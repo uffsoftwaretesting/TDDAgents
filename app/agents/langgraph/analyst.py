@@ -36,7 +36,7 @@ def analyze_requirements(user_input: str, conversation_history: str = "") -> dic
         max_tokens=1000
     )
     
-    content = response.choices[0].message.content
+    content = str(response.choices[0].message.content)
     
     # Analisar a resposta para determinar o estado
     has_checklist = "===CHECKLIST_END===" in content

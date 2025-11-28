@@ -13,7 +13,7 @@ class RequirementsOrchestrator:
     def __init__(self):
         self.graph = self._create_graph()
         
-    def _create_graph(self) -> StateGraph:
+    def _create_graph(self):
         """Cria o grafo LangGraph para levantamento de requisitos."""
         workflow = StateGraph(RequirementsState)
         

@@ -18,7 +18,7 @@ def node_user_input(state: RequirementsState) -> RequirementsState:
     
     # Verificar se é uma confirmação (sim, s, yes, ok, confirm, confirmado)
     confirm_re = re.compile(r"^(sim|s|yes|y|ok|confirm|confirmado)$", re.IGNORECASE)
-    is_confirmation = confirm_re.match(user_response)
+    is_confirmation = bool(confirm_re.match(user_response))
     
     has_checklist = state["has_checklist"]
     user_confirmed = has_checklist and is_confirmation
