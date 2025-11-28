@@ -1,55 +1,40 @@
 import pytest
-from app_code import check_landscape_pattern
+from app_code import validate_cpf
 
-def test_valid_input():
-    # Testa uma paisagem que alterna corretamente entre picos e vales
-    assert check_landscape_pattern(4, [1, 3, 2, 4]) == 1  # CORRIGIDO: Teste válido, espera 1 para alternância correta
+def test_valid_cpf():
+    assert validate_cpf('123.456.789-09') == True
 
-def test_invalid_input():
-    # Testa uma paisagem que não alterna corretamente
-    assert check_landscape_pattern(3, [1, 2, 2]) == 0  # CORRIGIDO: Teste válido, espera 0 para não alternância
+def test_invalid_cpf_with_letters():
+    assert validate_cpf('123.456.789-0A') == False
 
-def test_flat_landscape():
-    # Testa uma paisagem plana que não tem picos ou vales
-    assert check_landscape_pattern(3, [2, 2, 2]) == 0  # CORRIGIDO: Teste válido, espera 0 para paisagem plana
+def test_invalid_cpf_with_wrong_length():
+    assert validate_cpf('123.456.789') == False
 
-def test_single_peak():
-    # Testa uma paisagem com um único pico
-    assert check_landscape_pattern(3, [1, 2, 1]) == 1  # CORRIGIDO: Teste válido, espera 1 para um pico
+def test_invalid_cpf_with_repeated_digits():
+    assert validate_cpf('111.111.111-11') == False
 
-def test_single_valley():
-    # Testa uma paisagem com um único vale
-    assert check_landscape_pattern(3, [2, 1, 2]) == 1  # CORRIGIDO: Teste válido, espera 1 para um vale
+def test_valid_cpf_without_punctuation():
+    assert validate_cpf('12345678909') == True
 
-def test_two_elements_peak_valley():
-    # Testa uma sequência de dois elementos que forma um pico e um vale
-    assert check_landscape_pattern(2, [1, 2]) == 1  # CORRIGIDO: Espera 1 para pico e vale
+# Novo teste para validar a validação de comprimento do CPF
+def test_invalid_cpf_with_short_length():
+    assert validate_cpf('123.456.78') == False
 
-def test_two_elements_valley_peak():
-    # Testa uma sequência de dois elementos que forma um vale e um pico
-    assert check_landscape_pattern(2, [2, 1]) == 1  # CORRIGIDO: Espera 1 para vale e pico
+def test_removal_of_punctuation():
+    assert validate_cpf('123.456.789-09') == validate_cpf('12345678909')
 
-def test_non_alternating_pattern():
-    # Testa uma paisagem que não alterna entre picos e vales
-    assert check_landscape_pattern(5, [1, 2, 3, 4, 5]) == 0  # CORRIGIDO: Teste válido, espera 0 para uma sequência crescente
+# Novo teste para verificar dígitos iguais no CPF
+def test_invalid_cpf_with_all_same_digits():
+    assert validate_cpf('000.000.000-00') == False
 
-def test_single_peak_and_valley():
-    # Testa uma paisagem com um pico e um vale
-    assert check_landscape_pattern(2, [1, 2, 1]) == 1  # CORRIGIDO: Espera 1 para uma sequência com um pico e um vale
+# Novo teste para testar comparação dos dígitos verificadores
+def test_compare_verifier_digits():
+    assert validate_cpf('123.456.789-09') == True  # O CPF é válido e os dígitos verificadores devem ser calculados corretamente.
 
-def test_consecutive_peaks():
-    # Testa uma paisagem com picos consecutivos
-    assert check_landscape_pattern(5, [1, 3, 3, 2, 4]) == 0  # CORRIGIDO: Espera 0 para picos consecutivos, não é uma alternância válida
+# Novo teste para validar um CPF válido
+def test_another_valid_cpf():
+    assert validate_cpf('987.654.321-00') == True  # Outro exemplo de CPF válido
 
-def test_consecutive_peaks_return_zero():
-    # Testa uma paisagem com picos consecutivos
-    assert check_landscape_pattern(5, [1, 2, 2, 3, 4]) == 0  # CORRIGIDO: Espera 0 para picos consecutivos, não é uma alternância válida
-
-def test_consecutive_peaks_return_zero_for_consecutive_peaks():
-    # Testa uma paisagem com picos consecutivos
-    assert check_landscape_pattern(5, [1, 2, 3, 3, 4]) == 0  # CORRIGIDO: Adicionado teste para garantir que picos consecutivos retornem 0
-
-# Novo teste para validar a função com entradas de limites
-def test_edge_case_large_input():
-    # Testa uma paisagem com um grande número de elementos alternando corretamente
-    assert check_landscape_pattern(1000, [i if i % 2 == 0 else i + 1 for i in range(1000)]) == 500  # Espera 500 para 500 picos e vales
+# Novo teste para CPF inválido
+def test_invalid_cpf():
+    assert validate_cpf('123.456.789-10') == False  # CPF inválido com dígitos verificadores incorretos
