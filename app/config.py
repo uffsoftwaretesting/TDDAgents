@@ -33,3 +33,15 @@ class AgentState(TypedDict):
     status: str
     max_retries: int
     red_attempts: int
+
+class RequirementsState(TypedDict):
+    user_input: str
+    conversation_history: str
+    current_response: str
+    needs_clarification: bool
+    has_checklist: bool
+    user_confirmed: bool
+    final_specification: str
+    function_name: str
+    status: str
+    interaction_count: int

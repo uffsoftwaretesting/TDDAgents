@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, cast
 from langgraph.graph import StateGraph, END, START
 from langchain_core.runnables import RunnableConfig
 from app.config import AgentState, Config
+from app.graph.nodes.execute_quality_gate import node_execute_quality_gate
 from app.persistence import PersistenceStrategy, PersistenceFactory
 from app.utils.workspace import WorkspaceService
 from app.graph.nodes import (
@@ -94,6 +95,11 @@ class TDDOrchestrator:
             self._save_state(new_state)
             return new_state
 
+        def execute_quality_gate(state: AgentState) -> AgentState:
+            new_state = node_execute_quality_gate(state)
+            self._save_state(new_state)
+            return new_state
+
         # ==================== ROTAS DO GRAFO ====================
         
         def route_after_planner(state: AgentState) -> str:
@@ -153,9 +159,11 @@ class TDDOrchestrator:
             if status == "next_req":
                 logging.info("🔀 Rota: PROGRESS_EVALUATOR → TESTER (próximo sub-requisito)")
                 return "execute_tester"
+                
             elif status == "plan_complete":
-                logging.info("🔀 Rota: PROGRESS_EVALUATOR → END (plano completo!)")
-                return END
+                logging.info("🔀 Rota: PROGRESS_EVALUATOR → QUALITY_GATE (Plano completo, avaliando qualidade...)")
+                return "execute_quality_gate" 
+                
             else:
                 logging.error(f"🔀 Rota: PROGRESS_EVALUATOR → END (status: {status})")
                 return END
@@ -170,6 +178,7 @@ class TDDOrchestrator:
         workflow.add_node("execute_developer", execute_developer)
         workflow.add_node("execute_runner_green", execute_runner_green)
         workflow.add_node("execute_progress_evaluator", execute_progress_evaluator)
+        workflow.add_node("execute_quality_gate", execute_quality_gate)
         
         workflow.add_edge(START, "plan_task")
         
@@ -179,6 +188,8 @@ class TDDOrchestrator:
         workflow.add_conditional_edges("execute_developer", route_after_developer)
         workflow.add_conditional_edges("execute_runner_green", route_after_green)
         workflow.add_conditional_edges("execute_progress_evaluator", route_after_progress_evaluator)
+        
+        workflow.add_edge("execute_quality_gate", END)
         
         return workflow.compile()
 
