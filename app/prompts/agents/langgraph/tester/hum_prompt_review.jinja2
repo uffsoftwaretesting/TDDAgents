@@ -1,16 +1,34 @@
-🎯 FUNÇÃO: {{ function_name }}
-📝 SUB-REQUISITO ATUAL: {{ sub_requirement }}
+Atue como um Engenheiro de QA Sênior Especialista em Refatoração de Testes (Pytest).
 
+Seu output será executado diretamente por um runner rigoroso. Qualquer erro de sintaxe, importação ou contradição lógica quebrará o pipeline.
+
+Sua missão é realizar uma "Sanitização Lógica" na suite de testes fornecida e garantir a cobertura do novo sub-requisito.
+
+DIRETRIZES E RESTRIÇÕES TÉCNICAS:
+1. Consistência Absoluta: É PROIBIDO ter dois testes esperando resultados diferentes para a mesma entrada. Resolva contradições sempre a favor da lógica mais coerente com o novo sub-requisito.
+2. Preservação: Não delete testes a menos que sejam duplicatas exatas. Prefira corrigir a expectativa (`assert`) a apagar o teste inteiro.
+3. Escopo: A função alvo é EXCLUSIVAMENTE `{{ function_name }}`. Não altere outras funções.
+4. Novo Requisito: Se o `{{ sub_requirement }}` ainda não tiver cobertura clara nos testes existentes, adicione um novo caso de teste específico para ele.
+
+EXEMPLO DE RESOLUÇÃO DE CONFLITO:
+* Entrada (Testes Conflitantes):
+  def test_a(): assert func('') == 0
+  def test_b(): assert func('') == None # Conflito!
+* Saída (Consolidada):
+  def test_empty_string():
+      # CORRIGIDO: Unificado para retornar 0 conforme padrão atual
+      assert func('') == 0
+
+FORMATO DE SAÍDA:
+Retorne APENAS um bloco de código Python contendo:
+1. Imports necessários (`from ... import {{ function_name }}`).
+2. Todos os testes revisados/corrigidos + o novo teste do sub-requisito.
+
+DADOS DE ENTRADA:
+Função Alvo: {{ function_name }}
+Novo Sub-requisito: {{ sub_requirement }}
+
+Código de Testes Atual (Para Revisão):
+"""
 {% if context %}{{ context }}{% endif %}
-
-🔧 TAREFA DE REVISÃO:
-1. Analise TODOS os testes existentes acima
-2. Identifique e CORRIJA:
-   - Testes contraditórios
-   - Asserções incorretas
-   - Expectativas que não refletem a especificação
-3. Garanta que todos os testes sejam CONSISTENTES entre si
-4. Adicione comentários explicando as correções
-5. Se necessário, adicione o teste para o sub-requisito atual
-
-⚠️ FOCO: Corrigir testes problemáticos, não reescrever tudo.
+"""

@@ -72,7 +72,7 @@ class RequirementsOrchestrator:
         Returns:
             RequirementsState: Estado final com especificação gerada
         """
-        logging.info("🚀 Iniciando levantamento de requisitos com LangGraph")
+        logging.info("🚀 Iniciando levantamento de requisitos:")
         
         initial_state: RequirementsState = {
             "user_input": initial_user_input,
