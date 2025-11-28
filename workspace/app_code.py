@@ -1,8 +1,10 @@
 def validate_cpf(s):
-    s = s.replace('.', '').replace('-', '')
-    if len(s) != 11 or not s.isdigit():
+    import re
+    s = s.strip()
+    if not re.match(r'^\d{3}\.\d{3}\.\d{3}-\d{2}$', s) and not re.match(r'^\d{11}$', s):
         return False
-    if s == s[0] * 11:
+    s = re.sub(r'\D', '', s)
+    if len(s) != 11 or not s.isdigit() or s == s[0] * 11:
         return False
     
     def calculate_digit(cpf, factor):
@@ -15,4 +17,4 @@ def validate_cpf(s):
     first_digit = calculate_digit(s, 9)
     second_digit = calculate_digit(s + str(first_digit), 10)
     
-    return s[-2:] == f"{first_digit}{second_digit}"
+    return s[-2:] == f'{first_digit}{second_digit}'

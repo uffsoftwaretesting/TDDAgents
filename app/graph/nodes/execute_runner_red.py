@@ -73,6 +73,7 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
                 attempt=new_red_attempts,
                 sub_requirement=sub_req
             )
+            
             new_state = {
                 **state,
                 "status": "invalid_test",
