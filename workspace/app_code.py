@@ -1,33 +1,20 @@
-def roman_to_int(s):
-    if not s:
-        return 0
-    values = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
-    total = 0
-    prev_value = 0
-    count = 1
-    for i in range(len(s)):
-        char = s[i].upper()
-        if char not in values:
-            return 0
-        current_value = values[char]
-        
-        if i > 0 and current_value > prev_value:
-            if (prev_value == 1 and current_value in [5, 10]) or \
-               (prev_value == 10 and current_value in [50, 100]) or \
-               (prev_value == 100 and current_value in [500, 1000]):
-                total += current_value - 2 * prev_value
-            else:
-                return 0
-        else:
-            total += current_value
-        
-        if i > 0 and char == s[i - 1]:
-            count += 1
-            if (char in ['V', 'L', 'D'] and count > 1) or (char in ['I', 'X', 'C', 'M'] and count > 3):
-                return 0
-        else:
-            count = 1
-        
-        prev_value = current_value
+def validador(s):
+    import re
     
-    return total
+    if not s or not re.match(r'^\d{3}.\d{3}.\d{3}-\d{2}$', s) and not re.match(r'^\d{11}$', s):
+        return 'INVALIDO'
+    
+    s = re.sub(r'\D', '', s)  # Remove caracteres não numéricos
+    if len(s) != 11 or s == '00000000000':
+        return 'INVALIDO'
+    
+    def calcular_digitos_verificadores(cpf):
+        for i in range(9, 11):
+            soma = sum(int(cpf[j]) * ((i + 1) - j) for j in range(i))
+            digito = 11 - (soma % 11)
+            digito = digito if digito < 10 else 0
+            if digito != int(cpf[i]):
+                return False
+        return True
+
+    return 'VALIDO' if calcular_digitos_verificadores(s) else 'INVALIDO'

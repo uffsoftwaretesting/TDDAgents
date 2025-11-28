@@ -1,163 +1,200 @@
-from app.orchestrator import TDDOrchestrator
+import os
+import asyncio
+import logging
+from typing import List, Optional
+from dotenv import load_dotenv
 
-if __name__ == "__main__":
+# --- AutoGen Imports ---
+from autogen_agentchat.teams import SelectorGroupChat
+from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+from autogen_agentchat.messages import TextMessage
+from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
+
+# --- LangGraph Orchestrator Imports ---
+from app.orchestrator import TDDOrchestrator 
+
+# ==============================================================================
+# 🔧 CONFIGURAÇÃO DE LOGS (CORREÇÃO DO RUÍDO)
+# ==============================================================================
+# 1. Definimos o nível global para WARNING (esconde INFO de libs externas)
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# 2. Silenciamos explicitamente bibliotecas conhecidas por serem barulhentas
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("autogen_core").setLevel(logging.ERROR)
+logging.getLogger("autogen_agentchat").setLevel(logging.ERROR)
+
+# 3. Criamos um logger específico para A NOSSA aplicação com nível INFO
+logger = logging.getLogger("MeuApp")
+logger.setLevel(logging.INFO)
+# ==============================================================================
+
+async def run_requirements_gathering() -> Optional[str]:
+    """
+    Executa a camada de refinamento de requisitos com AutoGen.
+    Retorna a especificação refinada (prompt) ou None se falhar.
+    """
+    load_dotenv()
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        raise ValueError("API Key ausente no .env")
+
+    model_client = OpenAIChatCompletionClient(model="gpt-4o", api_key=api_key)
+
+    # ---------------------------------------------------------
+    # 1. AGENTE: ANALISTA DE REQUISITOS
+    # ---------------------------------------------------------
+    analyst_system_msg = """
+    Você é um Analista de Requisitos de Software Sênior. Siga estritamente este fluxo:
+    
+    1. Receba a solicitação inicial do usuário.
+    2. NÃO assuma nada. NÃO invente requisitos.
+    3. Analise a ambiguidade. Se houver qualquer dúvida (formato de entrada, tipos de dados, edge cases, limitações), FAÇA PERGUNTAS ao usuário.
+    4. Faça perguntas curtas e diretas, uma ou duas por vez.
+    5. Continue perguntando até ter certeza absoluta do que deve ser construído.
+    6. Quando tiver detalhes suficientes, apresente uma lista numerada ("Checklist de Requisitos") para o usuário EXATAMENTE com a frase: "Posso prosseguir?".
+    
+    IMPORTANTE: 
+    - NUNCA agradeça ou encerre a conversa.
+    - Se o usuário confirmar, NÃO FALE MAIS NADA. O sistema passará a vez para o Engenheiro.
+    """
+    
+    analyst = AssistantAgent(
+        name="Analista",
+        model_client=model_client,
+        system_message=analyst_system_msg,
+        description="Analista que faz perguntas para esclarecer requisitos vagos."
+    )
+
+    # ---------------------------------------------------------
+    # 2. AGENTE: ENGENHEIRO DE SPEC (PROMPT ENGINEER)
+    # ---------------------------------------------------------
+    engineer_system_msg = """
+    Você é um Engenheiro de Especificação Técnica e Prompt Engineer Especialista.
+    Sua única função é receber os requisitos validados pelo Analista e transformá-los em um Prompt de Especificação Técnica altamente formal e estruturado para um sistema TDD.
+    Sua vez chega IMEDIATAMENTE após o usuário confirmar que está satisfeito com os requisitos.
+
+    FORMATO OBRIGATÓRIO DE SAÍDA (Use Markdown):
+    
+    # [Nome da Função]
+    
+    ⚙️ DEFINIÇÃO:
+    [Descrição concisa e técnica do problema e do objetivo, em estilo acadêmico].
+    
+    ⚠️ REQUISITOS FUNCIONAIS & RESTRIÇÕES:
+    1. [Requisito explícito]
+    2. [Tratamento de erro ou edge case]
+    3. [Restrição técnica, ex: complexidade O(n), bibliotecas permitidas]
+    
+    💡 CASOS DE TESTE (Doctest style):
+    >>> [chamada_funcao]
+    [resultado_esperado]
+    
+    REGRAS FINAIS:
+    - Seja exaustivo nos requisitos.
+    - Se o usuário não especificou tratamento de erro, defina o padrão mais seguro (ex: raise ValueError).
+    - Após gerar a especificação, NÃO escreva mais nada.
+    - Finalize sua resposta EXATAMENTE com a string exata: "TERMINATE_SPEC"
+    """
+
+    engineer = AssistantAgent(
+        name="Engenheiro_Spec",
+        model_client=model_client,
+        system_message=engineer_system_msg,
+        description="Engenheiro que cria o prompt formal final baseada nos requisitos aprovados."
+    )
+
+    # ---------------------------------------------------------
+    # 3. AGENTE: USER PROXY
+    # ---------------------------------------------------------
+    user_proxy = UserProxyAgent(
+        name="Usuario",
+        input_func=lambda _: input(f"\n[Sua Resposta]: "),
+        description="Usuário humano que fornece os requisitos e responde dúvidas."
+    )
+
+    # ---------------------------------------------------------
+    # 4. ORQUESTRAÇÃO (SELECTOR)
+    # ---------------------------------------------------------
+    selector_prompt = """
+    Você é o gerente de fluxo. Siga esta lógica de transição estrita:
+    
+    1. Início ou Dúvidas -> Selecione 'Analista'.
+    2. Analista fez uma pergunta -> Selecione 'Usuario' (para responder).
+    3. Analista propôs o Checklist de Requisitos -> Selecione 'Usuario' (para confirmar).
+    4. Usuario disse "sim", "ok", "confirmado", "pode prosseguir" ou qualquer frase de confirmação ao receber a pergunta de "posso prosseguir?" do agente Analista para o Checklist -> Selecione 'Engenheiro_Spec'.
+    5. Usuario adicionou novos detalhes ou negou -> Selecione 'Analista'.
+    6. Engenheiro_Spec gerou a especificação final -> TERMINATE.
+    """
+
+    termination = TextMentionTermination("TERMINATE_SPEC") | MaxMessageTermination(50)
+
+    team = SelectorGroupChat(
+        [analyst, engineer, user_proxy],
+        model_client=model_client,
+        selector_prompt=selector_prompt,
+        termination_condition=termination
+    )
+
+    print("\n" + "="*60)
+    print("🤖 INICIANDO CAMADA DE LEVANTAMENTO DE REQUISITOS (AUTOGEN)")
+    print("="*60)
+    
+    task_input = input("Descreva o que você deseja programar (ex: 'Quero um validador de CPF'): ")
+    
+    final_specification = ""
+    
+    async for message in team.run_stream(task=task_input):
+        if isinstance(message, TextMessage):
+            print(f"\n[{message.source}]: {message.content}")
+            
+            if message.source == "Engenheiro_Spec":
+                final_specification = message.content.replace("TERMINATE_SPEC", "").strip()
+
+    return final_specification
+
+def main():
+    try:
+        refined_spec = asyncio.run(run_requirements_gathering())
+    except KeyboardInterrupt:
+        print("\nOperação cancelada pelo usuário.")
+        return
+
+    if not refined_spec:
+        logger.error("❌ Falha ao gerar especificação ou fluxo interrompido.")
+        return
+
+    print("\n" + "="*60)
+    print("🔄 TRANSFERINDO CONTEXTO: AUTOGEN --> LANGGRAPH")
+    print("="*60)
+    print(f"📜 Especificação Gerada:\n{refined_spec[:200]}...\n(truncada para visualização)")
+    
+    function_name = "generated_function"
+    for line in refined_spec.split('\n'):
+        if line.strip().startswith("#"):
+            parts = line.replace("#", "").strip().split()
+            if parts:
+                function_name = parts[0].lower().replace(" ", "_")
+                break
+    
+    logger.info(f"Nome da função detectado para TDD: {function_name}")
+
+    # 3. Fase de LangGraph (Execução TDD)
     orchestrator = TDDOrchestrator()
     
-    # === ESPECIFICAÇÕES ===
-    
-    spec_roman_to_int = (
-        "Implemente a função roman_to_int que recebe uma string "
-        "representando um numeral romano (ex: 'IX', 'MCMXCIV') e retorna o valor inteiro "
-        "correspondente. A função deve suportar os símbolos I, V, X, L, C, D, M "
-        "e aplicar corretamente a regra de subtração (ex: IV = 4, CM = 900).\n\n"
-        
-        "⚠️ REQUISITOS:\n"
-        "1. Apenas os símbolos I, V, X, L, C, D, M são válidos.\n"
-        "2. Repetições máximas:\n"
-        "   - I, X, C, M podem repetir até 3 vezes consecutivas (III ✅, IIII ❌)\n"
-        "   - V, L, D NÃO podem repetir NUNCA (VV ❌, LL ❌, DD ❌)\n"
-        "3. Ordem válida: símbolos maiores devem vir antes dos menores, exceto em subtrações.\n"
-        "4. Subtrações válidas: apenas I antes de V ou X, X antes de L ou C, C antes de D ou M.\n"
-        "5. Para entradas inválidas, retornar 'not a valid roman number.\n"
-        "6. String vazia deve retornar 0.\n"
-        "7. Desconsiderar maiúsculas ou minúsculas (converter tudo para uppercase).\n\n"
-    )
-
-    spec_is_prime = (
-        "Implemente a função is_prime que recebe um número inteiro n e retorna True se ele for um número primo, "
-        "ou False caso contrário.\n\n"
-        
-        "⚙️ DEFINIÇÃO:\n"
-        "Um número primo é aquele maior que 1 que possui exatamente dois divisores positivos distintos: "
-        "1 e ele mesmo. Exemplos: 2, 3, 5, 7, 11.\n\n"
-        
-        "⚠️ REQUISITOS:\n"
-        "1. O parâmetro n deve ser do tipo inteiro (int). Caso contrário, retornar 'invalid input'.\n"
-        "2. Se n for menor ou igual a 1, retornar False (números ≤ 1 não são primos por definição).\n"
-        "3. A verificação de divisores deve ser feita apenas até a raiz quadrada de n, "
-        "incluindo otimização para pular números pares após o 2.\n"
-        "4. A função deve retornar True se n for primo e False caso contrário.\n"
-        "5. A função deve lidar corretamente com números negativos e zero.\n\n"
-        
-        "💡 EXEMPLOS:\n"
-        ">>> is_prime(2)\n"
-        "True\n\n"
-        ">>> is_prime(9)\n"
-        "False\n\n"
-        ">>> is_prime(17)\n"
-        "True\n\n"
-        ">>> is_prime(1)\n"
-        "False\n\n"
-        ">>> is_prime('10')\n"
-        "'invalid input'\n"
-    )
-
-    spec_sort_numbers = (
-        "Implemente a função sort_numbers que recebe uma lista de números inteiros e retorna uma nova lista "
-        "com os mesmos elementos em ordem crescente.\n\n"
-        
-        "⚙️ DEFINIÇÃO:\n"
-        "A ordenação deve ser feita de forma que o menor número apareça primeiro e o maior por último. "
-        "A função deve preservar todos os elementos originais, sem removê-los ou alterá-los, apenas reordenando.\n\n"
-        
-        "⚠️ REQUISITOS:\n"
-        "1. O parâmetro de entrada deve ser uma lista (list) contendo apenas valores inteiros (int).\n"
-        "   - Caso a entrada não seja uma lista, ou contenha elementos não inteiros, retornar 'invalid input'.\n"
-        "2. A função deve retornar uma **nova lista**, sem modificar a lista original (sem efeitos colaterais).\n"
-        "3. É permitido o uso de métodos ou funções internas de ordenação do Python (ex: sorted, list.sort).\n"
-        "4. Implementações manuais de ordenação (ex: bubble sort, insertion sort) também são aceitas, "
-        "desde que mantenham a complexidade esperada.\n"
-        "5. A função deve lidar corretamente com listas vazias (retornar []).\n"
-        "6. Números negativos devem ser ordenados corretamente antes dos positivos.\n\n"
-        
-        "💡 EXEMPLOS:\n"
-        ">>> sort_numbers([3, 1, 4, 1, 5, 9])\n"
-        "[1, 1, 3, 4, 5, 9]\n\n"
-        ">>> sort_numbers([-2, 0, 10, -5])\n"
-        "[-5, -2, 0, 10]\n\n"
-        ">>> sort_numbers([])\n"
-        "[]\n\n"
-        ">>> sort_numbers([3, 'a', 2])\n"
-        "'invalid input'\n"
-    )
-    
-    spec_fizzbuzz = (
-        "Implemente a função fizzbuzz que recebe um número inteiro positivo n "
-        "e retorna uma lista de strings representando os números de 1 até n, aplicando as seguintes regras:\n\n"
-        
-        "⚙️ REGRAS:\n"
-        "1. Para cada número i de 1 até n:\n"
-        "   - Se i for divisível por 3 e por 5, adicione 'FizzBuzz' à lista.\n"
-        "   - Se i for divisível apenas por 3, adicione 'Fizz' à lista.\n"
-        "   - Se i for divisível apenas por 5, adicione 'Buzz' à lista.\n"
-        "   - Caso contrário, adicione o próprio número (como string).\n\n"
-        
-        "⚠️ REQUISITOS:\n"
-        "1. O parâmetro n deve ser um número inteiro positivo (> 0).\n"
-        "2. Se n <= 0 ou não for um número inteiro, retornar 'invalid input'.\n"
-        "3. O retorno deve ser uma lista de strings (por exemplo: ['1', '2', 'Fizz', ...]).\n"
-        "4. Não usar bibliotecas externas.\n"
-        "5. A função deve ter complexidade O(n).\n\n"
-        
-        "💡 EXEMPLOS:\n"
-        ">>> fizzbuzz(5)\n"
-        "['1', '2', 'Fizz', '4', 'Buzz']\n\n"
-        ">>> fizzbuzz(15)\n"
-        "['1', '2', 'Fizz', '4', 'Buzz', 'Fizz', '7', '8', 'Fizz', 'Buzz', '11', 'Fizz', '13', '14', 'FizzBuzz']\n"
-    )
-
-    spec_palindrome = (
-        "Implemente a função is_palindrome que recebe uma string e retorna True se ela for um palíndromo "
-        "(ou seja, se pode ser lida da mesma forma de trás para frente), ou False caso contrário.\n\n"
-        
-        "⚙️ DEFINIÇÃO:\n"
-        "Uma string é considerada palíndromo se, após remover espaços, pontuações e ignorar diferenças "
-        "de maiúsculas e minúsculas, sua sequência de caracteres for igual à sua inversa.\n\n"
-        
-        "⚠️ REQUISITOS:\n"
-        "1. A função deve ignorar espaços (' '), vírgulas, pontos, exclamações, interrogações e outros sinais de pontuação.\n"
-        "2. A comparação não deve ser sensível a maiúsculas/minúsculas (ex: 'A' == 'a').\n"
-        "3. Caracteres acentuados (como 'á', 'ã', 'ç') devem ser considerados normalmente — ou seja, "
-        "não há necessidade de removê-los.\n"
-        "4. Se a string for vazia, retornar True (string vazia é considerada palíndromo por definição).\n"
-        "5. Não utilizar bibliotecas externas.\n\n"
-        
-        "💡 EXEMPLOS:\n"
-        ">>> is_palindrome('Ame a ema')\n"
-        "True\n\n"
-        ">>> is_palindrome('Socorram-me, subi no ônibus em Marrocos!')\n"
-        "True\n\n"
-        ">>> is_palindrome('OpenAI')\n"
-        "False\n"
-    )
-
-    spec_password_validator = (
-        "Implemente a função is_strong_password que recebe uma string representando uma senha "
-        "e retorna True se ela for considerada forte, ou False caso contrário.\n\n"
-        
-        "⚙️ DEFINIÇÃO:\n"
-        "Uma senha é considerada forte se atender a critérios mínimos de segurança, garantindo "
-        "complexidade e resistência contra ataques de força bruta.\n\n"
-        
-        "⚠️ REQUISITOS:\n"
-        "1. A senha deve conter pelo menos 8 caracteres.\n"
-        "2. Deve incluir pelo menos uma letra maiúscula (A–Z).\n"
-        "3. Deve incluir pelo menos uma letra minúscula (a–z).\n"
-        "4. Deve conter pelo menos um dígito numérico (0–9).\n"
-        "5. Deve conter pelo menos um caractere especial (ex: !, @, #, $, %, &, *).\n"
-        "6. Não pode conter espaços em branco.\n"
-        "7. A função deve retornar False se a entrada for vazia ou não for uma string.\n\n"
-
-        "💡 EXEMPLOS:\n"
-        ">>> is_strong_password('Abc123!@#')\n"
-        "True\n\n"
-        ">>> is_strong_password('senha123')\n"
-        "False\n\n"
-        ">>> is_strong_password('A1!')\n"
-        "False\n"
-    )
-    
     final_state = orchestrator.run(
-        specification=spec_roman_to_int,
-        function_name="roman_to_int",
+        specification=refined_spec,
+        function_name=function_name,
+        resume=False
     )
+    
+    if final_state.get("status") == "plan_complete":
+        print("\n✅ Fluxo Completo com Sucesso!")
+    else:
+        print(f"\n⚠️ O fluxo terminou com status: {final_state.get('status')}")
+
+if __name__ == "__main__":
+    main()

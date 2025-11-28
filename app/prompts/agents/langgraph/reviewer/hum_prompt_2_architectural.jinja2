@@ -1,0 +1,31 @@
+🎯 SUB-REQUISITO: {{ sub_requirement }}
+
+📊 SITUAÇÃO CRÍTICA:
+- Testes passados: {{ passed_count }}
+- Testes falhados: {{ failed_count }}
+- Tentativa: {{ attempt }}/{{ max_retries }}
+- ⚠️ Múltiplas falhas no mesmo teste
+
+📋 ESPECIFICAÇÃO COMPLETA:
+{{ specification }}
+
+💻 CÓDIGO ATUAL:
+```python
+{{ current_code }}
+```
+
+📋 TODOS OS TESTES:
+```python
+{{ test_code }}
+```
+
+📊 SAÍDA PYTEST:
+```
+{{ test_output }}
+```
+
+TAREFA (ARCHITECTURAL):
+1. Analise se há conflito entre testes ou requisitos
+2. Identifique se a arquitetura atual pode resolver o problema
+3. Sugira redesign se necessário
+4. Se não houver conflito, identifique o erro de implementação específico
