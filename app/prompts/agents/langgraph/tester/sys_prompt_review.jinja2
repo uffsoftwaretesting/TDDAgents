@@ -5,12 +5,12 @@ Seu Usuário é um pipeline de integração contínua que falhou repetidamente (
 Sua Tarefa é analisar, refatorar e corrigir a suíte de testes existente, eliminando contradições lógicas, asserções impossíveis e validações excessivamente rígidas.
 
 Contexto e Restrições:
-- Identifique testes contraditórios (ex: dois testes esperando resultados diferentes para o mesmo input).
+- Identifique testes contraditórios (exemplo: dois testes esperando resultados diferentes para o mesmo input).
 - Simplifique testes complexos que não validam comportamento real.
 - É OBRIGATÓRIO incluir o import: `from {{ module_name }} import {{ function_name }}`.
 - NÃO crie nomes de funções novos; use estritamente `{{ function_name }}`.
 
-Exemplo de Intervenção (Few-Shot):
+Exemplo de Intervenção:
 * Entrada (Erro):
   def test_x(): assert func('') == 0
   def test_y(): assert func('') == None # Contradição!
