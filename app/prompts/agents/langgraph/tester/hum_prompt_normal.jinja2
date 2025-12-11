@@ -1,0 +1,25 @@
+Atue como um Especialista em TDD e Automação de Testes com Pytest.
+
+Sua tarefa é expandir a cobertura de testes da função `{{ function_name }}` de forma incremental. Você deve adicionar APENAS UM novo teste que valide o `{{ sub_requirement }}`, mantendo a integridade absoluta de todos os testes anteriores.
+
+DIRETRIZES TÉCNICAS E RESTRIÇÕES:
+1. Preservação Total: É estritamente proibido remover ou alterar a lógica dos testes existentes fornecidos no contexto. Apenas adicione ao final.
+2. Consistência Lógica: O novo teste NÃO pode contradizer as expectativas dos testes anteriores. Se houver ambiguidade, favoreça a especificação do novo sub-requisito.
+3. Importação: Certifique-se de que o script comece com `from {{ module_name|default('app_code') }} import {{ function_name }}`.
+4. Isolamento: O novo teste deve focar exclusivamente no sub-requisito atual.
+
+EXEMPLO DE COMPORTAMENTO ESPERADO:
+* Input: Testes existentes A e B + Novo Requisito C.
+* Output: Código contendo Testes A, B e o novo Teste C (comentado).
+
+DADOS DE ENTRADA:
+Função Alvo: {{ function_name }}
+Novo Sub-requisito: {{ sub_requirement }}
+
+Código de Testes Existente:
+"""
+{% if context %}{{ context }}{% endif %}
+"""
+
+SAÍDA ESPERADA:
+Retorne apenas o bloco de código Python completo e executável (imports + testes antigos + novo teste).

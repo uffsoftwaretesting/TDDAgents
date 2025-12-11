@@ -7,7 +7,7 @@ def run_pytest() -> str:
     
     try:
         result = subprocess.run(
-            ["pytest", f"workspace/{test_file}", "-v", "--tb=short"],
+            ["pytest", f"{Config.WORKSPACE_PATH}/{test_file}", "-v", "--tb=short"],
             capture_output=True,
             text=True,
             timeout=30

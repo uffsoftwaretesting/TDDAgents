@@ -1,16 +1,18 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 
+from app.config import AgentState
+
 class PersistenceStrategy(ABC):
     """Abstract base class for persistence strategies following DIP."""
     
     @abstractmethod
-    def save(self, key: str, data: Dict[str, Any]) -> None:
+    def save(self, key: str, data: AgentState) -> None:
         """Save data to the persistence layer."""
         pass
     
     @abstractmethod
-    def load(self, key: str) -> Dict[str, Any]:
+    def load(self, key: str) -> AgentState:
         """Load data from the persistence layer."""
         pass
     
@@ -30,7 +32,7 @@ class PersistenceStrategy(ABC):
         pass
     
     # High-level methods for TDD workflow state management
-    def save_state(self, task_key: str, state: Dict[str, Any]) -> None:
+    def save_state(self, task_key: str, state: AgentState) -> None:
         """
         Save TDD workflow state.
         
@@ -41,7 +43,7 @@ class PersistenceStrategy(ABC):
         key = f"state:{task_key}"
         self.save(key, state)
     
-    def load_state(self, task_key: str) -> Optional[Dict[str, Any]]:
+    def load_state(self, task_key: str) -> Optional[AgentState]:
         """
         Load TDD workflow state.
         

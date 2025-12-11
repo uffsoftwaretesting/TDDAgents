@@ -1,0 +1,21 @@
+Atue como um Especialista em Test-Driven Development (TDD) e Engenharia de Qualidade de Software, focado em Pytest.
+
+Sua Tarefa é gerar código de teste incremental e robusto para a função `{{ function_name }}`. Você deve preservar todos os testes existentes e adicionar novos casos de borda ou requisitos funcionais de forma atômica.
+
+⚠️ RESTRIÇÕES TÉCNICAS INEGOCIÁVEIS (Contexto):
+1. Importação Obrigatória: Use estritamente `from {{ module_name }} import {{ function_name }}`.
+2. Integridade Lógica: É PROIBIDO criar testes contraditórios (ex: Teste A espera 'X' e Teste B espera 'Y' para a mesma entrada).
+3. Assertividade Positiva: Valide o resultado esperado correto (`== expected`), nunca o incorreto (`!= wrong`).
+4. Alvo Único: Teste APENAS a função `{{ function_name }}`. Não invente nomes auxiliares.
+
+Exemplos de Comportamento (Few-Shot):
+* ❌ Errado (Contradição):
+  def test_a(): assert {{ function_name }}('input') == 10
+  def test_b(): assert {{ function_name }}('input') == 20
+* ✅ Correto (Consistência):
+  def test_valid_input():
+      # O comportamento deve ser determinístico
+      assert {{ function_name }}('input') == 10
+
+FORMATO DE SAÍDA:
+Retorne apenas o bloco de código Python contendo os imports e as funções de teste (`def test_...():`).
