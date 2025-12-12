@@ -8,13 +8,13 @@ from app.utils.prompt_loader import load_prompt
 def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> AgentState:
     """Nó do grafo que verifica se todos os testes passam (GREEN)."""
     sub_req = state["current_sub_req"]
-    iteration = state.get("iteration", 0)
+    iteration = state.get("iteration", 0)  # Developer's attempt number
     max_retries_state = state.get("max_retries", max_retries)
     plan_idx = state.get("plan_index", 0)
     
     logging.info("=" * 70)
     logging.info(f"🟢 FASE 5: RUNNER GREEN - TODOS os testes devem passar!")
-    logging.info(f"🔄 Iteração {iteration}/{max_retries_state}")
+    logging.info(f"🔄 Tentativa do Developer: {iteration}/{max_retries_state}")
     logging.info(f"🎯 Sub-requisito [{plan_idx + 1}]: '{sub_req}'")
     logging.info("=" * 70)
     
@@ -28,14 +28,26 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
         logging.info("✅✅✅ GREEN COMPLETO! TODOS OS TESTES PASSARAM! ✅✅✅")
         logging.info(f"✅ Sub-requisito [{plan_idx + 1}] completado com sucesso!")
         logging.info("=" * 70)
+        # Reset iteration for next sub-requirement
         new_state = {**state, "status": "green_passed", "feedback": "", "iteration": 0}
     else:
-        # Após 5 iterações, volta ao Tester para revisar testes
-        if iteration >= 5 and iteration < max_retries_state:
+        # ==============================================================================
+        # ESTRATÉGIA DE RETRIES INTERCALADA (DEV/TESTER)
+        # Baseada no número da tentativa do Developer (iteration)
+        # 1-5: Developer corrige código
+        # 6:   Tester revisa testes (sem incrementar iteration)
+        # 7-8: Developer corrige código
+        # 9:   Tester revisa testes (sem incrementar iteration)
+        # 10:  Developer última tentativa
+        # >10: FALHA
+        # ==============================================================================
+        
+        # Rota para o TESTER (Após tentativas 6 e 9 do Developer)
+        if iteration == 6 or iteration == 9:
             logging.warning("=" * 70)
-            logging.warning(f"⚠️ REVISÃO DE TESTES NECESSÁRIA!")
-            logging.warning(f"🔄 Tentativa {iteration}/{max_retries_state} - Falhas persistentes")
+            logging.warning(f"⚠️ REVISÃO DE TESTES NECESSÁRIA (Após {iteration} tentativas do Developer)")
             logging.warning("🔧 Voltando para o Tester revisar os testes...")
+            logging.warning("⚠️ Iteration permanece em {iteration} (Tester não incrementa)")
             logging.warning("=" * 70)
             
             reviewer_feedback = analyze_failures(
@@ -62,11 +74,13 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
                 logging.info(line)
             logging.info("=" * 70)
 
+            # Keep iteration unchanged - Tester doesn't count as a Developer attempt
             new_state = {**state, "status": "test_review_needed", "feedback": test_review_feedback}
-            
-        elif iteration >= max_retries_state:
+
+        # Rota de FALHA
+        elif iteration > max_retries_state:
             logging.error("=" * 70)
-            logging.error(f"❌ FALHA CRÍTICA: Excedeu {max_retries_state} tentativas!")
+            logging.error(f"❌ FALHA CRÍTICA: Developer excedeu {max_retries_state} tentativas!")
             logging.error(f"❌ Sub-requisito [{plan_idx + 1}] NÃO pôde ser completado.")
             logging.error("=" * 70)
             
@@ -87,12 +101,15 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
                 logging.info(line)
             logging.info("=" * 70)
 
+            # Keep iteration for final state reporting
             new_state = {**state, "status": "max_retries_exceeded", "feedback": feedback}
+
+        # Rota Padrão: DEVELOPER (1-5, 7-8, 10)
         else:
             logging.warning("=" * 70)
-            logging.warning(f"❌ GREEN FALHOU! Alguns testes não passaram.")
-            logging.warning(f"🔄 Tentativa {iteration}/{max_retries_state}")
+            logging.warning(f"❌ GREEN FALHOU! (Developer tentativa {iteration}/{max_retries_state})")
             logging.warning("🔧 Voltando para o Developer com feedback...")
+            logging.warning("➡️  Developer incrementará iteration para {iteration + 1}")
             logging.warning("=" * 70)
             
             feedback = analyze_failures(
@@ -112,6 +129,7 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
                 logging.info(line)
             logging.info("=" * 70)
 
+            # Keep iteration unchanged - Developer will increment on next entry
             new_state: AgentState = {**state, "status": "green_failed", "feedback": feedback}
     
     return new_state
