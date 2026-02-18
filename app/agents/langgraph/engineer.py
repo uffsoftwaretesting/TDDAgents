@@ -4,21 +4,13 @@ from openai import OpenAI
 from app.utils.prompt_loader import load_prompt
 
 
-def generate_specification(requirements: str) -> str:
-    """
-    Engenheiro que transforma requisitos validados em especificação técnica formal.
-    
-    Args:
-        requirements: Requisitos validados pelo analista
-        
-    Returns:
-        str: Especificação técnica formal
-    """
+def generate_specification(requirements: str, conversation_history: str = "") -> str:
     logging.info("=" * 70)
     logging.info("⚙️ ENGENHEIRO - Gerando especificação técnica formal")
     logging.info("=" * 70)
     
     logging.info(f"📋 Requisitos recebidos: {len(requirements)} caracteres")
+    logging.info(f"📚 Histórico de conversa: {len(conversation_history)} caracteres")
     logging.info(f"🔧 Processando com modelo: gpt-4o")
     
     client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -29,7 +21,8 @@ def generate_specification(requirements: str) -> str:
     
     human_prompt = load_prompt(
         template_name='agents/langgraph/engineer/hum_prompt_1.jinja2',
-        requirements=requirements
+        requirements=requirements,
+        conversation_history=conversation_history
     )
     
     logging.info("🚀 Enviando requisição para OpenAI...")
@@ -46,7 +39,6 @@ def generate_specification(requirements: str) -> str:
     
     content = str(response.choices[0].message.content)
     
-    # Remove o token de terminação se presente
     if "TERMINATE_SPEC" in content:
         content = content.replace("TERMINATE_SPEC", "").strip()
         logging.info("✂️ Token TERMINATE_SPEC removido")
@@ -55,7 +47,6 @@ def generate_specification(requirements: str) -> str:
     logging.info("📄 ESPECIFICAÇÃO TÉCNICA GERADA:")
     logging.info("=" * 70)
     
-    # Exibir a especificação de forma formatada
     lines = content.split('\n')
     for line in lines:
         if line.strip():

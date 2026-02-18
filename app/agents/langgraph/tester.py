@@ -6,21 +6,19 @@ from app.config import Config
 from app.utils.prompt_loader import load_prompt
 
 def extract_code(text: str) -> str:
-    """Extrai código Python de blocos markdown ou retorna o texto como está."""
     match = re.search(r'```(?:python)?\s*(.*?)\s*```', text, re.DOTALL)
     return match.group(1).strip() if match else text.strip()
 
 def generate_test_for_sub_req(
     sub_requirement: str,
     function_name: str,
+    specification: str,
     all_tests_code: str = "",
     feedback: str = ""
 ) -> str:
-    """Gera um novo teste pytest para o sub-requisito ou REVISA testes existentes."""
     llm = ChatOpenAI(model=Config.MODEL, temperature=0.2)
     module_name = Config.IMPLEMENTATION_MODULE
 
-    # ⚠️ DETECTA SE É MODO DE REVISÃO DE TESTES
     is_test_review = "REVISÃO DE TESTES NECESSÁRIA" in feedback
     
     context = ""
@@ -30,7 +28,6 @@ def generate_test_for_sub_req(
     if feedback:
         context += f"FEEDBACK DO REVISOR:\n{feedback}\n\n"
 
-    # ==================== MODO REVISÃO DE TESTES ====================
     if is_test_review:
         rendered_sys_message = load_prompt(
             template_name='agents/langgraph/tester/sys_prompt_review.jinja2',
@@ -43,6 +40,7 @@ def generate_test_for_sub_req(
             template_name='agents/langgraph/tester/hum_prompt_review.jinja2',
             function_name=function_name,
             sub_requirement=sub_requirement,
+            specification=specification,
             context=context
         )
         human_msg = HumanMessage(content=rendered_hum_message)
@@ -59,6 +57,7 @@ def generate_test_for_sub_req(
             template_name='agents/langgraph/tester/hum_prompt_normal.jinja2',
             function_name=function_name,
             sub_requirement=sub_requirement,
+            specification=specification,
             context=context
         )
         human_msg = HumanMessage(content=rendered_hum_message)

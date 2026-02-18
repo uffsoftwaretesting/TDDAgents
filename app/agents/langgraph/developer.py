@@ -5,17 +5,16 @@ from app.config import Config
 from app.utils.prompt_loader import load_prompt
 
 def remove_test_imports(code: str) -> str:
-    """Remove imports relacionados a testes."""
     lines = code.split('\n')
     return '\n'.join([line for line in lines if not (line.strip().startswith('import pytest') or line.strip().startswith('from pytest'))])
 
 def generate_code_incremental(
     test_code: str,
     function_name: str,
+    specification: str,
     feedback: str = "",
     previous_code: str = ""
 ) -> str:
-    """Gera código MÍNIMO para fazer os testes passarem."""
     llm = ChatOpenAI(model=Config.MODEL, temperature=0.3)
     
     context_parts = []
@@ -36,6 +35,7 @@ def generate_code_incremental(
     rendered_hum_message = load_prompt(
         template_name='agents/langgraph/developer/hum_prompt_1.jinja2',
         function_name=function_name,
+        specification=specification,
         context=context,
         test_code=test_code,
     )
@@ -51,7 +51,6 @@ def generate_code_incremental(
     if not clean_code.strip():
         raise ValueError("Developer gerou código vazio")
     
-    # Valida se a função tem o nome correto
     if f"def {function_name}" not in clean_code:
         raise ValueError(
             f"Código não contém a função {function_name}.\n\n"

@@ -1,20 +1,29 @@
-def validate_cpf(s):
-    import re
-    s = s.strip()
-    if not re.match(r'^\d{3}\.\d{3}\.\d{3}-\d{2}$', s) and not re.match(r'^\d{11}$', s):
-        return False
-    s = re.sub(r'\D', '', s)
-    if len(s) != 11 or not s.isdigit() or s == s[0] * 11:
-        return False
+def convert_roman_to_integer(roman):
+    if not roman:
+        raise ValueError("Entrada inválida")
     
-    def calculate_digit(cpf, factor):
-        total = 0
-        for i in range(factor):
-            total += int(cpf[i]) * (factor + 1 - i)
-        digit = 11 - (total % 11)
-        return digit if digit < 10 else 0
-
-    first_digit = calculate_digit(s, 9)
-    second_digit = calculate_digit(s + str(first_digit), 10)
+    roman_to_int = {
+        'I': 1,
+        'V': 5,
+        'X': 10,
+        'L': 50,
+        'C': 100,
+        'D': 500,
+        'M': 1000
+    }
     
-    return s[-2:] == f'{first_digit}{second_digit}'
+    total = 0
+    prev_value = 0
+    
+    for char in reversed(roman):
+        if char not in roman_to_int:
+            raise ValueError("Entrada inválida")
+        
+        value = roman_to_int[char]
+        if value < prev_value:
+            total -= value
+        else:
+            total += value
+        prev_value = value
+    
+    return total

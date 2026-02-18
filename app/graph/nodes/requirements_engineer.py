@@ -5,46 +5,37 @@ from app.agents.langgraph.engineer import generate_specification
 
 
 def node_engineer(state: RequirementsState) -> RequirementsState:
-    """Nó do grafo que gera a especificação técnica final."""
     logging.info("=" * 70)
     logging.info("⚙️ ENGENHEIRO - Gerando especificação técnica")
     logging.info("=" * 70)
     
     conversation_history = state["conversation_history"]
     
-    logging.info(f"📚 Processando histórico: {len(conversation_history.split('\\n'))} linhas")
+    logging.info(f"📚 Processando histórico: {len(conversation_history)} caracteres")
     
-    # Extrair os requisitos do histórico (última mensagem do analista que contém checklist)
     requirements = ""
-    lines = conversation_history.split('\n')
-    for i, line in enumerate(lines):
-        if "[Analista]:" in line and "===CHECKLIST_END===" in conversation_history[conversation_history.find(line):]:
-            # Encontrar o final desta mensagem do analista
-            analyst_message = line.replace("[Analista]:", "").strip()
-            j = i + 1
-            while j < len(lines) and not lines[j].startswith("["):
-                analyst_message += "\n" + lines[j]
-                j += 1
-            requirements = analyst_message
-            break
     
-    if not requirements:
-        requirements = conversation_history  # fallback
+    if "Checklist de Requisitos" in conversation_history and "===CHECKLIST_END===" in conversation_history:
+        last_checklist_start = conversation_history.rfind("Checklist de Requisitos")
+        last_checklist_end = conversation_history.rfind("===CHECKLIST_END===")
+        
+        if last_checklist_start != -1 and last_checklist_end != -1:
+            requirements = conversation_history[last_checklist_start:last_checklist_end + len("===CHECKLIST_END===")]
+            logging.info(f"✅ Checklist extraído com sucesso: {len(requirements)} caracteres")
+        else:
+            logging.warning("⚠️ Não foi possível extrair checklist - usando histórico completo")
+            requirements = conversation_history
+    else:
+        logging.warning("⚠️ Checklist não encontrado - usando histórico completo")
+        requirements = conversation_history
     
-    logging.info(f"📋 Requisitos extraídos: {len(requirements)} caracteres")
+    logging.info(f"📋 Requisitos extraídos: {requirements[:200]}...")
     
-    specification = generate_specification(requirements)
+    specification = generate_specification(requirements, conversation_history)
     
-    # Extrair nome da função da especificação
-    function_name = "generated_function"
-    for line in specification.split('\n'):
-        if line.strip().startswith("#"):
-            parts = line.replace("#", "").strip().split()
-            if parts:
-                function_name = parts[0].lower().replace(" ", "_")
-                break
+    function_name = _extract_function_name(specification)
     
-    logging.info(f"🎯 Nome da função detectado: {function_name}")
+    logging.info(f"🎯 Nome da função/sistema detectado: {function_name}")
     logging.info(f"📄 Especificação gerada: {len(specification)} caracteres")
     
     new_state: RequirementsState = {
@@ -55,3 +46,19 @@ def node_engineer(state: RequirementsState) -> RequirementsState:
     }
     
     return new_state
+
+
+def _extract_function_name(specification: str) -> str:
+    """Extrai o nome da função ou sistema da especificação."""
+    function_name = "generated_function"
+    for line in specification.split('\n'):
+        stripped = line.strip()
+        if stripped.startswith("#") and not stripped.startswith("##"):
+            name = stripped.lstrip("#").strip()
+            if name:
+                name = re.sub(r'[^a-zA-Z0-9_\s]', '', name)
+                name = re.sub(r'\s+', '_', name).strip('_').lower()
+                if name:
+                    function_name = name
+                    break
+    return function_name

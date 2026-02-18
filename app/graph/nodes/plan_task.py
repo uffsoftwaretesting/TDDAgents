@@ -2,30 +2,34 @@ import logging
 from app.config import AgentState
 from app.agents.langgraph.planner import generate_plan
 
+logger = logging.getLogger("TDDOrchestrator")
 
 def node_plan_task(state: AgentState) -> AgentState:
-    """Nó do grafo que gera o plano de sub-requisitos TDD."""
-    logging.info("=" * 70)
-    logging.info("🧠 FASE 1: PLANNER - Gerando plano de sub-requisitos TDD")
-    logging.info("=" * 70)
+    logger.info("\n" + "=" * 80)
+    logger.info("📋 FASE 1: PLANEJAMENTO (PLANNER)")
+    logger.info("=" * 80)
+    logger.info(f"📌 Especificação Original: {state['specification'][:100]}...")
     
     plan = generate_plan(state["specification"])
     
     if not plan:
-        logging.error("❌ Planner falhou ao gerar o plano.")
+        logger.error("❌ ERRO: O Planner falhou ao gerar o plano de tarefas.")
         return {**state, "status": "plan_failed", "plan": []}
     
-    logging.info(f"✅ Plano TDD gerado com {len(plan)} sub-requisitos:")
-    for idx, step in enumerate(plan, 1):
-        logging.info(f"  {idx}. {step}")
-    
+    logger.info("-" * 80)
+    logger.info(f"✅ PLANO GERADO COM {len(plan)} SUB-REQUISITOS:")
+    for i, item in enumerate(plan, 1):
+        logger.info(f"   {i}. {item}")
+    logger.info("-" * 80)
+
     new_state: AgentState = {
         **state,
         "plan": plan,
         "plan_index": 0,
         "current_sub_req": plan[0],
         "iteration": 0,
-        "status": "planning_complete"
+        "status": "planning_complete",
+        "messages": [] 
     }
     
     return new_state

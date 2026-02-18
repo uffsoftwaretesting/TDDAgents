@@ -1,37 +1,49 @@
 import pytest
-from app_code import validate_cpf
+from app_code import convert_roman_to_integer
 
-def test_valid_cpf():
-    assert validate_cpf('123.456.789-09') == True
+def test_convert_roman_to_integer_I():
+    assert convert_roman_to_integer("I") == 1
 
-def test_invalid_cpf():
-    assert validate_cpf('123.456.789-00') == False
+def test_convert_roman_to_integer_IV():
+    assert convert_roman_to_integer("IV") == 4
 
-def test_cpf_with_letters():
-    assert validate_cpf('123.456.78A-09') == False
+def test_convert_roman_to_integer_XIII():
+    assert convert_roman_to_integer("XIII") == 13
 
-def test_cpf_with_special_characters():
-    assert validate_cpf('123.456.789-09!') == False
+def test_convert_roman_to_integer_MCMXCIV():
+    assert convert_roman_to_integer("MCMXCIV") == 1994
 
-def test_cpf_with_spaces():
-    assert validate_cpf(' 123.456.789-09 ') == True
+def test_convert_roman_to_integer_MMMCMXCIX():
+    assert convert_roman_to_integer("MMMCMXCIX") == 3999
 
-# Novo teste para CPF válido sem pontuação
-def test_valid_cpf_without_punctuation():
-    assert validate_cpf('12345678909') == True
+def test_convert_roman_to_integer_empty():
+    # Deve lançar uma exceção ou retornar um valor de erro específico
+    with pytest.raises(ValueError):
+        convert_roman_to_integer("")
 
-# Novo teste para CPF com pontuação e inválido
-def test_cpf_with_punctuation_and_invalid():
-    assert validate_cpf('123.456.789-00') == False
+def test_convert_roman_to_integer_invalid():
+    # Deve lançar uma exceção ou retornar um valor de erro específico
+    with pytest.raises(ValueError):
+        convert_roman_to_integer("ABC")
 
-# Novo teste para CPF com todos os dígitos iguais e inválido
-def test_cpf_with_all_digits_equal():
-    assert validate_cpf('111.111.111-11') == False
+def test_convert_roman_to_integer_IV_new():
+    assert convert_roman_to_integer("IV") == 4
 
-# Novo teste para CPF vazio
-def test_empty_cpf():
-    assert validate_cpf('') == False
+def test_convert_roman_to_integer_XIII_new():
+    assert convert_roman_to_integer("XIII") == 13
 
-# Novo teste para CPF com pontuação e inválido (caso adicional)
-def test_cpf_with_punctuation_and_invalid_case_additional():
-    assert validate_cpf('123.456.789-01') == False
+def test_convert_roman_to_integer_MCMXCIV_new():
+    assert convert_roman_to_integer("MCMXCIV") == 1994
+
+def test_convert_roman_to_integer_MMMCMXCIX_new():
+    assert convert_roman_to_integer("MMMCMXCIX") == 3999
+
+def test_convert_roman_to_integer_empty_new():
+    # Testar entrada vazia e verificar tratamento de erro
+    with pytest.raises(ValueError):
+        convert_roman_to_integer("")
+
+def test_convert_roman_to_integer_invalid_characters():
+    # Testar entrada inválida com caracteres não romanos
+    with pytest.raises(ValueError):
+        convert_roman_to_integer("12345")

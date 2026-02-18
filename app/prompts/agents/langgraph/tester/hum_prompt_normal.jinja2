@@ -1,21 +1,30 @@
 Atue como um Especialista em TDD e Automação de Testes com Pytest.
+Sua tarefa é expandir a cobertura de testes da função `{{ function_name }}` de forma incremental.
+Você deve adicionar APENAS UM novo teste que valide o `{{ sub_requirement }}`, mantendo a integridade absoluta de todos os testes anteriores.
 
-Sua tarefa é expandir a cobertura de testes da função `{{ function_name }}` de forma incremental. Você deve adicionar APENAS UM novo teste que valide o `{{ sub_requirement }}`, mantendo a integridade absoluta de todos os testes anteriores.
+📋 ESPECIFICAÇÃO TÉCNICA (FONTE DA VERDADE):
+"""
+{{ specification }}
+"""
 
-DIRETRIZES TÉCNICAS E RESTRIÇÕES:
-1. Preservação Total: É estritamente proibido remover ou alterar a lógica dos testes existentes fornecidos no contexto. Apenas adicione ao final.
-2. Consistência Lógica: O novo teste NÃO pode contradizer as expectativas dos testes anteriores. Se houver ambiguidade, favoreça a especificação do novo sub-requisito.
-3. Importação: Certifique-se de que o script comece com `from {{ module_name|default('app_code') }} import {{ function_name }}`.
-4. Isolamento: O novo teste deve focar exclusivamente no sub-requisito atual.
+🎯 NOVO SUB-REQUISITO (O ÚNICO FOCO DESTE TESTE):
+"{{ sub_requirement }}"
+
+DIRETRIZES TÉCNICAS E RESTRIÇÕES TDD:
+1. **Escopo Limitado:** O novo teste deve validar EXCLUSIVAMENTE o `{{ sub_requirement }}`. Não tente testar outras partes da especificação ainda.
+2. **Tipagem Rigorosa:** Use a "Especificação Técnica" acima para garantir que está passando os argumentos corretos (nomes e tipos) e esperando o tipo de retorno correto.
+3. **Sem Alucinações:** Se a Spec diz que a função recebe `(user_id: str, timestamp: int)`, NÃO invente argumentos extras.
+4. **Preservação:** Não altere testes antigos. Apenas adicione o novo.
 
 EXEMPLO DE COMPORTAMENTO ESPERADO:
-* Input: Testes existentes A e B + Novo Requisito C.
-* Output: Código contendo Testes A, B e o novo Teste C (comentado).
+* Spec: "Soma dois inteiros."
+* Sub-req: "Soma números positivos."
+* Teste Gerado:
+  def test_soma_positivos():
+      assert soma(2, 3) == 5
 
 DADOS DE ENTRADA:
 Função Alvo: {{ function_name }}
-Novo Sub-requisito: {{ sub_requirement }}
-
 Código de Testes Existente:
 """
 {% if context %}{{ context }}{% endif %}

@@ -10,10 +10,6 @@ def extract_relevant_spec_context(
     test_output: str,
     current_code: str
 ) -> str:
-    """
-    Usa LLM para extrair APENAS a parte relevante da especificação.
-    Sem heurísticas frágeis, deixa a LLM decidir o que é relevante.
-    """
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
     rendered_sys_message = load_prompt(
@@ -44,12 +40,8 @@ def analyze_failures(
     current_code: str = "",
     test_code: str = ""
 ) -> str:
-    """
-    Analisa falhas com feedback GRADUAL usando LLM para filtragem.
-    """
     llm = ChatOpenAI(model=Config.MODEL, temperature=0.3)
 
-    # --- Extrai métricas do pytest ---
     passed_match = re.search(r'(\d+)\s+passed', test_output)
     failed_match = re.search(r'(\d+)\s+failed', test_output)
     
@@ -58,14 +50,12 @@ def analyze_failures(
     
     total = passed_count + failed_count
     
-    # --- ESTRATÉGIA DE FEEDBACK GRADUAL ---
     if iteration == 0:
         feedback_mode = "MINIMAL"
-        spec_context = ""  # Sem contexto de spec
+        spec_context = ""
         
     elif iteration == 1:
         feedback_mode = "CONTEXTUAL"
-        # ⚠️ LLM extrai contexto relevante
         spec_context = extract_relevant_spec_context(
             specification=specification,
             sub_requirement=sub_requirement,
@@ -73,11 +63,10 @@ def analyze_failures(
             current_code=current_code
         )
         
-    else:  # iteration >= 2
+    else:
         feedback_mode = "ARCHITECTURAL"
-        spec_context = specification  # Spec completa para análise profunda
+        spec_context = specification
 
-    # --- SYSTEM MESSAGE (instruções de comportamento) ---
     rendered_sys_message = load_prompt(
         template_name='agents/langgraph/reviewer/sys_prompt_2.jinja2',
         feedback_mode=feedback_mode,
@@ -86,7 +75,6 @@ def analyze_failures(
     )
     system_msg = SystemMessage(content=rendered_sys_message)
 
-    # --- HUMAN MESSAGE (contexto específico por modo) ---
     if feedback_mode == "MINIMAL":
         rendered_hum_message = load_prompt(
             template_name='agents/langgraph/reviewer/hum_prompt_2_minimal.jinja2',
@@ -108,7 +96,7 @@ def analyze_failures(
             test_output=test_output
         )
         
-    else:  # ARCHITECTURAL
+    else:
         rendered_hum_message = load_prompt(
             template_name='agents/langgraph/reviewer/hum_prompt_2_architectural.jinja2',
             sub_requirement=sub_requirement,

@@ -1,6 +1,9 @@
 import os
-from typing import TypedDict
+import operator
+from typing import TypedDict, Annotated, List, Optional, Union
 from dotenv import load_dotenv
+from langchain_core.messages import BaseMessage, AnyMessage
+from langgraph.graph.message import add_messages
 
 load_dotenv()
 
@@ -12,27 +15,30 @@ class Config:
     PROMPTS_DIR = os.path.join(os.path.dirname(__file__), './prompts')
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     MODEL = "gpt-4o-mini"
-    MAX_ITERATIONS = 10  # Aumentado para o ciclo incremental
+    MAX_ITERATIONS = 12
     WORKSPACE_PATH = "workspace"
 
-    IMPLEMENTATION_MODULE = "app_code"  # Nome do arquivo de implementação (app_code.py)
-    TEST_FILE = "test_app.py"          # Nome do arquivo de teste
-    # Chave para armazenar o estado do plano no Redis
+    IMPLEMENTATION_MODULE = "app_code"
+    TEST_FILE = "test_app.py"
     PLAN_KEY = "tdd_plan_queue"
 
 class AgentState(TypedDict):
     specification: str
     function_name: str 
     plan: list[str]
+    plan_index: int
     current_sub_req: str
+    
     tests_code: str
     implementation_code: str
-    feedback: str
+    
+    messages: Annotated[list[BaseMessage], add_messages]
+    
     iteration: int
-    plan_index: int
     status: str
     max_retries: int
     red_attempts: int
+    failed_requirements: list[dict]
 
 class RequirementsState(TypedDict):
     user_input: str

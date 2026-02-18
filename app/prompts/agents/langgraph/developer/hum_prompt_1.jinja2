@@ -1,20 +1,25 @@
 NOME DA FUNÇÃO (use EXATAMENTE este): {{ function_name }}
 
-TESTES QUE DEVEM PASSAR:
+📋 ESPECIFICAÇÃO TÉCNICA (CONTEXTO):
+"""
+{{ specification }}
+"""
 
+TESTES QUE DEVEM PASSAR (O "ROTEIRO" DO CÓDIGO):
 ```python
 {{ test_code }}
-```
-
 {{ context }}
 
-TAREFA:
+TAREFA TDD (RED -> GREEN):
 
-1. Implemente a função {{ function_name }}.
-2. Faça com que TODOS os testes acima passem.
-3. Escreva apenas o código MÍNIMO necessário.
-4. Quando houver muitos testes variados, você pode começar a generalizar a lógica.
+Seu ÚNICO objetivo é fazer os testes acima passarem (GREEN).
+
+NÃO implemente funcionalidades da especificação que ainda não têm testes. Isso viola o TDD.
+
+Use a "Especificação Técnica" para entender a lógica de negócio e os tipos de dados, mas implemente apenas o necessário para satisfazer os testes atuais.
+
+Se os testes atuais pedem apenas um caso básico, resolva apenas esse caso. Deixe a complexidade para as próximas iterações.
 
 ⚠️ IMPORTANTE: Retorne APENAS o código Python puro, SEM blocos markdown.
 
-Código da função {{ function_name }}:
+Código da função {{ function_name }}
