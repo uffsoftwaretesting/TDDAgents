@@ -1,27 +1,39 @@
 import subprocess
 from app.config import Config
 
+
 def run_pytest() -> str:
-    """Executa pytest no arquivo de testes."""
-    test_file = Config.TEST_FILE
-    
+    """
+    Executa o pytest no arquivo de testes atual e retorna o output completo.
+
+    stdout e stderr são mesclados para que os agentes downstream sempre vejam
+    o quadro completo (erros de import, por exemplo, aparecem apenas no stderr).
+    """
     try:
         result = subprocess.run(
-            ["pytest", f"{Config.WORKSPACE_PATH}/{test_file}", "-v", "--tb=short"],
+            [
+                "pytest",
+                f"{Config.WORKSPACE_PATH}/{Config.TEST_FILE}",
+                "-v",
+                "--tb=short",
+                # Códigos de cor quebram o matching de strings — mantém output simples.
+                "--no-header",
+                "-p", "no:warnings",
+            ],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
-        
-        # Combina stdout e stderr para análise completa
+
         output = result.stdout
         if result.stderr:
-            output += f"\n\nERROS:\n{result.stderr}"
-        
+            output += f"\n\nSTDERR:\n{result.stderr}"
+
         return output.strip()
+
     except subprocess.TimeoutExpired:
-        return "❌ Erro: execução de testes expirou (timeout de 30s)."
+        return "ERRO: execução dos testes expirou após 30 s."
     except FileNotFoundError:
-        return "❌ Erro: pytest não está instalado. Execute: pip install pytest"
+        return "ERRO: pytest não encontrado — execute: pip install pytest"
     except Exception as e:
-        return f"❌ Erro ao executar testes: {str(e)}"
+        return f"ERRO: não foi possível executar os testes: {e}"

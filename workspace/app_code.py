@@ -1,29 +1,22 @@
-def convert_roman_to_integer(roman):
-    if not roman:
-        raise ValueError("Entrada inválida")
+def rate_limiter(max_requests, time_window, client_id):
+    import time
     
-    roman_to_int = {
-        'I': 1,
-        'V': 5,
-        'X': 10,
-        'L': 50,
-        'C': 100,
-        'D': 500,
-        'M': 1000
-    }
+    if not hasattr(rate_limiter, 'clients'):
+        rate_limiter.clients = {}
     
-    total = 0
-    prev_value = 0
+    current_time = time.time()
     
-    for char in reversed(roman):
-        if char not in roman_to_int:
-            raise ValueError("Entrada inválida")
-        
-        value = roman_to_int[char]
-        if value < prev_value:
-            total -= value
-        else:
-            total += value
-        prev_value = value
+    if client_id not in rate_limiter.clients:
+        rate_limiter.clients[client_id] = {'count': 0, 'start_time': current_time}
     
-    return total
+    client_data = rate_limiter.clients[client_id]
+    
+    if current_time - client_data['start_time'] > time_window:
+        client_data['count'] = 0
+        client_data['start_time'] = current_time
+    
+    if client_data['count'] < max_requests:
+        client_data['count'] += 1
+        return "200 OK"
+    
+    return "429 Too Many Requests"
