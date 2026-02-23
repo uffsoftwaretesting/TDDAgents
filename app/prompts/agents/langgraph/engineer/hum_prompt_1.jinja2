@@ -1,16 +1,20 @@
 Atue como o Engenheiro de Especificação Técnica.
 
-Analise os seguintes Requisitos Validados pelo Analista com o objetivo de orientar a implementação de código em Python:
+Analise o seguinte histórico de levantamento de requisitos consolidado pelo Analista:
 
+📚 HISTÓRICO E REQUISITOS:
 """
+{% if conversation_history %}
+{{ conversation_history }}
+{% else %}
 {{ requirements }}
+{% endif %}
 """
 
-Sua tarefa é converter estes dados brutos na Especificação Técnica Final para o sistema TDD.
+🎯 SUA TAREFA:
+Converta estes dados brutos na Especificação Técnica Final em Markdown.
 
 Regras de Execução:
-1. Siga rigorosamente o "FORMATO OBRIGATÓRIO DE SAÍDA" estabelecido no seu System Prompt.
-2. Garanta que a definição inclua Type Hinting implícito e que os casos de teste sigam o padrão `doctest`.
-3. Não adicione conversas ou introduções, apenas a especificação técnica.
-
-Finalize a resposta EXATAMENTE com a string: "TERMINATE_SPEC"
+1. Siga rigorosamente a estrutura do "FORMATO OBRIGATÓRIO DE SAÍDA" estabelecida no seu System Prompt.
+2. Certifique-se de extrair todos os casos de borda e validações, pois o Engenheiro de Qualidade (Tester) usará o seu documento como a ÚNICA fonte da verdade para escrever a suíte de testes.
+3. Não inclua nenhuma saudação ou texto fora do Markdown.

@@ -1,193 +1,169 @@
-"""
-Ponto de entrada do pipeline de agentes TDD.
-
-Estratégia de Thread ID
-────────────────────────
-Cada execução do LangGraph é identificada por um thread_id armazenado no Postgres.
-O ID determina se uma nova execução começa do zero ou retoma uma anterior:
-
-  • Mesmo thread_id  → LangGraph carrega o último checkpoint do Postgres e
-                       continua de onde o processo anterior parou.
-                       Use isto para recuperação de falhas.
-
-  • Novo thread_id   → AgentState completamente em branco, sem contaminação de histórico.
-                       Use isto para cada tarefa genuinamente nova.
-
-Derivamos o thread_id a partir de um hash SHA-1 de (function_name + specification).
-Isso significa:
-  - Re-executar a mesma tarefa após uma falha → mesmo hash → retomada automática.
-  - Uma spec ou function_name diferente → hash diferente → estado limpo.
-  - Passe --fresh na CLI para forçar um UUID aleatório independente do conteúdo.
-"""
-
 import hashlib
 import logging
-import os
 import uuid
 import argparse
+import os
+import sys
 
 from dotenv import load_dotenv
 
 from app.requirements_orchestrator import RequirementsOrchestrator
 from app.orchestrator import TDDOrchestrator
 
-# ── Configuração de logging ───────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-for noisy_logger in ("httpx", "httpcore", "openai", "autogen_core", "autogen_agentchat"):
+# Silencia logs verbosos de bibliotecas base
+for noisy_logger in ("httpx", "httpcore", "anthropic", "e2b"):
     logging.getLogger(noisy_logger).setLevel(logging.ERROR)
 
 logger = logging.getLogger("TDDMain")
 logger.setLevel(logging.INFO)
 
 
-# ── Funções auxiliares ────────────────────────────────────────────────────────
-
-def make_thread_id(function_name: str, specification: str) -> str:
-    """
-    Deriva um thread_id estável e resistente a colisões a partir do conteúdo da tarefa.
-
-    O mesmo par (function_name, specification) sempre gera o mesmo ID,
-    permitindo que uma execução interrompida seja retomada automaticamente
-    apenas re-executando main.py com os mesmos inputs.
-    """
-    payload = f"{function_name}::{specification}"
+def make_thread_id(specification: str) -> str:
+    """Deriva um thread_id estável puramente a partir do texto da especificação."""
+    payload = f"sandbox::{specification}"
     return "tdd-" + hashlib.sha1(payload.encode()).hexdigest()[:16]
-
-
-def detect_function_name(specification: str) -> str:
-    """
-    Extração do nome da função em snake_case a partir da especificação.
-
-    Procura a primeira linha de título (começa com #) e converte.
-    Retorna 'generated_function' como fallback.
-    """
-    for line in specification.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            words = stripped.lstrip("#").strip().split()
-            if words:
-                return "_".join(w.lower() for w in words[:4])
-    return "generated_function"
 
 
 def run_requirements_gathering() -> str:
     """Fase interativa de levantamento de requisitos."""
-    print("\n" + "=" * 60)
-    print("🤖  LEVANTAMENTO DE REQUISITOS")
-    print("=" * 60)
-    print("Descreva o que você gostaria de implementar:\n")
+    print("\n" + "=" * 80)
+    print("🤖  FASE 1: LEVANTAMENTO DE REQUISITOS (PRODUCT MANAGER)")
+    print("=" * 80)
+    print("Descreva a aplicação, framework ou funcionalidade que você deseja construir.")
+    print("Seja detalhado. O Analista fará perguntas se algo estiver vago.\n")
 
-    initial_input = input("[Sua solicitação]: ").strip()
+    try:
+        initial_input = input("👤 [Sua Solicitação Inicial]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\n👋 Operação cancelada pelo usuário.")
+        sys.exit(0)
+
     if not initial_input:
-        raise ValueError("A solicitação não pode estar vazia.")
+        print("❌ A solicitação inicial não pode estar vazia.")
+        sys.exit(1)
 
     orchestrator = RequirementsOrchestrator()
     final_state = orchestrator.run(initial_input)
-    return final_state["final_specification"]
+    
+    spec = final_state.get("final_specification", "")
+    if not spec:
+        print("\n❌ Falha crítica: O Engenheiro não conseguiu gerar a especificação.")
+        sys.exit(1)
+        
+    return spec
 
-
-# ── Interface de linha de comando ─────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Executa o pipeline de agentes TDD.",
+        description="Executa o pipeline de agentes TDD Enterprise (E2B Sandbox Edition).",
     )
     parser.add_argument(
         "--fresh",
         action="store_true",
-        help=(
-            "Força uma execução completamente nova gerando um thread_id aleatório. "
-            "Sem esta flag a execução é retomável: se o processo falhar e for "
-            "reiniciado com os mesmos inputs, o LangGraph continua a partir do "
-            "último checkpoint salvo no Postgres."
-        ),
+        help="Força uma execução nova gerando um thread_id aleatório.",
     )
     parser.add_argument(
         "--thread-id",
         default=None,
-        help=(
-            "Define explicitamente o thread_id (substitui --fresh e o hash "
-            "derivado automaticamente). Útil para retomar ou inspecionar uma "
-            "execução específica pelo seu ID."
-        ),
+        help="Define explicitamente o thread_id.",
     )
     return parser.parse_args()
 
-
-# ── Função principal ──────────────────────────────────────────────────────────
 
 def main() -> None:
     load_dotenv()
     args = parse_args()
 
-    # ── Fase 1: levantamento de requisitos ────────────────────────────────────
-    try:
-        specification = run_requirements_gathering()
-    except KeyboardInterrupt:
-        print("\nOperação cancelada pelo usuário.")
-        return
-
-    if not specification:
-        logger.error("❌ Falha ao gerar a especificação.")
-        return
-
-    function_name = detect_function_name(specification)
-    logger.info(f"Nome de função detectado: '{function_name}'")
+    # ── Fase 1: Levantamento de Requisitos ────────────────────────────────────
+    specification = run_requirements_gathering()
 
     # ── Resolução do thread_id ────────────────────────────────────────────────
     if args.thread_id:
-        # Sobrescrita explícita — o usuário sabe exatamente qual execução retomar.
         thread_id = args.thread_id
         logger.info(f"🔑 Usando thread_id explícito: {thread_id}")
-
     elif args.fresh:
-        # Usuário quer uma execução garantidamente limpa, independente do conteúdo.
         thread_id = "tdd-" + uuid.uuid4().hex[:16]
         logger.info(f"🆕 Execução nova — thread_id gerado: {thread_id}")
-
     else:
-        # Padrão: hash derivado do conteúdo.
-        # Re-executar com inputs idênticos após uma falha retoma a execução.
-        # Uma spec ou function_name diferente gera um hash diferente → estado limpo.
-        thread_id = make_thread_id(function_name, specification)
-        logger.info(
-            f"🔑 thread_id derivado do conteúdo: {thread_id}  "
-            f"(use --fresh para forçar uma nova execução)"
-        )
+        thread_id = make_thread_id(specification)
+        logger.info(f"🔑 thread_id derivado da especificação: {thread_id}")
 
-    # ── Fase 2: execução TDD ──────────────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print("🔄  INICIANDO FASE TDD")
-    print("=" * 60)
-    print(f"📜 Prévia da especificação:\n{specification[:300]}...\n")
-    print(f"🔑 Thread ID: {thread_id}\n")
+    # ── Fase 2: Execução TDD ──────────────────────────────────────────────────
+    print("\n" + "=" * 80)
+    print("🚀  FASE 2: ORQUESTRAÇÃO TDD MULTI-AGENTE (SANDBOX E2B)")
+    print("=" * 80)
+    print(f"🔑 Thread ID: {thread_id}")
+    print("📜 Prévia da Especificação Técnica que guiará os agentes:")
+    print("-" * 80)
+    print(f"{specification[:500]}...\n\n[CONTINUA NA MEMÓRIA DOS AGENTES...]\n")
+    print("-" * 80 + "\n")
 
     orchestrator = TDDOrchestrator(task_key=thread_id)
-    final_state = orchestrator.run(
-        specification=specification,
-        function_name=function_name,
-    )
+    
+    try:
+        final_state = orchestrator.run(specification=specification)
+    except KeyboardInterrupt:
+        print("\n🛑 Execução TDD interrompida pelo usuário de forma segura.")
+        sys.exit(0)
 
     # ── Resultado ─────────────────────────────────────────────────────────────
     final_status = final_state.get("status", "unknown")
     failed = final_state.get("failed_requirements", [])
 
     if final_status in ("plan_complete", "completed_with_review"):
-        print("\n✅  Pipeline concluído com sucesso.")
+        print("\n✅  PIPELINE CONCLUÍDO COM SUCESSO!")
+
+        file_system = final_state.get("file_system", {})
+        if file_system:
+            print("\n💾 Extraindo arquivos da Sandbox para a sua máquina local...")
+            workspace_dir = "workspace_output"
+
+            for filepath, content in file_system.items():
+                clean_path = filepath.lstrip("/")
+                if clean_path.startswith("home/user/"):
+                    clean_path = clean_path.replace("home/user/", "", 1)
+                
+                full_path = os.path.join(workspace_dir, clean_path)
+
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+                with open(full_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            print(f"📁 Todos os arquivos foram salvos na pasta: ./{workspace_dir}/")
+
     else:
-        print(f"\n⚠️  Pipeline finalizado com status: '{final_status}'")
+        print(f"\n⚠️  PIPELINE FINALIZADO COM STATUS: '{final_status}'")
+
+        file_system = final_state.get("file_system", {})
+        
+        if file_system:
+            print("\n💾 Extraindo arquivos da Sandbox para a sua máquina local...")
+            workspace_dir = "workspace_output"
+
+            for filepath, content in file_system.items():
+                clean_path = filepath.lstrip("/")
+                if clean_path.startswith("home/user/"):
+                    clean_path = clean_path.replace("home/user/", "", 1)
+                
+                full_path = os.path.join(workspace_dir, clean_path)
+
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+                with open(full_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            print(f"\n📁 Todos os arquivos foram salvos na pasta: ./{workspace_dir}/")
 
     if failed:
         print(f"\n⚠️  {len(failed)} requisito(s) não puderam ser satisfeitos:")
         for req in failed:
-            print(f"   • {req}")
+            print(f"   • {req.get('requirement', req)}")
 
-    # Exibe o thread_id ao final para que o usuário possa copiá-lo e usar com --thread-id
     print(f"\n🔑 Thread ID desta execução: {thread_id}")
-    print("   (use --thread-id para retomar ou inspecionar esta execução)\n")
+    print("   (Para inspecionar o estado ou continuar futuramente, use --thread-id)\n")
 
 
 if __name__ == "__main__":

@@ -44,8 +44,7 @@ def node_plan_task(state: AgentState) -> AgentState:
         "red_attempts": 0,
         "status": "planning_complete",
         # Os históricos dos agentes começam vazios — nenhuma memória deve ser
-        # carregada para o primeiro sub-requisito. Já são [] no initial_state,
-        # mas ser explícito aqui torna o plan_task seguro mesmo em retomadas parciais.
+        # carregada para o primeiro sub-requisito. Já são [] no initial_state.
         "tester_messages": [],
         "developer_messages": [],
         "reviewer_messages": [],

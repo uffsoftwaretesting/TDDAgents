@@ -1,34 +1,30 @@
-Atue como um Especialista em TDD e Automação de Testes com Pytest.
-Sua tarefa é expandir a cobertura de testes da função `{{ function_name }}` de forma incremental.
-Você deve adicionar APENAS UM novo teste que valide o `{{ sub_requirement }}`, mantendo a integridade absoluta de todos os testes anteriores.
+{% if not feedback %}
+🎯 SUB-REQUISITO ATUAL:
+{{ sub_requirement }}
 
-📋 ESPECIFICAÇÃO TÉCNICA (FONTE DA VERDADE):
+📋 ESPECIFICAÇÃO TÉCNICA (CONTEXTO GERAL):
 """
 {{ specification }}
 """
 
-🎯 NOVO SUB-REQUISITO (O ÚNICO FOCO DESTE TESTE):
-"{{ sub_requirement }}"
+💻 CÓDIGO ATUAL NO WORKSPACE:
+{{ current_codebase }}
 
-DIRETRIZES TÉCNICAS E RESTRIÇÕES TDD:
-1. **Escopo Limitado:** O novo teste deve validar EXCLUSIVAMENTE o `{{ sub_requirement }}`. Não tente testar outras partes da especificação ainda.
-2. **Tipagem Rigorosa:** Use a "Especificação Técnica" acima para garantir que está passando os argumentos corretos (nomes e tipos) e esperando o tipo de retorno correto.
-3. **Sem Alucinações:** Se a Spec diz que a função recebe `(user_id: str, timestamp: int)`, NÃO invente argumentos extras.
-4. **Preservação:** Não altere testes antigos. Apenas adicione o novo.
+TAREFA:
+Expanda a cobertura de testes para cobrir estritamente o "Sub-requisito Atual".
+Analise o código atual do workspace para saber como fazer o import correto e em qual arquivo adicionar o teste.
+Gere sua resposta usando a estrutura JSON/Action exigida.
 
-EXEMPLO DE COMPORTAMENTO ESPERADO:
-* Spec: "Soma dois inteiros."
-* Sub-req: "Soma números positivos."
-* Teste Gerado:
-  def test_soma_positivos():
-      assert soma(2, 3) == 5
+{% else %}
+⚠️ ALERTA DE FLUXO OU FALHA DE EXECUÇÃO:
 
-DADOS DE ENTRADA:
-Função Alvo: {{ function_name }}
-Código de Testes Existente:
-"""
-{% if context %}{{ context }}{% endif %}
-"""
+📝 FEEDBACK DA TENTATIVA ANTERIOR:
+{{ feedback }}
 
-SAÍDA ESPERADA:
-Retorne apenas o bloco de código Python completo e executável (imports + testes antigos + novo teste).
+💻 CÓDIGO ATUAL ATUALIZADO:
+{{ current_codebase }}
+
+TAREFA DE CORREÇÃO:
+Seus testes falharam em ser gerados corretamente ou o Developer precisou solicitar uma modificação. 
+Com base no feedback, revise a sua atuação. Gere a sua resposta usando a estrutura JSON/Action exigida e retorne o arquivo completo.
+{% endif %}

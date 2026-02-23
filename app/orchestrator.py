@@ -1,9 +1,9 @@
 import logging
-import os
 from typing import Literal
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
+from e2b_code_interpreter import Sandbox # <-- Nova importação do E2B
 
 from app.config import AgentState, Config
 from app.graph.nodes import (
@@ -13,10 +13,8 @@ from app.graph.nodes import (
 )
 from app.graph.subgraphs.build_tdd_subgraph import build_tdd_subgraph
 
-
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("TDDOrchestrator")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COMO O CHECKPOINTER FUNCIONA
@@ -61,10 +59,8 @@ logger = logging.getLogger("TDDOrchestrator")
 # e reinicializações do processo.
 # ─────────────────────────────────────────────────────────────────────────────
 
-
 class TDDOrchestrator:
     def __init__(self, task_key: str = "tdd_task"):
-        # task_key vira o thread_id — mude-o para iniciar uma execução limpa.
         self.task_key = task_key
 
     def _build_main_graph(self, checkpointer):
@@ -94,25 +90,22 @@ class TDDOrchestrator:
 
         return workflow.compile(checkpointer=checkpointer)
 
-    def run(self, specification: str, function_name: str) -> AgentState:
-        # Garante que o diretório de workspace existe antes de qualquer nó
-        # tentar gravar arquivos.
-        os.makedirs(Config.WORKSPACE_PATH, exist_ok=True)
+    def run(self, specification: str) -> AgentState:
+        # Inicializando a Cloud Sandbox do E2B
+        logger.info("📦 Inicializando E2B Cloud Sandbox...")
+        sandbox = Sandbox.create(api_key=Config.E2B_API_KEY)
+        sandbox_id = sandbox.sandbox_id
 
         initial_state: AgentState = {
             "specification": specification,
-            "function_name": function_name,
             "plan": [],
             "plan_index": 0,
             "current_sub_req": "",
-            "tests_code": "",
-            "implementation_code": "",
-            # Históricos de conversa por agente — começam vazios; o add_messages
-            # acumula os turnos a cada re-entrada de nó.
+            "sandbox_id": sandbox_id, # <-- Passando o ID real da sandbox para o estado
+            "file_system": {},
             "tester_messages": [],
             "developer_messages": [],
             "reviewer_messages": [],
-            # Log de auditoria compartilhado, visível ao orquestrador e no Postgres.
             "audit_log": [],
             "iteration": 0,
             "status": "starting",
@@ -122,27 +115,29 @@ class TDDOrchestrator:
         }
 
         logger.info("\n" + "#" * 80)
-        logger.info("🚀 INICIANDO ORQUESTRADOR TDD (LangGraph + Postgres)")
-        logger.info(f"📂 Função Alvo: {function_name}")
+        logger.info("🚀 INICIANDO ORQUESTRADOR TDD (LangGraph + Postgres + E2B Sandbox)")
+        logger.info(f"☁️  Sandbox ID ativa: {sandbox_id}")
         logger.info(f"🔑 Thread ID : {self.task_key}  (mude para iniciar uma execução limpa)")
         logger.info("#" * 80 + "\n")
 
-        with PostgresSaver.from_conn_string(Config.POSTGRES_URL) as checkpointer:
-            # setup() é idempotente — cria as tabelas de checkpoint se ainda não
-            # existirem. Seguro chamar a cada inicialização.
-            checkpointer.setup()
+        try:
+            with PostgresSaver.from_conn_string(Config.POSTGRES_URL) as checkpointer:
+                checkpointer.setup()
 
-            graph = self._build_main_graph(checkpointer)
+                graph = self._build_main_graph(checkpointer)
 
-            return graph.invoke(
-                initial_state,
-                config={
-                    "recursion_limit": 150,
-                    "configurable": {
-                        # Esta é a chave que delimita TODAS as leituras/gravações
-                        # no Postgres para esta execução. O LangGraph só carregará
-                        # checkpoints gravados sob este mesmo thread_id.
-                        "thread_id": self.task_key
+                result = graph.invoke(
+                    initial_state,
+                    config={
+                        "recursion_limit": 150,
+                        "configurable": {
+                            "thread_id": self.task_key
+                        },
                     },
-                },
-            )
+                )
+                return result
+        finally:
+            # Garantir que a sandbox seja fechada após a execução do pipeline
+            # para não consumir recursos desnecessários na nuvem.
+            logger.info(f"🧹 Encerrando Sandbox {sandbox_id}...")
+            sandbox.kill()

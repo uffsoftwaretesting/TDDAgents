@@ -2,25 +2,15 @@ import logging
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.config import AgentState
-from app.agents.langgraph.runner import run_pytest
+from app.agents.langgraph.runner import run_pytest_in_sandbox
 from app.agents.langgraph.reviewer import analyze_failures
 from app.utils.prompt_loader import load_prompt
+from app.utils.sandbox_utils import read_all_files_from_state
 
 logger = logging.getLogger("TDDOrchestrator")
 
 
 def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentState:
-    """
-    Nó RUNNER RED — confirma que o teste recém-escrito realmente FALHA antes de
-    passar para o Developer (esta é a etapa 'Red' do ciclo Red/Green/Refactor).
-
-    Fluxo de mensagens
-    ──────────────────
-    Se o teste falhar como esperado (red confirmado), chamamos analyze_failures()
-    com state["reviewer_messages"] para que o reviewer acumule contexto ao longo
-    de todo o ciclo TDD para este sub-requisito. Apenas os novos turnos são
-    retornados para que o add_messages possa anexar corretamente.
-    """
     sub_req = state["current_sub_req"]
     iteration = state.get("iteration", 0)
     red_attempts = state.get("red_attempts", 0)
@@ -29,8 +19,9 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
     logger.info(f"🔴 FASE 3: RUNNER RED (Verificação de Falha) | Tentativa {red_attempts + 1}")
     logger.info("-" * 80)
 
-    output = run_pytest()
-    has_failures = "failed" in output.lower() or "error" in output.lower()
+    # 1. Executa os testes na E2B Sandbox ativa
+    output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"])
+    has_failures = not is_success
 
     existing_reviewer_len = len(state.get("reviewer_messages", []))
     audit_entries: list = []
@@ -39,14 +30,16 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
         logger.info("✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.")
         logger.info("   ➡️  Executando análise de confirmação...")
 
+        # Puxa o código atual do file_system para contexto do Reviewer
+        current_codebase = read_all_files_from_state(state.get("file_system", {}))
+
         analysis, updated_reviewer_history = analyze_failures(
             test_output=output,
             specification=state["specification"],
             sub_requirement=sub_req,
             iteration=iteration,
             max_retries=state.get("max_retries", max_retries),
-            current_code=state.get("implementation_code", ""),
-            test_code=state.get("tests_code", ""),
+            current_code=current_codebase, # Código unificado
             conversation_history=state.get("reviewer_messages", []),
         )
 
@@ -59,21 +52,28 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
 
         new_reviewer_turns = updated_reviewer_history[existing_reviewer_len:]
 
+        if "[ERRO NO TESTE]" in analysis:
+            status = "test_review_needed"
+            logger.warning("   ⚠️ O teste falhou de forma inválida (Erro no código do teste). Devolvendo ao Tester.")
+        else:
+            status = "red_confirmed"
+
         audit_entries.append(
-            AIMessage(content=f"[RunnerRed] Red confirmado para '{sub_req}'. Análise do reviewer armazenada.")
+            AIMessage(content=f"[RunnerRed] Red confirmado para '{sub_req}'. Status: {status}.")
         )
 
         return {
             **state,
-            "status": "red_confirmed",
+            "status": status,
             "red_attempts": 0,
             "reviewer_messages": new_reviewer_turns,
             "audit_log": audit_entries,
         }
 
     else:
+        # ── GREEN NO RED: Forçamos a ida ao Developer para garantir o ciclo ───
         logger.warning("⚠️  ALERTA: O teste PASSOU imediatamente (Green no Red).")
-        logger.info("   ℹ️  Avançando — tratando como red_confirmed.")
+        logger.info("   ℹ️  Avançando — enviando para o Developer inspecionar a implementação mesmo assim.")
 
         feedback_text = load_prompt(
             'agents/langgraph/orchestrator/feedback_existing_implementation.jinja2',
@@ -86,10 +86,10 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
             )
         )
 
-        # Sem chamada ao reviewer — apenas avança para que o developer possa refinar
+        # Volta a usar "red_confirmed" para forçar o roteamento ir pro Developer
         return {
             **state,
-            "status": "red_confirmed",
+            "status": "red_confirmed", 
             "red_attempts": 0,
             "audit_log": audit_entries,
         }

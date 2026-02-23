@@ -2,23 +2,14 @@ import logging
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.config import AgentState
-from app.agents.langgraph.runner import run_pytest
+from app.agents.langgraph.runner import run_pytest_in_sandbox
 from app.agents.langgraph.reviewer import analyze_failures
+from app.utils.sandbox_utils import read_all_files_from_state
 
 logger = logging.getLogger("TDDOrchestrator")
 
 
 def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> AgentState:
-    """
-    Nó RUNNER GREEN — valida que todos os testes passam após a tentativa do developer.
-
-    Fluxo de mensagens
-    ──────────────────
-    Em caso de falha, chamamos analyze_failures() com state["reviewer_messages"] para
-    que o LLM do reviewer veja todas as suas análises anteriores como histórico real
-    de conversa. Retornamos apenas os *novos* turnos para que o add_messages anexe
-    em vez de substituir.
-    """
     sub_req = state["current_sub_req"]
     iteration = state.get("iteration", 0)
     max_retries_state = state.get("max_retries", max_retries)
@@ -27,12 +18,11 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
     logger.info(f"🟢 FASE 5: RUNNER GREEN (Validação) | Tentativa {iteration}/{max_retries_state}")
     logger.info("-" * 80)
 
-    output = run_pytest()
-    all_passed = (
-        "passed" in output.lower()
-        and "failed" not in output.lower()
-        and "error" not in output.lower()
-    )
+    # 1. Executa os testes na E2B Sandbox ativa desempacotando a tupla
+    output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"])
+    
+    # No modo GREEN, queremos que is_success seja True
+    all_passed = is_success
 
     if all_passed:
         logger.info("✅ SUCESSO: Todos os testes passaram! 🚀")
@@ -48,6 +38,9 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
     logger.warning("❌ FALHA: Testes não passaram.")
 
     existing_reviewer_len = len(state.get("reviewer_messages", []))
+    
+    # Injeta a base de código atual inteira para o Reviewer
+    current_codebase = read_all_files_from_state(state.get("file_system", {}))
 
     analysis, updated_reviewer_history = analyze_failures(
         test_output=output,
@@ -55,8 +48,7 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
         sub_requirement=sub_req,
         iteration=iteration,
         max_retries=max_retries_state,
-        current_code=state.get("implementation_code", ""),
-        test_code=state.get("tests_code", ""),
+        current_code=current_codebase, # Código unificado
         conversation_history=state.get("reviewer_messages", []),
     )
 
@@ -69,32 +61,29 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
 
     new_reviewer_turns = updated_reviewer_history[existing_reviewer_len:]
 
-    # ── Decisão de roteamento ─────────────────────────────────────────────────
+    # ── Decisão de roteamento baseada na inteligência do Pydantic ─────────────
     extra_audit: list = []
 
-    if iteration in (6, 9):
-        logger.warning(f"   ⚠️  Iteração crítica ({iteration}): solicitando REVISÃO DE TESTES ao Tester.")
+    if "[ERRO NO TESTE]" in analysis:
+        logger.warning(f"   ⚠️  Reviewer identificou falha no teste. Solicitando REVISÃO ao Tester.")
         status = "test_review_needed"
         extra_audit.append(
-            HumanMessage(
-                content=f"[RunnerGreen] Iteração {iteration}: falha persistente — escalando para o Tester revisar os testes."
-            )
+            HumanMessage(content=f"[RunnerGreen] Iteração {iteration}: Reviewer apontou erro no código de teste. Escalando para Tester.")
         )
     elif iteration >= max_retries_state:
         logger.error(f"   ⛔  Limite de tentativas excedido ({max_retries_state}). Abortando.")
         status = "max_retries_exceeded"
     else:
-        logger.info("   🔄  Retornando ao Developer para correção.")
+        logger.info("   🔄  Retornando ao Developer para correção da implementação.")
         status = "green_failed"
 
     audit_entry = AIMessage(
-        content=f"[RunnerGreen] Iteração {iteration}: {status}. Análise do reviewer armazenada em reviewer_messages."
+        content=f"[RunnerGreen] Iteração {iteration}: {status}. Análise armazenada."
     )
 
     return {
         **state,
         "status": status,
-        # Apenas os novos turnos do reviewer — o add_messages mescla com o estado do Postgres
         "reviewer_messages": new_reviewer_turns,
         "audit_log": [audit_entry] + extra_audit,
     }

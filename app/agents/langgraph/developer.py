@@ -1,115 +1,56 @@
-from langchain_openai import ChatOpenAI
+import logging
+from app.utils.chat_model_factory import get_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from app.config import Config
 from app.utils.prompt_loader import load_prompt
+from app.schema.schema import AgentAction
+from app.utils.sandbox_utils import read_all_files_from_state
 
-
-def remove_test_imports(code: str) -> str:
-    lines = code.split('\n')
-    return '\n'.join(
-        line for line in lines
-        if not (
-            line.strip().startswith('import pytest')
-            or line.strip().startswith('from pytest')
-        )
-    )
-
+logger = logging.getLogger("TDDOrchestrator")
 
 def generate_code_incremental(
-    test_code: str,
-    function_name: str,
     specification: str,
+    file_system: dict,
     feedback: str = "",
-    previous_code: str = "",
     conversation_history: list | None = None,
-) -> tuple[str, list]:
+) -> tuple[AgentAction, list]:
     """
-    Gera ou corrige o código de implementação.
-
-    Parâmetros
-    ----------
-    conversation_history:
-        A lista `developer_messages` acumulada do AgentState. Esta é a conversa
-        real do LangChain que cresce a cada chamada — o LLM vê seu próprio
-        raciocínio anterior e o feedback do reviewer como turnos reais de chat,
-        não como strings coladas.
-
-    Retorna
-    -------
-    (clean_code, updated_history)
-        updated_history é a nova lista para armazenar de volta no AgentState,
-        permitindo que o reducer add_messages do LangGraph a persista via
-        checkpointer.
+    Gera a ação estruturada (arquivos, dependências, comandos bash) para implementar o código.
     """
-    llm = ChatOpenAI(model=Config.MODEL, temperature=0.3)
+    llm = get_chat_model(model_name=Config.CHAT_MODEL, model=Config.MODEL)
+    structured_llm = llm.with_structured_output(AgentAction)
 
     history: list = list(conversation_history) if conversation_history else []
+    current_codebase = read_all_files_from_state(file_system)
 
-    # ── Construção do turno Human para esta iteração ──────────────────────────
-    # Na primeira chamada não há histórico, então incluímos o contexto completo
-    # do sistema. Nas chamadas seguintes o LLM já conhece a spec e o conjunto de
-    # testes dos turnos anteriores — enviamos apenas o que mudou.
     if not history:
-        # Primeira chamada: inclui o system prompt + contexto humano completo
+        # Primeira chamada: envia a spec completa (sem feedback)
         system_content = load_prompt(
             template_name='agents/langgraph/developer/sys_prompt_1.jinja2',
-            function_name=function_name,
         )
         human_content = load_prompt(
             template_name='agents/langgraph/developer/hum_prompt_1.jinja2',
-            function_name=function_name,
             specification=specification,
-            context="",          # sem feedback na primeira tentativa
-            test_code=test_code,
+            current_codebase=current_codebase,
+            feedback=""
         )
         history = [
             SystemMessage(content=system_content),
             HumanMessage(content=human_content),
         ]
     else:
-        # Chamadas seguintes: o LLM já tem a spec e o código anterior.
-        # Enviamos apenas o feedback do reviewer e o conjunto de testes atualizado
-        # para manter a janela de contexto enxuta.
-        context_parts = []
-        if feedback:
-            context_parts.append(f"FEEDBACK DO REVIEWER:\n{feedback}")
-        if previous_code:
-            context_parts.append(
-                f"SUA IMPLEMENTAÇÃO ANTERIOR:\n```python\n{previous_code.strip()}\n```"
-            )
-        if test_code:
-            context_parts.append(
-                f"CONJUNTO DE TESTES ATUAL (pode ter sido atualizado pelo Tester):\n"
-                f"```python\n{test_code}\n```"
-            )
-
-        follow_up = "\n\n".join(context_parts) + (
-            "\n\nPor favor, produza uma implementação corrigida que passe em todos os testes."
+        # Próximas chamadas: usa o mesmo template, mas passa o feedback
+        human_content = load_prompt(
+            template_name='agents/langgraph/developer/hum_prompt_1.jinja2',
+            current_codebase=current_codebase,
+            feedback=feedback
         )
-        history.append(HumanMessage(content=follow_up))
+        history.append(HumanMessage(content=human_content))
 
-    # ── Chamada ao LLM com o histórico completo até agora ────────────────────
-    response = llm.invoke(history)
-    raw_code = str(response.content).strip()
+    # Invoca o LLM forçando a saída estruturada do AgentAction
+    action: AgentAction = structured_llm.invoke(history)
 
-    # Registra a resposta do assistente para que a próxima iteração a veja
-    history.append(AIMessage(content=raw_code))
+    # Armazena a resposta formatada como JSON no histórico de conversa (para o LangGraph)
+    history.append(AIMessage(content=action.model_dump_json(indent=2)))
 
-    # ── Pós-processamento ─────────────────────────────────────────────────────
-    clean_code = remove_test_imports(raw_code)
-
-    if not clean_code.strip():
-        raise ValueError("O Developer gerou código vazio")
-
-    if f"def {function_name}" not in clean_code:
-        raise ValueError(
-            f"O código não contém a função '{function_name}'.\n\n"
-            f"RESPOSTA BRUTA:\n{raw_code}\n\nCÓDIGO FINAL:\n{clean_code}"
-        )
-
-    try:
-        compile(clean_code, '<string>', 'exec')
-    except SyntaxError as e:
-        raise ValueError(f"Erro de sintaxe: {e}\n\nCódigo:\n{clean_code}")
-
-    return clean_code, history
+    return action, history
