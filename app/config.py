@@ -6,7 +6,7 @@ from langgraph.graph.message import add_messages
 
 load_dotenv()
 
-if not os.getenv("GEMINI_API_KEY"):
+if not os.getenv("OPENAI_API_KEY"):
     raise Exception("Nenhuma chave de API configurada")
 
 if not os.getenv("E2B_API_KEY"):
@@ -17,14 +17,14 @@ if not os.getenv("POSTGRES_URL"):
 
 
 class Config:
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     E2B_API_KEY = os.getenv("E2B_API_KEY")
     PROMPTS_DIR = os.path.join(os.path.dirname(__file__), './prompts')
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
     
     # Model natively trained for advanced tool calling
-    CHAT_MODEL = "gemini"
-    MODEL = "gemini-3.1"
+    CHAT_MODEL = "openai"
+    MODEL = "o4-mini"
     MAX_ITERATIONS = 12
     WORKSPACE_PATH = "workspace"
     PLAN_KEY = "tdd_plan_queue"
