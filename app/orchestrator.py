@@ -101,7 +101,7 @@ class TDDOrchestrator:
             "plan": [],
             "plan_index": 0,
             "current_sub_req": "",
-            "sandbox_id": sandbox_id, # <-- Passando o ID real da sandbox para o estado
+            "sandbox_id": sandbox_id,
             "file_system": {},
             "tester_messages": [],
             "developer_messages": [],
@@ -139,5 +139,6 @@ class TDDOrchestrator:
         finally:
             # Garantir que a sandbox seja fechada após a execução do pipeline
             # para não consumir recursos desnecessários na nuvem.
-            logger.info(f"🧹 Encerrando Sandbox {sandbox_id}...")
-            sandbox.kill()
+            if 'sandbox' in locals():
+                logger.info(f"🧹 Encerrando Sandbox {sandbox_id}...")
+                sandbox.kill()

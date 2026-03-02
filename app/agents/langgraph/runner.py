@@ -15,7 +15,10 @@ def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".") -> tuple[str, b
         sandbox = Sandbox.connect(sandbox_id, api_key=Config.E2B_API_KEY)
         
         # Garantir que as ferramentas básicas de teste estejam sempre presentes
-        sandbox.commands.run("pip install pytest pytest-mock pytest-asyncio", timeout=60)
+        sandbox.commands.run(
+            "python -c 'import pytest, pytest_mock, pytest_asyncio' || pip install pytest pytest-mock pytest-asyncio", 
+            timeout=60
+        )
         
         # Executar o pytest. 
         # PYTHONPATH=. garante que imports absolutos (como 'from app.crud import...') funcionem perfeitamente.
