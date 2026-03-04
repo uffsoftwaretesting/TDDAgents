@@ -57,7 +57,7 @@ To guarantee reliability, the system executes agent-generated code inside secure
 
 ## How It Works
 
-Built on **LangGraph**, the pipeline operates in two stages: first, it collaborates with the user to consolidate technical specifications, and second, it launches an autonomous team of agents to implement the code via Test-Driven Development.
+Built on **LangGraph**, the pipeline operates in three stages: first, it collaborates with the user to consolidate technical specifications,second, it launches an autonomous team of agents to implement the code via Test-Driven Development, and third, the results are evaluated by a Quality agent.
 
 ---
 
@@ -76,7 +76,23 @@ Before a single line of code is written, the system engages the user in a collab
 
 ### Phase 2 — The TDD Engineering Loop
 
-> Once the spec is approved, the engineering graph takes over and iterates until all sub-requirements are fully implemented and tested.
+Once the technical specification is approved, the orchestration transitions to the Planner Agent, which is responsible for decomposing the documentation into atomic, testable sub-requirements. Each sub-requirement is then executed within a specialized SubGraph that encapsulates the State Machine governing the "Red-Green-Refactor" workflow.
+
+To ensure enterprise-grade reliability, every architectural decision and code change is persisted in a PostgreSQL database via a unique thread_id, allowing the system to recover seamlessly from interruptions without data loss.
+
+The process operates within a strict execution loop:
+
+1. Tester Agent: Receives a sub-requirement and the current workspace to generate or update test files.
+
+2. Red Phase: Executes the tests in an isolated E2B Cloud Sandbox to confirm failure against the current implementation, ensuring the test is valid and not a false positive.
+
+Reviewer Agent: Analyzes execution logs and stack traces to provide technical insights and feedback.
+
+Developer Agent: Utilizes the sub-requirements, Reviewer conclusions, and the workspace to implement the minimum code necessary to satisfy the tests.
+
+Green Phase: Re-executes the test suite in the sandbox to validate the new implementation. If all tests pass, the cycle advances to the next sub-requirement.
+
+If either the Red or Green phase fails to meet the TDD criteria, the Reviewer Agent acts as the primary judge, performing Intelligent Fault Attribution. By analyzing the stack trace and the codebase, it dynamically routes the workflow back to either the Tester (to fix flawed tests or imports) or the Developer (to correct the logic), ensuring every requirement is fully validated.
 
 ```
   ┌─────────────────────────────────────────────────────────────────────┐
@@ -86,7 +102,7 @@ Before a single line of code is written, the system engages the user in a collab
   │                  ↑                                   ↓              │
   │               (next                          Runner(Green)          │
   │            sub-req)                         ╱              ╲        │
-  │                  ↑                    ✅ Pass          ❌ Fail       │
+  │                  ↑                    ✅ Pass          ❌ Fail     │
   │                  │                      ↓                 ↓         │
   │             Quality Gate            Next Task          Reviewer     │
   │           (CodeMetric-AI)                             ╱       ╲     │
