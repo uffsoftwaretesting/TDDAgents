@@ -15,21 +15,20 @@
 
 ## 📋 Table of Contents
 
-- [Overview](#-overview)
-- [How It Works](#-how-it-works)
+- [Overview](#overview)
+- [How It Works](#how-it-works)
   - [Phase 1 — Requirements Gathering](#phase-1--requirements-gathering-the-product-team)
   - [Phase 2 — The TDD Engineering Loop](#phase-2--the-tdd-engineering-loop)
-- [Key Features](#-key-features)
-- [The Agent Team](#-the-agent-team)
-- [Project Structure](#-project-structure)
-- [Getting Started](#-getting-started)
+  - [Phase 3 - Quality assessment](#phase-3--quality-assessement)
+- [Key Features](#key-features)
+- [The Agent Team](#the-agent-team)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
-- [Usage](#-usage)
+- [Usage](#usage)
   - [Execution Flags](#execution-flags)
-- [Output & Deliverables](#-output--deliverables)
-- [License](#-license)
-
+- [Output & Deliverables](#output--deliverables)
 ---
 
 ## Overview
