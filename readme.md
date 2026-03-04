@@ -76,7 +76,7 @@ Before a single line of code is written, the system engages the user in a collab
 
 ### Phase 2 — The TDD Engineering Loop
 
-Once the technical specification is approved, the orchestration transitions to the **Planner Agent**, which is responsible for decomposing the documentation into atomic, testable sub-requirements. Each sub-requirement is then executed within a specialized SubGraph that encapsulates the State Machine governing the "Red-Green-Refactor" workflow.
+Once the technical specification is approved, the orchestration transitions to the **Planner Agent**, which is responsible for decomposing the documentation into atomic, testable sub-requirements. Each sub-requirement is then executed within a specialized **SubGraph** that encapsulates the State Machine governing the "Red-Green-Refactor" workflow.
 
 To ensure enterprise-grade reliability, every architectural decision and code change is persisted in a **PostgreSQL** database via a unique **thread_id**, allowing the system to recover seamlessly from interruptions without data loss.
 
@@ -96,34 +96,9 @@ If either the Red or Green phase fails to meet the TDD criteria, the **Reviewer 
 
 The **Runner Agent** is responsible for orchestrating the execution of agent-generated code within an isolated E2B Cloud Sandbox. It serves as the bridge between the LLM's logic and a real Linux environment, executing the specific commands and functions required to validate both the Red Phase (confirming a failing test) and the Green Phase (verifying the implementation). By managing the sandbox lifecycle, the Runner ensures that every test is performed in a deterministic, secure, and clean environment, returning the exact **stdout** and **stderr** logs needed for the **Reviewer** to perform fault attribution.
 
-```
-  ┌─────────────────────────────────────────────────────────────────────┐
-  │                      TDD ENGINEERING LOOP                           │
-  │                                                                     │
-  │   Tech Spec → Planner → Tester → Runner(Red) → Developer           │
-  │                  ↑                                   ↓              │
-  │               (next                          Runner(Green)          │
-  │            sub-req)                         ╱              ╲        │
-  │                  ↑                    ✅ Pass          ❌ Fail     │
-  │                  │                      ↓                 ↓         │
-  │             Quality Gate            Next Task          Reviewer     │
-  │           (CodeMetric-AI)                             ╱       ╲     │
-  │                                              Bad Code?   Bad Test?  │
-  │                                                  ↓           ↓      │
-  │                                             Developer     Tester    │
-  └─────────────────────────────────────────────────────────────────────┘
-```
+![TDD Engeneering Workflow](assets/TDD_ENGENEERING_WORKFLOW.png)
 
-| Step | Agent | Action |
-|------|-------|--------|
-| **1** | **Planner (Architect)** | Decomposes the tech spec into a sequential "TDD Plan" of atomic vertical slices — one testable sub-requirement at a time. |
-| **2** | **Tester (QA)** | Writes a complete `pytest` file targeting the current sub-requirement. The test is written *before* any implementation exists. |
-| **3** | **Runner — Red** | Executes the test inside the E2B Sandbox. The test **must fail** at this stage. A passing test here indicates a flawed test and triggers a retry. |
-| **4** | **Developer** | Writes the minimum implementation code necessary to make the failing test pass. No gold-plating; just enough to go green. |
-| **5** | **Runner — Green** | Executes the test suite again against the new implementation. |
-| **✅ Pass** | — | Marks the sub-requirement complete. Advances to the next item in the TDD Plan. |
-| **❌ Fail** | **Reviewer** | Reads the full `stderr` stack trace and determines fault: *Bad Code* (routes back to Developer) or *Bad Test* (routes back to Tester). |
-| **6** | **CodeMetric-AI** | After all sub-requirements pass, a final static analysis agent evaluates the complete codebase for quality, complexity, and adherence to SOLID principles. |
+### Phase 3 — Quality assessement
 
 ---
 
@@ -283,7 +258,6 @@ python -m venv venv
 
 # Activate it
 source venv/bin/activate       # macOS / Linux
-# venv\Scripts\activate        # Windows
 
 # Install dependencies
 pip install -r requirements.txt
