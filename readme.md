@@ -76,25 +76,25 @@ Before a single line of code is written, the system engages the user in a collab
 
 ### Phase 2 — The TDD Engineering Loop
 
-Once the technical specification is approved, the orchestration transitions to the Planner Agent, which is responsible for decomposing the documentation into atomic, testable sub-requirements. Each sub-requirement is then executed within a specialized SubGraph that encapsulates the State Machine governing the "Red-Green-Refactor" workflow.
+Once the technical specification is approved, the orchestration transitions to the **Planner Agent**, which is responsible for decomposing the documentation into atomic, testable sub-requirements. Each sub-requirement is then executed within a specialized SubGraph that encapsulates the State Machine governing the "Red-Green-Refactor" workflow.
 
-To ensure enterprise-grade reliability, every architectural decision and code change is persisted in a PostgreSQL database via a unique thread_id, allowing the system to recover seamlessly from interruptions without data loss.
+To ensure enterprise-grade reliability, every architectural decision and code change is persisted in a **PostgreSQL** database via a unique **thread_id**, allowing the system to recover seamlessly from interruptions without data loss.
 
 The process operates within a strict execution loop:
 
-1. Tester Agent: Receives a sub-requirement and the current workspace to generate or update test files.
+1. **Tester Agent**: Receives a sub-requirement and the current workspace to generate or update test files.
 
-2. Red Phase: Executes the tests in an isolated E2B Cloud Sandbox to confirm failure against the current implementation, ensuring the test is valid and not a false positive.
+2. **Red Phase**: Executes the tests in an isolated E2B Cloud Sandbox to confirm failure against the current implementation, ensuring the test is valid and not a false positive.
 
-3. Reviewer Agent: Analyzes execution logs and stack traces to provide technical insights and feedback.
+3. **Reviewer Agent**: Analyzes execution logs and stack traces to provide technical insights and feedback.
 
-4. Developer Agent: Utilizes the sub-requirements, Reviewer conclusions, and the workspace to implement the minimum code necessary to satisfy the tests.
+4. **Developer Agent**: Utilizes the sub-requirements, Reviewer conclusions, and the workspace to implement the minimum code necessary to satisfy the tests.
 
-5. Green Phase: Re-executes the test suite in the sandbox to validate the new implementation. If all tests pass, the cycle advances to the next sub-requirement.
+5. **Green Phase**: Re-executes the test suite in the sandbox to validate the new implementation. If all tests pass, the cycle advances to the next sub-requirement.
 
-If either the Red or Green phase fails to meet the TDD criteria, the Reviewer Agent acts as the primary judge, performing Intelligent Fault Attribution. By analyzing the stack trace and the codebase, it dynamically routes the workflow back to either the Tester (to fix flawed tests or imports) or the Developer (to correct the logic), ensuring every requirement is fully validated.
+If either the Red or Green phase fails to meet the TDD criteria, the **Reviewer Agent** acts as the primary judge, performing **Intelligent Fault Attribution**. By analyzing the stack trace and the codebase, it dynamically routes the workflow back to either the Tester (to fix flawed tests or imports) or the Developer (to correct the logic), ensuring every requirement is fully validated.
 
-As mentioned before, the Red and Green exectution phase is executed 
+The **Runner Agent** is responsible for orchestrating the execution of agent-generated code within an isolated E2B Cloud Sandbox. It serves as the bridge between the LLM's logic and a real Linux environment, executing the specific commands and functions required to validate both the Red Phase (confirming a failing test) and the Green Phase (verifying the implementation). By managing the sandbox lifecycle, the Runner ensures that every test is performed in a deterministic, secure, and clean environment, returning the exact **stdout** and **stderr** logs needed for the **Reviewer** to perform fault attribution.
 
 ```
   ┌─────────────────────────────────────────────────────────────────────┐
