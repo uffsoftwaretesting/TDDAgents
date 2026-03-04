@@ -118,11 +118,11 @@ Upon completion, the workspace_output folder receives a final structured report 
 
 | Feature | Description |
 |---------|-------------|
-| 🛡️ **Real Execution Environment** | Code is never "hallucinated." Every test runs inside a real, isolated E2B Linux container. Dependencies are installed via `pip`. Results are deterministic. |
+| 🛡️ **Real Execution Environment** | Every test runs inside a real, isolated E2B Linux container. Dependencies are installed via `pip`. Results are deterministic. |
 | 🧠 **Intelligent Fault Attribution** | The Reviewer agent distinguishes between *bad implementation* and *bad tests* by analyzing the full traceback — routing the fix to the correct agent automatically. |
 | 💾 **State Persistence & Resumability** | PostgreSQL checkpoints the full LangGraph state after every node. Stop execution at any time and resume exactly where you left off using a Thread ID. |
 | 🔄 **Self-Healing Retry Loop** | When tests fail, agents read the error output, reason about the root cause, apply a targeted fix, and re-execute — iterating until resolution or escalation. |
-| 📊 **Automated Quality Reports** | Upon completion, `CodeMetric-AI` generates a final audit log with Cyclomatic Complexity scores, SOLID principle adherence, and architectural notes. |
+| 📊 **Automated Quality Reports** | Upon completion, `quality.py` generates a final audit log with Cyclomatic Complexity scores, SOLID principle adherence, and architectural notes. |
 | 🗂️ **Structured Output Delivery** | All generated source code and test suites are extracted from the Sandbox and saved locally to `./workspace_output/` for immediate use. |
 
 ---
