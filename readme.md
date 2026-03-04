@@ -86,13 +86,15 @@ The process operates within a strict execution loop:
 
 2. Red Phase: Executes the tests in an isolated E2B Cloud Sandbox to confirm failure against the current implementation, ensuring the test is valid and not a false positive.
 
-Reviewer Agent: Analyzes execution logs and stack traces to provide technical insights and feedback.
+3. Reviewer Agent: Analyzes execution logs and stack traces to provide technical insights and feedback.
 
-Developer Agent: Utilizes the sub-requirements, Reviewer conclusions, and the workspace to implement the minimum code necessary to satisfy the tests.
+4. Developer Agent: Utilizes the sub-requirements, Reviewer conclusions, and the workspace to implement the minimum code necessary to satisfy the tests.
 
-Green Phase: Re-executes the test suite in the sandbox to validate the new implementation. If all tests pass, the cycle advances to the next sub-requirement.
+5. Green Phase: Re-executes the test suite in the sandbox to validate the new implementation. If all tests pass, the cycle advances to the next sub-requirement.
 
 If either the Red or Green phase fails to meet the TDD criteria, the Reviewer Agent acts as the primary judge, performing Intelligent Fault Attribution. By analyzing the stack trace and the codebase, it dynamically routes the workflow back to either the Tester (to fix flawed tests or imports) or the Developer (to correct the logic), ensuring every requirement is fully validated.
+
+As mentioned before, the Red and Green exectution phase is executed 
 
 ```
   ┌─────────────────────────────────────────────────────────────────────┐
