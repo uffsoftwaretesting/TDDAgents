@@ -172,7 +172,7 @@ TDDAgents-SandBoxv2.0/
 │   │       ├── developer.py            # Developer: code implementation from failing tests
 │   │       ├── engineer.py             # Engineer: Technical Specification generation
 │   │       ├── planner.py              # Planner/Architect: TDD plan decomposition
-│   │       ├── quality.py              # CodeMetric-AI: final static analysis & scoring
+│   │       ├── quality.py              # Quality: final static analysis & scoring
 │   │       ├── reviewer.py             # Reviewer/Judge: traceback analysis & fault routing
 │   │       ├── runner.py               # Runner: E2B Sandbox test execution (Red & Green)
 │   │       └── tester.py               # Tester/QA: pytest file generation
@@ -191,8 +191,6 @@ TDDAgents-SandBoxv2.0/
 │   └── requirements_orchestrator.py   # Requirements-phase graph construction
 │
 ├── workspace_output/                   # ← Generated code is saved here after execution
-│   ├── src/                            #   Implementation files extracted from Sandbox
-│   └── tests/                          #   Full pytest suite from the Tester agent
 │
 ├── docker-compose.yaml                 # PostgreSQL service configuration
 ├── requirements.txt                    # Python package dependencies
