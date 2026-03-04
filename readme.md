@@ -57,7 +57,7 @@ To guarantee reliability, the system executes agent-generated code inside secure
 
 ## How It Works
 
-Built on **LangGraph**, the pipeline operates in three stages: first, it collaborates with the user to consolidate technical specifications,second, it launches an autonomous team of agents to implement the code via Test-Driven Development, and third, the results are evaluated by a Quality agent.
+Built on **LangGraph**, the pipeline operates in three stages: first, it collaborates with the user to consolidate technical specifications, second, it launches an autonomous team of agents to implement the code via Test-Driven Development, and third, the results are evaluated by a Quality agent.
 
 ---
 
