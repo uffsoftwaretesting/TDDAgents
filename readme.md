@@ -34,9 +34,9 @@
 
 ## Overview
 
-**Test-Driven-Developement Agents** is an experimental multi-phase software engineering *pipeline* prototype orchestrated entirely by AI agents.
+**Test-Driven Development Agents** is an experimental, multi-phase software engineering pipeline prototype orchestrated entirely by AI agents, designed to autonomously analyze requirements, generate tests, implement code, and iteratively refine solutions.
 
-The core differentiator is the **Test-Driven-Development (TDD) Enforcement Cycle** and a linux-sandbox cloud-based coding and testing execution.
+The core differentiator lies in its **Test-Driven Development (TDD) enforcement cycle**, combined with a **cloud-based Linux sandbox** that securely executes code generation, testing, and validation in an isolated environment.
 
 Our pipeline follows the guidelines proposed by the standard TDD workflow:
 
@@ -51,7 +51,7 @@ Our pipeline follows the guidelines proposed by the standard TDD workflow:
                     statisfy the test    and requests refactoring                        
 ```
 
-To guarantee reliability, the system executes agent-generated code inside secure **E2B sandbox environments** using the E2B Code Interpreter runtime, ensuring. This ensures safe execution in the cloud and keeps dependencies and the file system isolated from the host. The workflow is managed by a **LangGraph** state machine backed by PostgreSQL, allowing the pipeline to handle interruptions, persist agent memory, and resume execution seamlessly without data loss.ce.
+To guarantee reliability, the system executes agent-generated code inside secure **E2B sandbox environments** using the E2B Code Interpreter runtime. This ensures safe execution in the cloud and keeps dependencies and the file system isolated from the host. The workflow is managed by a **LangGraph** state machine backed by PostgreSQL, allowing the pipeline to handle interruptions, persist agent memory, and resume execution seamlessly without data loss.
 
 ---
 
@@ -63,14 +63,14 @@ Built on **LangGraph**, the pipeline operates in two stages: first, it collabora
 
 ### Phase 1 — Requirements Gathering
 
-> Before a single line of code is written, the system engages the user in a collaborative validation loop. An AI Analyst actively refines the scope by asking clarifying questions and incorporating feedback or warnings, strictly awaiting the user's explicit approval on the final checklist. Once confirmed, these requirements are handed to an Engineer Agent, who authors the formal Technical Specification that serves as the blueprint for the subsequent autonomous TDD stage.
+Before a single line of code is written, the system engages the user in a collaborative validation loop. An AI Analyst actively refines the scope by asking clarifying questions and incorporating feedback or warnings, strictly awaiting the user's explicit approval on the final checklist. Once confirmed, these requirements are handed to an Engineer Agent, who authors the formal Technical Specification that serves as the blueprint for the subsequent autonomous TDD stage.
 
 ![Requirements Gathering Workflow](assets/Req_Gathering.png)
 
 | Step | Agent | Action |
 |------|-------|--------|
 | **1** | **Requirements Analyst** | Interviews the user to surface ambiguities. Produces a validated checklist of functional and non-functional requirements. |
-| **2** | **Requirements Engineer** | Converts the checklist into a formal, structured **Technical Specification** (Markdown), ready for the engineering team. |
+| **2** | **Requirements Engineer** | Converts the checklist into a formal, structured **Technical Specification** (Markdown). |
 
 ---
 
