@@ -1,45 +1,55 @@
-import os
 import logging
-from app.config import AgentState, Config
+from langchain_core.messages import AIMessage
+from app.config import AgentState
 from app.agents.langgraph.developer import generate_code_incremental
+from app.utils.sandbox_utils import apply_agent_action_to_sandbox
 
+logger = logging.getLogger("TDDOrchestrator")
 
 def node_execute_developer(state: AgentState) -> AgentState:
-    """Nó do grafo que implementa código para passar nos testes."""
     sub_req = state["current_sub_req"]
     iteration = state.get("iteration", 0) + 1
-    plan_idx = state.get("plan_index", 0)
-    total = len(state.get("plan", []))
-    function_name = state.get("function_name", "process")
-    
-    logging.info("=" * 70)
-    logging.info(f"💻 FASE 4: DEVELOPER - [{plan_idx + 1}/{total}] Iteração {iteration}")
-    logging.info(f"🎯 Implementando: '{sub_req}'")
-    logging.info(f"🎯 Função: {function_name}")
-    logging.info(f"📦 Código anterior: {len(state.get('implementation_code', '').split('\\n'))} linhas")
-    logging.info("=" * 70)
-    
-    tests_code = state["tests_code"]
-    feedback = state["feedback"]
-    previous_code = state.get("implementation_code", "")
-    
-    new_code = generate_code_incremental(
-        test_code=tests_code,
-        function_name=function_name,
-        feedback=feedback,
-        previous_code=previous_code
-    )
-    
-    impl_path = os.path.join(Config.WORKSPACE_PATH, f"{Config.IMPLEMENTATION_MODULE}.py")
-    with open(impl_path, "w", encoding="utf-8") as f:
-        f.write(new_code)
-    
-    new_state: AgentState = {
+    max_retries = state.get("max_retries", 10)
+
+    logger.info("\n" + "=" * 80)
+    logger.info(f"💻 FASE 4: DEVELOPER (IMPLEMENTAÇÃO) | Iteração {iteration}/{max_retries}")
+    logger.info("=" * 80)
+    logger.info(f"🎯 Objetivo: Implementar '{sub_req}'")
+
+    reviewer_msgs = state.get("reviewer_messages", [])
+    feedback = reviewer_msgs[-1].content if reviewer_msgs and hasattr(reviewer_msgs[-1], "content") else ""
+
+    try:
+        # Developer gera sua ação de código estruturada
+        action, updated_dev_history = generate_code_incremental(
+            specification=state.get("specification", ""),
+            file_system=state.get("file_system", {}),
+            feedback=feedback,
+            conversation_history=state.get("developer_messages", []),
+        )
+        
+        logger.info(f"💭 Raciocínio do Developer: {action.thoughts}")
+
+        # Aplica a implementação e setup na Sandbox E2B
+        updated_fs, logs = apply_agent_action_to_sandbox(
+            sandbox_id=state["sandbox_id"],
+            action=action,
+            current_file_system=state.get("file_system", {})
+        )
+        
+    except Exception as exc:
+        logger.error(f"❌ Falha crítica no Developer: {exc}")
+        return {**state, "status": "developer_failed", "iteration": iteration}
+
+    audit_entry = AIMessage(content=f"[Developer] Tentativa #{iteration}: código escrito para '{sub_req}'.")
+    existing_len = len(state.get("developer_messages", []))
+    new_turns = updated_dev_history[existing_len:]
+
+    return {
         **state,
-        "implementation_code": new_code,
+        "file_system": updated_fs, # Novo código mapeado no estado
         "iteration": iteration,
-        "feedback": "",
-        "status": "code_written"
+        "status": "code_written",
+        "developer_messages": new_turns,
+        "audit_log": [audit_entry],
     }
-    
-    return new_state

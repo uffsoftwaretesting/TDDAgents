@@ -1,27 +1,42 @@
-import subprocess
+import logging
+from e2b_code_interpreter import Sandbox
 from app.config import Config
 
-def run_pytest() -> str:
-    """Executa pytest no arquivo de testes."""
-    test_file = Config.TEST_FILE
+logger = logging.getLogger("TDDOrchestrator")
+
+def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".") -> tuple[str, bool]:
+    """
+    Conecta à Sandbox E2B ativa e executa o pytest com variáveis de ambiente preparadas para frameworks.
+    Como a sandbox é persistente, os arquivos gravados pelo Developer/Tester já estão presentes no container.
+    """
+    logger.info(f"🏃 RUNNER: Executando testes na Sandbox {sandbox_id[:8]}...")
     
     try:
-        result = subprocess.run(
-            ["pytest", f"{Config.WORKSPACE_PATH}/{test_file}", "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-            timeout=30
+        sandbox = Sandbox.connect(sandbox_id, api_key=Config.E2B_API_KEY)
+        
+        # Garantir que as ferramentas básicas de teste estejam sempre presentes
+        sandbox.commands.run(
+            "python -c 'import pytest, pytest_mock, pytest_asyncio' || pip install pytest pytest-mock pytest-asyncio", 
+            timeout=60
         )
         
-        # Combina stdout e stderr para análise completa
-        output = result.stdout
-        if result.stderr:
-            output += f"\n\nERROS:\n{result.stderr}"
+        # Executar o pytest. 
+        # PYTHONPATH=. garante que imports absolutos (como 'from app.crud import...') funcionem perfeitamente.
+        execution = sandbox.commands.run(
+            f"PYTHONPATH=. python -m pytest {test_path} -v --tb=short --no-header -p no:warnings",
+            timeout=60
+        )
         
-        return output.strip()
-    except subprocess.TimeoutExpired:
-        return "❌ Erro: execução de testes expirou (timeout de 30s)."
-    except FileNotFoundError:
-        return "❌ Erro: pytest não está instalado. Execute: pip install pytest"
+        output = execution.stdout
+        if execution.stderr:
+            output += f"\n\nSTDERR:\n{execution.stderr}"
+            
+        output_str = output.strip() if output.strip() else "ERRO: Nenhum output retornado pelo pytest."
+
+        is_success = (execution.exit_code == 0)
+
+        return output_str, is_success
+        
     except Exception as e:
-        return f"❌ Erro ao executar testes: {str(e)}"
+        logger.error(f"❌ Erro ao executar pytest na sandbox: {e}")
+        return f"ERRO FATAL DE EXECUÇÃO: {e}", False

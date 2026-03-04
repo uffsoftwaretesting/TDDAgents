@@ -1,8 +1,12 @@
-Solicitação do usuário: {{ user_input }}
+📝 SOLICITAÇÃO ATUAL DO USUÁRIO:
+{{ user_input }}
 
 {% if conversation_history %}
-Histórico da conversa:
+📚 HISTÓRICO DA CONVERSA:
 {{ conversation_history }}
 {% endif %}
 
-Analise esta solicitação e determine se precisa de mais esclarecimentos ou se já tem informações suficientes para criar um checklist de requisitos.
+🎯 TAREFA:
+Analise a solicitação atual juntamente com o histórico.
+Determine se você precisa de mais esclarecimentos (fazendo perguntas direcionadas) ou se já possui informações suficientes para criar o checklist de requisitos final.
+Gere a sua resposta utilizando ESTRITAMENTE a estrutura JSON/Action exigida pelo sistema.

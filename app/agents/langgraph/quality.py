@@ -1,6 +1,7 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.config import Config
+from app.utils.chat_model_factory import get_chat_model
 
 # Se você estiver usando jinja, crie os templates. 
 # Aqui farei direto para facilitar a visualização.
@@ -94,7 +95,7 @@ def evaluate_code_quality(implementation_code: str, specification: str) -> str:
     if not implementation_code:
         return "Nenhum código foi gerado para avaliação."
 
-    llm = ChatOpenAI(model=Config.MODEL, temperature=0.1)
+    llm = get_chat_model(model_name=Config.CHAT_MODEL, model=Config.MODEL)
 
     human_msg = f"""
     --- ESPECIFICAÇÃO ORIGINAL ---

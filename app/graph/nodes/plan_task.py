@@ -1,31 +1,52 @@
 import logging
+from langchain_core.messages import AIMessage
+
 from app.config import AgentState
 from app.agents.langgraph.planner import generate_plan
 
+logger = logging.getLogger("TDDOrchestrator")
+
 
 def node_plan_task(state: AgentState) -> AgentState:
-    """Nó do grafo que gera o plano de sub-requisitos TDD."""
-    logging.info("=" * 70)
-    logging.info("🧠 FASE 1: PLANNER - Gerando plano de sub-requisitos TDD")
-    logging.info("=" * 70)
-    
+    logger.info("\n" + "=" * 80)
+    logger.info("📋 FASE 1: PLANEJAMENTO (PLANNER)")
+    logger.info("=" * 80)
+    logger.info(f"📌 Especificação: {state['specification'][:100]}...")
+
     plan = generate_plan(state["specification"])
-    
+
     if not plan:
-        logging.error("❌ Planner falhou ao gerar o plano.")
-        return {**state, "status": "plan_failed", "plan": []}
-    
-    logging.info(f"✅ Plano TDD gerado com {len(plan)} sub-requisitos:")
-    for idx, step in enumerate(plan, 1):
-        logging.info(f"  {idx}. {step}")
-    
-    new_state: AgentState = {
+        logger.error("❌ ERRO: O Planner falhou ao gerar o plano de tarefas.")
+        return {
+            **state,
+            "status": "plan_failed",
+            "plan": [],
+            "audit_log": [AIMessage(content="[Planner] Falha ao gerar o plano de tarefas.")],
+        }
+
+    logger.info("-" * 80)
+    logger.info(f"✅ PLANO GERADO COM {len(plan)} SUB-REQUISITOS:")
+    for i, item in enumerate(plan, 1):
+        logger.info(f"   {i}. {item}")
+    logger.info("-" * 80)
+
+    plan_summary = "\n".join(f"{i+1}. {item}" for i, item in enumerate(plan))
+    audit_entry = AIMessage(
+        content=f"[Planner] Plano gerado com {len(plan)} sub-requisitos:\n{plan_summary}"
+    )
+
+    return {
         **state,
         "plan": plan,
         "plan_index": 0,
         "current_sub_req": plan[0],
         "iteration": 0,
-        "status": "planning_complete"
+        "red_attempts": 0,
+        "status": "planning_complete",
+        # Os históricos dos agentes começam vazios — nenhuma memória deve ser
+        # carregada para o primeiro sub-requisito. Já são [] no initial_state.
+        "tester_messages": [],
+        "developer_messages": [],
+        "reviewer_messages": [],
+        "audit_log": [audit_entry],
     }
-    
-    return new_state

@@ -1,25 +1,30 @@
-Atue como um Especialista em TDD e Automação de Testes com Pytest.
+{% if not feedback %}
+🎯 SUB-REQUISITO ATUAL:
+{{ sub_requirement }}
 
-Sua tarefa é expandir a cobertura de testes da função `{{ function_name }}` de forma incremental. Você deve adicionar APENAS UM novo teste que valide o `{{ sub_requirement }}`, mantendo a integridade absoluta de todos os testes anteriores.
-
-DIRETRIZES TÉCNICAS E RESTRIÇÕES:
-1. Preservação Total: É estritamente proibido remover ou alterar a lógica dos testes existentes fornecidos no contexto. Apenas adicione ao final.
-2. Consistência Lógica: O novo teste NÃO pode contradizer as expectativas dos testes anteriores. Se houver ambiguidade, favoreça a especificação do novo sub-requisito.
-3. Importação: Certifique-se de que o script comece com `from {{ module_name|default('app_code') }} import {{ function_name }}`.
-4. Isolamento: O novo teste deve focar exclusivamente no sub-requisito atual.
-
-EXEMPLO DE COMPORTAMENTO ESPERADO:
-* Input: Testes existentes A e B + Novo Requisito C.
-* Output: Código contendo Testes A, B e o novo Teste C (comentado).
-
-DADOS DE ENTRADA:
-Função Alvo: {{ function_name }}
-Novo Sub-requisito: {{ sub_requirement }}
-
-Código de Testes Existente:
+📋 ESPECIFICAÇÃO TÉCNICA (CONTEXTO GERAL):
 """
-{% if context %}{{ context }}{% endif %}
+{{ specification }}
 """
 
-SAÍDA ESPERADA:
-Retorne apenas o bloco de código Python completo e executável (imports + testes antigos + novo teste).
+💻 CÓDIGO ATUAL NO WORKSPACE:
+{{ current_codebase }}
+
+TAREFA:
+Expanda a cobertura de testes para cobrir estritamente o "Sub-requisito Atual".
+Analise o código atual do workspace para saber como fazer o import correto e em qual arquivo adicionar o teste.
+Gere sua resposta usando a estrutura JSON/Action exigida.
+
+{% else %}
+⚠️ ALERTA DE FLUXO OU FALHA DE EXECUÇÃO:
+
+📝 FEEDBACK DA TENTATIVA ANTERIOR:
+{{ feedback }}
+
+💻 CÓDIGO ATUAL ATUALIZADO:
+{{ current_codebase }}
+
+TAREFA DE CORREÇÃO:
+Seus testes falharam em ser gerados corretamente ou o Developer precisou solicitar uma modificação. 
+Com base no feedback, revise a sua atuação. Gere a sua resposta usando a estrutura JSON/Action exigida e retorne o arquivo completo.
+{% endif %}
