@@ -204,7 +204,7 @@ Ensure the following are installed and available on your system before proceedin
 | Requirement | Version | Purpose |
 |-------------|---------|---------|
 | **Python** | 3.10+ | Runtime |
-| **Docker** | Latest | Hosts PostgreSQL & Redis locally |
+| **Docker** | Latest | Hosts PostgreSQL locally |
 | **OpenAI API Key** | — | LLM backbone (or swap for Anthropic / DeepSeek) |
 | **E2B API Key** | — | Cloud Sandbox execution environment |
 
