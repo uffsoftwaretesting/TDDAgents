@@ -2,10 +2,10 @@ from pydantic import BaseModel, Field
 
 class FileToWrite(BaseModel):
     filepath: str = Field(
-        description="O caminho relativo para o arquivo, ex: 'app/main.py', 'app/models/models.py' ou 'tests/unit_tests/test_api.py'. Diretórios são criados automaticamente."
+        description="O caminho relativo para o arquivo, ex: 'app/main.py', 'app/models/models.py' ou 'pytest.ini'. Diretórios são criados automaticamente."
     )
     content: str = Field(
-        description="O código COMPLETO e totalmente atualizado para este arquivo. NUNCA use reticências (...) ou placeholders. Você deve gerar o arquivo inteiro."
+        description="O código COMPLETO e atualizado. NUNCA use reticências (...). CRÍTICO: Não envolva o conteúdo em blocos de markdown (```). Retorne apenas o texto puro do arquivo."
     )
 
 class AgentAction(BaseModel):

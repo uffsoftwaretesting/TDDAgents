@@ -14,9 +14,10 @@ def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".") -> tuple[str, b
     try:
         sandbox = Sandbox.connect(sandbox_id, api_key=Config.E2B_API_KEY)
         
-        # Garantir que as ferramentas básicas de teste estejam sempre presentes
+        # Garantir APENAS a ferramenta básica de teste.
+        # Os agentes devem pedir explicitamente (via 'dependencies') se precisarem de pytest-asyncio ou pytest-mock.
         sandbox.commands.run(
-            "python -c 'import pytest, pytest_mock, pytest_asyncio' || pip install pytest pytest-mock pytest-asyncio", 
+            "python -c 'import pytest' || pip install pytest", 
             timeout=60
         )
         
