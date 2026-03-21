@@ -2,6 +2,9 @@ import logging
 from e2b_code_interpreter import Sandbox
 from app.config import Config
 
+## PROBLEMA GRAVE: INSTALA ASYNCIO COM STRING HARDCODED, SEM DELEGAR ISTO PARA OS AGENTES.
+
+
 logger = logging.getLogger("TDDOrchestrator")
 
 def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".") -> tuple[str, bool]:
