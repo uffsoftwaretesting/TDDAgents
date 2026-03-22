@@ -69,15 +69,15 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Type
 
-from e2b_code_interpreter import (
-    AuthenticationException,
+from e2b import (
+    Sandbox,
+    SandboxException,
+    TimeoutException,
     InvalidArgumentException,
     NotEnoughSpaceException,
     NotFoundException,
-    Sandbox,
-    SandboxException,
+    AuthenticationException,
     TemplateException,
-    TimeoutException,
 )
 
 from e2b.exceptions import RateLimitException
@@ -558,9 +558,3 @@ def run_pytest_in_sandbox(
         )
 
         return _build_output(error), False
-
-    finally:
-        # 4. Liberar o httpx.Client local sem matar a VM remota.
-        #    Executado sempre — tanto no sucesso quanto no erro.
-        if sandbox is not None:
-            _close_sandbox_client(sandbox)
