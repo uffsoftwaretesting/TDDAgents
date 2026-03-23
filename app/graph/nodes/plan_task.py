@@ -40,10 +40,9 @@ def node_plan_task(state: AgentState) -> AgentState:
         "plan": plan,
         "plan_index": 0,
         "current_sub_req": plan[0],
-        "iteration": 0,
-        "red_attempts": 0,
+        "iteration": 1,
         "status": "planning_complete",
-        # Os históricos dos agentes começam vazios — nenhuma memória deve ser
+        # Os históricos dos agentes começam vazios, nenhuma memória deve ser
         # carregada para o primeiro sub-requisito. Já são [] no initial_state.
         "tester_messages": [],
         "developer_messages": [],

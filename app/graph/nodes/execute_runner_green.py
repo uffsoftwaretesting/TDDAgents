@@ -1,7 +1,7 @@
 import logging
 from langchain_core.messages import HumanMessage, AIMessage
 
-from app.config import AgentState
+from app.config import AgentState, Config
 from app.agents.langgraph.runner import run_pytest_in_sandbox
 from app.agents.langgraph.reviewer import analyze_failures
 from app.utils.sandbox_utils import read_all_files_from_state
@@ -9,13 +9,13 @@ from app.utils.sandbox_utils import read_all_files_from_state
 logger = logging.getLogger("TDDOrchestrator")
 
 
-def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> AgentState:
+def node_execute_runner_green(state: AgentState) -> AgentState:
     sub_req = state["current_sub_req"]
-    iteration = state.get("iteration", 0)
-    max_retries_state = state.get("max_retries", max_retries)
+    iteration = state.get("iteration", 1)
+    max_retries_state = state.get("max_retries", Config.MAX_ITERATIONS)
 
     logger.info("\n" + "-" * 80)
-    logger.info(f"🟢 FASE 5: RUNNER GREEN (Validação) | Tentativa {iteration}/{max_retries_state}")
+    logger.info(f"🟢 FASE 5: RUNNER GREEN (Validação) | Iteração {iteration}/{max_retries_state}")
     logger.info("-" * 80)
 
     # 1. Executa os testes na E2B Sandbox ativa desempacotando a tupla
@@ -30,7 +30,7 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
         return {
             **state,
             "status": "green_passed",
-            "iteration": 0,
+            "iteration": iteration,
             "audit_log": [audit],
         }
 
@@ -48,7 +48,7 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
         sub_requirement=sub_req,
         iteration=iteration,
         max_retries=max_retries_state,
-        current_code=current_codebase, # Código unificado
+        current_code=current_codebase,
         conversation_history=state.get("reviewer_messages", []),
     )
 
@@ -60,22 +60,26 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
     logger.info("=" * 80 + "\n")
 
     new_reviewer_turns = updated_reviewer_history[existing_reviewer_len:]
-
-    # ── Decisão de roteamento baseada na inteligência do Pydantic ─────────────
     extra_audit: list = []
 
+    # ── Decisão de Roteamento e Lógica de Incremento ──
     if "[ERRO NO TESTE]" in analysis:
         logger.warning(f"   ⚠️  Reviewer identificou falha no teste. Solicitando REVISÃO ao Tester.")
         status = "test_review_needed"
         extra_audit.append(
             HumanMessage(content=f"[RunnerGreen] Iteração {iteration}: Reviewer apontou erro no código de teste. Escalando para Tester.")
         )
+        next_iteration = iteration + 1  # Incrementa porque volta pro Tester
+        
     elif iteration >= max_retries_state:
         logger.error(f"   ⛔  Limite de tentativas excedido ({max_retries_state}). Abortando.")
         status = "max_retries_exceeded"
+        next_iteration = iteration
+        
     else:
         logger.info("   🔄  Retornando ao Developer para correção da implementação.")
         status = "green_failed"
+        next_iteration = iteration + 1  # Incrementa porque volta pro Developer
 
     audit_entry = AIMessage(
         content=f"[RunnerGreen] Iteração {iteration}: {status}. Análise armazenada."
@@ -84,6 +88,7 @@ def node_execute_runner_green(state: AgentState, max_retries: int = 10) -> Agent
     return {
         **state,
         "status": status,
+        "iteration": next_iteration,
         "reviewer_messages": new_reviewer_turns,
         "audit_log": [audit_entry] + extra_audit,
     }

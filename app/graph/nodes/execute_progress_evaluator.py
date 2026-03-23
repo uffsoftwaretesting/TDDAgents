@@ -5,11 +5,16 @@ from app.config import AgentState
 
 logger = logging.getLogger("TDDOrchestrator")
 
-_FAILURE_STATUSES = {"max_retries_exceeded", "tester_failed"}
+_FAILURE_STATUSES = {
+    "max_retries_exceeded", 
+    "tester_failed", 
+    "developer_failed"
+}
 
 _FAILURE_REASONS = {
-    "max_retries_exceeded": "Excedeu o número máximo de tentativas do developer (10).",
-    "tester_failed":        "O Tester não conseguiu gerar testes válidos após todas as tentativas de autocorreção.",
+    "max_retries_exceeded": "Excedeu o número máximo de tentativas do ciclo TDD.",
+    "tester_failed":        "O Tester falhou catastroficamente (erro de execução ou API).",
+    "developer_failed":     "O Developer falhou catastroficamente (erro de execução ou API)."
 }
 
 
@@ -94,8 +99,7 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
             "status": "next_req",
             "plan_index": next_index,
             "current_sub_req": next_req,
-            "iteration": 0,
-            "red_attempts": 0,
+            "iteration": 1,
             "failed_requirements": failed_requirements,
             **history_resets,
             "audit_log": audit_entries,

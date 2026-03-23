@@ -22,7 +22,6 @@ class Config:
     PROMPTS_DIR = os.path.join(os.path.dirname(__file__), './prompts')
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
     
-    # Model natively trained for advanced tool calling
     CHAT_MODEL = "openai"
     MODEL = "o4-mini"
     MAX_ITERATIONS = 12
@@ -55,7 +54,6 @@ class AgentState(TypedDict):
     iteration: int
     status: str
     max_retries: int
-    red_attempts: int
     failed_requirements: list[dict]
 
 

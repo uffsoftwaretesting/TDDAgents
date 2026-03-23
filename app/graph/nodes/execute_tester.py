@@ -19,10 +19,9 @@ def node_execute_tester(state: AgentState) -> AgentState:
     feedback = reviewer_msgs[-1].content if is_review_mode and reviewer_msgs and hasattr(reviewer_msgs[-1], "content") else ""
 
     existing_len = len(state.get("tester_messages", []))
-    iteration = state.get("iteration", 0)
+    iteration = state.get("iteration", 1) # <-- CORREÇÃO: Apenas lê a iteração atual
 
     try:
-        # O LLM agora retorna a estrutura AgentAction validada
         action, updated_history = generate_test_for_sub_req(
             sub_requirement=sub_req,
             specification=state.get("specification", ""),
@@ -34,7 +33,6 @@ def node_execute_tester(state: AgentState) -> AgentState:
         
         logger.info(f"💭 Raciocínio do Tester: {action.thoughts}")
         
-        # ⚠️ A mágica acontece aqui: aplicamos a ação na E2B Sandbox real
         updated_fs, logs = apply_agent_action_to_sandbox(
             sandbox_id=state["sandbox_id"],
             action=action,
@@ -43,17 +41,14 @@ def node_execute_tester(state: AgentState) -> AgentState:
 
     except Exception as exc:
         logger.error(f"❌ TESTER: falhou em produzir ou aplicar testes.\n{exc}")
-        return {**state, "iteration": iteration + 1, "status": "tester_failed"}
-
-    if is_review_mode:
-        iteration += 1
+        return {**state, "iteration": iteration, "status": "tester_failed"} # Remove o +1 aqui também
 
     new_turns = updated_history[existing_len:]
     audit_entry = AIMessage(content=f"[Tester] Testes {'revisados' if is_review_mode else 'escritos'} para '{sub_req}'.")
 
     return {
         **state,
-        "file_system": updated_fs,  # Estado rastreado atualizado!
+        "file_system": updated_fs,
         "iteration": iteration,
         "status": "tests_written",
         "tester_messages": new_turns,

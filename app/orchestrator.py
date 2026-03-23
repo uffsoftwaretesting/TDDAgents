@@ -107,10 +107,9 @@ class TDDOrchestrator:
             "developer_messages": [],
             "reviewer_messages": [],
             "audit_log": [],
-            "iteration": 0,
+            "iteration": 1,
             "status": "starting",
-            "max_retries": 10,
-            "red_attempts": 0,
+            "max_retries": Config.MAX_ITERATIONS,
             "failed_requirements": [],
         }
 

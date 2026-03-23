@@ -1,6 +1,6 @@
 import logging
 from langchain_core.messages import AIMessage
-from app.config import AgentState
+from app.config import AgentState, Config
 from app.agents.langgraph.developer import generate_code_incremental
 from app.utils.sandbox_utils import apply_agent_action_to_sandbox
 
@@ -8,8 +8,8 @@ logger = logging.getLogger("TDDOrchestrator")
 
 def node_execute_developer(state: AgentState) -> AgentState:
     sub_req = state["current_sub_req"]
-    iteration = state.get("iteration", 0) + 1
-    max_retries = state.get("max_retries", 10)
+    iteration = state.get("iteration", 1)
+    max_retries = state.get("max_retries", Config.MAX_ITERATIONS)
 
     logger.info("\n" + "=" * 80)
     logger.info(f"💻 FASE 4: DEVELOPER (IMPLEMENTAÇÃO) | Iteração {iteration}/{max_retries}")
@@ -41,7 +41,7 @@ def node_execute_developer(state: AgentState) -> AgentState:
         logger.error(f"❌ Falha crítica no Developer: {exc}")
         return {**state, "status": "developer_failed", "iteration": iteration}
 
-    audit_entry = AIMessage(content=f"[Developer] Tentativa #{iteration}: código escrito para '{sub_req}'.")
+    audit_entry = AIMessage(content=f"[Developer] Iteração #{iteration}: código escrito para '{sub_req}'.")
     existing_len = len(state.get("developer_messages", []))
     new_turns = updated_dev_history[existing_len:]
 

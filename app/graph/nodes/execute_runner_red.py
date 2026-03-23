@@ -1,7 +1,7 @@
 import logging
 from langchain_core.messages import HumanMessage, AIMessage
 
-from app.config import AgentState
+from app.config import AgentState, Config
 from app.agents.langgraph.runner import run_pytest_in_sandbox
 from app.agents.langgraph.reviewer import analyze_failures
 from app.utils.prompt_loader import load_prompt
@@ -10,13 +10,13 @@ from app.utils.sandbox_utils import read_all_files_from_state
 logger = logging.getLogger("TDDOrchestrator")
 
 
-def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentState:
+def node_execute_runner_red(state: AgentState) -> AgentState:
     sub_req = state["current_sub_req"]
-    iteration = state.get("iteration", 0)
-    red_attempts = state.get("red_attempts", 0)
+    iteration = state.get("iteration", 1)
+    max_retries_state = state.get("max_retries", Config.MAX_ITERATIONS)
 
     logger.info("\n" + "-" * 80)
-    logger.info(f"🔴 FASE 3: RUNNER RED (Verificação de Falha) | Tentativa {red_attempts + 1}")
+    logger.info(f"🔴 FASE 3: RUNNER RED (Verificação de Falha) | Iteração {iteration}/{max_retries_state}")
     logger.info("-" * 80)
 
     # 1. Executa os testes na E2B Sandbox ativa
@@ -38,8 +38,8 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
             specification=state["specification"],
             sub_requirement=sub_req,
             iteration=iteration,
-            max_retries=state.get("max_retries", max_retries),
-            current_code=current_codebase, # Código unificado
+            max_retries=max_retries_state,
+            current_code=current_codebase, 
             conversation_history=state.get("reviewer_messages", []),
         )
 
@@ -53,10 +53,17 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
         new_reviewer_turns = updated_reviewer_history[existing_reviewer_len:]
 
         if "[ERRO NO TESTE]" in analysis:
-            status = "test_review_needed"
-            logger.warning("   ⚠️ O teste falhou de forma inválida (Erro no código do teste). Devolvendo ao Tester.")
+            if iteration >= max_retries_state:
+                logger.error(f"   ⛔ Limite de tentativas excedido no Tester ({max_retries_state}). Abortando.")
+                status = "max_retries_exceeded"
+                next_iteration = iteration
+            else:
+                status = "test_review_needed"
+                logger.warning("   ⚠️ O teste falhou de forma inválida. Devolvendo ao Tester.")
+                next_iteration = iteration + 1
         else:
             status = "red_confirmed"
+            next_iteration = iteration
 
         audit_entries.append(
             AIMessage(content=f"[RunnerRed] Red confirmado para '{sub_req}'. Status: {status}.")
@@ -65,7 +72,7 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
         return {
             **state,
             "status": status,
-            "red_attempts": 0,
+            "iteration": next_iteration,
             "reviewer_messages": new_reviewer_turns,
             "audit_log": audit_entries,
         }
@@ -73,23 +80,27 @@ def node_execute_runner_red(state: AgentState, max_retries: int = 10) -> AgentSt
     else:
         # ── GREEN NO RED: Forçamos a ida ao Developer para garantir o ciclo ───
         logger.warning("⚠️  ALERTA: O teste PASSOU imediatamente (Green no Red).")
-        logger.info("   ℹ️  Avançando — enviando para o Developer inspecionar a implementação mesmo assim.")
+        logger.info("   ℹ️  Avançando — enviando alerta para o Developer inspecionar.")
 
+        # Carrega o template de alerta
         feedback_text = load_prompt(
             'agents/langgraph/orchestrator/feedback_existing_implementation.jinja2',
             attempt=1,
         )
 
         audit_entries.append(
-            HumanMessage(
-                content=f"[RunnerRed] Teste passou imediatamente para '{sub_req}'. {feedback_text}"
+            AIMessage(
+                content=f"[RunnerRed] Teste passou imediatamente para '{sub_req}'. Alerta enviado ao Developer."
             )
         )
 
-        # Volta a usar "red_confirmed" para forçar o roteamento ir pro Developer
+        # O LangGraph fará o append automático nessa lista e o Developer a lerá como o `feedback` atual.
+        alert_message = HumanMessage(content=feedback_text)
+
         return {
             **state,
             "status": "red_confirmed", 
-            "red_attempts": 0,
+            "iteration": iteration, 
+            "reviewer_messages": [alert_message], #
             "audit_log": audit_entries,
         }
