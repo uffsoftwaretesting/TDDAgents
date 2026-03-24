@@ -8,13 +8,15 @@ logger = logging.getLogger("TDDOrchestrator")
 _FAILURE_STATUSES = {
     "max_retries_exceeded", 
     "tester_failed", 
-    "developer_failed"
+    "developer_failed",
+    "sandbox_failed"
 }
 
 _FAILURE_REASONS = {
     "max_retries_exceeded": "Excedeu o número máximo de tentativas do ciclo TDD.",
     "tester_failed":        "O Tester falhou catastroficamente (erro de execução ou API).",
-    "developer_failed":     "O Developer falhou catastroficamente (erro de execução ou API)."
+    "developer_failed":     "O Developer falhou catastroficamente (erro de execução ou API).",
+    "sandbox_failed":       "A execução falhou por erro fatal ou instabilidade contínua na E2B/API."
 }
 
 
@@ -46,6 +48,7 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
 
     audit_entries: list = []
 
+    # 1. Verifica se falhou (incluindo falha de sandbox/infra)
     if status in _FAILURE_STATUSES:
         reason = _FAILURE_REASONS.get(status, f"Status de falha desconhecido: '{status}'")
         failure_info = {

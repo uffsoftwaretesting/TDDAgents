@@ -1,9 +1,11 @@
 import logging
+import time
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.config import AgentState, Config
 from app.agents.langgraph.runner import run_pytest_in_sandbox
 from app.agents.langgraph.reviewer import analyze_failures
+from app.errors.exceptions import FatalInfraError, TransientInfraError
 from app.utils.prompt_loader import load_prompt
 from app.utils.sandbox_utils import read_all_files_from_state
 
@@ -14,13 +16,31 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
     sub_req = state["current_sub_req"]
     iteration = state.get("iteration", 1)
     max_retries_state = state.get("max_retries", Config.MAX_ITERATIONS)
+    infra_retries = state.get("infra_retries", 0)
 
     logger.info("\n" + "-" * 80)
     logger.info(f"🔴 FASE 3: RUNNER RED (Verificação de Falha) | Iteração {iteration}/{max_retries_state}")
     logger.info("-" * 80)
 
     # 1. Executa os testes na E2B Sandbox ativa
-    output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"])
+    
+    try:
+        output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"])
+
+    except TransientInfraError as exc:
+        infra_retries += 1
+        if infra_retries >= Config.MAX_INFRA_RETRIES:
+            logger.error(f"❌ Falha de Infra (Limite de Retries Atingido): {exc.original_exc}")
+            return {**state, "status": "sandbox_failed", "infra_retries": 0}
+        
+        logger.warning(f"⚠️ Erro de Infra Transiente. Tentativa {infra_retries}. Aguardando 3s... ({exc})")
+        time.sleep(3)
+        return {**state, "status": "infra_error_red", "infra_retries": infra_retries}
+
+    except FatalInfraError as exc:
+        logger.error(f"❌ Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "sandbox_failed", "infra_retries": 0}
+
     has_failures = not is_success
 
     existing_reviewer_len = len(state.get("reviewer_messages", []))
@@ -73,6 +93,7 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
             **state,
             "status": status,
             "iteration": next_iteration,
+            "infra_retries": 0,
             "reviewer_messages": new_reviewer_turns,
             "audit_log": audit_entries,
         }
@@ -100,7 +121,8 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
         return {
             **state,
             "status": "red_confirmed", 
-            "iteration": iteration, 
+            "iteration": iteration,
+            "infra_retries": 0,
             "reviewer_messages": [alert_message], #
             "audit_log": audit_entries,
         }

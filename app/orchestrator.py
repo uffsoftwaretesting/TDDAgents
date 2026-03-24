@@ -108,6 +108,7 @@ class TDDOrchestrator:
             "reviewer_messages": [],
             "audit_log": [],
             "iteration": 1,
+            "infra_retries": 0,
             "status": "starting",
             "max_retries": Config.MAX_ITERATIONS,
             "failed_requirements": [],

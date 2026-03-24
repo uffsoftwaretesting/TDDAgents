@@ -25,6 +25,7 @@ class Config:
     CHAT_MODEL = "openai"
     MODEL = "o4-mini"
     MAX_ITERATIONS = 12
+    MAX_INFRA_RETRIES = 3
     WORKSPACE_PATH = "workspace"
     PLAN_KEY = "tdd_plan_queue"
 
@@ -52,6 +53,7 @@ class AgentState(TypedDict):
 
     # ── Controle de fluxo ─────────────────────────────────────────────────────
     iteration: int
+    infra_retries: int
     status: str
     max_retries: int
     failed_requirements: list[dict]

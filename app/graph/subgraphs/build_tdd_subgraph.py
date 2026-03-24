@@ -25,60 +25,66 @@ def build_tdd_subgraph():
     workflow.add_edge(START, "tester")
 
     # ── 2. Saída do Tester ──
-    def route_after_tester(state: AgentState) -> Literal["runner_red", END]:
-        if state.get("status") == "tester_failed":
+    def route_after_tester(state: AgentState) -> Literal["tester", "runner_red", END]:
+        status = state.get("status")
+        if status == "infra_error_tester":
+            return "tester"
+        if status in ("tester_failed", "sandbox_failed"):
             return END
         return "runner_red"
 
     workflow.add_conditional_edges("tester", route_after_tester)
 
     # ── 3. Saída do Runner Red ──
-    def route_after_red(state: AgentState) -> Literal["developer", "tester", END]:
+    def route_after_red(state: AgentState) -> Literal["developer", "tester", "runner_red", END]:
         status = state.get("status")
         
-        # Envia para o Developer de qualquer forma (Falha real ou Green no Red alertado)
+        if status == "infra_error_red":
+            return "runner_red"
+            
         if status == "red_confirmed":
             return "developer"
-        
-        # Se o Reviewer notou que o teste escrito está quebrado/inválido
+            
         if status == "test_review_needed":
             return "tester"
             
-        # Aborta se o Tester falhar na API ou estourar o limite de tentativas de corrigir o teste
-        if status in ("tester_failed", "max_retries_exceeded"):
+        if status in ("tester_failed", "max_retries_exceeded", "sandbox_failed"):
             return END
             
         return "tester"
 
     workflow.add_conditional_edges("runner_red", route_after_red)
     
-    # ── 4. Saída do Developer (CORRIGIDA) ──
-    # Removido: workflow.add_edge("developer", "runner_green")
-    def route_after_developer(state: AgentState) -> Literal["runner_green", END]:
-        # Se o Developer sofreu um erro sistêmico/API, aborta imediatamente
-        if state.get("status") == "developer_failed":
+    # ── 4. Saída do Developer ──
+    def route_after_developer(state: AgentState) -> Literal["developer", "runner_green", END]:
+        status = state.get("status")
+        
+        if status == "infra_error_developer":
+            return "developer"
+            
+        if status in ("developer_failed", "sandbox_failed"):
             return END
+            
         return "runner_green"
         
     workflow.add_conditional_edges("developer", route_after_developer)
 
     # ── 5. Saída do Runner Green ──
-    def route_after_green(state: AgentState) -> Literal[END, "developer", "tester"]:
+    def route_after_green(state: AgentState) -> Literal[END, "developer", "tester", "runner_green"]:
         status = state.get("status")
         
-        # Passou! Sai do subgrafo rumo ao próximo requisito.
+        if status == "infra_error_green":
+            return "runner_green"
+            
         if status == "green_passed":
             return END
             
-        # Roteamento dinâmico baseado no is_test_fault do Reviewer
         if status == "test_review_needed":
             return "tester"
             
-        # Aborta se exceder o limite de iterações ou se algum erro grave vazou
-        if status in ("max_retries_exceeded", "tester_failed", "developer_failed"):
+        if status in ("max_retries_exceeded", "tester_failed", "developer_failed", "sandbox_failed"):
             return END
             
-        # Se falhou e a culpa é da implementação (green_failed), volta para o Developer
         return "developer"
 
     workflow.add_conditional_edges("runner_green", route_after_green)

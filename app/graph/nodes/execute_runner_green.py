@@ -1,9 +1,11 @@
 import logging
+import time
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.config import AgentState, Config
 from app.agents.langgraph.runner import run_pytest_in_sandbox
 from app.agents.langgraph.reviewer import analyze_failures
+from app.errors.exceptions import FatalInfraError, TransientInfraError
 from app.utils.sandbox_utils import read_all_files_from_state
 
 logger = logging.getLogger("TDDOrchestrator")
@@ -13,15 +15,30 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
     sub_req = state["current_sub_req"]
     iteration = state.get("iteration", 1)
     max_retries_state = state.get("max_retries", Config.MAX_ITERATIONS)
+    infra_retries = state.get("infra_retries", 0)
 
     logger.info("\n" + "-" * 80)
     logger.info(f"🟢 FASE 5: RUNNER GREEN (Validação) | Iteração {iteration}/{max_retries_state}")
     logger.info("-" * 80)
 
-    # 1. Executa os testes na E2B Sandbox ativa desempacotando a tupla
-    output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"])
+    try:
+        # 1. Executa os testes na E2B Sandbox ativa desempacotando a tupla
+        output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"])
+
+    except TransientInfraError as exc:
+        infra_retries += 1
+        if infra_retries >= Config.MAX_INFRA_RETRIES:
+            logger.error(f"❌ RUNNER GREEN: Falha de Infra (Limite Atingido): {exc.original_exc}")
+            return {**state, "status": "sandbox_failed", "infra_retries": 0}
+        
+        logger.warning(f"⚠️ RUNNER GREEN: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc})")
+        time.sleep(3)
+        return {**state, "status": "infra_error_green", "infra_retries": infra_retries}
+
+    except FatalInfraError as exc:
+        logger.error(f"❌ RUNNER GREEN: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "sandbox_failed", "infra_retries": 0}
     
-    # No modo GREEN, queremos que is_success seja True
     all_passed = is_success
 
     if all_passed:
@@ -32,6 +49,7 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
             "status": "green_passed",
             "iteration": iteration,
             "audit_log": [audit],
+            "infra_retries": 0,
         }
 
     # ── Falha nos testes ──────────────────────────────────────────────────────
@@ -89,6 +107,7 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
         **state,
         "status": status,
         "iteration": next_iteration,
+        "infra_retries": 0,
         "reviewer_messages": new_reviewer_turns,
         "audit_log": [audit_entry] + extra_audit,
     }
