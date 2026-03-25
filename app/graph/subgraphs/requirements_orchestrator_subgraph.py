@@ -1,7 +1,7 @@
 import logging
 from typing import cast
 from langgraph.graph import StateGraph, END
-from app.config import RequirementsState
+from app.config.config import RequirementsState
 from app.graph.nodes.requirements_analyst import node_analyst
 from app.graph.nodes.requirements_user_input import node_user_input
 from app.graph.nodes.requirements_engineer import node_engineer

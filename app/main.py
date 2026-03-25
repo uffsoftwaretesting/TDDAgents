@@ -7,8 +7,8 @@ import sys
 
 from dotenv import load_dotenv
 
-from app.requirements_orchestrator import RequirementsOrchestrator
-from app.orchestrator import TDDOrchestrator
+from app.graph.subgraphs.requirements_orchestrator_subgraph import RequirementsOrchestrator
+from app.graph.orchestrator import TDDOrchestrator
 
 logging.basicConfig(
     level=logging.WARNING,

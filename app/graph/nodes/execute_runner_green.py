@@ -2,7 +2,7 @@ import logging
 import time
 from langchain_core.messages import HumanMessage, AIMessage
 
-from app.config import AgentState, Config
+from app.config.config import AgentState, Config
 from app.agents.langgraph.runner import run_pytest_in_sandbox
 from app.agents.langgraph.reviewer import analyze_failures
 from app.errors.exceptions import FatalInfraError, TransientInfraError

@@ -1,7 +1,7 @@
 import logging
 import re
 import sys
-from app.config import RequirementsState
+from app.config.config import RequirementsState
 
 logger = logging.getLogger("TDDOrchestrator")
 

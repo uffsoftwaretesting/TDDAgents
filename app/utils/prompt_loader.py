@@ -1,5 +1,5 @@
 import os
-from app.config import Config
+from app.config.config import Config
 from jinja2 import Environment, FileSystemLoader
 
 env = Environment(loader=FileSystemLoader(Config.PROMPTS_DIR))

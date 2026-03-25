@@ -2,7 +2,7 @@ import time
 import logging
 from langchain_core.messages import AIMessage
 
-from app.config import AgentState, Config
+from app.config.config import AgentState, Config
 from app.agents.langgraph.developer import generate_code_incremental
 from app.errors.agents.handler import handle_llm_exception
 from app.utils.sandbox_utils import apply_agent_action_to_sandbox

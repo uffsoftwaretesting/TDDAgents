@@ -1,7 +1,7 @@
 import logging
 from langchain_core.messages import AIMessage, RemoveMessage
 
-from app.config import AgentState
+from app.config.config import AgentState
 
 logger = logging.getLogger("TDDOrchestrator")
 

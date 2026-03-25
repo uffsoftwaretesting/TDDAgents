@@ -1,7 +1,7 @@
 import logging
 from langchain_core.messages import AIMessage
 
-from app.config import AgentState
+from app.config.config import AgentState
 from app.agents.langgraph.planner import generate_plan
 
 logger = logging.getLogger("TDDOrchestrator")

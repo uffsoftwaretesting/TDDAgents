@@ -5,7 +5,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
 from e2b_code_interpreter import Sandbox # <-- Nova importação do E2B
 
-from app.config import AgentState, Config
+from app.config.config import AgentState, Config
 from app.graph.nodes import (
     node_plan_task,
     node_execute_progress_evaluator,

@@ -1,5 +1,5 @@
 import logging
-from app.config import RequirementsState
+from app.config.config import RequirementsState
 from app.agents.langgraph.engineer import generate_specification
 
 logger = logging.getLogger("TDDOrchestrator")

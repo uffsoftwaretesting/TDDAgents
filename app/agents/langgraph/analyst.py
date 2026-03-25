@@ -3,7 +3,7 @@ from app.utils.chat_model_factory import get_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 
-from app.config import Config
+from app.config.config import Config
 from app.utils.prompt_loader import load_prompt
 
 logger = logging.getLogger("TDDOrchestrator")

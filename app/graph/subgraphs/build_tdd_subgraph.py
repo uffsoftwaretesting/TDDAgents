@@ -1,7 +1,7 @@
 from typing import Literal
 from langgraph.graph import StateGraph, END, START
 
-from app.config import AgentState
+from app.config.config import AgentState
 from app.graph.nodes import (
     node_execute_tester,
     node_execute_runner_red,

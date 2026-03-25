@@ -1,7 +1,7 @@
 import logging
 from e2b_code_interpreter import Sandbox
 from e2b import SandboxException
-from app.config import Config
+from app.config.config import Config
 from app.errors.sandbox.handler import handle_e2b_exception
 from app.schema.schema import AgentAction
 

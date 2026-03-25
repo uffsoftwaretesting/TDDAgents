@@ -1,11 +1,11 @@
 import logging
 import os
 import shutil
-from app.config import Config
+from app.config.config import Config
 
 import os
 import logging
-from app.config import Config
+from app.config.config import Config
 
 class WorkspaceService:
     @staticmethod

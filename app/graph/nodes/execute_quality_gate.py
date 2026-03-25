@@ -1,7 +1,7 @@
 import logging
 from langchain_core.messages import AIMessage
 from app.agents.langgraph.quality import evaluate_code_quality
-from app.config import AgentState
+from app.config.config import AgentState
 
 logger = logging.getLogger("TDDOrchestrator")
 

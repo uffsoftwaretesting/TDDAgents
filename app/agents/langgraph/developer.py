@@ -1,7 +1,7 @@
 import logging
 from app.utils.chat_model_factory import get_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from app.config import Config
+from app.config.config import Config
 from app.utils.prompt_loader import load_prompt
 from app.schema.schema import AgentAction
 from app.utils.sandbox_utils import read_all_files_from_state

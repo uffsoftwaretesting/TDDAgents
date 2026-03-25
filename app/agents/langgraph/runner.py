@@ -82,7 +82,7 @@ from e2b import (
 
 from e2b.exceptions import RateLimitException
 
-from app.config import Config
+from app.config.config import Config
 from app.errors.sandbox.handler import handle_e2b_exception
 
 logger = logging.getLogger("TDDOrchestrator.Runner")

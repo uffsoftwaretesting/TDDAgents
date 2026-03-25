@@ -1,6 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from app.config import Config
+from app.config.config import Config
 from app.utils.chat_model_factory import get_chat_model
 
 # Se você estiver usando jinja, crie os templates. 
