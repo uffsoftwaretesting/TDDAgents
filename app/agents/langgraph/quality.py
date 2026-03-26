@@ -1,4 +1,3 @@
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.config.config import Config
 from app.utils.chat_model_factory import get_chat_model
@@ -95,7 +94,7 @@ def evaluate_code_quality(implementation_code: str, specification: str) -> str:
     if not implementation_code:
         return "Nenhum código foi gerado para avaliação."
 
-    llm = get_chat_model(model_name=Config.CHAT_MODEL, model=Config.MODEL)
+    llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
 
     human_msg = f"""
     --- ESPECIFICAÇÃO ORIGINAL ---

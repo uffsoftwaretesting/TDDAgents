@@ -23,7 +23,7 @@ def analyze_requirements(user_input: str, conversation_history: str = "") -> dic
     """
     Analista de requisitos que faz perguntas para esclarecer regras de negócio.
     """
-    llm = get_chat_model(model_name=Config.CHAT_MODEL, model=Config.MODEL)
+    llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(AnalystResponse)
     
     system_prompt = load_prompt(template_name='agents/langgraph/analyst/sys_prompt_1.jinja2')

@@ -67,15 +67,25 @@ class TDDOrchestrator:
         workflow = StateGraph(AgentState)
 
         workflow.add_node("planner", node_plan_task)
-        workflow.add_node("evaluator", node_execute_progress_evaluator)
-        workflow.add_node("quality_gate", node_execute_quality_gate)
 
         tdd_graph = build_tdd_subgraph()
         workflow.add_node("tdd_execution", tdd_graph)
 
-        workflow.set_entry_point("planner")
+        workflow.add_node("evaluator", node_execute_progress_evaluator)
+        workflow.add_node("quality_gate", node_execute_quality_gate)
 
-        workflow.add_edge("planner", "tdd_execution")
+        workflow.set_entry_point("planner")
+   
+        def route_after_planner(state: AgentState) -> Literal["planner", "tdd_execution", END]:
+            status = state.get("status")
+            if status == "infra_error_planner":
+                return "planner"
+            if status == "plan_failed":
+                return END
+            return "tdd_execution"
+
+        workflow.add_conditional_edges("planner", route_after_planner)
+
         workflow.add_edge("tdd_execution", "evaluator")
 
         def route_evaluator(
@@ -91,7 +101,6 @@ class TDDOrchestrator:
         return workflow.compile(checkpointer=checkpointer)
 
     def run(self, specification: str) -> AgentState:
-        # Inicializando a Cloud Sandbox do E2B
         logger.info("📦 Inicializando E2B Cloud Sandbox...")
         sandbox = Sandbox.create(api_key=Config.E2B_API_KEY)
         sandbox_id = sandbox.sandbox_id

@@ -66,21 +66,11 @@ Ausentes intencionalmente:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Callable, Type
 
 from e2b import (
     Sandbox,
     SandboxException,
-    TimeoutException,
-    InvalidArgumentException,
-    NotEnoughSpaceException,
-    NotFoundException,
-    AuthenticationException,
-    TemplateException,
 )
-
-from e2b.exceptions import RateLimitException
 
 from app.config.config import Config
 from app.errors.sandbox.handler import handle_e2b_exception

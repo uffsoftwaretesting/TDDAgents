@@ -1,5 +1,4 @@
 import logging
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 
@@ -19,7 +18,7 @@ def generate_plan(specification: str) -> list[str]:
     """
     Gera um plano de engenharia de software (lista de módulos/arquivos) a partir da especificação.
     """
-    llm = get_chat_model(model_name=Config.CHAT_MODEL, model=Config.MODEL)
+    llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(TDDPlan)
 
     rendered_sys = load_prompt(

@@ -17,7 +17,7 @@ def generate_code_incremental(
     """
     Gera a ação estruturada (arquivos, dependências, comandos bash) para implementar o código.
     """
-    llm = get_chat_model(model_name=Config.CHAT_MODEL, model=Config.MODEL)
+    llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(AgentAction)
 
     history: list = list(conversation_history) if conversation_history else []

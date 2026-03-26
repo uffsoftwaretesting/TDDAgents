@@ -1,4 +1,3 @@
-import os
 from app.config.config import Config
 from jinja2 import Environment, FileSystemLoader
 

@@ -19,7 +19,7 @@ def generate_test_for_sub_req(
     """
     Gera a ação estruturada contendo as modificações na suíte de testes (via Pytest).
     """
-    llm = get_chat_model(model_name=Config.CHAT_MODEL, model=Config.MODEL)
+    llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(AgentAction)
 
     history: list = list(conversation_history) if conversation_history else []

@@ -1,5 +1,5 @@
 import os
-from typing import TypedDict, Annotated, Any
+from typing import TypedDict, Annotated
 from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -19,11 +19,12 @@ if not os.getenv("POSTGRES_URL"):
 class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     E2B_API_KEY = os.getenv("E2B_API_KEY")
-    PROMPTS_DIR = os.path.join(os.path.dirname(__file__), './prompts')
+    PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts")
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
     
     CHAT_MODEL = "openai"
     MODEL = "o4-mini"
+    TEMPERATURE = 1.0
     MAX_ITERATIONS = 12
     MAX_INFRA_RETRIES = 3
     WORKSPACE_PATH = "workspace"
@@ -69,3 +70,4 @@ class RequirementsState(TypedDict):
     final_specification: str
     status: str
     interaction_count: int
+    infra_retries: int

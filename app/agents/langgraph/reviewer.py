@@ -1,5 +1,4 @@
 import logging
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pydantic import BaseModel, Field
 
@@ -33,7 +32,7 @@ def analyze_failures(
     """
     Analisa a saída de erro do Pytest contra a base de código atual e fornece feedback estruturado.
     """
-    llm = get_chat_model(model_name=Config.CHAT_MODEL, model=Config.MODEL)
+    llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(ReviewAnalysis)
 
     history: list = list(conversation_history) if conversation_history else []
