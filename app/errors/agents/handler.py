@@ -1,9 +1,3 @@
-"""
-app/errors/llm_error_handler.py
-
-Classificação de exceções para chamadas LLM usadas em LangGraph / LangChain.
-"""
-
 from __future__ import annotations
 
 try:
