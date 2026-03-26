@@ -18,6 +18,7 @@ if not os.getenv("POSTGRES_URL"):
 
 class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
     E2B_API_KEY = os.getenv("E2B_API_KEY")
     PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts")
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")

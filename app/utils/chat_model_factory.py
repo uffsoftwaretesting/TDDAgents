@@ -1,6 +1,7 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_together import ChatTogether
 
 from app.config.config import Config
 
@@ -25,5 +26,7 @@ def get_chat_model(provider: str, **kwargs):
         return ChatOpenAI(**kwargs)
     elif provider.lower() == "gemini":
         return ChatGoogleGenerativeAI(**kwargs)
+    elif provider.lower() == "together":
+        return ChatTogether(together_api_key=Config.TOGETHER_API_KEY, **kwargs)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
