@@ -26,16 +26,12 @@ def node_execute_developer(state: AgentState) -> AgentState:
 
     try:
         # 1. Tenta gerar o código via LLM
-        try:
-            action, updated_dev_history = generate_code_incremental(
-                specification=state.get("specification", ""),
-                file_system=state.get("file_system", {}),
-                feedback=feedback,
-                conversation_history=state.get("developer_messages", []),
-            )
-        except Exception as exc:
-            # Converte exceções da LangChain/OpenAI para o nosso domínio
-            handle_llm_exception(exc, context="Developer LLM API")
+        action, updated_dev_history = generate_code_incremental(
+            specification=state.get("specification", ""),
+            file_system=state.get("file_system", {}),
+            feedback=feedback,
+            conversation_history=state.get("developer_messages", []),
+        )
 
         logger.info(f"💭 Raciocínio do Developer: {action.thoughts}")
 
@@ -52,12 +48,16 @@ def node_execute_developer(state: AgentState) -> AgentState:
             logger.error(f"❌ DEVELOPER: Falha de Infra (Limite Atingido): {exc.original_exc}")
             return {**state, "status": "developer_failed", "infra_retries": 0}
         
-        logger.warning(f"⚠️ DEVELOPER: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc})")
+        logger.warning(f"⚠️ DEVELOPER: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_developer", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
         logger.error(f"❌ DEVELOPER: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "developer_failed", "infra_retries": 0}
+    
+    except Exception as exc:
+        logger.error(f"❌ DEVELOPER: Falha Fatal de Infraestrutura")
         return {**state, "status": "developer_failed", "infra_retries": 0}
 
     # === Fluxo de Sucesso ===

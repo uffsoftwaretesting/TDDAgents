@@ -2,7 +2,6 @@ import logging
 import time
 from app.config.config import Config, RequirementsState
 from app.agents.langgraph.analyst import analyze_requirements
-from app.errors.agents.handler import handle_llm_exception
 from app.errors.exceptions import FatalInfraError, TransientInfraError
 
 logger = logging.getLogger("TDDOrchestrator")
@@ -21,23 +20,19 @@ def node_analyst(state: RequirementsState) -> RequirementsState:
     interaction_count += 1
 
     try:
-        try:
-            result = analyze_requirements(user_input, conversation_history)
-        except Exception as exc:
-            handle_llm_exception(exc, context="Analyst LLM API")
-            
+        result = analyze_requirements(user_input, conversation_history)
     except TransientInfraError as exc:
         infra_retries += 1
         if infra_retries >= Config.MAX_INFRA_RETRIES:
             logger.error(f"❌ ANALISTA: Falha de Infra (Limite Atingido): {exc.original_exc}")
             return {**state, "status": "analyst_failed", "infra_retries": 0}
         
-        logger.warning(f"⚠️ ANALISTA: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc})")
+        logger.warning(f"⚠️ ANALISTA: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_analyst", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
-        logger.error(f"❌ ANALISTA: Falha Fatal de Infraestrutura: {exc}")
+        logger.error(f"❌ ANALISTA: Falha Fatal de Infraestrutura: {exc.original_exc}")
         return {**state, "status": "analyst_failed", "infra_retries": 0}
     
     logger.info(f"🔍 Precisa esclarecimento: {result['needs_clarification']}")

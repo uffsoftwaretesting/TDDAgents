@@ -4,6 +4,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 
 from app.config.config import Config
+from app.errors.agents.handler import handle_llm_exception
 from app.utils.prompt_loader import load_prompt
 
 logger = logging.getLogger("TDDOrchestrator")
@@ -39,10 +40,6 @@ def analyze_requirements(user_input: str, conversation_history: str = "") -> dic
             HumanMessage(content=human_prompt)
         ])
         return result.model_dump()
-    except Exception as e:
-        logger.error(f"❌ Erro no Analyst: {e}")
-        return {
-            "response": "Desculpe, ocorreu um erro ao processar. Pode repetir a solicitação?",
-            "needs_clarification": True,
-            "has_checklist": False
-        }
+    except Exception as exc:
+        logger.error("❌ ANALISTA: Falha ao analisar requisitos")
+        handle_llm_exception(exc, context="analyze_requirements")

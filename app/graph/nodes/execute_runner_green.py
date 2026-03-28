@@ -23,7 +23,7 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
 
     try:
         # 1. Executa os testes na E2B Sandbox ativa desempacotando a tupla
-        output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"])
+        output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"], is_red_phase=False)
 
     except TransientInfraError as exc:
         infra_retries += 1
@@ -31,12 +31,16 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
             logger.error(f"❌ RUNNER GREEN: Falha de Infra (Limite Atingido): {exc.original_exc}")
             return {**state, "status": "sandbox_failed", "infra_retries": 0}
         
-        logger.warning(f"⚠️ RUNNER GREEN: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc})")
+        logger.warning(f"⚠️ RUNNER GREEN: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_green", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
         logger.error(f"❌ RUNNER GREEN: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "sandbox_failed", "infra_retries": 0}
+    
+    except Exception as exc:
+        logger.error(f"❌ RUNNER GREEN: Erro inesperado")
         return {**state, "status": "sandbox_failed", "infra_retries": 0}
     
     all_passed = is_success
@@ -60,15 +64,36 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
     # Injeta a base de código atual inteira para o Reviewer
     current_codebase = read_all_files_from_state(state.get("file_system", {}))
 
-    analysis, updated_reviewer_history = analyze_failures(
-        test_output=output,
-        specification=state["specification"],
-        sub_requirement=sub_req,
-        iteration=iteration,
-        max_retries=max_retries_state,
-        current_code=current_codebase,
-        conversation_history=state.get("reviewer_messages", []),
-    )
+    try:
+        analysis, updated_reviewer_history = analyze_failures(
+            test_output=output,
+            specification=state["specification"],
+            sub_requirement=sub_req,
+            iteration=iteration,
+            max_retries=max_retries_state,
+            current_code=current_codebase,
+            conversation_history=state.get("reviewer_messages", []),
+        )
+    except TransientInfraError as exc:
+        infra_retries += 1
+        if infra_retries >= Config.MAX_INFRA_RETRIES:
+            logger.error(f"❌ RUNNER GREEN: Falha de Infra no Reviewer (Limite Atingido): {exc.original_exc}")
+            return {**state, "status": "sandbox_failed", "infra_retries": 0}
+
+        logger.warning(
+            f"⚠️ RUNNER GREEN: Erro transiente no Reviewer. "
+            f"Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})"
+        )
+        time.sleep(3)
+        return {**state, "status": "infra_error_green", "infra_retries": infra_retries}
+
+    except FatalInfraError as exc:
+        logger.error(f"❌ RUNNER GREEN: Falha fatal no Reviewer: {exc.original_exc}")
+        return {**state, "status": "sandbox_failed", "infra_retries": 0}
+
+    except Exception as exc:
+        logger.error("❌ RUNNER GREEN: Erro inesperado durante análise do Reviewer")
+        return {**state, "status": "sandbox_failed", "infra_retries": 0}
 
     logger.info("\n" + "=" * 80)
     logger.info(f"🧐 ANÁLISE DO REVIEWER — Iteração {iteration}")

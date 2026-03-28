@@ -3,12 +3,12 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 
 from app.config.config import Config
+from app.errors.agents.handler import handle_llm_exception
 from app.utils.chat_model_factory import get_chat_model
 from app.utils.prompt_loader import load_prompt
 
 logger = logging.getLogger("TDDOrchestrator")
 
-# O esquema Pydantic dita a forma como o LLM estrutura a resposta
 class TDDPlan(BaseModel):
     tdd_plan: list[str] = Field(
         description="Uma lista ordenada de 'Epics' ou Módulos Arquiteturais. Cada string deve descrever claramente o que deve ser configurado/implementado (ex: arquivos, dependências, rotas) para aquela fatia do sistema."
@@ -35,6 +35,6 @@ def generate_plan(specification: str) -> list[str]:
             HumanMessage(content=rendered_hum),
         ])
         return response.tdd_plan
-    except Exception as e:
-        logger.error(f"❌ Planner falhou ao gerar o plano estruturado: {e}")
-        return []
+    except Exception as exc:
+        logger.error(f"❌ Planner falhou ao gerar o plano estruturado: {exc}")
+        handle_llm_exception(exc, context="generate_plan")

@@ -27,7 +27,7 @@ class Config:
     MODEL = "o4-mini"
     TEMPERATURE = 1.0
     MAX_ITERATIONS = 12
-    MAX_INFRA_RETRIES = 3
+    MAX_INFRA_RETRIES = 2
     WORKSPACE_PATH = "workspace"
     PLAN_KEY = "tdd_plan_queue"
 

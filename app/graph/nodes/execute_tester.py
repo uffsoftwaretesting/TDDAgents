@@ -28,18 +28,14 @@ def node_execute_tester(state: AgentState) -> AgentState:
 
     try:
         # 1. Tenta gerar os testes via LLM
-        try:
-            action, updated_history = generate_test_for_sub_req(
-                sub_requirement=sub_req,
-                specification=state.get("specification", ""),
-                file_system=state.get("file_system", {}),
-                feedback=feedback,
-                conversation_history=state.get("tester_messages", []),
-                is_review_mode=is_review_mode,
-            )
-        except Exception as exc:
-            # Converte exceções da LangChain/OpenAI para o nosso domínio
-            handle_llm_exception(exc, context="Tester LLM API")
+        action, updated_history = generate_test_for_sub_req(
+            sub_requirement=sub_req,
+            specification=state.get("specification", ""),
+            file_system=state.get("file_system", {}),
+            feedback=feedback,
+            conversation_history=state.get("tester_messages", []),
+            is_review_mode=is_review_mode,
+        )
             
         logger.info(f"💭 Raciocínio do Tester: {action.thoughts}")
         
@@ -56,12 +52,15 @@ def node_execute_tester(state: AgentState) -> AgentState:
             logger.error(f"❌ TESTER: Falha de Infra (Limite Atingido): {exc.original_exc}")
             return {**state, "status": "tester_failed", "infra_retries": 0}
             
-        logger.warning(f"⚠️ TESTER: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Retentando em 3s... ({exc})")
+        logger.warning(f"⚠️ TESTER: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Retentando em 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_tester", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
         logger.error(f"❌ TESTER: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "tester_failed", "infra_retries": 0}
+    except Exception as exc:
+        logger.error(f"❌ TESTER: Falha Fatal de Infraestrutura")
         return {**state, "status": "tester_failed", "infra_retries": 0}
 
     # === Fluxo de Sucesso ===

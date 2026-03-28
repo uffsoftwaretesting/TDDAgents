@@ -1,4 +1,5 @@
 import logging
+from app.errors.agents.handler import handle_llm_exception
 from app.utils.chat_model_factory import get_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from app.config.config import Config
@@ -47,8 +48,11 @@ def generate_code_incremental(
         )
         history.append(HumanMessage(content=human_content))
 
-    # Invoca o LLM forçando a saída estruturada do AgentAction
-    action: AgentAction = structured_llm.invoke(history)
+    try:
+        # Invoca o LLM forçando a saída estruturada do AgentAction
+        action: AgentAction = structured_llm.invoke(history)
+    except Exception as exc:
+        handle_llm_exception(exc, context="generate_code_incremental")
 
     # Armazena a resposta formatada como JSON no histórico de conversa (para o LangGraph)
     history.append(AIMessage(content=action.model_dump_json(indent=2)))

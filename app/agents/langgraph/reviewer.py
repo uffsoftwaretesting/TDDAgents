@@ -3,6 +3,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pydantic import BaseModel, Field
 
 from app.config.config import Config
+from app.errors.agents.handler import handle_llm_exception
 from app.utils.chat_model_factory import get_chat_model
 from app.utils.prompt_loader import load_prompt
 
@@ -66,8 +67,6 @@ def analyze_failures(
         history.append(AIMessage(content=final_feedback))
         return final_feedback, history
         
-    except Exception as e:
-        logger.error(f"❌ Reviewer falhou ao gerar análise: {e}")
-        fallback = f"Falha sistêmica ao analisar os erros do Pytest: {e}. Revise a última alteração."
-        history.append(AIMessage(content=fallback))
-        return fallback, history
+    except Exception as exc:
+        logger.error(f"❌ Reviewer falhou ao gerar análise")
+        handle_llm_exception(exc, context="analyze_failures")

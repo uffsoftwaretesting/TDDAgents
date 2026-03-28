@@ -86,7 +86,7 @@ _PYTEST_FLAGS = "-vv -rA --tb=long --showlocals -W default -o asyncio_default_fi
 _PYTEST_TIMEOUT: int = 180
 _REQUEST_TIMEOUT: int = 30
 
-def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".") -> tuple[str, bool]:
+def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".", is_red_phase: bool = False) -> tuple[str, bool]:
     """
     Retorna:
         (output: str, is_success: bool)
@@ -115,10 +115,10 @@ def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".") -> tuple[str, b
 
     except SandboxException as exc:
         # 1. Este é o único erro esperado: O pytest rodou, mas os testes falharam (exit code > 0)
-        if type(exc).__name__ == "CommandExitException":
-            output = f"--- STDOUT ---\n{getattr(exc, 'stdout', '')}\n--- STDERR ---\n{getattr(exc, 'stderr', '')}"
+        if is_red_phase:
             logger.info("🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).")
-            return output, False
+        else:
+            logger.info("🔴 RUNNER: Testes falharam na validação (Ajuste necessário na implementação).")
         
         # 2. Se for qualquer outro erro de sandbox, envia para o mapper classificar e disparar o erro
         handle_e2b_exception(exc, context="Runner")

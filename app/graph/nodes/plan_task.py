@@ -19,11 +19,7 @@ def node_plan_task(state: AgentState) -> AgentState:
     infra_retries = state.get("infra_retries", 0)
 
     try:
-        
-        try:
-            plan = generate_plan(state["specification"])
-        except Exception as exc:
-            handle_llm_exception(exc, context="Planner LLM API")
+        plan = generate_plan(state["specification"])
 
     except TransientInfraError as exc:
         infra_retries += 1
@@ -31,12 +27,15 @@ def node_plan_task(state: AgentState) -> AgentState:
             logger.error(f"❌ PLANNER: Falha de Infra (Limite Atingido): {exc.original_exc}")
             return {**state, "status": "plan_failed", "plan": [], "infra_retries": 0}
         
-        logger.warning(f"⚠️ PLANNER: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc})")
+        logger.warning(f"⚠️ PLANNER: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_planner", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
         logger.error(f"❌ PLANNER: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "plan_failed", "plan": [], "infra_retries": 0}
+    except Exception as exc:
+        logger.error(f"❌ PLANNER: Falha Fatal de Infraestrutura")
         return {**state, "status": "plan_failed", "plan": [], "infra_retries": 0}
 
     if not plan:

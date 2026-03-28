@@ -16,11 +16,8 @@ def node_engineer(state: RequirementsState) -> RequirementsState:
     infra_retries = state.get("infra_retries", 0)
     
     try:
-        try:
-            requirements = conversation_history
-            specification = generate_specification(requirements, conversation_history)
-        except Exception as exc:
-            handle_llm_exception(exc, context="Engineer LLM API")
+        requirements = conversation_history
+        specification = generate_specification(requirements, conversation_history)
             
     except TransientInfraError as exc:
         infra_retries += 1
@@ -28,12 +25,16 @@ def node_engineer(state: RequirementsState) -> RequirementsState:
             logger.error(f"❌ ENGENHEIRO: Falha de Infra (Limite Atingido): {exc.original_exc}")
             return {**state, "status": "engineer_failed", "infra_retries": 0}
         
-        logger.warning(f"⚠️ ENGENHEIRO: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc})")
+        logger.warning(f"⚠️ ENGENHEIRO: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_engineer", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
         logger.error(f"❌ ENGENHEIRO: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "engineer_failed", "infra_retries": 0}
+    
+    except Exception as exc:
+        logger.error(f"❌ ENGENHEIRO: Falha Fatal de Infraestrutura")
         return {**state, "status": "engineer_failed", "infra_retries": 0}
     
     return {
