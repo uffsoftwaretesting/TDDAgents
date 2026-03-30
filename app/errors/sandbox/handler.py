@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 try:
@@ -10,27 +9,12 @@ try:
         TemplateException,
         TimeoutException,
     )
-
     from e2b.exceptions import RateLimitException
-
     _E2B_AVAILABLE = True
 except ImportError:
     _E2B_AVAILABLE = False
 
 from app.errors.exceptions import FatalInfraError, TransientInfraError
-
-
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-
-# ---------------------------------------------------------------------------
-# Public handler
-# ---------------------------------------------------------------------------
 
 def handle_e2b_exception(exc: Exception, context: str = "") -> None:
     """
@@ -40,29 +24,23 @@ def handle_e2b_exception(exc: Exception, context: str = "") -> None:
         TransientInfraError
         FatalInfraError
     """
-
     prefix = f"[{context}] " if context else ""
-    error_msg = str(exc).lower()
-
-    # ------------------------------------------------------------------
-    # 1. E2B exception types
-    # ------------------------------------------------------------------
 
     if _E2B_AVAILABLE:
+        # Prevenção extra caso um erro de comando de terminal alcance o handler
+        if type(exc).__name__ == "CommandExitException":
+            raise TransientInfraError(
+                f"{prefix}Falha na execução de comando interno na Sandbox: {exc}"
+            ) from exc
 
         if isinstance(exc, TimeoutException):
             raise TransientInfraError(
-                f"{prefix}Rate limit do E2B atingido."
+                f"{prefix}Timeout atingido no E2B."
             ) from exc
 
         if isinstance(exc, RateLimitException):
             raise TransientInfraError(
                 f"{prefix}Rate limit do E2B atingido."
-            ) from exc
-    
-        if isinstance(exc, SandboxException):
-            raise TransientInfraError(
-                f"{prefix}Sandbox error."
             ) from exc
 
         if isinstance(exc, AuthenticationException):
@@ -84,6 +62,14 @@ def handle_e2b_exception(exc: Exception, context: str = "") -> None:
             raise FatalInfraError(
                 f"{prefix}Template da sandbox inválido."
             ) from exc
+            
+        # SandboxException atua como base para as exceções acima, então ela
+        # deve vir por último para capturar quaisquer outros erros desconhecidos do E2B
+        if isinstance(exc, SandboxException):
+            raise TransientInfraError(
+                f"{prefix}Sandbox error: {exc}"
+            ) from exc
+
     raise FatalInfraError(
-        f"{prefix}Falha não classificada de LLM: {exc}"
+        f"{prefix}Falha não classificada de infraestrutura: {exc}"
     ) from exc
