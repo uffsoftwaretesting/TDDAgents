@@ -3,7 +3,7 @@ from typing import Literal
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
-from e2b_code_interpreter import Sandbox # <-- Nova importação do E2B
+from e2b_code_interpreter import Sandbox
 
 from app.config.config import AgentState, Config
 from app.graph.nodes import (
