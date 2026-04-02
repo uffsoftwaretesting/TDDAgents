@@ -139,22 +139,37 @@ def main() -> None:
         print(f"\n⚠️  PIPELINE FINALIZADO COM STATUS: '{final_status}'")
 
         file_system = final_state.get("file_system", {})
+        plan = final_state.get("plan", [])
         
-        if file_system:
+        if file_system or plan:
             print("\n💾 Extraindo arquivos da Sandbox para a sua máquina local...")
             workspace_dir = "workspace_output"
+            os.makedirs(workspace_dir, exist_ok=True) # Garante que a pasta base exista
 
-            for filepath, content in file_system.items():
-                clean_path = filepath.lstrip("/")
-                if clean_path.startswith("home/user/"):
-                    clean_path = clean_path.replace("home/user/", "", 1)
-                
-                full_path = os.path.join(workspace_dir, clean_path)
+            # 1. Extrai o código-fonte gerado
+            if file_system:
+                for filepath, content in file_system.items():
+                    clean_path = filepath.lstrip("/")
+                    if clean_path.startswith("home/user/"):
+                        clean_path = clean_path.replace("home/user/", "", 1)
+                    
+                    full_path = os.path.join(workspace_dir, clean_path)
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+            
+            # 2. Extrai o plano e salva como planner.txt na raiz do workspace
+            if plan:
+                plan_path = os.path.join(workspace_dir, "planner.txt")
+                with open(plan_path, "w", encoding="utf-8") as f:
+                    f.write("PLANO DE ENGENHARIA E TDD\n")
+                    f.write("================================================================================\n")
+                    for i, item in enumerate(plan):
+                        f.write(f"{i+1}. {item}\n")
+                    f.write("================================================================================\n")
+                print("📝 Arquivo 'planner.txt' gerado com sucesso!")
 
-                with open(full_path, "w", encoding="utf-8") as f:
-                    f.write(content)
             print(f"\n📁 Todos os arquivos foram salvos na pasta: ./{workspace_dir}/")
 
     if failed:
