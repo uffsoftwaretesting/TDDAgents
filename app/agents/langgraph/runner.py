@@ -13,8 +13,8 @@ from app.errors.sandbox.handler import handle_e2b_exception
 logger = logging.getLogger("TDDOrchestrator.Runner")
 
 _PYTEST_FLAGS = "-vv -rA --tb=long --showlocals -W default -o asyncio_default_fixture_loop_scope=function -o asyncio_mode=auto"
-_PYTEST_TIMEOUT: int = 180
-_REQUEST_TIMEOUT: int = 30
+_PYTEST_TIMEOUT: int = 300
+_REQUEST_TIMEOUT: int = 320
 
 def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".", is_red_phase: bool = False) -> tuple[str, bool]:
     """

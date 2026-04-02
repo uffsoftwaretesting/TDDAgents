@@ -148,6 +148,6 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
             "status": "red_confirmed", 
             "iteration": iteration,
             "infra_retries": 0,
-            "reviewer_messages": [alert_message], #
+            "reviewer_messages": [alert_message],
             "audit_log": audit_entries,
         }

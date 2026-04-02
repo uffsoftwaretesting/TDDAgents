@@ -69,6 +69,16 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 content=f"[Evaluator] FALHOU '{current_req}' (status={status}): {reason}"
             )
         )
+
+        if status == "sandbox_failed":
+            logger.warning("🛑 Erro fatal de infraestrutura. Abortando a progressão para novos requisitos.")
+            return {
+                **state,
+                "status": "sandbox_failed", 
+                "failed_requirements": failed_requirements,
+                "audit_log": audit_entries,
+            }
+
     else:
         logger.info(f"✅ Sub-requisito concluído: '{current_req}'")
         audit_entries.append(

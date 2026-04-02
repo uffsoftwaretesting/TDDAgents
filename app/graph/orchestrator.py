@@ -67,10 +67,7 @@ class TDDOrchestrator:
         workflow = StateGraph(AgentState)
 
         workflow.add_node("planner", node_plan_task)
-
-        tdd_graph = build_tdd_subgraph()
-        workflow.add_node("tdd_execution", tdd_graph)
-
+        workflow.add_node("tdd_execution", build_tdd_subgraph())
         workflow.add_node("evaluator", node_execute_progress_evaluator)
         workflow.add_node("quality_gate", node_execute_quality_gate)
 
@@ -78,20 +75,19 @@ class TDDOrchestrator:
    
         def route_after_planner(state: AgentState) -> Literal["planner", "tdd_execution", END]:
             status = state.get("status")
-            if status == "infra_error_planner":
-                return "planner"
-            if status == "plan_failed":
-                return END
+            if status == "infra_error_planner": return "planner"
+            if status == "plan_failed": return END
             return "tdd_execution"
 
         workflow.add_conditional_edges("planner", route_after_planner)
 
         workflow.add_edge("tdd_execution", "evaluator")
 
-        def route_evaluator(
-            state: AgentState,
-        ) -> Literal["tdd_execution", "quality_gate"]:
-            if state.get("status") == "next_req":
+        def route_evaluator(state: AgentState) -> Literal["tdd_execution", "quality_gate", END]:
+            status = state.get("status")
+            if status == "sandbox_failed":
+                return END
+            if status == "next_req":
                 return "tdd_execution"
             return "quality_gate"
 
@@ -144,10 +140,13 @@ class TDDOrchestrator:
                         },
                     },
                 )
+
+                if result.get("status") == "sandbox_failed":
+                    logger.error("🛑 O processo foi abortado precocemente por falha na nuvem E2B.")
+                    logger.info("➡️  Retornando estado final para salvamento local dos arquivos...")
+
                 return result
         finally:
-            # Garantir que a sandbox seja fechada após a execução do pipeline
-            # para não consumir recursos desnecessários na nuvem.
             if 'sandbox' in locals():
                 logger.info(f"🧹 Encerrando Sandbox {sandbox_id}...")
                 sandbox.kill()
