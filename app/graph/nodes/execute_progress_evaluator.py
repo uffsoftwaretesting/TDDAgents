@@ -71,10 +71,34 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
         )
 
         if status == "sandbox_failed":
-            logger.warning("🛑 Erro fatal de infraestrutura. Abortando a progressão para novos requisitos.")
+            logger.warning("🛑 Erro fatal de infraestrutura. Abortando o fluxo TDD.")
             return {
                 **state,
                 "status": "sandbox_failed", 
+                "failed_requirements": failed_requirements,
+                "audit_log": audit_entries,
+            }
+        elif status == "developer_failed":
+            logger.warning("🛑 Erro fatal de infraestrutura ao chamar o Developer. Abortando o fluxo TDD.")
+            return {
+                **state,
+                "status": "developer_failed", 
+                "failed_requirements": failed_requirements,
+                "audit_log": audit_entries,
+            }
+        elif status == "tester_failed":
+            logger.warning("🛑 Erro fatal de infraestrutura ao chamar o Tester. Abortando o fluxo TDD.")
+            return {
+                **state,
+                "status": "tester_failed", 
+                "failed_requirements": failed_requirements,
+                "audit_log": audit_entries,
+            }
+        elif status == "max_retries_exceeded":
+            logger.warning("🛑 O ciclo TDD excedeu o número máximo de iterações permitidas. Abortando o fluxo TDD.")
+            return {
+                **state,
+                "status": "max_retries_exceeded", 
                 "failed_requirements": failed_requirements,
                 "audit_log": audit_entries,
             }

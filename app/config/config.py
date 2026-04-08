@@ -24,10 +24,10 @@ class Config:
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
     
     CHAT_MODEL = "openai"
-    MODEL = "o4-mini"
+    MODEL = "o4-mini" # 100 mil tokens por minuto
     TEMPERATURE = 1.0
     MAX_ITERATIONS = 12
-    MAX_INFRA_RETRIES = 2
+    MAX_INFRA_RETRIES = 3
     WORKSPACE_PATH = "workspace"
     PLAN_KEY = "tdd_plan_queue"
 

@@ -85,7 +85,7 @@ class TDDOrchestrator:
 
         def route_evaluator(state: AgentState) -> Literal["tdd_execution", "quality_gate", END]:
             status = state.get("status")
-            if status == "sandbox_failed":
+            if status in ("sandbox_failed", "tester_failed", "developer_failed", "max_retries_exceeded"):
                 return END
             if status == "next_req":
                 return "tdd_execution"
@@ -140,10 +140,6 @@ class TDDOrchestrator:
                         },
                     },
                 )
-
-                if result.get("status") == "sandbox_failed":
-                    logger.error("🛑 O processo foi abortado precocemente por falha na nuvem E2B.")
-                    logger.info("➡️  Retornando estado final para salvamento local dos arquivos...")
 
                 return result
         finally:
