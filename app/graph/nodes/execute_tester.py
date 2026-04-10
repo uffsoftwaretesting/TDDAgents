@@ -18,7 +18,7 @@ def node_execute_tester(state: AgentState) -> AgentState:
     if is_review_mode:
         logger.info("🔧 TESTER: MODO REVISÃO — corrigindo testes potencialmente incorretos")
     else:
-        logger.info("✍️  TESTER: Escrevendo testes para o sub-requisito atual")
+        logger.info("✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual")
 
     reviewer_msgs = state.get("reviewer_messages", [])
     feedback = reviewer_msgs[-1].content if is_review_mode and reviewer_msgs and hasattr(reviewer_msgs[-1], "content") else ""

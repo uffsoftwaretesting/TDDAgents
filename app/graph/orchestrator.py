@@ -96,13 +96,14 @@ class TDDOrchestrator:
 
         return workflow.compile(checkpointer=checkpointer)
 
-    def run(self, specification: str) -> AgentState:
+    def run(self, specification: str, requirements: str) -> AgentState:
         logger.info("📦 Inicializando E2B Cloud Sandbox...")
         sandbox = Sandbox.create(api_key=Config.E2B_API_KEY)
         sandbox_id = sandbox.sandbox_id
 
         initial_state: AgentState = {
             "specification": specification,
+            "requirements": requirements,
             "plan": [],
             "plan_index": 0,
             "current_sub_req": "",

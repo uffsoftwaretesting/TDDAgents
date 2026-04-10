@@ -19,7 +19,7 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
     infra_retries = state.get("infra_retries", 0)
 
     logger.info("\n" + "-" * 80)
-    logger.info(f"🔴 FASE 2: RUNNER RED (Verificação de Falha) | Iteração {iteration}/{max_retries_state}")
+    logger.info(f"🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração {iteration}/{max_retries_state}")
     logger.info("-" * 80)
 
     # 1. Executa os testes na E2B Sandbox ativa

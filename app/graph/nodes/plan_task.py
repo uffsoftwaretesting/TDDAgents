@@ -12,7 +12,7 @@ logger = logging.getLogger("TDDOrchestrator")
 
 def node_plan_task(state: AgentState) -> AgentState:
     logger.info("\n" + "=" * 80)
-    logger.info("📋 FASE 1: PLANEJAMENTO (PLANNER)")
+    logger.info("📋 PLANEJAMENTO (PLANNER)")
     logger.info("=" * 80)
     logger.info(f"📌 Especificação: {state['specification'][:100]}...")
 

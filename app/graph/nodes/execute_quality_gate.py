@@ -8,7 +8,7 @@ logger = logging.getLogger("TDDOrchestrator")
 def node_execute_quality_gate(state: AgentState) -> AgentState:
     """Nó final que avalia a qualidade do código produzido antes de encerrar."""
     logger.info("\n" + "=" * 80)
-    logger.info("🛡️  FASE FINAL: QUALITY GATE (Auditoria de Código)")
+    logger.info("🛡️  ETAPA FINAL: QUALITY GATE (Auditoria de Código)")
     logger.info("=" * 80)
     
     impl_code = state.get("implementation_code", "")

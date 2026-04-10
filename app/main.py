@@ -28,7 +28,7 @@ def make_thread_id(specification: str) -> str:
     return "tdd-" + hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 
-def run_requirements_gathering() -> str:
+def run_requirements_gathering() -> tuple[str, str]:
     """Fase interativa de levantamento de requisitos."""
     print("\n" + "=" * 80)
     print("🤖  FASE 1: LEVANTAMENTO DE REQUISITOS (PRODUCT MANAGER)")
@@ -50,11 +50,13 @@ def run_requirements_gathering() -> str:
     final_state = orchestrator.run(initial_input)
     
     spec = final_state.get("final_specification", "")
+    reqs = final_state.get("conversation_history", "")
+    
     if not spec:
         print("\n❌ Falha crítica: O Engenheiro não conseguiu gerar a especificação.")
         sys.exit(1)
         
-    return spec
+    return spec, reqs
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,7 +81,7 @@ def main() -> None:
     args = parse_args()
 
     # ── Fase 1: Levantamento de Requisitos ────────────────────────────────────
-    specification = run_requirements_gathering()
+    specification, requirements = run_requirements_gathering()
 
     # ── Resolução do thread_id ────────────────────────────────────────────────
     if args.thread_id:
@@ -92,11 +94,23 @@ def main() -> None:
         thread_id = make_thread_id(specification)
         logger.info(f"🔑 thread_id derivado da especificação: {thread_id}")
 
+    # ── Configuração de Workspace e Logs ──────────────────────────────────────
+    workspace_dir = f"workspace_output_{thread_id}"
+    os.makedirs(workspace_dir, exist_ok=True)
+    
+    # Exporta todo o tráfego do logger para o .txt no novo diretório
+    log_file_path = os.path.join(workspace_dir, "execution_logs.txt")
+    file_handler = logging.FileHandler(log_file_path, mode="w", encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logging.getLogger().addHandler(file_handler)
+
     # ── Fase 2: Execução TDD ──────────────────────────────────────────────────
     print("\n" + "=" * 80)
     print("🚀  FASE 2: ORQUESTRAÇÃO TDD MULTI-AGENTE (SANDBOX E2B)")
     print("=" * 80)
     print(f"🔑 Thread ID: {thread_id}")
+    print(f"📂 Output Directory: ./{workspace_dir}/")
     print("📜 Prévia da Especificação Técnica que guiará os agentes:")
     print("-" * 80)
     print(f"{specification[:500]}...\n\n[CONTINUA NA MEMÓRIA DOS AGENTES...]\n")
@@ -105,72 +119,64 @@ def main() -> None:
     orchestrator = TDDOrchestrator(task_key=thread_id)
     
     try:
-        final_state = orchestrator.run(specification=specification)
+        final_state = orchestrator.run(specification=specification, requirements=requirements)
     except KeyboardInterrupt:
         print("\n🛑 Execução TDD interrompida pelo usuário de forma segura.")
         sys.exit(0)
 
-    # ── Resultado ─────────────────────────────────────────────────────────────
+    # ── Resultado e Extração ──────────────────────────────────────────────────
     final_status = final_state.get("status", "unknown")
     failed = final_state.get("failed_requirements", [])
+    file_system = final_state.get("file_system", {})
+    plan = final_state.get("plan", [])
 
-    if final_status in ("plan_complete", "completed_with_review"):
+    if final_status in ("plan_complete", "completed_with_review", "completed_successfully"):
         print("\n✅  PIPELINE CONCLUÍDO COM SUCESSO!")
-
-        file_system = final_state.get("file_system", {})
-        if file_system:
-            print("\n💾 Extraindo arquivos da Sandbox para a sua máquina local...")
-            workspace_dir = "workspace_output"
-
-            for filepath, content in file_system.items():
-                clean_path = filepath.lstrip("/")
-                if clean_path.startswith("home/user/"):
-                    clean_path = clean_path.replace("home/user/", "", 1)
-                
-                full_path = os.path.join(workspace_dir, clean_path)
-
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
-
-                with open(full_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-            print(f"📁 Todos os arquivos foram salvos na pasta: ./{workspace_dir}/")
-
     else:
         print(f"\n⚠️  PIPELINE FINALIZADO COM STATUS: '{final_status}'")
 
-        file_system = final_state.get("file_system", {})
-        plan = final_state.get("plan", [])
-        
-        if file_system or plan:
-            print("\n💾 Extraindo arquivos da Sandbox para a sua máquina local...")
-            workspace_dir = "workspace_output"
-            os.makedirs(workspace_dir, exist_ok=True) # Garante que a pasta base exista
+    print(f"\n💾 Extraindo artefatos para a máquina local ({workspace_dir}/)...")
 
-            # 1. Extrai o código-fonte gerado
-            if file_system:
-                for filepath, content in file_system.items():
-                    clean_path = filepath.lstrip("/")
-                    if clean_path.startswith("home/user/"):
-                        clean_path = clean_path.replace("home/user/", "", 1)
-                    
-                    full_path = os.path.join(workspace_dir, clean_path)
-                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
-
-                    with open(full_path, "w", encoding="utf-8") as f:
-                        f.write(content)
+    # 1. Extrai o código-fonte
+    if file_system:
+        for filepath, content in file_system.items():
+            clean_path = filepath.lstrip("/")
+            if clean_path.startswith("home/user/"):
+                clean_path = clean_path.replace("home/user/", "", 1)
             
-            # 2. Extrai o plano e salva como planner.txt na raiz do workspace
-            if plan:
-                plan_path = os.path.join(workspace_dir, "planner.txt")
-                with open(plan_path, "w", encoding="utf-8") as f:
-                    f.write("PLANO DE ENGENHARIA E TDD\n")
-                    f.write("================================================================================\n")
-                    for i, item in enumerate(plan):
-                        f.write(f"{i+1}. {item}\n")
-                    f.write("================================================================================\n")
-                print("📝 Arquivo 'planner.txt' gerado com sucesso!")
+            full_path = os.path.join(workspace_dir, clean_path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
-            print(f"\n📁 Todos os arquivos foram salvos na pasta: ./{workspace_dir}/")
+            with open(full_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+    # 2. Extrai o planner.txt
+    if plan:
+        plan_path = os.path.join(workspace_dir, "planner.txt")
+        with open(plan_path, "w", encoding="utf-8") as f:
+            f.write("PLANO DE SUB-REQUISITOS TDD\n")
+            f.write("================================================================================\n")
+            for i, item in enumerate(plan):
+                f.write(f"{i+1}. {item}\n")
+            f.write("================================================================================\n")
+
+    # 3. Extrai as especificações do Engenheiro
+    spec_path = os.path.join(workspace_dir, "engineer_specifications.txt")
+    with open(spec_path, "w", encoding="utf-8") as f:
+        f.write("ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO\n")
+        f.write("================================================================================\n")
+        f.write(specification)
+
+    # 4. Extrai o histórico dos requisitos validados
+    reqs_path = os.path.join(workspace_dir, "confirmed_user_requirements.txt")
+    with open(reqs_path, "w", encoding="utf-8") as f:
+        f.write("REQUISITOS ENVIADOS PELO USUÁRIO\n")
+        f.write("================================================================================\n")
+        for req in requirements:
+            f.write(f"{req}")
+        f.write("================================================================================\n")
+
+    print(f"📁 Todos os artefatos e logs foram salvos com sucesso!")
 
     if failed:
         print(f"\n⚠️  {len(failed)} requisito(s) não puderam ser satisfeitos:")
@@ -179,7 +185,6 @@ def main() -> None:
 
     print(f"\n🔑 Thread ID desta execução: {thread_id}")
     print("   (Para inspecionar o estado ou continuar futuramente, use --thread-id)\n")
-
 
 if __name__ == "__main__":
     main()

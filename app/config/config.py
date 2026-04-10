@@ -24,7 +24,7 @@ class Config:
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
     
     CHAT_MODEL = "openai"
-    MODEL = "o4-mini" # 100 mil tokens por minuto
+    MODEL = "o4-mini"
     TEMPERATURE = 1.0
     MAX_ITERATIONS = 12
     MAX_INFRA_RETRIES = 3
@@ -35,6 +35,7 @@ class Config:
 class AgentState(TypedDict):
     # ── Dados principais da tarefa ────────────────────────────────────────────
     specification: str
+    requirements: str
     plan: list[str]
     plan_index: int
     current_sub_req: str

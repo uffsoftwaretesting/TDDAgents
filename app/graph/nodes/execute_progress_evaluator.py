@@ -36,7 +36,7 @@ def _clear_agent_histories(state: AgentState) -> dict:
 
 def node_execute_progress_evaluator(state: AgentState) -> AgentState:
     logger.info("\n" + "=" * 80)
-    logger.info("📊 FASE 6: AVALIADOR DE PROGRESSO")
+    logger.info("📊 ETAPA 5: AVALIADOR DE PROGRESSO")
     logger.info("=" * 80)
 
     current_index = state.get("plan_index", 0)
