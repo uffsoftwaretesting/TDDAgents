@@ -95,13 +95,7 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 "audit_log": audit_entries,
             }
         elif status == "max_retries_exceeded":
-            logger.warning("🛑 O ciclo TDD excedeu o número máximo de iterações permitidas. Abortando o fluxo TDD.")
-            return {
-                **state,
-                "status": "max_retries_exceeded", 
-                "failed_requirements": failed_requirements,
-                "audit_log": audit_entries,
-            }
+            logger.warning("Excedeu o número máximo de tentativas para este sub-requisito. Abortando o fluxo TDD.")
 
     else:
         logger.info(f"✅ Sub-requisito concluído: '{current_req}'")

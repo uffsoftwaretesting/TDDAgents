@@ -17,7 +17,7 @@ def node_execute_developer(state: AgentState) -> AgentState:
     infra_retries = state.get("infra_retries", 0)
 
     logger.info("\n" + "=" * 80)
-    logger.info(f"💻 FASE 4: DEVELOPER (IMPLEMENTAÇÃO) | Iteração {iteration}/{max_retries}")
+    logger.info(f"💻 FASE 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração {iteration}/{max_retries}")
     logger.info("=" * 80)
     logger.info(f"🎯 Objetivo: Implementar '{sub_req}'")
 

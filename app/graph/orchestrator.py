@@ -85,7 +85,7 @@ class TDDOrchestrator:
 
         def route_evaluator(state: AgentState) -> Literal["tdd_execution", "quality_gate", END]:
             status = state.get("status")
-            if status in ("sandbox_failed", "tester_failed", "developer_failed", "max_retries_exceeded"):
+            if status in ("sandbox_failed", "tester_failed", "developer_failed"):
                 return END
             if status == "next_req":
                 return "tdd_execution"
