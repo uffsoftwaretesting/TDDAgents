@@ -4,6 +4,7 @@ import uuid
 import argparse
 import os
 import sys
+import textwrap
 
 from dotenv import load_dotenv
 
@@ -112,6 +113,18 @@ def main() -> None:
         f.write("================================================================================\n")
         for idx, prompt in enumerate(user_prompts, start=1):
             f.write(f"{idx}. {prompt}\n")
+        f.write("================================================================================\n")
+
+    initial_prompt_path = os.path.join(workspace_dir, "initial_user_prompt.txt")
+    initial_prompt = user_prompts[0] if user_prompts else ""
+    wrapped_initial_prompt = "\n".join(
+        textwrap.fill(line, width=80) if line.strip() else ""
+        for line in (initial_prompt.splitlines() or [initial_prompt])
+    )
+    with open(initial_prompt_path, "w", encoding="utf-8") as f:
+        f.write("PROMPT INICIAL ENVIADO PELO USUARIO\n")
+        f.write("================================================================================\n")
+        f.write((wrapped_initial_prompt or "(vazio)") + "\n")
         f.write("================================================================================\n")
 
     # ── Fase 2: Execução TDD ──────────────────────────────────────────────────
