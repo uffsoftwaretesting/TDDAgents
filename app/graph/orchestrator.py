@@ -3,7 +3,9 @@ from typing import Literal
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.memory import InMemorySaver
 from e2b_code_interpreter import Sandbox
+from psycopg import OperationalError
 
 from app.config.config import AgentState, Config
 from app.graph.nodes import (
@@ -62,6 +64,18 @@ logger = logging.getLogger("TDDOrchestrator")
 class TDDOrchestrator:
     def __init__(self, task_key: str = "tdd_task"):
         self.task_key = task_key
+
+    def _invoke_graph(self, initial_state: AgentState, checkpointer) -> AgentState:
+        graph = self._build_main_graph(checkpointer)
+        return graph.invoke(
+            initial_state,
+            config={
+                "recursion_limit": 150,
+                "configurable": {
+                    "thread_id": self.task_key
+                },
+            },
+        )
 
     def _build_main_graph(self, checkpointer):
         workflow = StateGraph(AgentState)
@@ -123,26 +137,23 @@ class TDDOrchestrator:
         logger.info("\n" + "#" * 80)
         logger.info("🚀 INICIANDO ORQUESTRADOR TDD (LangGraph + Postgres + E2B Sandbox)")
         logger.info(f"☁️  Sandbox ID ativa: {sandbox_id}")
-        logger.info(f"🔑 Thread ID : {self.task_key}  (mude para iniciar uma execução limpa)")
         logger.info("#" * 80 + "\n")
 
         try:
-            with PostgresSaver.from_conn_string(Config.POSTGRES_URL) as checkpointer:
-                checkpointer.setup()
-
-                graph = self._build_main_graph(checkpointer)
-
-                result = graph.invoke(
-                    initial_state,
-                    config={
-                        "recursion_limit": 150,
-                        "configurable": {
-                            "thread_id": self.task_key
-                        },
-                    },
+            try:
+                with PostgresSaver.from_conn_string(Config.POSTGRES_URL) as checkpointer:
+                    checkpointer.setup()
+                    logger.info("🗄️ Checkpointer ativo: PostgresSaver")
+                    return self._invoke_graph(initial_state, checkpointer)
+            except OperationalError as exc:
+                logger.warning(
+                    "⚠️ Não foi possível conectar ao Postgres (%s). "
+                    "Executando com InMemorySaver sem persistência entre reinícios.",
+                    exc,
                 )
-
-                return result
+                memory_checkpointer = InMemorySaver()
+                logger.info("🧠 Checkpointer ativo: InMemorySaver (fallback)")
+                return self._invoke_graph(initial_state, memory_checkpointer)
         finally:
             if 'sandbox' in locals():
                 logger.info(f"🧹 Encerrando Sandbox {sandbox_id}...")

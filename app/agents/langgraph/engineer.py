@@ -8,9 +8,6 @@ from app.utils.prompt_loader import load_prompt
 logger = logging.getLogger("TDDOrchestrator")
 
 def generate_specification(requirements: str, conversation_history: str = "") -> str:
-    logger.info("=" * 70)
-    logger.info("⚙️ ENGENHEIRO - Escrevendo Especificação Técnica Formal")
-    logger.info("=" * 70)
     
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     

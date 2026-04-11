@@ -60,6 +60,7 @@ class RequirementsOrchestrator:
         
         initial_state: RequirementsState = {
             "user_input": initial_user_input,
+            "user_prompts": [initial_user_input],
             "conversation_history": "",
             "current_response": "",
             "needs_clarification": False,

@@ -37,12 +37,16 @@ def node_user_input(state: RequirementsState) -> RequirementsState:
 
     logger.info(f"📝 Resposta do usuário: {user_response}")
 
+    user_prompts = list(state.get("user_prompts", []))
+    user_prompts.append(user_response)
+
     # Confirmação estática e explícita: apenas '/sim' confirma.
     is_confirmation = bool(state.get("has_checklist")) and user_response.lower() == "/sim"
 
     new_state: RequirementsState = {
         **state,
         "user_input": user_response,
+        "user_prompts": user_prompts,
         "user_confirmed": is_confirmation,
         "status": "confirmed" if is_confirmation else "continue_analysis",
     }

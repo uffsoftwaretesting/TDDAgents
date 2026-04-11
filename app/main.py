@@ -28,7 +28,7 @@ def make_thread_id(specification: str) -> str:
     return "tdd-" + hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 
-def run_requirements_gathering() -> tuple[str, str]:
+def run_requirements_gathering() -> tuple[str, str, list[str]]:
     """Fase interativa de levantamento de requisitos."""
     print("\n" + "=" * 80)
     print("🤖  FASE 1: LEVANTAMENTO DE REQUISITOS (PRODUCT MANAGER)")
@@ -51,12 +51,13 @@ def run_requirements_gathering() -> tuple[str, str]:
     
     spec = final_state.get("final_specification", "")
     reqs = final_state.get("conversation_history", "")
+    user_prompts = final_state.get("user_prompts", [initial_input])
     
     if not spec:
         print("\n❌ Falha crítica: O Engenheiro não conseguiu gerar a especificação.")
         sys.exit(1)
         
-    return spec, reqs
+    return spec, reqs, user_prompts
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,7 +82,7 @@ def main() -> None:
     args = parse_args()
 
     # ── Fase 1: Levantamento de Requisitos ────────────────────────────────────
-    specification, requirements = run_requirements_gathering()
+    specification, requirements, user_prompts = run_requirements_gathering()
 
     # ── Resolução do thread_id ────────────────────────────────────────────────
     if args.thread_id:
@@ -105,11 +106,18 @@ def main() -> None:
     file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     logging.getLogger().addHandler(file_handler)
 
+    prompts_path = os.path.join(workspace_dir, "user_prompts.txt")
+    with open(prompts_path, "w", encoding="utf-8") as f:
+        f.write("PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL\n")
+        f.write("================================================================================\n")
+        for idx, prompt in enumerate(user_prompts, start=1):
+            f.write(f"{idx}. {prompt}\n")
+        f.write("================================================================================\n")
+
     # ── Fase 2: Execução TDD ──────────────────────────────────────────────────
     print("\n" + "=" * 80)
     print("🚀  FASE 2: ORQUESTRAÇÃO TDD MULTI-AGENTE (SANDBOX E2B)")
     print("=" * 80)
-    print(f"🔑 Thread ID: {thread_id}")
     print(f"📂 Output Directory: ./{workspace_dir}/")
     print("📜 Prévia da Especificação Técnica que guiará os agentes:")
     print("-" * 80)

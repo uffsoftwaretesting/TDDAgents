@@ -12,12 +12,17 @@ logger = logging.getLogger("TDDOrchestrator")
 
 def node_execute_tester(state: AgentState) -> AgentState:
     sub_req = state["current_sub_req"]
+    is_first_sub_req = state.get("plan_index", 0) == 0
     is_review_mode = state.get("status") == "test_review_needed"
     infra_retries = state.get("infra_retries", 0)
 
     if is_review_mode:
         logger.info("🔧 TESTER: MODO REVISÃO — corrigindo testes potencialmente incorretos")
     else:
+        if is_first_sub_req and state.get("iteration", 1) == 1:
+            logger.info("\n" + "=" * 80)
+            logger.info(f"⏭️  PRÓXIMA TAREFA: '{sub_req}'")
+            logger.info("=" * 80)
         logger.info("✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual")
 
     reviewer_msgs = state.get("reviewer_messages", [])

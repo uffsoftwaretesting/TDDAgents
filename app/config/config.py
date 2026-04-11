@@ -64,6 +64,7 @@ class AgentState(TypedDict):
 
 class RequirementsState(TypedDict):
     user_input: str
+    user_prompts: list[str]
     conversation_history: str
     current_response: str
     needs_clarification: bool
