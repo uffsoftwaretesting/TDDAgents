@@ -1,0 +1,48 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Você é um engenheiro de software Python especializado em métodos numéricos e computação científica. Utilize bibliotecas de computação científica amplamente utilizadas no ecossistema Python, como numpy, scipy ou outras bibliotecas padrão adequadas, para implementar uma solução numérica robusta e eficiente. Sua tarefa é implementar uma função Python que calcula a integral definida de uma função utilizando especificamente o método da regra composta do trapézio. O objetivo principal é produzir uma implementação correta, estável e funcional que satisfaça o contrato da função e funcione corretamente dentro de um sistema automático de avaliação. A função obrigatoriamente deve se chamar solve e possuir a assinatura solve(f, a, b, n). A função deve retornar exclusivamente um único valor do tipo float correspondente à aproximação da integral definida da função f(x) no intervalo fechado [a, b]. O parâmetro f será uma função Python que recebe um escalar x e retorna f(x). O parâmetro a representa o limite inferior de integração, b representa o limite superior e n representa o número de subintervalos utilizados na discretização do intervalo. A discretização deve utilizar exatamente n subintervalos uniformes no intervalo [a, b], com passo de malha definido como h igual a (b menos a) dividido por n. A implementação deve aplicar explicitamente a regra composta do trapézio, cuja formulação é dada por h dividido por 2 multiplicado pela soma de f(a) mais duas vezes a soma dos valores f(x_i) para todos os pontos internos da malha mais f(b), onde os pontos internos são definidos por x_i igual a a mais i vezes h para i variando de 1 até n menos 1. O código deve ser determinístico, não deve imprimir nada no console, não deve realizar leitura ou escrita em arquivos e não deve depender de variáveis globais. A função deve funcionar corretamente para qualquer função contínua passada como argumento. O sistema de avaliação executará múltiplas chamadas da função solve com diferentes valores de n e diferentes funções f para medir o erro absoluto da aproximação em relação ao valor exato da integral e estimar automaticamente a ordem de convergência do método por meio de regressão log log do erro em função do tamanho da malha. Portanto, é essencial que a implementação respeite rigorosamente a discretização com exatamente n subintervalos e siga fielmente a formulação matemática da regra composta do trapézio para produzir resultados numericamente consistentes sob refinamento sucessivo da malha. A saída final deve conter exclusivamente o código Python completo da função solve pronto para ser importado por outro módulo Python, sem qualquer texto adicional, sem blocos de teste e sem código executável no nível global.
+[Analista]: Checklist de Requisitos Técnicos para implementação da função solve (Regra Composta do Trapézio):
+
+1. Assinatura da função
+   • Nome: solve
+   • Parâmetros: f (callable escalar → escalar), a (float), b (float), n (int)
+   • Retorno: float
+
+2. Cálculo do passo de malha (h)
+   • h = (b - a) / n
+   • Validar que n > 0 e b ≥ a (levantar ValueError ou retorno apropriado em caso inválido)
+
+3. Avaliação nos pontos da malha
+   • Calcular f(a) e f(b) apenas uma vez cada
+   • Para i de 1 até n-1:
+       – x_i = a + i * h
+       – Avaliar f(x_i) e acumular soma interna
+
+4. Fórmula da regra composta do trapézio
+   • Soma_total = f(a) + 2 * (soma dos f(x_i) para i=1..n-1) + f(b)
+   • Integral ≈ (h / 2) * Soma_total
+
+5. Características de qualidade
+   • Determinismo: não usar variáveis globais, não imprimir no console, não ler/escrever arquivos
+   • Robustez: checar tipos de entrada e lançar exceções claras para entradas inválidas
+   • Precisão: seguir exatamente a discretização com n subintervalos uniformes
+   • Estabilidade numérica: evitar diferenças na ordem de somas que alterem o resultado sob refinamento
+
+6. Dependências e performance
+   • Implementação em Python puro ou usando numpy para vetorização (opcional)
+   • Evitar overhead desnecessário de chamadas Python em loops se for usada vetorização
+
+7. Documentação mínima
+   • Docstring na função explicando parâmetros, retorno e método usado
+
+8. Critérios de validação automatizada
+   • Testes de unidade cobrindo casos:
+     – Funções polinomiais (exata)
+     – Funções trigonométricas e exponenciais
+     – n = 1 e valores maiores de n
+     – b = a (resultado zero)
+     – Passo não inteiro (b-a)/n não integral
+   • Medição de erro absoluto em relação ao valor exato
+   • Verificação da ordem de convergência por regressão log–log do erro versus h
+
+Posso prosseguir para a equipe de engenharia?================================================================================
