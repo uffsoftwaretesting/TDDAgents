@@ -2,7 +2,7 @@
       RELATORIO DE METRICAS DE QUALIDADE (SONAR)      
 ======================================================
 Projeto: workspace_output_tdd-fd7d82b0bf208ff2
-Gerado em: 2026-04-12 15:07:05
+Gerado em: 2026-04-12 15:55:39
 Linhas de Código Úteis (NCLOC): 53
 Total de Code Smells:           1
 
