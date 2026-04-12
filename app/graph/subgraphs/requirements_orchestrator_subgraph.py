@@ -56,7 +56,7 @@ class RequirementsOrchestrator:
         return workflow.compile()
     
     def run(self, initial_user_input: str) -> RequirementsState:
-        logger.info("🚀 Iniciando Orquestração de Requisitos Interativa...")
+        logger.info("\n🚀 Iniciando Orquestração de Requisitos Interativa...")
         
         initial_state: RequirementsState = {
             "user_input": initial_user_input,
