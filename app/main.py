@@ -61,6 +61,50 @@ def run_requirements_gathering() -> tuple[str, str, list[str]]:
     return spec, reqs, user_prompts
 
 
+def format_dialogue_text(dialogue: str, width: int = 88) -> str:
+    """Formata o diálogo para leitura em arquivo texto com quebra de linha."""
+    if not dialogue or not dialogue.strip():
+        return "(vazio)"
+
+    formatted_lines: list[str] = []
+    speaker_prefixes = ("[Usuário]:", "[Usuario]:", "[Analista]:")
+
+    for raw_line in dialogue.splitlines():
+        line = raw_line.strip()
+        if not line:
+            formatted_lines.append("")
+            continue
+
+        speaker = next((prefix for prefix in speaker_prefixes if line.startswith(prefix)), None)
+        if speaker:
+            content = line[len(speaker):].strip()
+            if not content:
+                formatted_lines.append(speaker)
+                continue
+
+            indent = " " * (len(speaker) + 1)
+            wrapped = textwrap.fill(
+                content,
+                width=width,
+                initial_indent=f"{speaker} ",
+                subsequent_indent=indent,
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
+            formatted_lines.append(wrapped)
+            continue
+
+        wrapped = textwrap.fill(
+            line,
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        formatted_lines.append(wrapped)
+
+    return "\n".join(formatted_lines)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Executa o pipeline de agentes TDD Enterprise (E2B Sandbox Edition).",
@@ -107,12 +151,27 @@ def main() -> None:
     file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     logging.getLogger().addHandler(file_handler)
 
+    formatted_requirements = format_dialogue_text(requirements)
+
     prompts_path = os.path.join(workspace_dir, "user_prompts.txt")
     with open(prompts_path, "w", encoding="utf-8") as f:
         f.write("PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL\n")
         f.write("================================================================================\n")
         for idx, prompt in enumerate(user_prompts, start=1):
-            f.write(f"{idx}. {prompt}\n")
+            wrapped_prompt = textwrap.fill(
+                prompt,
+                width=88,
+                initial_indent=f"{idx}. ",
+                subsequent_indent=" " * (len(f"{idx}. ")),
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
+            f.write(wrapped_prompt + "\n")
+        f.write("================================================================================\n\n")
+
+        f.write("DIALOGO COMPLETO ENTRE USUARIO E ANALISTA\n")
+        f.write("================================================================================\n")
+        f.write(formatted_requirements + "\n")
         f.write("================================================================================\n")
 
     initial_prompt_path = os.path.join(workspace_dir, "initial_user_prompt.txt")
@@ -193,8 +252,7 @@ def main() -> None:
     with open(reqs_path, "w", encoding="utf-8") as f:
         f.write("REQUISITOS ENVIADOS PELO USUÁRIO\n")
         f.write("================================================================================\n")
-        for req in requirements:
-            f.write(f"{req}")
+        f.write(formatted_requirements + "\n")
         f.write("================================================================================\n")
 
     print(f"📁 Todos os artefatos e logs foram salvos com sucesso!")
