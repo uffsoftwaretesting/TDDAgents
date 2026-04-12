@@ -51,7 +51,7 @@ def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".", is_red_phase: b
             if is_red_phase:
                 logger.info("🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).")
             else:
-                logger.info("🔴 RUNNER: Testes falharam na validação.")
+                logger.info("🟢 RUNNER: Testes falharam na validação.")
                 
             return output, False
             
