@@ -1,0 +1,91 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: API de Validação de CPF
+
+## 1. Visão Geral do Sistema
+A API de Validação de CPF expõe um endpoint POST `/validate-cpf` que recebe um payload JSON com o campo `cpf` (string) e retorna um JSON indicando o CPF informado e se ele é válido ou não. A verificação dos dígitos e regras formais do CPF é delegada a uma biblioteca especializada (ex: validate-docbr ou python-cpf). A aplicação segue princípios de Clean Architecture, separando domínio, casos de uso, infraestrutura e interface, e é desenvolvida via TDD, containerizada e com CI via GitHub Actions.
+
+## 2. Estruturas de Dados e Interfaces
+
+### 2.1 Domain Layer  
+Entidade e regras de negócio independentes de frameworks:
+- **CPF**  
+  - Propriedades:  
+    - `raw: str` (CPF original)  
+    - `normalized: str` (somente dígitos, sem máscara)  
+  - Regras:  
+    - `normalized` deve ter exatamente 11 dígitos numéricos.  
+    - Não pode ser composto por todos os dígitos iguais.  
+    - Deve satisfazer cálculo dos dígitos verificadores.
+
+### 2.2 Application Layer  
+Caso de uso:
+- **ValidateCPFUseCase**  
+  - Assinatura:  
+    - `execute(raw_cpf: str) -> ValidationResult`  
+  - Fluxo:  
+    1. Recebe `raw_cpf`.  
+    2. Instancia `CPF` e normaliza ou registra erro de domínio.  
+    3. Invoca `CPFValidator.is_valid(normalized)` na infraestrutura.  
+    4. Retorna `ValidationResult(cpf_original: str, cpf_formatado: str, valid: bool)`.
+
+- **ValidationResult**  
+  - `cpf_original: str`  
+  - `cpf_formatado: str` (com máscara padrão `XXX.XXX.XXX-XX`)  
+  - `valid: bool`
+
+### 2.3 Infrastructure Layer  
+Adapter para biblioteca externa:
+- **CPFValidator** (Interface)  
+  - Método: `is_valid(cpf: str) -> bool`
+- **LibraryCPFValidator** (Implementação)  
+  - Constrói adapter sobre `validate-docbr` ou `python-cpf`.
+
+### 2.4 Interface Layer  
+FastAPI + Pydantic:
+- **Schemas**  
+  - `CPFRequestSchema`:  
+    - `cpf: str` (obrigatório)  
+  - `CPFResponseSchema`:  
+    - `cpf: str`  
+    - `valid: bool`
+- **Router**  
+  - POST `/validate-cpf`  
+    - Request: `CPFRequestSchema`  
+    - Response 200: `CPFResponseSchema`  
+    - Response 422: payload malformado ou campo ausente  
+    - Erros de domínio ou validação retornam `{"cpf": <input>, "valid": false}` com status 200.
+
+## 3. Casos de Borda e Validações (Edge Cases)
+- Campo `cpf` ausente ou tipo não-string → HTTP 422 (Pydantic).  
+- `null` em `cpf` → HTTP 422.  
+- String vazia `""` → válido como request; retorna 200 + `valid: false`.  
+- Contém caracteres não numéricos (letras/símbolos) → normaliza removendo não-dígitos; se resultado não tiver 11 dígitos → `valid: false`.  
+- Formato com máscara (`123.456.789-09`) ou sem (`12345678909`) → ambos normalizados.  
+- Tamanho diferente de 11 dígitos depois de normalização → `valid: false`.  
+- Todos os dígitos iguais (`11111111111`) → `valid: false`.  
+- Dígitos verificadores incorretos → `valid: false`.  
+- CPF válido → `valid: true`.  
+- Entrada com espaços em branco → trim antes da normalização.  
+- Payload extra com campos adicionais → descartados por Pydantic (ou configurável como erro).
+
+## 4. Contexto Técnico
+- Linguagem: Python 3.9+  
+- Framework Web: FastAPI  
+- Paradigma: REST JSON, Clean Architecture em camadas (domain, application, infrastructure, interface)  
+- Configuração: variáveis via `.env` carregadas por `python-dotenv`  
+- Máscara de CPF padrão: `XXX.XXX.XXX-XX` para saída formatada  
+- Containerização: imagem `python:3.x-slim`, multi-stage build  
+- Composição local: `docker-compose.yml` mapeando porta e variáveis de ambiente  
+- Desenvolvimento: TDD com cobertura mínima de 90%  
+- CI/CD: GitHub Actions rodando instalação, testes e build a cada push/PR
+
+## 5. Dependências Base (Core Dependencies)
+- FastAPI  
+- Uvicorn  
+- python-dotenv  
+- validate-docbr _ou_ python-cpf  
+- Pydantic  
+- pytest, pytest-cov  
+- Docker, docker-compose  
+- GitHub Actions (workflow YAML)

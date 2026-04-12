@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8 black
+
+      - name: Run tests with coverage
+        run: pytest --cov=src --cov-fail-under=90
+
+      - name: Lint with Flake8
+        run: flake8 src
+
+      - name: Check formatting with Black
+        run: black --check src
+
+      - name: Build Docker image
+        run: docker build . --file Dockerfile --tag cpf-api:ci
+
+      - name: Run Docker container
+        run: |
+          docker run -d --name cpf-api-ci -p 8000:8000 cpf-api:ci
+
+      - name: Wait for API to be available
+        run: |
+          for i in {1..10}; do
+            if curl -s -X POST http://localhost:8000/validate-cpf \
+                -H "Content-Type: application/json" \
+                -d '{"cpf":""}' | grep -q '"valid":false'; then
+              echo "API is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not respond in time" && exit 1
+
+      - name: Stop and remove Docker container
+        if: always()
+        run: |
+          docker stop cpf-api-ci
+          docker rm cpf-api-ci
