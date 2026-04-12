@@ -153,7 +153,7 @@ def main() -> None:
 
     formatted_requirements = format_dialogue_text(requirements)
 
-    prompts_path = os.path.join(workspace_dir, "user_prompts.txt")
+    prompts_path = os.path.join(workspace_dir, "user_analyst_dialogue.txt")
     with open(prompts_path, "w", encoding="utf-8") as f:
         f.write("PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL\n")
         f.write("================================================================================\n")
