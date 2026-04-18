@@ -26,7 +26,7 @@ class Config:
     CHAT_MODEL = "openai"
     MODEL = "o4-mini"
     TEMPERATURE = 1.0
-    MAX_ITERATIONS = 12
+    MAX_ITERATIONS = 15
     MAX_INFRA_RETRIES = 3
     WORKSPACE_PATH = "workspace"
     PLAN_KEY = "tdd_plan_queue"

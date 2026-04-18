@@ -27,7 +27,7 @@ def apply_agent_action_to_sandbox(sandbox_id: str, action: AgentAction, current_
         if action.dependencies:
             deps_str = " ".join(action.dependencies)
             logger.info(f"📦 Instalando dependências na Sandbox: {deps_str}")
-            sandbox.commands.run(f"pip install {deps_str}")
+            sandbox.commands.run(f"pip install {deps_str}", user="root")
 
         # 2. Escrever Arquivos (Models, Routers, Schemas, etc.)
         for file_obj in action.files_to_write:
@@ -36,7 +36,7 @@ def apply_agent_action_to_sandbox(sandbox_id: str, action: AgentAction, current_
             # Garante que os diretórios existam
             if "/" in file_obj.filepath:
                 dir_path = file_obj.filepath.rsplit('/', 1)[0]
-                sandbox.commands.run(f"mkdir -p {dir_path}")
+                sandbox.commands.run(f"mkdir -p {dir_path}", user="root")
                 
             # Escreve o arquivo na Sandbox
             sandbox.files.write(file_obj.filepath, file_obj.content)
@@ -46,7 +46,7 @@ def apply_agent_action_to_sandbox(sandbox_id: str, action: AgentAction, current_
         # 3. Executar Comandos Bash de Configuração (Migrations, variáveis de ambiente, etc.)
         for cmd in action.bash_commands:
             logger.info(f"🔧 Executando comando: {cmd}")
-            result = sandbox.commands.run(cmd, timeout=60)
+            result = sandbox.commands.run(cmd, user="root")
             execution_logs += f"\n$ {cmd}\n{result.stdout}"
             if result.stderr:
                 execution_logs += f"\nSTDERR:\n{result.stderr}"

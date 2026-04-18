@@ -32,12 +32,13 @@ def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".", is_red_phase: b
         # Garante o pytest
         sandbox.commands.run(
             "python -c 'import pytest' 2>/dev/null || pip install pytest -q",
+            user="root",
             timeout=_PYTEST_TIMEOUT, request_timeout=_REQUEST_TIMEOUT
         )
 
         cmd = f'PYTHONPATH=. python -m pytest "{test_path}" {_PYTEST_FLAGS}'
         result = sandbox.commands.run(
-            cmd, timeout=_PYTEST_TIMEOUT, request_timeout=_REQUEST_TIMEOUT
+            cmd, user="root", timeout=_PYTEST_TIMEOUT, request_timeout=_REQUEST_TIMEOUT
         )
         
         logger.info("✅ RUNNER: Todos os testes passaram.")

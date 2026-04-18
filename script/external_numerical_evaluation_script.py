@@ -21,13 +21,13 @@ from pathlib import Path
 #  CONFIGURAÇÃO DO USUÁRIO — EDITE APENAS ESTE BLOCO
 # =============================================================================
 
-AGENT_MODULE_PATH = "workspace_output_tdd-e889977ddc016068/src/integrador_trapezio.py"
+AGENT_MODULE_PATH = "workspace_output_tdd-f03910dda2dcd102/src/solve.py"
 FUNCTION_NAME     = "solve"
-CHALLENGE_ID      = 3
+CHALLENGE_ID      = 1
 
 GROUND_TRUTH_FILE = Path(__file__).parent / "ground_truth.json"
 
-METHOD_KEY      = "trapezio"
+METHOD_KEY      = "euler_explicito"
 ORDER_TOLERANCE = 0.20
 H_LEVELS        = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 
@@ -38,11 +38,20 @@ H_LEVELS        = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 
 A, B = 0.0, np.pi
 
+T0, TF = 0.0, 1.0
+Y0 = 1.0
+
 def INTEGRAND(x):
     """sin(x)/x via np.sinc para estabilidade numérica em x=0."""
     return np.sinc(x / np.pi)
 
+
+def ODE_FUNCTION(t, y):
+    """ODE de referência para cenários Euler/RK no gabarito: y' = -y."""
+    return -y
+
 INTEGRAL_EXACT = None  # preenchido após carregar o gabarito
+ODE_EXACT = None
 
 
 # =============================================================================
@@ -73,8 +82,15 @@ METHODS = {
 def _error_integracao(result, h):
     return abs(float(result) - INTEGRAL_EXACT)
 
+
+def _error_ode_ivp(result, h):
+    if isinstance(result, (list, tuple, np.ndarray)):
+        result = result[-1]
+    return abs(float(result) - ODE_EXACT)
+
 ERROR_FN = {
     "integracao": _error_integracao,
+    "ode_ivp": _error_ode_ivp,
 }
 
 
@@ -86,8 +102,14 @@ def _call_integracao(solver_fn, h):
     n = max(2, round((B - A) / h))  # round garante que n dobra quando h é dividido por 2
     return solver_fn(INTEGRAND, A, B, n)
 
+
+def _call_ode_ivp(solver_fn, h):
+    n = max(2, round((TF - T0) / h))
+    return solver_fn(ODE_FUNCTION, T0, TF, Y0, n)
+
 CALL_FN = {
     "integracao": _call_integracao,
+    "ode_ivp": _call_ode_ivp,
 }
 
 
@@ -109,6 +131,16 @@ def load_agent_module(module_path):
     path = Path(module_path).resolve()
     if not path.exists():
         raise FileNotFoundError(f"Módulo não encontrado: {path}")
+
+    # Resolve imports like "from src..." independent of workspace folder name.
+    project_root = next(
+        (parent for parent in path.parents if (parent / "src").is_dir()),
+        path.parent.parent,
+    )
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+
     spec   = importlib.util.spec_from_file_location("agent_module", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -211,7 +243,7 @@ def run_convergence_test(solver_fn, expected_order, problem_type):
 # =============================================================================
 
 def main():
-    global INTEGRAL_EXACT
+    global INTEGRAL_EXACT, ODE_EXACT
 
     method         = METHODS[METHOD_KEY]
     problem_type   = method["problem_type"]
@@ -228,6 +260,10 @@ def main():
     if problem_type == "integracao":
         INTEGRAL_EXACT = gt["valor_esperado"]
         print(f"\n[INFO] INTEGRAL_EXACT = {INTEGRAL_EXACT}")
+
+    if problem_type == "ode_ivp":
+        ODE_EXACT = gt["valor_esperado"]
+        print(f"\n[INFO] ODE_EXACT = {ODE_EXACT}")
 
     module    = load_agent_module(AGENT_MODULE_PATH)
     solver_fn = getattr(module, FUNCTION_NAME)
