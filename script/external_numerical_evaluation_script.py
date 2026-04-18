@@ -21,13 +21,13 @@ from pathlib import Path
 #  CONFIGURAÇÃO DO USUÁRIO — EDITE APENAS ESTE BLOCO
 # =============================================================================
 
-AGENT_MODULE_PATH = "workspace_output_tdd-f03910dda2dcd102/src/solve.py"
+AGENT_MODULE_PATH = "workspace_output_tdd-c79c2ec75162b2f1/src/solve.py"
 FUNCTION_NAME     = "solve"
-CHALLENGE_ID      = 1
+CHALLENGE_ID      = 3
 
 GROUND_TRUTH_FILE = Path(__file__).parent / "ground_truth.json"
 
-METHOD_KEY      = "euler_explicito"
+METHOD_KEY      = "trapezio"
 ORDER_TOLERANCE = 0.20
 H_LEVELS        = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 

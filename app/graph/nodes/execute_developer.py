@@ -4,7 +4,6 @@ from langchain_core.messages import AIMessage
 
 from app.config.config import AgentState, Config
 from app.agents.langgraph.developer import generate_code_incremental
-from app.errors.agents.handler import handle_llm_exception
 from app.utils.sandbox_utils import apply_agent_action_to_sandbox
 from app.errors.exceptions import TransientInfraError, FatalInfraError
 
@@ -27,6 +26,7 @@ def node_execute_developer(state: AgentState) -> AgentState:
     try:
         # 1. Tenta gerar o código via LLM
         action, updated_dev_history = generate_code_incremental(
+            sub_req=sub_req,
             specification=state.get("specification", ""),
             file_system=state.get("file_system", {}),
             feedback=feedback,

@@ -10,6 +10,7 @@ from app.utils.sandbox_utils import read_all_files_from_state
 logger = logging.getLogger("TDDOrchestrator")
 
 def generate_code_incremental(
+    sub_req: str,
     specification: str,
     file_system: dict,
     feedback: str = "",
@@ -31,6 +32,7 @@ def generate_code_incremental(
         )
         human_content = load_prompt(
             template_name='agents/langgraph/developer/hum_prompt_1.jinja2',
+            sub_requsite=sub_req,
             specification=specification,
             current_codebase=current_codebase,
             feedback=""
@@ -43,6 +45,7 @@ def generate_code_incremental(
         # Próximas chamadas: usa o mesmo template, mas passa o feedback
         human_content = load_prompt(
             template_name='agents/langgraph/developer/hum_prompt_1.jinja2',
+            sub_requisite=sub_req,
             current_codebase=current_codebase,
             feedback=feedback
         )
