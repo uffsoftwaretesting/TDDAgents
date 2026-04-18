@@ -14,6 +14,7 @@ from app.graph.nodes import (
     node_execute_quality_gate,
 )
 from app.graph.subgraphs.build_tdd_subgraph import build_tdd_subgraph
+from app.utils.callbacks import GlobalTokenTracker
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("TDDOrchestrator")
@@ -61,21 +62,27 @@ logger = logging.getLogger("TDDOrchestrator")
 # e reinicializações do processo.
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TDDOrchestrator:
     def __init__(self, task_key: str = "tdd_task"):
         self.task_key = task_key
+        self.token_tracker = GlobalTokenTracker()
+
+    def _build_config(self) -> dict:
+        """
+        Single place for LangGraph run config.
+        To add LangSmith tracing, extra callbacks, or change limits — do it here only.
+        """
+        return {
+            "recursion_limit": 150,
+            "configurable": {"thread_id": self.task_key},
+            "callbacks": [self.token_tracker],
+        }
 
     def _invoke_graph(self, initial_state: AgentState, checkpointer) -> AgentState:
+        self.token_tracker.reset()  # clean slate for each invocation
         graph = self._build_main_graph(checkpointer)
-        return graph.invoke(
-            initial_state,
-            config={
-                "recursion_limit": 150,
-                "configurable": {
-                    "thread_id": self.task_key
-                },
-            },
-        )
+        return graph.invoke(initial_state, config=self._build_config())
 
     def _build_main_graph(self, checkpointer):
         workflow = StateGraph(AgentState)
@@ -86,11 +93,13 @@ class TDDOrchestrator:
         workflow.add_node("quality_gate", node_execute_quality_gate)
 
         workflow.set_entry_point("planner")
-   
+
         def route_after_planner(state: AgentState) -> Literal["planner", "tdd_execution", END]:
             status = state.get("status")
-            if status == "infra_error_planner": return "planner"
-            if status == "plan_failed": return END
+            if status == "infra_error_planner":
+                return "planner"
+            if status == "plan_failed":
+                return END
             return "tdd_execution"
 
         workflow.add_conditional_edges("planner", route_after_planner)

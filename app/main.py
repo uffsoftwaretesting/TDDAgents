@@ -49,15 +49,15 @@ def run_requirements_gathering() -> tuple[str, str, list[str]]:
 
     orchestrator = RequirementsOrchestrator()
     final_state = orchestrator.run(initial_input)
-    
+
     spec = final_state.get("final_specification", "")
     reqs = final_state.get("conversation_history", "")
     user_prompts = final_state.get("user_prompts", [initial_input])
-    
+
     if not spec:
         print("\n❌ Falha crítica: O Engenheiro não conseguiu gerar a especificação.")
         sys.exit(1)
-        
+
     return spec, reqs, user_prompts
 
 
@@ -122,6 +122,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _write_token_report(workspace_dir: str, orchestrator: TDDOrchestrator) -> None:
+    """Logs token usage and persists a report to workspace_dir/token_usage.txt."""
+    summary = orchestrator.token_tracker.summary()
+    totals = summary["totals"]
+
+    logger.info(
+        "📊 Token Usage — total: %d | prompt: %d | completion: %d | cached: %d",
+        totals["total_tokens"],
+        totals["prompt_tokens"],
+        totals["completion_tokens"],
+        totals["cached_tokens"],
+    )
+
+    token_report_path = os.path.join(workspace_dir, "token_usage.txt")
+    with open(token_report_path, "w", encoding="utf-8") as f:
+        f.write("TOKEN USAGE REPORT\n")
+        f.write("=" * 80 + "\n\n")
+        f.write("BY MODEL:\n")
+        for model, stats in summary["by_model"].items():
+            f.write(f"  {model}:\n")
+            for k, v in stats.items():
+                f.write(f"    {k}: {v}\n")
+        f.write("\nTOTALS:\n")
+        for k, v in totals.items():
+            f.write(f"  {k}: {v}\n")
+
+
 def main() -> None:
     load_dotenv()
     args = parse_args()
@@ -143,8 +170,7 @@ def main() -> None:
     # ── Configuração de Workspace e Logs ──────────────────────────────────────
     workspace_dir = f"workspace_output_{thread_id}"
     os.makedirs(workspace_dir, exist_ok=True)
-    
-    # Exporta todo o tráfego do logger para o .txt no novo diretório
+
     log_file_path = os.path.join(workspace_dir, "execution_logs.txt")
     file_handler = logging.FileHandler(log_file_path, mode="w", encoding="utf-8")
     file_handler.setLevel(logging.INFO)
@@ -156,7 +182,7 @@ def main() -> None:
     prompts_path = os.path.join(workspace_dir, "user_analyst_dialogue.txt")
     with open(prompts_path, "w", encoding="utf-8") as f:
         f.write("PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL\n")
-        f.write("================================================================================\n")
+        f.write("=" * 80 + "\n")
         for idx, prompt in enumerate(user_prompts, start=1):
             wrapped_prompt = textwrap.fill(
                 prompt,
@@ -167,12 +193,11 @@ def main() -> None:
                 break_on_hyphens=False,
             )
             f.write(wrapped_prompt + "\n")
-        f.write("================================================================================\n\n")
-
+        f.write("=" * 80 + "\n\n")
         f.write("DIALOGO COMPLETO ENTRE USUARIO E ANALISTA\n")
-        f.write("================================================================================\n")
+        f.write("=" * 80 + "\n")
         f.write(formatted_requirements + "\n")
-        f.write("================================================================================\n")
+        f.write("=" * 80 + "\n")
 
     initial_prompt_path = os.path.join(workspace_dir, "initial_user_prompt.txt")
     initial_prompt = user_prompts[0] if user_prompts else ""
@@ -182,9 +207,9 @@ def main() -> None:
     )
     with open(initial_prompt_path, "w", encoding="utf-8") as f:
         f.write("PROMPT INICIAL ENVIADO PELO USUARIO\n")
-        f.write("================================================================================\n")
+        f.write("=" * 80 + "\n")
         f.write((wrapped_initial_prompt or "(vazio)") + "\n")
-        f.write("================================================================================\n")
+        f.write("=" * 80 + "\n")
 
     # ── Fase 2: Execução TDD ──────────────────────────────────────────────────
     print("\n" + "=" * 80)
@@ -197,12 +222,15 @@ def main() -> None:
     print("-" * 80 + "\n")
 
     orchestrator = TDDOrchestrator(task_key=thread_id)
-    
+
     try:
         final_state = orchestrator.run(specification=specification, requirements=requirements)
     except KeyboardInterrupt:
         print("\n🛑 Execução TDD interrompida pelo usuário de forma segura.")
         sys.exit(0)
+
+    # ── Token Usage Report ────────────────────────────────────────────────────
+    _write_token_report(workspace_dir, orchestrator)
 
     # ── Resultado e Extração ──────────────────────────────────────────────────
     final_status = final_state.get("status", "unknown")
@@ -223,7 +251,7 @@ def main() -> None:
             clean_path = filepath.lstrip("/")
             if clean_path.startswith("home/user/"):
                 clean_path = clean_path.replace("home/user/", "", 1)
-            
+
             full_path = os.path.join(workspace_dir, clean_path)
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
@@ -235,27 +263,27 @@ def main() -> None:
         plan_path = os.path.join(workspace_dir, "planner.txt")
         with open(plan_path, "w", encoding="utf-8") as f:
             f.write("PLANO DE SUB-REQUISITOS TDD\n")
-            f.write("================================================================================\n")
+            f.write("=" * 80 + "\n")
             for i, item in enumerate(plan):
                 f.write(f"{i+1}. {item}\n")
-            f.write("================================================================================\n")
+            f.write("=" * 80 + "\n")
 
     # 3. Extrai as especificações do Engenheiro
     spec_path = os.path.join(workspace_dir, "engineer_specifications.txt")
     with open(spec_path, "w", encoding="utf-8") as f:
         f.write("ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO\n")
-        f.write("================================================================================\n")
+        f.write("=" * 80 + "\n")
         f.write(specification)
 
     # 4. Extrai o histórico dos requisitos validados
     reqs_path = os.path.join(workspace_dir, "confirmed_user_requirements.txt")
     with open(reqs_path, "w", encoding="utf-8") as f:
         f.write("REQUISITOS ENVIADOS PELO USUÁRIO\n")
-        f.write("================================================================================\n")
+        f.write("=" * 80 + "\n")
         f.write(formatted_requirements + "\n")
-        f.write("================================================================================\n")
+        f.write("=" * 80 + "\n")
 
-    print(f"📁 Todos os artefatos e logs foram salvos com sucesso!")
+    print("📁 Todos os artefatos e logs foram salvos com sucesso!")
 
     if failed:
         print(f"\n⚠️  {len(failed)} requisito(s) não puderam ser satisfeitos:")
@@ -264,6 +292,7 @@ def main() -> None:
 
     print(f"\n🔑 Thread ID desta execução: {thread_id}")
     print("   (Para inspecionar o estado ou continuar futuramente, use --thread-id)\n")
+
 
 if __name__ == "__main__":
     main()
