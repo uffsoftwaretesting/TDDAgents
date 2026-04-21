@@ -1,0 +1,48 @@
+{
+  "challenge_id": 1,
+  "module": "workspace_output_tdd-c753409f79d42d21/src/solver_euler.py",
+  "method": "Euler Explícito",
+  "method_key": "euler_explicito",
+  "problem_type": "ode_ivp",
+  "final_status": "PASS",
+  "unit_test_success": {
+    "passed": 35,
+    "failed": 0,
+    "errors": 0,
+    "total": 35,
+    "success_rate_pct": 100.0
+  },
+  "pointwise": {
+    "status": "PASS",
+    "abs_error": 0.0005755612509834585
+  },
+  "convergence": {
+    "status": "PASS",
+    "estimated_order": 1.0111,
+    "expected_order": 1.0,
+    "acceptable_range": [
+      0.8,
+      1.2
+    ],
+    "r_squared": 1.0,
+    "avg_reduction": 2.0168,
+    "expected_reduction": 2.0,
+    "h_vals": [
+      0.1,
+      0.05,
+      0.025,
+      0.0125,
+      0.00625,
+      0.003125
+    ],
+    "errors": [
+      0.019201001071442347,
+      0.009393518762900122,
+      0.004647001283561714,
+      0.0023112971243251512,
+      0.0011526264528429198,
+      0.0005755612509834585
+    ],
+    "reason": "OK"
+  }
+}
