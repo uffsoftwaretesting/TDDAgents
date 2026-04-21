@@ -1,0 +1,74 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: Módulo de Integração por Regra de Simpson 1/3 Composta
+
+## 1. Visão Geral do Sistema
+O sistema fornece uma rotina em Python denominada `integracao_simpson_1_3` para aproximar o valor de integrais definidas usando a Regra de Simpson 1/3 Composta. A função faz validações rigorosas de entrada, suporta avaliação vetorizada via NumPy quando disponível e recai a uma implementação em pure Python em sua ausência.
+
+## 2. Estruturas de Dados e Interfaces
+
+### 2.1 Assinatura da Função
+Nome: `integracao_simpson_1_3`
+
+Parâmetros:
+- `f: Callable[[float], float]`  
+  Função integranda, deve aceitar e retornar valores numéricos (float).
+- `a: Union[float, int]`  
+  Limite inferior de integração. Valores int serão convertidos para float.
+- `b: Union[float, int]`  
+  Limite superior de integração. Valores int serão convertidos para float.
+- `N: int`  
+  Número de subintervalos (deve ser inteiro, par e positivo).
+
+Retorno:
+- `float`  
+  Aproximação da integral de `f` em `[a, b]`.
+
+### 2.2 Comportamento em Dependências
+- Se o módulo `numpy` estiver disponível:
+  - Utilizar `numpy.linspace` para gerar os pontos `x_i` e avaliação vetorizada de `f`.
+- Se `numpy` não estiver instalado ou falhar na importação:
+  - Executar a lógica de geração de pontos e somatórios em pure Python, sem dependências externas.
+
+### 2.3 Docstring e Exemplos
+A função deve conter docstring com:
+- Descrição geral.
+- Explain dos parâmetros e tipos.
+- Detalhamento do retorno.
+- Lista de exceções possíveis.
+- Exemplos de uso:
+  ```python
+  >>> import math
+  >>> integracao_simpson_1_3(lambda x: x**2, 0, 1, 2)
+  0.3333333333333333
+  >>> integracao_simpson_1_3(math.sin, 0, math.pi, 100)
+  2.0
+  ```
+
+## 3. Casos de Borda e Validações (Edge Cases)
+- **Tipo de `N`**  
+  - Se `N` não for `int`, lançar `TypeError("N deve ser do tipo int")`.
+- **Valor de `N`**  
+  - Se `N <= 0` ou `N` ímpar, lançar `ValueError("N deve ser um inteiro par positivo")`.
+- **Tipos de `a` e `b`**  
+  - Se `a` ou `b` não forem `int` ou `float`, lançar `TypeError("Limites de integração devem ser números")`.
+  - Conversão implícita: `int` → `float`.
+- **Relação entre `a` e `b`**  
+  - Se `a == b`, retornar `0.0` imediatamente.
+  - Se `a > b`, lançar `ValueError("Limite inferior a deve ser menor ou igual ao limite superior b")`.
+- **Comportamento de `f`**  
+  - Se `f(x)` lançar qualquer exceção durante a avaliação, propagar sem captura.
+- **Importação de `numpy`**  
+  - Qualquer falha na importação deve ser silenciosa e acionar o fallback em pure Python.
+
+## 4. Contexto Técnico
+- Linguagem-alvo: Python 3.7+  
+- Paradigma: Imperativo/funções puras, com tipagem via `typing`.  
+- Precisão numérica: ponto flutuante em dupla precisão (IEEE 754).  
+- Ambiente: desktop ou servidor; não se destinam restrições de memória além das usuais em operações vetorizadas.  
+- Política de erro: erros de uso da API geram exceções específicas (`TypeError`, `ValueError`). Erros de execução de `f` são propagados.
+
+## 5. Dependências Base (Core Dependencies)
+- Python Standard Library  
+- NumPy (opcional, para otimização vetorial)  
+- pytest (para suíte de testes TDD)

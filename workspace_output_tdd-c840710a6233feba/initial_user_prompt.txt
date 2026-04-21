@@ -1,0 +1,11 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Como engenheiro de software com foco em computação científica, quero desenvolver
+uma rotina em Python chamada interpolacao_lagrange que calcule o valor
+aproximado de uma função em um ponto arbitrário utilizando o Polinômio
+Interpolador de Lagrange. A função deve compor o núcleo de uma biblioteca
+matemática, exigindo tipagem estática rigorosa: deve receber um array de
+coordenadas independentes (x_nos​), a função alvo f(x) (passada como um Callable
+nativo puro para geração automática dos valores de y_nos​ associados) e o ponto
+alvo de avaliação x_alvo​.
+================================================================================

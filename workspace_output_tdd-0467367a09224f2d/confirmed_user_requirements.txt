@@ -1,0 +1,91 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Como engenheiro de software com foco em computação científica, quero
+           desenvolver uma rotina em Python chamada diferencas_finitas_bvp que resolva
+           um Problema de Valor de Contorno (BVP) de segunda ordem da forma −u′′
+           (x)=f(x) utilizando o Método das Diferenças Finitas. A função deve atuar como
+           o núcleo de uma biblioteca de simulação espacial, exigindo tipagem estática
+           rigorosa para os parâmetros: a função fonte f(x) como um Callable nativo
+           vetorizado, o intervalo de domínio espacial [a,b], um dicionário ou estrutura
+           tipada definindo as condições de contorno de Dirichlet (u(a) e u(b)), o
+           número de nós internos da malha N e o ponto específico de avaliação x_alvo.
+[Analista]: Para elaborar um checklist completo, preciso de alguns detalhes adicionais:
+
+1. Retorno da função: deve entregar apenas o valor aproximado de u(x_alvo) ou também
+todo o vetor de solução u em todos os nós da malha?
+2. Estrutura de condições de contorno: qual o formato exato do dicionário/estrutura? Por
+exemplo, dicionário com chaves 'left' e 'right' ou outro padrão?
+3. Biblioteca de vetorização: podemos assumir o uso de NumPy para avaliação vetorizada
+de f(x) ou há outra preferência?
+
+
+[Usuário]: O retorno deve ser apenas um valor escalar aproximado. Condições de contorno
+           no formato "{"u_a": 0.0, "u_b": 0.0}". O uso de bibliotecas é permitido.
+[Analista]: Para completar o checklist, preciso de um último detalhe:
+
+• x_alvo será sempre exatamente um dos nós da malha gerada (o que elimina a necessidade
+de interpolação), ou precisamos implementar interpolação (por exemplo, linear) quando
+x_alvo cair entre dois nós?
+
+[Usuário]: Implemente interpolação se necessário.
+[Analista]: Checklist de Requisitos Técnico, Robusto e Testável para a função
+            diferencas_finitas_bvp:
+
+1. Validação de Parâmetros de Entrada
+• Verificar que “a” e “b” são floats e que a < b.
+• Verificar que N é int e N ≥ 1.
+• Verificar que x_alvo é float e a ≤ x_alvo ≤ b.
+• Verificar que bc é dict com chaves “u_a” e “u_b” e valores float.
+• Verificar que f é Callable que, ao receber um np.ndarray de shape (M,), retorna
+np.ndarray shape (M,).
+
+2. Assinatura e Tipagem Estática
+• type hints:
+def diferencas_finitas_bvp(
+f: Callable[[np.ndarray], np.ndarray],
+a: float,
+b: float,
+bc: Dict[str, float],
+N: int,
+x_alvo: float
+) -> float:
+
+3. Discretização da Malha
+• Calcular passo h = (b - a) / (N + 1).
+• Gerar vetor de nós x = np.linspace(a, b, N+2).
+
+4. Montagem do Sistema Linear
+• Matriz tridiagonal A de tamanho N×N com 2 na diagonal principal e -1 nas duas
+sub/superdiagonais.
+• Vetor RHS de tamanho N: RHS[i] = h**2 * f(x[i+1]).
+• Ajustar RHS[0] += bc['u_a'] e RHS[-1] += bc['u_b'].
+
+5. Resolução do Sistema
+• Usar solver numérico (ex: np.linalg.solve ou scipy.linalg.solve_banded).
+• Validar que a solução interna u_int retorna vetor de tamanho N.
+
+6. Construção da Solução Completa
+• Concatenar u = [u_a] + u_int + [u_b] formando vetor de tamanho N+2.
+
+7. Avaliação em x_alvo com Interpolação
+• Se |x_alvo - x[i]| < tol (ex: 1e-12) para algum nó i, retornar u[i].
+• Caso contrário, localizar i tal que x[i] < x_alvo < x[i+1] e aplicar interpolação
+linear:
+u(x_alvo) = u[i] + (u[i+1] - u[i]) * (x_alvo - x[i]) / h.
+
+8. Tratamento e Mensagens de Erro
+• Levantar ValueError para parâmetros fora de domínio ou tipos incorretos.
+• Capturar e re-embalar exceções do solver numérico com mensagens claras.
+
+9. Testes Unitários e de Integração
+• Caso f(x)=constante: comparar com solução analítica.
+• Testar x_alvo em nó e entre nós (interpolação).
+• Testar limites a, b, N=1 e N>1.
+• Testar lançamento de erros para inputs inválidos.
+
+10. Documentação
+• Docstring completa (parâmetros, retorno, exceções) no estilo Sphinx.
+• Exemplos de uso simples e com interpolação.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

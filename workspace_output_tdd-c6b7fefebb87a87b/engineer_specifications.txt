@@ -1,0 +1,76 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: adams_bashforth_2
+
+## 1. Visão Geral do Sistema
+A função `adams_bashforth_2` resolve um Problema de Valor Inicial (PVI) para uma Equação Diferencial Ordinária (EDO) usando o método explícito de passos múltiplos Adams–Bashforth de 2 passos. Dado um integrando `f(t, y)`, condições iniciais `(t0, y0)`, um ponto de avaliação `t_eval` e um passo inicial `h`, a função ajusta `h` para que o número de passos seja inteiro, aplica um passo de arranque via Euler explícito e, em seguida, evolui a solução até `t_eval`, retornando apenas o valor escalar `y(t_eval)`.
+
+## 2. Estruturas de Dados e Interfaces
+
+#### Assinatura da Função
+```python
+from typing import Callable
+
+def adams_bashforth_2(
+    f: Callable[[float, float], float],
+    t0: float,
+    y0: float,
+    t_eval: float,
+    h: float
+) -> float:
+    ...
+```
+
+Parâmetros  
+- `f`: Callable[[float, float], float] — função que calcula dy/dt = f(t, y)  
+- `t0`: float — instante inicial  
+- `y0`: float — valor de y em t0  
+- `t_eval`: float — instante em que se deseja o valor de y (substitui t_final)  
+- `h`: float — passo inicial para integração
+
+Retorno  
+- `float` — valor aproximado de `y(t_eval)`
+
+Fluxo interno  
+1. Validação de entradas  
+2. Cálculo de Δ = `t_eval - t0`  
+3. Ajuste de `h` via `n_steps = ceil(Δ / h)` e `h = Δ / n_steps`  
+4. Euler explícito para obter (`t1`, `y1`)  
+5. Loop de 1 até `n_steps - 1` aplicando o esquema Adams–Bashforth de 2 passos  
+6. Retorno de `y` no ponto `t_eval`
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+1. **Tipo de entrada**  
+   - Se `f` não for callable: lançar `TypeError("f must be Callable[[float, float], float]")`.  
+   - Se `t0`, `y0`, `t_eval` ou `h` não forem `float`: lançar `TypeError("<param> must be float")`.
+
+2. **Intervalo e sinal de h**  
+   - Se `h <= 0`: lançar `ValueError("h must be greater than zero")`.  
+   - Se `t_eval < t0`: lançar `ValueError("t_eval must be greater than or equal to t0")`.
+
+3. **Δ = t_eval – t0**  
+   - Se Δ == 0: retornar imediatamente `y0`.
+
+4. **Ajuste de passo**  
+   - Calcular `n_steps = ceil(Δ / h)` sempre que Δ > 0.  
+   - Recalibrar `h = Δ / n_steps` antes de qualquer iteração.  
+
+5. **Execução de f**  
+   - Qualquer exceção levantada por `f(t, y)` deve propagar-se ao chamador.  
+
+6. **Limites de performance (opcional)**  
+   - Se `n_steps` for extraordinariamente grande, pode-se opcionalmente lançar `RuntimeError("too many steps")` ou similar, conforme política interna de limites.
+
+## 4. Contexto Técnico
+- Linguagem-alvo: Python 3.8+  
+- Paradigma: Procedural/funções puras com tipagem estática via `typing`  
+- Precisão: `float` de dupla precisão (IEEE 754)  
+- Dependência de funções matemáticas básicas: `math.ceil`  
+- O método ajusta dinamicamente o passo para que o produto `n_steps * h` cubra exatamente `t_eval - t0`.
+
+## 5. Dependências Base (Core Dependencies)
+- Python Standard Library  
+  - `typing.Callable`  
+  - `math` (p. ex. `ceil`)  
+- Ferramenta de testes recomendada: `pytest`

@@ -1,0 +1,19 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Como engenheiro de software com foco em computação científica, quero desenvolver
+uma função em Python chamada euler_implicito que resolva um Problema de Valor
+Inicial (PVI) de uma Equação Diferencial Ordinária (EDO). A função deve ser
+projetada como o núcleo de uma biblioteca matemática de alta performance,
+recebendo parâmetros com tipagem estática rigorosa: a função matemática do PVI
+passada como uma estrutura de primeira classe nativa do Python, as condições
+iniciais t0 e y0, o limite de integração t_final e o tamanho do passo h.
+Diferente de métodos explícitos, o cálculo do próximo estado no Euler Implícito
+(y_(n+1)  = y_n + h⋅f(t_n+1, y_(n+1))) requer a resolução de uma equação
+algébrica. Portanto, a função deve implementar internamente um método de busca
+de raízes (como Newton-Raphson ou iteração de ponto fixo) para isolar y_(n+1). A
+lógica interna deve ser robusta para lidar com falhas de convergência do solver
+em EDOs não-lineares, levantando exceções customizadas e descritivas (ex:
+ConvergenceError) caso o número máximo de iterações do solver seja atingido.A
+função deve aceitar apenas problemas escalares. Implemente internamente um
+método iterativo. A estrutura de retorno deve ser uma lista python.
+================================================================================

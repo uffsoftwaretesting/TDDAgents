@@ -1,0 +1,85 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Como engenheiro de software com foco em computação científica, quero
+           desenvolver uma rotina em Python chamada interpolacao_lagrange que calcule o
+           valor aproximado de uma função em um ponto arbitrário utilizando o Polinômio
+           Interpolador de Lagrange. A função deve compor o núcleo de uma biblioteca
+           matemática, exigindo tipagem estática rigorosa: deve receber um array de
+           coordenadas independentes (x_nos​), a função alvo f(x) (passada como um
+           Callable nativo puro para geração automática dos valores de y_nos​
+           associados) e o ponto alvo de avaliação x_alvo​.
+[Analista]: Para melhor definir os requisitos técnicos e garantir uma implementação
+            robusta, preciso de alguns detalhes adicionais:
+
+1. Qual tipo de coleção devemos aceitar para x_nos e para os valores gerados de y_nos?
+a. Python built-in Sequence[float] (list/tuple)?
+b. numpy.ndarray?
+
+2. O valor retornado (aproximação em x_alvo) deve sempre ser do tipo float de precisão
+dupla (float64) ou devemos permitir tipos numéricos genéricos (por exemplo, Decimal,
+complex)?
+
+3. Como tratar casos inválidos de entrada, por exemplo:
+a. x_nos contendo valores duplicados?
+b. x_alvo fora do intervalo de x_nos?
+(Devemos lançar exceções específicas ou retornar NaN?)
+
+Com estas informações, posso elaborar um checklist completo e testável para a equipe de
+TDD.
+
+[Usuário]: O tipo do input deve ser Python built-in Sequence[float] (list/tuple). O
+           valor retornado (aproximação em x_alvo) deve sempre ser do tipo float de
+           precisão dupla. Trate os valores excepcionais da maneira que julgar mais
+           adequada.
+[Analista]: Checklist de Requisitos Técnico para interpolacao_lagrange:
+
+1. Assinatura e Tipagem
+- Função com assinatura:
+def interpolacao_lagrange(
+x_nos: Sequence[float],
+f: Callable[[float], float],
+x_alvo: float
+) -> float
+- Todos os floats devem ser do tipo nativo Python (float64).
+- Documentar no docstring os tipos de entrada, saída e complexidade O(n²).
+
+2. Validação de Entrada
+- Verificar que x_nos é uma Sequence e len(x_nos) >= 1; se não, lançar ValueError.
+- Verificar que cada elemento de x_nos é float; caso contrário, lançar TypeError.
+- Verificar que x_alvo é float; caso contrário, lançar TypeError.
+- Verificar duplicatas em x_nos; se existir x_i == x_j (i≠j), lançar ValueError "Nós de
+abscissa duplicados".
+
+3. Geração de Valores y_nos
+- Iterar sobre x_nos e chamar f(x_i) para cada x_i.
+- Verificar que cada y_i retornado é float; se não for, lançar TypeError.
+
+4. Cálculo do Polinômio de Lagrange
+- Para cada i em [0, n-1], calcular o termo:
+L_i(x_alvo) = ∏_{j≠i} (x_alvo - x_j) / (x_i - x_j)
+- Somar y_i * L_i(x_alvo).
+- Executar em precisão dupla (float64) sem bibliotecas externas.
+
+5. Tratamento de Exceções / Casos de Borda
+- x_nos vazio → ValueError.
+- Tipos inválidos → TypeError.
+- Nós duplicados → ValueError.
+- Extrapolação (x_alvo fora do intervalo) deve funcionar normalmente.
+
+6. Documentação e Typing
+- Incluir docstring detalhando parâmetros, retorno, exceções possíveis e complexidade
+algorítmica.
+- Incluir type hints para todas variáveis locais e retorno.
+
+7. Testes Unitários (TDD)
+- Caso normal: pontos em polinômio de grau 1, 2, 3 (ex: f(x)=ax+b); verificar
+aproximação exata.
+- Único nó: x_nos=[x0]; qualquer x_alvo → retorno f(x0).
+- Extrapolação: x_alvo fora de range → comparar com valor analítico.
+- Entrada vazia → espera ValueError.
+- Duplicatas em x_nos → espera ValueError.
+- f retorna tipo não-float → espera TypeError.
+- x_nos ou x_alvo não-float → espera TypeError.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

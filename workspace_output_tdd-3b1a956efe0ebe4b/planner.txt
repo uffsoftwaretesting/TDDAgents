@@ -1,0 +1,11 @@
+PLANO DE SUB-REQUISITOS TDD
+================================================================================
+1. FASE 0 - SETUP: Criar virtualenv Python 3.8+, instalar pytest; estruturar pastas: /src com rk4_classico.py (stub vazio) e /tests com test_rk4_classico.py; adicionar requirements.txt (pytest) e configurar pytest.ini.
+2. FASE 1 - VALIDAÇÃO DE PARÂMETROS (TDD): Escrever primeiro testes que garantam que rk4_classico lança TypeError se f não for Callable, ou t0, y0, t_final, h não forem floats; e ValueError se h <=0 ou t_final <= t0. Fechar testes e depois implementar checagens de tipos e valores no stub.
+3. FASE 2 - CÁLCULO DE PASSOS (TDD): Escrever testes que, para t0, t_final e h dados, verifiquem que n = floor((t_final–t0)/h) e h_last = (t_final–t0)–n*h; testar cenários de divisão exata e não exata; implementar lógica de cálculo de n e h_last em rk4_classico.
+4. FASE 3 - LOOP PRINCIPAL RK4 (TDD): Criar testes que usem f trivial (por ex. f(t,y)=0) e confirmem que y permanece constante após n passos; após fechar testes, implementar o laço de n passos usando k1,k2,k3,k4 com lookup local para f e variáveis escalares.
+5. FASE 4 - PASSO FINAL AJUSTADO (TDD): Escrever testes que cubram casos em que h_last>0 (por ex. t_final–t0 não múltiplo de h) e verifiquem o valor de y após o passo final; implementar condição e cálculo do passo remanescente com mesma fórmula RK4.
+6. FASE 5 - TESTES DE COMPORTAMENTO E PRECISÃO (TDD): Escrever testes que comparem o resultado numérico de rk4_classico para ODEs conhecidas (dy/dt=1, dy/dt=y) contra valores analíticos com tolerância (pytest.approx); ajustar tolerâncias e validar coerência.
+7. FASE 6 - DOCUMENTAÇÃO E TYPE HINTS: Preencher docstring PEP 257 em rk4_classico com descrição de parâmetros, fluxo, exceções; adicionar type hints conforme assinatura; incluir import typing.Callable; rodar pytest para garantir que não há erros de sintaxe ou de documentação.
+8. FASE 7 - INTEGRAÇÃO E COBERTURA: Executar suíte completa no CI local, garantir 100% de cobertura no módulo rk4_classico; revisar mensagens de erro, simplificar código; otimizar import e lookup para performance sem alocações extras.
+================================================================================

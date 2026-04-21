@@ -1,0 +1,107 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Como engenheiro de software com foco em computação científica, quero desenvolver uma
+   função em Python chamada adams_bashforth_2 que resolva um Problema de Valor Inicial
+   (PVI) de uma Equação Diferencial Ordinária (EDO) utilizando o método explícito de
+   passos múltiplos Adams-Bashforth de 2 passos. A função deve compor o núcleo de uma
+   biblioteca matemática rigorosamente tipada, recebendo como parâmetros: a função
+   integranda f(t,y) injetada via Callable nativo puro, as condições iniciais t0​ e y0​,
+   o tempo limite t_final​ e o tamanho do passo h.
+2. O método de arranque deve ser euler explícito. A solução deve ser um y escalar.
+   Ajuste o passo h para encaixar.
+3. A função não deve retornar uma sequência de pontos e sim o valor escalar calculado em
+   um determinado ponto.
+4. substitua t_final por t_eval e ajuste o passo h conforme necessário.
+5. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Como engenheiro de software com foco em computação científica, quero
+           desenvolver uma função em Python chamada adams_bashforth_2 que resolva um
+           Problema de Valor Inicial (PVI) de uma Equação Diferencial Ordinária (EDO)
+           utilizando o método explícito de passos múltiplos Adams-Bashforth de 2
+           passos. A função deve compor o núcleo de uma biblioteca matemática
+           rigorosamente tipada, recebendo como parâmetros: a função integranda f(t,y)
+           injetada via Callable nativo puro, as condições iniciais t0​ e y0​, o tempo
+           limite t_final​ e o tamanho do passo h.
+[Analista]: Para gerar um checklist completo, preciso de alguns detalhes adicionais:
+
+1. Qual método de arranque (starter) devemos usar para obter o segundo ponto y₁? Ex.:
+Euler explícito de passo h ou outro método?
+2. A solução y é escalar (float) ou vetor (por ex. numpy.ndarray)? Em que formato deve
+ser retornado o resultado (lista de tuplas, dois arrays separados, generator etc.)?
+3. Como tratar o caso em que (t_final - t0)/h não resulte em um número inteiro de
+passos? Deseja lançar exceção, truncar o último passo ou ajustar h para se encaixar?
+
+Com essas respostas, elaboro o checklist detalhado.
+
+[Usuário]: O método de arranque deve ser euler explícito. A solução deve ser um y
+           escalar. Ajuste o passo h para encaixar.
+[Analista]: Obrigado pelas informações! Para completar o checklist, preciso apenas
+            definir o formato de saída dos resultados:
+
+Em que estrutura você deseja retornar a sequência de pontos (tᵢ, yᵢ)? Por exemplo:
+1. Lista de tuplas (t, y)
+2. Dois arrays separados (um para t, outro para y)
+3. Gerador (yield de pares)
+4. Outro formato (por favor especifique)
+
+
+[Usuário]: A função não deve retornar uma sequência de pontos e sim o valor escalar
+           calculado em um determinado ponto.
+[Analista]: Entendi que agora a função deve retornar somente o valor y em um ponto
+            específico, não toda a trajetória. Para alinhar os requisitos, preciso
+            confirmar:
+
+1. Como o ponto de avaliação será informado? (por exemplo, substituímos t_final por
+t_eval ou adicionamos um parâmetro extra?)
+2. Deseja que o ajuste do passo h para encaixar seja sempre feito em relação a esse
+t_eval informado?
+
+Com esses detalhes, posso gerar o checklist final.
+
+[Usuário]: substitua t_final por t_eval e ajuste o passo h conforme necessário.
+[Analista]: Checklist de Requisitos para adams_bashforth_2 com t_eval e ajuste de h:
+
+1. Validação de Parâmetros
+1.1. f deve ser Callable[[float, float], float]. Lançar TypeError se não.
+1.2. t0, y0, t_eval e h devem ser floats. Lançar TypeError caso contrário.
+1.3. h > 0. Se h <= 0, lançar ValueError.
+1.4. t_eval >= t0. Caso contrário, lançar ValueError.
+
+2. Ajuste de h para encaixar em t_eval
+2.1. Calcular Δ = t_eval - t0.
+2.2. Se Δ == 0: retornar imediatamente y0.
+2.3. Calcular n_steps = ceil(Δ / h).
+2.4. Recalibrar h = Δ / n_steps.
+
+3. Método de Arranque (Euler Explícito)
+3.1. t₁ = t0 + h.
+3.2. y₁ = y0 + h * f(t0, y0).
+
+4. Loop Principal (Adams–Bashforth de 2 passos)
+Para i de 1 até n_steps-1:
+4.1. t_prev = t0 + (i-1)*h, y_prev armazenado.
+4.2. t_curr = t0 + i*h, y_curr armazenado.
+4.3. y_next = y_curr + h * (1.5 * f(t_curr, y_curr) - 0.5 * f(t_prev, y_prev)).
+4.4. Atualizar t_prev=y_curr→y_prev, y_curr=y_next.
+
+5. Saída
+5.1. Retornar y_curr (valor escalar no ponto t_eval).
+
+6. Tratamento de Erros em Tempo de Execução
+6.1. Capturar e propagar exceções de f.
+6.2. Garantir que n_steps não ultrapasse limites de performance ou memória (opcional).
+
+7. Testes Unitários
+7.1. ODE linear com solução analítica (por ex. y'=k*y).
+7.2. Caso f constante.
+7.3. t_eval == t0.
+7.4. h exatamente igual a Δ.
+7.5. h > Δ.
+7.6. h inválido (<=0).
+7.7. f não callable.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

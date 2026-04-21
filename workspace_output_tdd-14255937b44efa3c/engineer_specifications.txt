@@ -1,0 +1,79 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: RK2 Método de Ponto Médio
+
+## 1. Visão Geral do Sistema
+Esta especificação define uma função Python `rk2_ponto_medio` para resolver problemas de valor inicial (PVI) de equações diferenciais ordinárias (EDOs) escalares usando o método de Runge–Kutta de 2ª ordem (ponto médio). A função retorna apenas o valor aproximado de y em `t_final`, ajustando o último passo quando necessário.
+
+## 2. Estruturas de Dados e Interfaces
+
+### Assinatura da Função
+```python
+def rk2_ponto_medio(
+    f: Callable[[float, float], float],
+    t0: float,
+    y0: float,
+    t_final: float,
+    h: float
+) -> float
+```
+
+### Parâmetros
+- `f`: Callable[[float, float], float]  
+  Função pura que implementa a EDO `dy/dt = f(t, y)`.  
+- `t0`: float  
+  Tempo inicial.  
+- `y0`: float  
+  Valor inicial y(t0).  
+- `t_final`: float  
+  Tempo final de integração (deve ser ≥ t0).  
+- `h`: float  
+  Tamanho de passo desejado (h > 0).
+
+### Retorno
+- `float`: aproximação de `y(t_final)`.
+
+### Contratos e Pré-condições
+- `f` deve ser passível de chamada com dois floats e retornar float.  
+- `t_final ≥ t0`.  
+- `h > 0`.  
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+1. **Tipagem de `f`**  
+   - Se `f` não for callable ou não retornar float, lançar `TypeError`.  
+
+2. **Parâmetros Numéricos**  
+   - Se `t0`, `y0`, `t_final` ou `h` não forem do tipo `float`, lançar `TypeError`.  
+   - Se `h ≤ 0`, lançar `ValueError`.  
+   - Se `t_final < t0`, lançar `ValueError`.  
+
+3. **Caso Trivial**  
+   - Se `t_final == t0`, retorna `y0` imediatamente sem chamar `f`.
+
+4. **Integração com Ajuste de Passo**  
+   - Enquanto `t < t_final`:
+     • `h_i = min(h, t_final - t)`  
+     • `k1 = f(t, y)`  
+     • `y_mid = y + (h_i/2)*k1`  
+     • `t_mid = t + h_i/2`  
+     • `k2 = f(t_mid, y_mid)`  
+     • `y = y + h_i*k2`  
+     • `t = t + h_i`  
+   - Garantir que todos os resultados intermediários sejam floats, senão lançar `TypeError`.
+
+5. **Propagação de Exceções**  
+   - Se `f` lançar qualquer exceção durante a avaliação, propagar sem captura interna.
+
+## 4. Contexto Técnico
+- Linguagem: Python 3.9+  
+- Paradigma: Programação funcional pura (função sem efeitos colaterais).  
+- Tipagem estática via type hints (compatível com `mypy`).  
+- Docstring em estilo NumPy ou Google para gerar documentação automática.  
+- Uso de referências locais (bind-to-local) para variáveis críticas dentro do loop de integração para otimização de performance.  
+
+## 5. Dependências Base (Core Dependencies)
+- Python Standard Library  
+- Módulo `typing` (para `Callable`)  
+- Ferramenta de testes: `pytest`  
+- Ferramenta de checagem de tipos: `mypy`

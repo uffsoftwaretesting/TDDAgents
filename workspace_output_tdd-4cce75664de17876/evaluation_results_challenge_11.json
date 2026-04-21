@@ -1,0 +1,41 @@
+{
+  "challenge_id": 11,
+  "module": "workspace_output_tdd-4cce75664de17876/src/mathutils/derivada_diferenca_central.py",
+  "method": "Diferença Central",
+  "method_key": "diferenca_central",
+  "problem_type": "derivacao",
+  "final_status": "FAIL",
+  "pointwise": {
+    "status": "FAIL",
+    "reason": "\nNot equal to tolerance rtol=1e-07, atol=1e-06\n\nMismatched elements: 1 / 1 (100%)\nMax absolute difference among violations: 1.15088938e-06\nMax relative difference among violations: inf\n ACTUAL: array(1.150889e-06)\n DESIRED: array(0.)"
+  },
+  "convergence": {
+    "status": "PASS",
+    "estimated_order": 1.9999,
+    "expected_order": 2.0,
+    "acceptable_range": [
+      1.6,
+      2.4
+    ],
+    "r_squared": 1.0,
+    "avg_reduction": 3.9996,
+    "expected_reduction": 4.0,
+    "h_vals": [
+      0.1,
+      0.05,
+      0.025,
+      0.0125,
+      0.00625,
+      0.003125
+    ],
+    "errors": [
+      0.001177922186606284,
+      0.0002945909992083662,
+      7.365465462794152e-05,
+      1.8414095236729544e-05,
+      4.603550786463906e-06,
+      1.1508893763556571e-06
+    ],
+    "reason": "OK"
+  }
+}

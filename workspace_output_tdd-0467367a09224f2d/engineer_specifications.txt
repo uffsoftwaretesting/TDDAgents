@@ -1,0 +1,89 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: diferencas_finitas_bvp
+
+## 1. Visão Geral do Sistema
+A função `diferencas_finitas_bvp` resolve um Problema de Valor de Contorno (BVP) de segunda ordem na forma  
+−u″(x) = f(x)  
+em um intervalo [a, b] com condições de Dirichlet em a e b, usando o Método das Diferenças Finitas. Retorna o valor aproximado de u em um ponto de avaliação x_alvo, aplicando interpolação linear quando x_alvo não coincide exatamente com um nó da malha.
+
+## 2. Estruturas de Dados e Interfaces
+
+Assinatura e type hints:
+```python
+def diferencas_finitas_bvp(
+    f: Callable[[np.ndarray], np.ndarray],
+    a: float,
+    b: float,
+    bc: Dict[str, float],
+    N: int,
+    x_alvo: float
+) -> float:
+    ...
+```
+
+Parâmetros:
+- f: Callable[[np.ndarray], np.ndarray]  
+  Função fonte vetorizada que recebe array de pontos x e retorna f(x).
+- a, b: float  
+  Limites do domínio, com a < b.
+- bc: Dict[str, float]  
+  Condições de contorno no formato `{"u_a": float, "u_b": float}`.
+- N: int  
+  Número de nós internos da malha (N ≥ 1).
+- x_alvo: float  
+  Ponto de avaliação, com a ≤ x_alvo ≤ b.
+
+Retorno:
+- float  
+  Aproximação de u(x_alvo).
+
+Estruturas internas:
+- h: float  
+  Passo da malha = (b − a) / (N + 1).
+- x: np.ndarray, shape (N+2,)  
+  Nós da malha gerada por `linspace(a, b, N+2)`.
+- A: np.ndarray, shape (N, N)  
+  Matriz tridiagonal com [2] na diagonal principal e [−1] nas sub- e superdiagonais.
+- RHS: np.ndarray, shape (N,)  
+  Vetor `h**2 * f(x[1:-1])`, ajustado pelas condições de contorno:
+  - RHS[0] += bc["u_a"]
+  - RHS[-1] += bc["u_b"]
+- u_int: np.ndarray, shape (N,)  
+  Solução interna obtida via solver linear.
+- u: np.ndarray, shape (N+2,)  
+  Solução completa concatenando u_a, u_int e u_b.
+
+## 3. Casos de Borda e Validações (Edge Cases)
+- Parâmetros de tipo ou domínio incorretos:
+  - a, b: devem ser float e satisfazer a < b → ValueError.
+  - N: deve ser int e N ≥ 1 → ValueError.
+  - x_alvo: float e a ≤ x_alvo ≤ b → ValueError.
+  - bc: dict com chaves `"u_a"`, `"u_b"` e valores float → ValueError.
+  - f: deve ser Callable que aceita np.ndarray M e retorna np.ndarray M → ValueError.
+- Geração da malha:
+  - Se (b − a) / (N + 1) = 0 (N muito grande ou underflow) → ValueError.
+- Montagem do sistema:
+  - Verificar dimensões corretas de A e RHS; inconsistências → RuntimeError.
+- Solver numérico:
+  - Falha na resolução (matriz singular ou não convergência) → encapsular em RuntimeError com mensagem clara.
+- Avaliação em x_alvo:
+  - Se |x_alvo − x[i]| < tol (tol = 1e-12) para algum i: retorno direto u[i].
+  - Se x_alvo entre x[i] e x[i+1]: aplicar interpolação linear.
+- Situações limite:
+  - N = 1: sistema 1×1 tratado como caso geral.
+  - x_alvo = a ou x_alvo = b: retorno exato de bc["u_a"] ou bc["u_b"].
+  - f retorna valores NaN ou Inf: propagar erro ou ValueError.
+
+## 4. Contexto Técnico
+- Linguagem-alvo: Python 3.7+.
+- Paradigma: computação numérica vetorizada.
+- Precisão: float64.
+- Vetorização: NumPy para avaliação de f(x) e operações com arrays.
+- Solver linear: `np.linalg.solve`. Pode-se optar por `scipy.linalg.solve_banded` para eficiência.
+- Tolerância para comparação de float: 1e-12.
+- Docstring no estilo Sphinx, incluindo parâmetros, retornos, exceções e exemplos.
+
+## 5. Dependências Base (Core Dependencies)
+- NumPy (vetorização, álgebra linear).
+- pytest (testes unitários e de integração).

@@ -1,0 +1,17 @@
+======================================================
+      RELATORIO DE METRICAS DE QUALIDADE (SONAR)      
+======================================================
+Projeto: workspace_output_tdd-0f1e58d57bdc9864
+Gerado em: 2026-04-13 21:23:02
+Linhas de Código Úteis (NCLOC): 41
+Total de Code Smells:           1
+
+Complexidade Cognitiva       Valor:       13 | Meta: <= 15     | PASSED
+Complexidade Ciclomatica     Valor:       12 | Meta: <= 10     | FAILED
+Densidade Code Smells        Valor:     2.44 | Meta: <= 5      | PASSED
+Duplicacao de Codigo         Valor:       0% | Meta: <= 3%     | PASSED
+Cobertura de Testes          Valor:   97.10% | Meta: >= 80%    | PASSED
+Debt Ratio                   Valor:    0.10% | Meta: <= 5%     | PASSED
+
+STATUS GERAL: FAILED
+======================================================

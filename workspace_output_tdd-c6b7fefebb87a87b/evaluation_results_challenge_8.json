@@ -1,0 +1,41 @@
+{
+  "challenge_id": 8,
+  "module": "workspace_output_tdd-c6b7fefebb87a87b/src/adams_bashforth_2.py",
+  "method": "Adams Bashforth 2",
+  "method_key": "adams_bashforth_2",
+  "problem_type": "ode_ivp",
+  "final_status": "PASS",
+  "pointwise": {
+    "status": "PASS",
+    "abs_error": 3.0218801205794676e-07
+  },
+  "convergence": {
+    "status": "PASS",
+    "estimated_order": 2.0676,
+    "expected_order": 2.0,
+    "acceptable_range": [
+      1.6,
+      2.4
+    ],
+    "r_squared": 0.9998,
+    "avg_reduction": 4.2073,
+    "expected_reduction": 4.0,
+    "h_vals": [
+      0.1,
+      0.05,
+      0.025,
+      0.0125,
+      0.00625,
+      0.003125
+    ],
+    "errors": [
+      0.0003968009755439539,
+      8.809605705717427e-05,
+      2.0596800433814177e-05,
+      4.969747459060425e-06,
+      1.219981031530537e-06,
+      3.0218801205794676e-07
+    ],
+    "reason": "OK"
+  }
+}

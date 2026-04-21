@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-python-dotenv
-validate-docbr
-pytest
-pytest-cov
-pytest-env
-httpx
-requests

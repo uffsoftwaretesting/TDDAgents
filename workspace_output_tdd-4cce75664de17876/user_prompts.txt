@@ -1,0 +1,68 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Como engenheiro de software com foco em computação científica, quero desenvolver uma
+   rotina em Python chamada derivada_diferenca_central que calcule a primeira derivada
+   de uma função matemática em um ponto específico utilizando o Método das Diferenças
+   Finitas Centrais de ordem O(h^2). A função deve compor o núcleo utilitário de uma
+   biblioteca matemática, recebendo parâmetros estritamente tipados: a função alvo f(x)
+   como um Callable nativo e puro, o ponto de avaliação x e o tamanho do passo de
+   perturbação h.
+2. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Como engenheiro de software com foco em computação científica, quero
+           desenvolver uma rotina em Python chamada derivada_diferenca_central que
+           calcule a primeira derivada de uma função matemática em um ponto específico
+           utilizando o Método das Diferenças Finitas Centrais de ordem O(h^2). A função
+           deve compor o núcleo utilitário de uma biblioteca matemática, recebendo
+           parâmetros estritamente tipados: a função alvo f(x) como um Callable nativo e
+           puro, o ponto de avaliação x e o tamanho do passo de perturbação h.
+[Analista]: Checklist de Requisitos Técnico para a função derivada_diferenca_central
+            (O(h²)):
+
+1. Assinatura e Tipagem
+• Definir função: derivada_diferenca_central(f: Callable[[float], float], x: float, h:
+float) -> float
+• Importação: from typing import Callable
+
+2. Validação de Entrada
+• Verificar tipo de f: é Callable[[float], float], caso contrário lançar TypeError
+• Verificar x e h: são floats, caso contrário lançar TypeError
+• Verificar h > 0, caso contrário lançar ValueError
+
+3. Implementação do Núcleo
+• Calcular: (f(x + h) - f(x - h)) / (2 * h)
+• Garantir ordem de erro O(h²)
+• Não modificar estado global nem variáveis externas
+
+4. Tratamento de Erros em Tempo de Execução
+• Capturar e propagar exceções de f(x) (ex: ZeroDivisionError)
+• Documentar comportamento em casos de overflow ou NaN
+
+5. Saída e Contrato
+• Retornar float que representa a derivada aproximada
+• Não usar round interno—deixar precisão natural de float
+
+6. Documentação e Estilo
+• Docstring explicando propósito, parâmetros, valor de retorno, exceções lançadas
+• Seguir PEP8 (nomes, espaçamento, imports)
+• Adicionar exemplos de uso na docstring
+
+7. Testes Unitários (TDD)
+• Caso constante f(x)=C → resultado≈0
+• Caso linear f(x)=ax+b → resultado≈a
+• Caso quadrático f(x)=ax²+bx+c → resultado≈2ax+b
+• Caso trigonométrico (e.g. sin, cos) comparando com math.cos e –math.sin
+respectivamente
+• Variação de h (10⁻¹,10⁻²,…,10⁻⁸) avaliando convergência e tolerância de erro ≤C·h²
+• Testes de TypeError/ValueError para entradas inválidas
+
+8. Qualidade e Performance
+• Garantir execução em tempo constante O(1)
+• Nenhuma dependência externa além da stdlib
+• Revisão de código com foco em precisão e robustez
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

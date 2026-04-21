@@ -1,0 +1,12 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Como engenheiro de software com foco em computação científica, quero desenvolver
+uma rotina em Python chamada taylor_2 que resolva um Problema de Valor Inicial
+(PVI) de uma Equação Diferencial Ordinária (EDO) utilizando o Método da Série de
+Taylor de 2ª ordem. A função deve compor o núcleo de uma biblioteca matemática
+rigorosamente tipada, recebendo como parâmetros: a função integranda f(t,y) (que
+representa a primeira derivada y′  ), a função df(t,y) (que representa a
+derivada total de f em relação a t, ou seja, y′′), as condições iniciais t0​ e
+y0​, o tempo limite t_final​ e o tamanho do passo h. Ambas as funções
+matemáticas devem ser injetadas como Callable nativos estritamente puros.
+================================================================================

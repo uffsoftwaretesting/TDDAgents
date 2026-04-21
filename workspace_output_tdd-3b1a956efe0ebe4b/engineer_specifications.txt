@@ -1,0 +1,75 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: rk4_classico
+
+## 1. Visão Geral do Sistema
+A função rk4_classico é o motor numérico principal de uma biblioteca matemática de alta performance em Python. Seu objetivo é resolver Problemas de Valor Inicial (PVI) de Equações Diferenciais Ordinárias (EDO) escalares por meio do método clássico de Runge-Kutta de 4ª ordem, retornando apenas o valor numérico de \(y(t_{\text{final}})\).
+
+## 2. Estruturas de Dados e Interfaces
+
+### Assinatura da Função
+```python
+def rk4_classico(
+    f: Callable[[float, float], float],
+    t0: float,
+    y0: float,
+    t_final: float,
+    h: float
+) -> float
+```
+
+### Parâmetros
+- f: Callable[[float, float], float]  
+  Função derivada \(f(t,y)\), sem efeitos colaterais, retorna taxa de variação.
+- t0: float  
+  Tempo inicial.
+- y0: float  
+  Valor inicial de \(y\) em \(t_0\).
+- t_final: float  
+  Tempo final de integração (\(>\,t_0\)).
+- h: float  
+  Passo de integração padrão (\(>\,0\)).
+
+### Retorno
+- float  
+  Valor aproximado de \(y(t_{\text{final}})\).
+
+### Fluxo de Integração
+1. Validar parâmetros de entrada (veja seção Casos de Borda).  
+2. Calcular número inteiro de passos completos \(n = \lfloor (t_{\text{final}} - t_0)/h \rfloor\).  
+3. Determinar passo final ajustado \(h_{\text{last}} = (t_{\text{final}} - t_0) - n\cdot h\).  
+4. Executar laço principal para \(n\) passos com passo \(h\).  
+5. Se \(h_{\text{last}} > 0\), executar um passo final de tamanho \(h_{\text{last}}\).  
+6. Retornar o valor escalar de \(y\) correspondente a \(t = t_{\text{final}}\).
+
+## 3. Casos de Borda e Validações (Edge Cases)
+- Parâmetros de tipo incorreto:  
+  - Se f não for Callable[[float, float], float], lançar TypeError.  
+  - Se t0, y0, t_final ou h não forem floats, lançar TypeError.  
+- Valores fora de domínio:  
+  - Se h <= 0, lançar ValueError("Passo h deve ser maior que zero").  
+  - Se t_final <= t0, lançar ValueError("t_final deve ser maior que t0").  
+- Ajuste de passo final:  
+  - Se \((t_{\text{final}} - t_0)\%h \neq 0\), usar \(h_{\text{last}}\) para atingir exatamente \(t_{\text{final}}\).  
+- Propagação de erros de f(t,y):  
+  - Não silenciar exceções geradas por f; repassá-las ao chamador.  
+- Retorno de f fora de float:  
+  - Se qualquer k1, k2, k3 ou k4 não for float, permitir falha natural (TypeError) ao tentar operações aritméticas.  
+- Precisão numérica:  
+  - Cuidado com somas de floats grandes; não há tratamento especial além do comportamento nativo do Python.
+
+## 4. Contexto Técnico
+- Linguagem-alvo: Python 3.8+.  
+- Paradigma: funcional/imperativo leve, sem mutabilidade de coleções.  
+- Precisão: dupla precisão (float nativo do CPython).  
+- Performance:  
+  - Manter uso apenas de variáveis escalares.  
+  - Evitar alocação de listas ou arrays no laço.  
+  - Minimizar chamadas a funções externas dentro do laço (usar local lookup).  
+- Documentação: docstring conforme PEP 257 com descrição de parâmetros, comportamentos e exceções.
+
+## 5. Dependências Base (Core Dependencies)
+- Python standard library:  
+  - typing.Callable  
+- Ferramenta de testes:  
+  - pytest (padrão-ouro para TDD em Python)

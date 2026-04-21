@@ -1,0 +1,41 @@
+{
+  "challenge_id": 3,
+  "module": "workspace_output_tdd-c0d2da4616eb323c/src/integracao_trapezio.py",
+  "method": "Regra do Trapézio Composta",
+  "method_key": "trapezio",
+  "problem_type": "integracao",
+  "final_status": "PASS",
+  "pointwise": {
+    "status": "PASS",
+    "abs_error": 2.592009167301512e-07
+  },
+  "convergence": {
+    "status": "PASS",
+    "estimated_order": 2.0046,
+    "expected_order": 2.0,
+    "acceptable_range": [
+      1.6,
+      2.4
+    ],
+    "r_squared": 1.0,
+    "avg_reduction": 4.0213,
+    "expected_reduction": 4.0,
+    "h_vals": [
+      0.1,
+      0.05,
+      0.025,
+      0.0125,
+      0.00625,
+      0.003125
+    ],
+    "errors": [
+      0.0002724422056170628,
+      6.596211690190756e-05,
+      1.6490328250906572e-05,
+      4.1554841299085155e-06,
+      1.0347436449897884e-06,
+      2.592009167301512e-07
+    ],
+    "reason": "OK"
+  }
+}

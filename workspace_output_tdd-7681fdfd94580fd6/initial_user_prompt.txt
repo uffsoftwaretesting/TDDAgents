@@ -1,0 +1,11 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Como engenheiro de software com foco em computação científica, quero desenvolver
+uma rotina em Python chamada adams_bashforth_3 que resolva um Problema de Valor
+Inicial (PVI) de uma Equação Diferencial Ordinária (EDO) utilizando o método
+explícito de passos múltiplos Adams-Bashforth de 3 passos. A função deve ser
+construída como o motor de uma biblioteca matemática rigorosa, recebendo
+parâmetros estritamente tipados: a função integranda f(t,y) via Callable nativo
+puro, as condições iniciais t0​ e y0​, o tempo limite t_final​ e o tamanho do
+passo h.
+================================================================================

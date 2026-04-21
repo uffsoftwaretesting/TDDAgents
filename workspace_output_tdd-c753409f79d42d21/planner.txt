@@ -1,0 +1,14 @@
+PLANO DE SUB-REQUISITOS TDD
+================================================================================
+1. FASE 0 - SETUP: criar estrutura de diretórios em sandbox: /src, /tests; adicionar __init__.py onde necessário; criar requirements.txt com pytest; garantir Python 3.8+; instalar dependências: typing (stdlib), math (stdlib), pytest
+2. FASE 1 - INTERFACE: no módulo src/solver_euler.py criar stub da função euler_explicito(f, t0, y0, t_final, h) que apenas 'raise NotImplementedError'; em tests/test_signature.py escrever testes que importem a função e verifiquem tipo de retorno float e que NotImplementedError seja levantado inicialmente
+3. FASE 2 - VALIDATION-TYPE: implementar checagem de tipo para f ser callable e t0, y0, t_final, h serem float; lançar TypeError com mensagens claras; em tests/test_validation_type.py adicionar casos de f não chamável e parâmetros não float
+4. FASE 3 - VALIDATION-DOMAIN: estender validações para condições de domínio: h>0 (ValueError("h must be positive")); t_final>=t0 (ValueError("t_final must be >= t0")); calcular N=(t_final-t0)/h com math.isclose dentro de tol=1e-8 e lancar ValueError("Number of steps must be integer") quando falhar; criar testes em tests/test_validation_domain.py para cada cenário
+5. FASE 4 - ZERO-STEPS: tratar caso t_final==t0 (N==0) retornando y0 imediatamente sem iteração; escrever teste em tests/test_zero_steps.py assegurando retorno exato de y0
+6. FASE 5 - LOOP-CORE: implementar loop principal de Euler Explícito: inicializar t, y; iterar N passos atualizando y += h * f(t, y) e t += h; ao final retornar y; escrever testes em tests/test_core_loop.py usando EDO simples (ex: f(t,y)=y → y0*2^n) e validando aproximação numérica
+7. FASE 6 - ERROR-HANDLING-F: envolver chamadas a f(t,y) em try/except capturando exceções internas e relançando RuntimeError(f"Error evaluating derivative at step {i}: {e}"); criar testes em tests/test_error_handling_f.py simulando f que lança exceção no passo i
+8. FASE 7 - PUREZA: assegurar que euler_explicito não altera variáveis fora do seu escopo; escrever teste em tests/test_purity.py definindo variáveis globais antes da chamada e verificando que permanecem intactas
+9. FASE 8 - TOLERÂNCIA-N: validar que N calculado é convertido para inteiro corretamente quando dentro da tolerância; escrever teste em tests/test_steps_tolerance.py para variações de h e t_final que produzem N quase inteiro
+10. FASE 9 - DOCUMENTAÇÃO-TYPEHINTS: adicionar anotações de tipo (typing.Callable, float -> float) na assinatura da função; criar teste de type checking básico usando mypy (opcional) ou pytest-mypy para garantir conformidade
+11. FASE 10 - INTEGRAÇÃO FINAL E CLEANUP: rodar toda a suíte pytest garantindo 100% de aprovação e cobertura para todos os casos; remover stubs ou prints de depuração; organizar código conforme PEP8 e adicionar docstring explicativa na função
+================================================================================

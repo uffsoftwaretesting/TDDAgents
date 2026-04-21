@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "rk2-ponto-medio"
+version = "0.1.0"
+description = "Implementação do método RK2 (ponto médio) para EDOs"
+authors = ["Seu Nome <seu.email@exemplo.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.0"
+mypy = "^1.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

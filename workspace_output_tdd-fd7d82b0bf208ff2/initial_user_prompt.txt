@@ -1,5 +1,0 @@
-PROMPT INICIAL ENVIADO PELO USUARIO
-================================================================================
-faça um código que receba algarismos romanos como entrada e devolva inteiro na
-saida
-================================================================================

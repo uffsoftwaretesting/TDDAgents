@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# diretório dos testes
+testpaths = ["tests"]
+# adiciona src ao PYTHONPATH
+pythonpath = ["src"]

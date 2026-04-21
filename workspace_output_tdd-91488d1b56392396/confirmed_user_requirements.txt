@@ -1,0 +1,94 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Como engenheiro de software com foco em computação científica, quero
+           desenvolver uma função em Python chamada euler_implicito que resolva um
+           Problema de Valor Inicial (PVI) de uma Equação Diferencial Ordinária (EDO). A
+           função deve ser projetada como o núcleo de uma biblioteca matemática de alta
+           performance, recebendo parâmetros com tipagem estática rigorosa: a função
+           matemática do PVI passada como uma estrutura de primeira classe nativa do
+           Python, as condições iniciais t0 e y0, o limite de integração t_final e o
+           tamanho do passo h. Diferente de métodos explícitos, o cálculo do próximo
+           estado no Euler Implícito (y_(n+1)  = y_n + h⋅f(t_n+1, y_(n+1))) requer a
+           resolução de uma equação algébrica. Portanto, a função deve implementar
+           internamente um método de busca de raízes (como Newton-Raphson ou iteração de
+           ponto fixo) para isolar y_(n+1). A lógica interna deve ser robusta para lidar
+           com falhas de convergência do solver em EDOs não-lineares, levantando
+           exceções customizadas e descritivas (ex: ConvergenceError) caso o número
+           máximo de iterações do solver seja atingido.A função deve aceitar apenas
+           problemas escalares. Implemente internamente um método iterativo. A estrutura
+           de retorno deve ser uma lista python.
+[Analista]: Antes de gerar o checklist, preciso confirmar alguns pontos essenciais para
+            a implementação:
+
+1. Você deseja expor, como parâmetros opcionais da função, a tolerância de convergência
+(tol) e o número máximo de iterações (max_iter) do solver, ou podemos fixá-los
+internamente com valores padrão pré-definidos?
+2. Como devemos tratar situações em que (t_final – t0)/h não resulte em número inteiro
+de passos? Ajustamos o último passo automaticamente ou lançamos uma exceção (por
+exemplo, ValueError)?
+
+[Usuário]: Sim, exponha esses parâmetros. Ajuste o último passo automaticamente.
+[Analista]: Checklist de Requisitos Técnicos para a função euler_implicito (Python)
+
+1. Assinatura da Função
+• Nome: euler_implicito
+• Parâmetros:
+- func: Callable[[float, float], float]  (função f(t, y))
+- t0: float  (tempo inicial)
+- y0: float  (valor inicial)
+- t_final: float  (tempo final)
+- h: float  (passo inicial)
+- tol: float = 1e-8  (tolerância de convergência do solver, exposta)
+- max_iter: int = 50  (número máximo de iterações do solver, exposto)
+• Retorno: List[float]  (lista de valores y_n para cada ponto de tempo)
+• Anotações de tipo (type hints) devem estar presentes em toda a função.
+
+2. Validação de Entrada
+• t0, t_final, y0, h, tol devem ser floats; max_iter deve ser int → caso contrário
+ValueError.
+• h > 0, tol > 0, max_iter >= 1 → caso violem, lançar ValueError.
+• t_final > t0 → caso contrário ValueError.
+
+3. Cálculo de Número de Passos e Ajuste do Último Passo
+• Calcular n_steps = ceil((t_final - t0) / h).
+• Para cada passo i=0..n_steps-1:
+- Se i == n_steps-1, usar h_i = t_final - t_{i} (ajuste automático do último passo).
+- Caso contrário, h_i = h.
+
+4. Implementação do Método de Euler Implícito
+Para cada iteração de passo:
+a) Definir t_next = t_i + h_i.
+b) Resolver y_next da equação: y_next = y_i + h_i * func(t_next, y_next)
+• Usar Newton-Raphson (por padrão) com inicialização em y_i.
+• Função-objetivo φ(y) = y - y_i - h_i⋅func(t_next, y).
+• Derivada φ'(y) = 1 - h_i⋅∂f/∂y (aproximar derivada numérica ou solicitar que func
+retorne também ∂f/∂y?).
+– Para simplicidade, use derivada numérica com passo eps = 1e-6.
+• Iterar até |y_new - y_old| < tol ou até atingir max_iter.
+• Em cada iteração, y_new = y_old - φ(y_old)/φ'(y_old).
+
+5. Tratamento de Falha de Convergência
+• Se não convergir em max_iter iterações: lançar ConvergenceError com mensagem
+descritiva.
+• Definir classe ConvergenceError(Exception).
+
+6. Saída e Estrutura de Dados
+• Manter lista times = [t0, t1, ..., t_final] (opcional) e lista ys = [y0, y1, ...,
+y_n].
+• Retornar apenas ys (lista floats) conforme escopo.
+
+7. Testes TDD (mínimo)
+1) Teste linear exato: dy/dt = λ y, y(0)=y0, comparação com y0·exp(λt).
+2) Teste não-linear simples (p.ex. dy/dt = y^2), verificar comportamento e convergência.
+3) Teste de falha: usar max_iter muito baixo para forçar ConvergenceError.
+4) Teste de h que não divide exatamente o intervalo: verificar ajuste do último passo.
+5) Teste de validação de parâmetros inválidos (h≤0, tol≤0, t_final≤t0, tipos
+incorretos).
+
+8. Performance e Manutenibilidade
+• Internamente, evitar alocações desnecessárias dentro do loop (reusar variáveis).
+• Documentar complexidade: O(n_steps × avg_iter).
+• Código deve ser legível e modular (separar solver de raíz em função auxiliar).
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

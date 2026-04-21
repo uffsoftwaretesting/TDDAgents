@@ -1,0 +1,18 @@
+PLANO DE SUB-REQUISITOS TDD
+================================================================================
+1. FASE 0 - SETUP: Criar estrutura de projeto isolada com diretórios 'src/' e 'tests/', inicializar virtualenv, instalar dependências core (pytest, mypy), criar arquivos vazios src/rk2_heun.py e tests/test_rk2_heun.py, adicionar pyproject.toml ou setup.cfg com configuração mínima para pytest e mypy.
+2. FASE 1 - VALIDAÇÃO DE ENTRADAS: Escrever testes em tests/test_rk2_heun.py que verifiquem: f não callable (TypeError), t0/y0/t_final/h não float (TypeError), h <= 0 (ValueError), t_final < t0 (ValueError).
+3. FASE 2 - IMPLEMENTAR VALIDAÇÃO: No src/rk2_heun.py implementar checagens de tipo e valor conforme testes da Fase 1, garantindo que exceções corretas sejam lançadas.
+4. FASE 3 - CASO t_final == t0: Escrever teste que chama rk2_heun com t_final igual a t0 e f que lançaria se executado, validando retorno imediato de y0 sem chamar f.
+5. FASE 4 - RETORNO ANTECIPADO: Implementar no código a lógica que detecta t_final == t0 e retorna y0 antes de qualquer chamada a f.
+6. FASE 5 - CÁLCULO DE PASSOS: Escrever testes que, para vários pares (t0, t_final, h), verifiquem valores de n_full e remainder esperados (incluindo h maior que t_final–t0 e casos com resto não zero).
+7. FASE 6 - GERAR LISTA DE PASSOS: Implementar helper interno em rk2_heun que cria lista de passos [h]*n_full + [remainder>0], validando casos de ponto flutuante mínimos, conforme testes da Fase 5.
+8. FASE 7 - PASSO HEUN INDIVIDUAL: Escrever testes unitários para uma única iteração de método RK2 Heun (função f simples, e.g. f(t,y)=c), calculando y_pred e y_next manualmente para comparação.
+9. FASE 8 - IMPLEMENTAR PASSO HEUN: No módulo, implementar cálculo de y_pred e y_next usando hi, f(t,y) e f(t+hi,y_pred), convertendo retornos de f para float ou propagando TypeError, conforme testes.
+10. FASE 9 - LOOP DE INTEGRAÇÃO: Escrever testes de integração que executem múltiplos passos (lista completa de hi) para ODE simples (e.g. y'=k, y'=y) e validem valor aproximado após cada passo ou ao final.
+11. FASE 10 - IMPLEMENTAR LOOP: Integrar helper de passos e rotina de passo Heun em laço iterativo, atualizando t e y em cada hi e retornando y_final, garantindo comportamento dos testes de múltiplos passos.
+12. FASE 11 - PROPAGAÇÃO DE EXCEÇÕES DE f: Criar testes que fazem f lançar exceção customizada e validem que rk2_heun não a captura, apenas propaga.
+13. FASE 12 - DOCUMENTAÇÃO E TIPAGEM: Adicionar docstring completa em rk2_heun com parâmetros, saída e exceções, aplicar type hints estritos e configurar mypy para checagem sem erros.
+14. FASE 13 - QUALIDADE E CI: Criar pytest.ini, mypy.ini, adicionar badge e workflow de CI simulado, rodar pytest --maxfail=1 --disable-warnings e mypy para validar cobertura e tipagem.
+15. FASE 14 - TESTES DE REGRESSÃO E VERIFICAÇÃO FINAL: Incluir casos de teste extra para cenários de borda (remainder muito pequeno, h > ∆t), validar precisão numérica com tolerância relativa e encerrar o ciclo TDD.
+================================================================================

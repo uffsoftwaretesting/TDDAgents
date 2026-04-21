@@ -1,0 +1,66 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: adams_bashforth_3
+
+## 1. Visão Geral do Sistema
+Implementar um solucionador de Problema de Valor Inicial (PVI) para Equação Diferencial Ordinária (EDO) escalar usando o método explícito de passos múltiplos Adams-Bashforth de 3 passos. A função recebe função integranda, condições iniciais, passo de integração e tempo final, e retorna o valor aproximado de y em t_final. As duas primeiras etapas usam Euler explícito para geração de y₁ e y₂.
+
+## 2. Estruturas de Dados e Interfaces
+
+Assinatura da função  
+```python
+def adams_bashforth_3(
+    f: Callable[[float, float], float],
+    t0: float,
+    y0: float,
+    t_final: float,
+    h: float
+) -> float
+```
+
+Parâmetros  
+- f: Callable[[float, float], float]  
+  • Recebe (t: float, y: float) → retorna float  
+- t0: float  (condição inicial de tempo)  
+- y0: float  (condição inicial de solução)  
+- t_final: float  (tempo até o qual integrar)  
+- h: float  (tamanho do passo, > 0)
+
+Retorno  
+- float: aproximação yₙ em t_final
+
+Fluxo Interno  
+1. Calcular n_steps = (t_final - t0) / h  
+2. Gerar y₁, y₂ por Euler explícito  
+3. Se n_steps ≥ 3, iterar esquema Adams-Bashforth de 3 passos  
+4. Retornar valor final escalar
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+Validações de tipo e domínio  
+- f não callable ou assinatura inválida → TypeError  
+- t0, y0, t_final, h não forem float → TypeError  
+- h ≤ 0 → ValueError("Passo h deve ser positivo")  
+- t_final < t0 → ValueError("t_final deve ser ≥ t0")  
+- n_steps = (t_final - t0)/h não inteiro (|frac(n_steps)| > ε, e.g. 1e-12) → ValueError("Número de passos não inteiro")
+
+Condições de contagem de passos  
+- n_steps == 0 → retorna y0  
+- n_steps == 1 → calcula y1 = y0 + h·f(t0, y0) e retorna y1  
+- n_steps == 2 → calcula y1 e y2 (ambos via Euler explícito) e retorna y2  
+- n_steps ≥ 3 → executa loop Adams-Bashforth de 3 passos e retorna yₙ
+
+Tratamento de exceções de f  
+- Qualquer exceção lançada por f deve ser propagada sem modificação
+
+## 4. Contexto Técnico
+- Linguagem: Python 3.8+  
+- Paradigma: Procedural/funções puras, uso de floats de dupla precisão  
+- Tolerância ε para integridade de n_steps (sugestão de 1e-12)  
+- Não há suporte a sistemas vetoriais (apenas escalares)  
+- Não usar dependências externas além da stdlib
+
+## 5. Dependências Base (Core Dependencies)
+- Python standard library  
+- typing (Callable)  
+- pytest (para desenvolvimento da suíte de testes)

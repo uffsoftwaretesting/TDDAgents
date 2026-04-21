@@ -1,0 +1,78 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Como engenheiro de software com foco em computação científica, quero
+           desenvolver uma rotina em Python chamada adams_bashforth_3 que resolva um
+           Problema de Valor Inicial (PVI) de uma Equação Diferencial Ordinária (EDO)
+           utilizando o método explícito de passos múltiplos Adams-Bashforth de 3
+           passos. A função deve ser construída como o motor de uma biblioteca
+           matemática rigorosa, recebendo parâmetros estritamente tipados: a função
+           integranda f(t,y) via Callable nativo puro, as condições iniciais t0​ e y0​,
+           o tempo limite t_final​ e o tamanho do passo h.
+[Analista]: Para elaborar um checklist robusto, por favor, esclareça os seguintes
+            pontos:
+
+1. O método deve suportar apenas EDOs escalares (float) ou também sistemas vetoriais
+(np.ndarray)?
+2. Como devemos gerar as duas primeiras aproximações (y1 e y2) antes de aplicar
+Adams-Bashforth-3? Ex.: usar Runge-Kutta 4, RK2, Euler explícito, etc.
+3. Qual formato de saída você espera? Por exemplo, uma tupla (t_values: np.ndarray,
+y_values: np.ndarray) e como tratar casos em que (t_final – t0)/h não seja um número
+inteiro exato.
+
+Com essas informações, posso montar o checklist de requisitos técnico e testável.
+
+[Usuário]: O método deve suportar apenas escalares. Use Euler explícito para aproximar
+           os dois primeiros pontos. O formato da saída deve ser um único escalar com o
+           valor calculado no ponto específico.
+[Analista]: Checklist de Requisitos Técnico e Testável para adams_bashforth_3:
+
+1. Assinatura e Tipagem
+• Assinatura: def adams_bashforth_3(
+f: Callable[[float, float], float],
+t0: float,
+y0: float,
+t_final: float,
+h: float
+) -> float
+
+2. Validação de Parâmetros de Entrada
+• f deve ser callable, aceitar dois floats e retornar float; senão, TypeError
+• t0, y0, t_final, h devem ser floats; senão, TypeError
+• h > 0; senão, ValueError("Passo h deve ser positivo")
+• t_final >= t0; senão, ValueError("t_final deve ser ≥ t0")
+• n_steps = (t_final - t0) / h deve ser inteiro (abs(frac(n_steps)) < ε);
+caso contrário, ValueError("Número de passos não inteiro")
+
+3. Cálculo dos Dois Primeiros Pontos (Euler Explícito)
+• y1 = y0 + h * f(t0, y0)
+• y2 = y1 + h * f(t0 + h, y1)
+
+4. Tratamento de Casos com n_steps < 3
+• Se n_steps == 0: retorna y0
+• Se n_steps == 1: retorna y1
+• Se n_steps == 2: retorna y2
+
+5. Iteração Adams-Bashforth de 3 Passos (para i de 2 a n_steps-1)
+Para cada i:
+ti   = t0 + i·h
+fi   = f(ti, yi)
+fi_1 = f(ti - h, yi-1)
+fi_2 = f(ti - 2h, yi-2)
+yi+1 = yi + (h/12) * (23·fi - 16·fi_1 + 5·fi_2)
+
+6. Saída
+• Retornar o único escalar y_n correspondente a t_final
+
+7. Tratamento de Erros e Robustez
+• Capturar e propagar exceções de f
+• Não usar dependências externas (apenas stdlib)
+
+8. Testes Unitários (TDD)
+• Caso simples: f(t,y)=c (constante) → y = y0 + c·(t_final - t0)
+• ODE linear: f(t,y)=a·y, comparar com solução exp(a·t)
+• Testar h inválido (≤0), t_final < t0, f não-callable, tipos errados
+• Testar n_steps não inteiro
+• Testar n_steps=0,1,2 e ≥3
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

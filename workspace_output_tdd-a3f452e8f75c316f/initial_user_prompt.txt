@@ -1,0 +1,10 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Como engenheiro de software com foco em computação científica, quero desenvolver
+uma rotina em Python chamada integracao_simpson_1_3 que aproxime o valor de uma
+integral definida utilizando a Regra de Simpson 1/3 Composta. A função deve ser
+projetada como o núcleo de um módulo matemático de alta performance, recebendo
+parâmetros estritamente tipados: a função integranda f(x) como uma estrutura de
+primeira classe nativa do Python, os limites de integração a e b, e o número de
+subintervalos N.
+================================================================================

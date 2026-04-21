@@ -1,0 +1,89 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Como engenheiro de software com foco em computação científica, quero desenvolver uma
+   função em Python chamada euler_explicito que implemente o Método de Euler Explícito
+   que resolva um Problema de Valor Inicial (PVI) de uma Equação Diferencial Ordinária
+   (EDO). A função deve ser projetada como o núcleo de uma biblioteca matemática de alta
+   performance e confiabilidade, recebendo parâmetros com tipagem estática rigorosa: a
+   função matemática do PVI passada como uma estrutura de primeira classe nativa do
+   Python (evitando interpretação de strings em tempo de execução), as condições
+   iniciais t0 e y0, o limite de integração t_final e o tamanho do passo h.
+2. Estamos lidando apenas com EDOs escalares. A função deve retornar apenas o valor
+   final.
+3. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Como engenheiro de software com foco em computação científica, quero
+           desenvolver uma função em Python chamada euler_explicito que implemente o
+           Método de Euler Explícito que resolva um Problema de Valor Inicial (PVI) de
+           uma Equação Diferencial Ordinária (EDO). A função deve ser projetada como o
+           núcleo de uma biblioteca matemática de alta performance e confiabilidade,
+           recebendo parâmetros com tipagem estática rigorosa: a função matemática do
+           PVI passada como uma estrutura de primeira classe nativa do Python (evitando
+           interpretação de strings em tempo de execução), as condições iniciais t0 e
+           y0, o limite de integração t_final e o tamanho do passo h.
+[Analista]: Para elaborar um checklist robusto, preciso de alguns detalhes adicionais:
+
+1. O vetor de estado y pode ser multidimensional (e.g., np.ndarray) ou estamos tratando
+somente de EDOs escalares (float)?
+2. A função deve retornar todo o trajeto de integração (arrays de t e y) ou apenas o
+valor final y(t_final)?
+
+Com essas informações, preparo o checklist completo. Obrigado!
+
+[Usuário]: Estamos lidando apenas com EDOs escalares. A função deve retornar apenas o
+           valor final.
+[Analista]: Segue o checklist de requisitos técnicos para a função euler_explicito (EDO
+            escalar, retorno do valor final):
+
+1. Assinatura e Tipagem
+• Definir função com tipagem estática (type hints):
+def euler_explicito(
+f: Callable[[float, float], float],
+t0: float,
+y0: float,
+t_final: float,
+h: float
+) -> float
+
+2. Validação de Parâmetros
+• f deve ser chamável e receber dois floats, retornando float. Caso contrário, lançar
+TypeError.
+• t0, y0, t_final, h devem ser floats. Senão, lançar TypeError.
+• h deve ser > 0. Caso contrário, lançar ValueError.
+• t_final >= t0. Caso contrário, lançar ValueError.
+• (t_final - t0) / h deve ser inteiro (dentro de tolerância de ponto flutuante). Caso
+contrário, lançar ValueError.
+
+3. Lógica de Integração (Método de Euler Explícito)
+• Calcular número de passos N = int((t_final - t0) / h).
+• Inicializar t = t0, y = y0.
+• Para i em range(N):
+• y = y + h * f(t, y)
+• t = t + h
+• Se N == 0 (t_final == t0), retornar imediatamente y0.
+
+4. Tratamento de Erros em Tempo de Execução
+• Capturar exceções internas de f e reembalar em RuntimeError com mensagem informativa.
+• Garantir que nenhum estado global seja modificado (função pura).
+
+5. Retorno
+• Retornar o valor y final (float).
+
+6. Testabilidade (TDD)
+• Teste caso trivial y'=0: y(t)=y0 para todo t.
+• Teste caso y'=c constante: y(t)=y0 + c*(t_final - t0).
+• Teste equação linear y'=k*y: comparar com solução analítica euler aproximado.
+• Teste zero steps (t_final == t0) retorna y0.
+• Teste parâmetros inválidos: h<=0, t_final<t0, tipos errados, número de passos não
+inteiro.
+• Teste exceções da função f() reembaladas em RuntimeError.
+
+7. Performance e Confiabilidade
+• Todos os cálculos em variáveis locais (sem overhead de estruturas externas).
+• Documentar complexidade O(N).
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

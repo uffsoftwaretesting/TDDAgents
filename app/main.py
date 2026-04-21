@@ -6,6 +6,12 @@ import os
 import sys
 import textwrap
 
+# Permite executar este arquivo diretamente sem perder imports absolutos `app.*`.
+if __package__ in (None, ""):
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
 from dotenv import load_dotenv
 
 from app.graph.subgraphs.requirements_orchestrator_subgraph import RequirementsOrchestrator
