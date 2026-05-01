@@ -5,6 +5,7 @@
 # Inclui: Unit Test Success, verificação pontual, convergência, gráfico log-log.
 #
 # ODE (Challenge 1): y' = -y,  y(0) = 1,  t ∈ [0, 1]
+# Gabarito obtido via scipy.integrate.solve_ivp.
 # Uso: python script/evaluate_solver_euler.py
 # =============================================================================
 
@@ -13,6 +14,7 @@ import json
 import inspect
 import numpy as np
 from pathlib import Path
+from scipy.integrate import solve_ivp
 
 # Adiciona diretório script ao path para importar _eval_utils
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,14 +49,30 @@ H_LEVELS          = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 _STATE = {}  # t0, y0, t_final, exact_final, rhs
 
 
+def _compute_scipy_reference(rhs, t0, y0, t_f):
+    """Calcula o valor de referência usando scipy.integrate.solve_ivp."""
+    sol = solve_ivp(
+        rhs, [t0, t_f], [y0],
+        method="RK45", rtol=1e-12, atol=1e-14,
+        dense_output=True,
+    )
+    if not sol.success:
+        raise RuntimeError(f"solve_ivp falhou: {sol.message}")
+    return float(sol.y[0, -1])
+
+
 def _setup_ode(gt):
     cond     = gt.get("condicao_inicial", {})
     interval = gt.get("intervalo", [0.0, 1.0])
     _STATE["t0"]    = float(cond.get("t0", interval[0]))
     _STATE["y0"]    = float(cond.get("y0", 1.0))
     _STATE["t_f"]   = float(interval[1])
-    _STATE["exact"] = float(gt["valor_esperado"])
     _STATE["rhs"]   = lambda t, y: -y
+
+    # Gabarito via scipy
+    _STATE["exact"] = _compute_scipy_reference(
+        _STATE["rhs"], _STATE["t0"], _STATE["y0"], _STATE["t_f"]
+    )
 
 
 def _call_solver(solver_fn, h):
@@ -97,7 +115,7 @@ def main():
     gt = load_ground_truth(GROUND_TRUTH_FILE, CHALLENGE_ID)
     _setup_ode(gt)
     print(f"\n[INFO] ODE: y'=-y, y({_STATE['t0']})={_STATE['y0']}, t_final={_STATE['t_f']}")
-    print(f"[INFO] Valor exato = {_STATE['exact']}")
+    print(f"[INFO] Gabarito scipy (solve_ivp) = {_STATE['exact']}")
 
     module    = load_agent_module(AGENT_MODULE_PATH)
     solver_fn = getattr(module, FUNCTION_NAME)
@@ -146,6 +164,7 @@ def main():
         "challenge_id": CHALLENGE_ID, "module": AGENT_MODULE_PATH,
         "method": METHOD_LABEL, "method_key": METHOD_KEY,
         "problem_type": PROBLEM_TYPE, "final_status": final_status,
+        "scipy_reference": _STATE["exact"],
         "unit_test_success": {
             "passed": ut["passed"], "failed": ut["failed"],
             "errors": ut["errors"], "total": ut["total"],

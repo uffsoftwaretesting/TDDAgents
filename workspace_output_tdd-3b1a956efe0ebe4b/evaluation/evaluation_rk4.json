@@ -5,6 +5,7 @@
   "method_key": "rk4",
   "problem_type": "ode_ivp",
   "final_status": "PASS",
+  "scipy_reference": 0.018315638888756394,
   "unit_test_success": {
     "passed": 31,
     "failed": 0,
@@ -14,18 +15,18 @@
   },
   "pointwise": {
     "status": "PASS",
-    "abs_error": 5.0100548709686166e-12
+    "abs_error": 4.9878400021352576e-12
   },
   "convergence": {
     "status": "PASS",
-    "estimated_order": 4.0695,
+    "estimated_order": 4.0705,
     "expected_order": 4.0,
     "acceptable_range": [
       3.2,
       4.8
     ],
     "r_squared": 0.9999,
-    "avg_reduction": 16.8718,
+    "avg_reduction": 16.8861,
     "expected_reduction": 16.0,
     "h_vals": [
       0.1,
@@ -36,12 +37,12 @@
       0.003125
     ],
     "errors": [
-      6.813378325171149e-06,
-      3.7253999970315865e-07,
-      2.177020601290547e-08,
-      1.3155636024997364e-09,
-      8.084769659300051e-11,
-      5.0100548709686166e-12
+      6.81337830295628e-06,
+      3.725399774882898e-07,
+      2.1770183798036635e-08,
+      1.315541387630903e-09,
+      8.082548172416715e-11,
+      4.9878400021352576e-12
     ],
     "reason": "OK"
   }

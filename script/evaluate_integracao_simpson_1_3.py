@@ -5,6 +5,7 @@
 # Inclui: Unit Test Success, verificação pontual, convergência, gráfico log-log.
 #
 # Integral (Challenge 4): ∫₀^π sin(x)/x dx  (sinc normalizado)
+# Gabarito obtido via scipy.integrate.quad.
 # Uso: python script/evaluate_integracao_simpson_1_3.py
 # =============================================================================
 
@@ -12,6 +13,7 @@ import sys
 import json
 import numpy as np
 from pathlib import Path
+from scipy.integrate import quad
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _eval_utils import (
@@ -39,12 +41,22 @@ OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / "ev
 H_LEVELS          = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 
 A, B = 0.0, np.pi
-# Valor de alta precisão (scipy.integrate.quad)
-INTEGRAL_EXACT = 1.851937051982466
+INTEGRAL_EXACT = None
 
 
 def _integrand(x):
     return np.sinc(x / np.pi)
+
+
+def _integrand_quad(x):
+    if x == 0.0:
+        return 1.0
+    return np.sin(x) / x
+
+
+def _compute_scipy_reference():
+    result, _ = quad(_integrand_quad, A, B, limit=200)
+    return float(result)
 
 
 def _call_solver(solver_fn, h):
@@ -70,16 +82,16 @@ def _pointwise(solver_fn, gt):
         return {"status": "ERROR", "reason": str(e)}
 
 
-# =============================================================================
-#  MAIN
-# =============================================================================
-
 def main():
+    global INTEGRAL_EXACT
+
     print(f"\n{'='*60}\n TDDAgents — Avaliação Numérica: {METHOD_LABEL}")
     print(f" Módulo : {AGENT_MODULE_PATH}\n{'='*60}")
 
     gt = load_ground_truth(GROUND_TRUTH_FILE, CHALLENGE_ID)
-    print(f"\n[INFO] Integral: ∫₀^π sin(x)/x dx = {INTEGRAL_EXACT}")
+    INTEGRAL_EXACT = _compute_scipy_reference()
+    print(f"\n[INFO] Integral: ∫₀^π sin(x)/x dx")
+    print(f"[INFO] Gabarito scipy (quad) = {INTEGRAL_EXACT}")
 
     module    = load_agent_module(AGENT_MODULE_PATH)
     solver_fn = getattr(module, FUNCTION_NAME)
@@ -98,10 +110,7 @@ def main():
 
     print("\n── Teste de Convergência ──────────────────────────────")
     convergence = run_convergence_test(
-        lambda h: _call_solver(solver_fn, h),
-        _err,
-        H_LEVELS,
-        EXPECTED_ORDER,
+        lambda h: _call_solver(solver_fn, h), _err, H_LEVELS, EXPECTED_ORDER,
     )
     print(f"\n  Status         : {convergence['status']}")
     print(f"  Ordem estimada : {convergence.get('estimated_order')}")
@@ -128,13 +137,13 @@ def main():
         "challenge_id": CHALLENGE_ID, "module": AGENT_MODULE_PATH,
         "method": METHOD_LABEL, "method_key": METHOD_KEY,
         "problem_type": PROBLEM_TYPE, "final_status": final_status,
+        "scipy_reference": INTEGRAL_EXACT,
         "unit_test_success": {
             "passed": ut["passed"], "failed": ut["failed"],
             "errors": ut["errors"], "total": ut["total"],
             "success_rate_pct": ut["success_rate_pct"],
         },
-        "pointwise": pointwise,
-        "convergence": convergence,
+        "pointwise": pointwise, "convergence": convergence,
     }
     output_path = OUTPUT_DIR / f"evaluation_{METHOD_KEY}.json"
     with open(output_path, "w") as f:

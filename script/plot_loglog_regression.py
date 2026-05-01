@@ -5,7 +5,8 @@
 # Equação: log(E) ≈ p·log(h) + log(C)
 #
 # Lê os arquivos de avaliação JSON gerados pelos scripts evaluate_*.py e
-# produz um painel comparativo de todos os métodos + gráficos individuais.
+# produz gráficos separados para métodos ODE e de Integração,
+# além de gráficos individuais por método.
 #
 # Uso:
 #   python script/plot_loglog_regression.py
@@ -26,28 +27,14 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Mapa: (workspace_dir, method_key, label, cor_pontos)
-EVALUATION_CONFIGS = [
+# Métodos ODE (Aproximação de Função via IVP)
+ODE_CONFIGS = [
     {
         "workspace": "workspace_output_tdd-c753409f79d42d21",
         "method_key": "euler_explicito",
         "label": "Euler Explícito",
         "color": "#2196F3",
         "marker": "o",
-    },
-    {
-        "workspace": "workspace_output_tdd-a3f452e8f75c316f",
-        "method_key": "simpson_1_3",
-        "label": "Simpson 1/3",
-        "color": "#9C27B0",
-        "marker": "s",
-    },
-    {
-        "workspace": "workspace_output_tdd-c0d2da4616eb323c",
-        "method_key": "trapezio",
-        "label": "Trapézio Composto",
-        "color": "#00BCD4",
-        "marker": "D",
     },
     {
         "workspace": "workspace_output_tdd-3b1a956efe0ebe4b",
@@ -57,13 +44,34 @@ EVALUATION_CONFIGS = [
         "marker": "^",
     },
     {
-        "workspace": "workspace_output_tdd-c6b7fefebb87a87b",
-        "method_key": "adams_bashforth_2",
-        "label": "Adams-Bashforth 2",
+        "workspace": "workspace_output_tdd-7681fdfd94580fd6",
+        "method_key": "adams_bashforth_3",
+        "label": "Adams-Bashforth 3",
         "color": "#FF5722",
         "marker": "P",
     },
 ]
+
+# Métodos de Integração Numérica
+INTEGRACAO_CONFIGS = [
+    {
+        "workspace": "workspace_output_tdd-c0d2da4616eb323c",
+        "method_key": "trapezio",
+        "label": "Trapézio Composto",
+        "color": "#00BCD4",
+        "marker": "D",
+    },
+    {
+        "workspace": "workspace_output_tdd-a3f452e8f75c316f",
+        "method_key": "simpson_1_3",
+        "label": "Simpson 1/3",
+        "color": "#9C27B0",
+        "marker": "s",
+    },
+]
+
+# Todos juntos (para compatibilidade e gráficos individuais)
+EVALUATION_CONFIGS = ODE_CONFIGS + INTEGRACAO_CONFIGS
 
 OUTPUT_DIR = PROJECT_ROOT / "script" / "loglog_plots"
 
@@ -126,47 +134,58 @@ def plot_individual(ax, h_vals, errors, est_order, log_C, label, color, marker):
 
 
 # =============================================================================
-#  PAINEL COMPARATIVO
+#  FUNÇÕES AUXILIARES PARA FILTRAR DADOS
 # =============================================================================
 
-def plot_comparison_panel(results):
-    """Gera painel 2×3 com todos os métodos sobrepostos e individuais."""
+def _extract_plot_data(cfg, data):
+    """Extrai h_vals e errors filtrados de um resultado de avaliação."""
+    if data is None:
+        return None, None
+    convergence = data.get("convergence", {})
+    h_vals = convergence.get("h_vals", [])
+    errors = convergence.get("errors", [])
+
+    if not h_vals or not errors or len(h_vals) < 3:
+        return None, None
+
+    pairs = [(h, e) for h, e in zip(h_vals, errors) if e > 0]
+    if len(pairs) < 3:
+        return None, None
+    h_vals_f, errors_f = zip(*pairs)
+    return list(h_vals_f), list(errors_f)
+
+
+# =============================================================================
+#  PAINEL COMPARATIVO (por categoria)
+# =============================================================================
+
+def plot_comparison_panel(results, title_suffix=""):
+    """Gera painel com gráficos individuais para um grupo de métodos."""
     n_methods = len(results)
-    cols = 3
+    cols = min(3, n_methods)
     rows = (n_methods + cols - 1) // cols
 
     fig = plt.figure(figsize=(cols * 6.5, rows * 5.5))
     fig.suptitle(
-        'Regressão Log-Log do Erro Numérico\nlog(E) ≈ p·log(h) + log(C)',
+        f'Regressão Log-Log do Erro Numérico{title_suffix}\n'
+        'log(E) ≈ p·log(h) + log(C)',
         fontsize=16, fontweight='bold', y=1.01
     )
 
     gs = gridspec.GridSpec(rows, cols, figure=fig, hspace=0.45, wspace=0.35)
 
     for idx, (cfg, data) in enumerate(results):
-        if data is None:
-            continue
-        convergence = data.get("convergence", {})
-        h_vals = convergence.get("h_vals", [])
-        errors = convergence.get("errors", [])
-
-        if not h_vals or not errors or len(h_vals) < 3:
+        h_vals_f, errors_f = _extract_plot_data(cfg, data)
+        if h_vals_f is None:
             continue
 
-        # Filtra zeros/negativos antes do log
-        pairs = [(h, e) for h, e in zip(h_vals, errors) if e > 0]
-        if len(pairs) < 3:
-            continue
-        h_vals_f, errors_f = zip(*pairs)
-
-        est_order, log_C, r2 = compute_regression(list(h_vals_f), list(errors_f))
+        est_order, log_C, r2 = compute_regression(h_vals_f, errors_f)
 
         row, col = divmod(idx, cols)
         ax = fig.add_subplot(gs[row, col])
-        plot_individual(ax, list(h_vals_f), list(errors_f),
+        plot_individual(ax, h_vals_f, errors_f,
                         est_order, log_C, cfg["label"], cfg["color"], cfg["marker"])
 
-        # Adiciona R² na legenda via anotação
         ax.annotate(f'R² = {r2:.4f}', xy=(0.97, 0.07),
                     xycoords='axes fraction', ha='right', fontsize=9,
                     color='#333333',
@@ -176,28 +195,17 @@ def plot_comparison_panel(results):
 
 
 # =============================================================================
-#  GRÁFICO OVERLAID (todos os métodos num mesmo plot)
+#  GRÁFICO OVERLAID (por categoria)
 # =============================================================================
 
-def plot_overlay(results):
-    """Sobrepõe todos os métodos num único gráfico log-log."""
+def plot_overlay(results, title_suffix=""):
+    """Sobrepõe métodos de um grupo num único gráfico log-log."""
     fig, ax = plt.subplots(figsize=(10, 7))
 
     for cfg, data in results:
-        if data is None:
+        h_vals_f, errors_f = _extract_plot_data(cfg, data)
+        if h_vals_f is None:
             continue
-        convergence = data.get("convergence", {})
-        h_vals = convergence.get("h_vals", [])
-        errors = convergence.get("errors", [])
-
-        if not h_vals or not errors or len(h_vals) < 3:
-            continue
-
-        pairs = [(h, e) for h, e in zip(h_vals, errors) if e > 0]
-        if len(pairs) < 3:
-            continue
-        h_vals_f, errors_f = zip(*pairs)
-        h_vals_f = list(h_vals_f); errors_f = list(errors_f)
 
         log_h = np.log10(h_vals_f)
         log_e = np.log10(errors_f)
@@ -211,8 +219,10 @@ def plot_overlay(results):
 
     ax.set_xlabel('log₁₀(h)', fontsize=13)
     ax.set_ylabel('log₁₀(E)', fontsize=13)
-    ax.set_title('Comparação de Métodos — Regressão Log-Log\nlog(E) ≈ p·log(h) + log(C)',
-                 fontsize=14, fontweight='bold')
+    ax.set_title(
+        f'Comparação de Métodos{title_suffix}\n'
+        'log(E) ≈ p·log(h) + log(C)',
+        fontsize=14, fontweight='bold')
     ax.legend(fontsize=11)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -223,8 +233,9 @@ def plot_overlay(results):
 #  RELATÓRIO TEXTO
 # =============================================================================
 
-def print_summary(results):
-    print(f"\n{'='*72}")
+def print_summary(results, group_label=""):
+    if group_label:
+        print(f"\n  ── {group_label} ──")
     print(f"  {'Método':<28}  {'p estimado':>10}  {'p esperado':>10}  {'R²':>8}  {'UT %':>6}")
     print(f"  {'-'*68}")
     for cfg, data in results:
@@ -241,7 +252,6 @@ def print_summary(results):
         exp_s = f"{exp:.1f}" if exp is not None else "—"
         r2_s  = f"{r2:.4f}" if r2 is not None else "—"
         print(f"  {cfg['label']:<28}  {est_s:>10}  {exp_s:>10}  {r2_s:>8}  {pct:>6}")
-    print(f"{'='*72}\n")
 
 
 # =============================================================================
@@ -255,31 +265,33 @@ def main():
     print(f" TDDAgents — Plotter de Regressão Log-Log")
     print(f"{'='*60}\n")
 
-    results = []
-    for cfg in EVALUATION_CONFIGS:
-        print(f"  Carregando: {cfg['label']} ...")
+    # Carregar resultados separados por categoria
+    ode_results = []
+    for cfg in ODE_CONFIGS:
+        print(f"  Carregando [ODE]: {cfg['label']} ...")
         data = load_evaluation(cfg["workspace"], cfg["method_key"])
-        results.append((cfg, data))
+        ode_results.append((cfg, data))
 
-    print_summary(results)
+    integracao_results = []
+    for cfg in INTEGRACAO_CONFIGS:
+        print(f"  Carregando [INT]: {cfg['label']} ...")
+        data = load_evaluation(cfg["workspace"], cfg["method_key"])
+        integracao_results.append((cfg, data))
+
+    all_results = ode_results + integracao_results
+
+    # Resumo textual
+    print(f"\n{'='*72}")
+    print_summary(ode_results, "Métodos ODE (Aproximação de Função)")
+    print_summary(integracao_results, "Métodos de Integração Numérica")
+    print(f"{'='*72}\n")
 
     # Gráficos individuais por método
-    for cfg, data in results:
-        if data is None:
+    for cfg, data in all_results:
+        h_vals_f, errors_f = _extract_plot_data(cfg, data)
+        if h_vals_f is None:
+            print(f"  [SKIP] {cfg['label']}: dados insuficientes.")
             continue
-        conv = data.get("convergence", {})
-        h_vals = conv.get("h_vals", [])
-        errors = conv.get("errors", [])
-
-        if not h_vals or not errors or len(h_vals) < 3:
-            print(f"  [SKIP] {cfg['label']}: dados insuficientes para plotar.")
-            continue
-
-        pairs = [(h, e) for h, e in zip(h_vals, errors) if e > 0]
-        if len(pairs) < 3:
-            continue
-        h_vals_f = [p[0] for p in pairs]
-        errors_f  = [p[1] for p in pairs]
 
         est_order, log_C, r2 = compute_regression(h_vals_f, errors_f)
 
@@ -297,19 +309,35 @@ def main():
         plt.close(fig)
         print(f"  Salvo: {out}")
 
-    # Painel comparativo
-    panel_fig = plot_comparison_panel(results)
-    panel_path = OUTPUT_DIR / "loglog_comparison_panel.png"
-    panel_fig.savefig(panel_path, dpi=150, bbox_inches='tight')
-    plt.close(panel_fig)
-    print(f"\n  Painel comparativo salvo: {panel_path}")
+    # ── Painéis comparativos separados ──
 
-    # Overlay (todos juntos)
-    overlay_fig = plot_overlay(results)
-    overlay_path = OUTPUT_DIR / "loglog_overlay_all_methods.png"
-    overlay_fig.savefig(overlay_path, dpi=150, bbox_inches='tight')
-    plt.close(overlay_fig)
-    print(f"  Overlay salvo          : {overlay_path}")
+    # ODE
+    panel_ode = plot_comparison_panel(ode_results, " — Métodos ODE")
+    p_ode = OUTPUT_DIR / "loglog_comparison_ode.png"
+    panel_ode.savefig(p_ode, dpi=150, bbox_inches='tight')
+    plt.close(panel_ode)
+    print(f"\n  Painel ODE salvo          : {p_ode}")
+
+    # Integração
+    panel_int = plot_comparison_panel(integracao_results, " — Métodos de Integração")
+    p_int = OUTPUT_DIR / "loglog_comparison_integracao.png"
+    panel_int.savefig(p_int, dpi=150, bbox_inches='tight')
+    plt.close(panel_int)
+    print(f"  Painel Integração salvo   : {p_int}")
+
+    # ── Overlays separados ──
+
+    overlay_ode = plot_overlay(ode_results, " — ODE (Aproximação de Função)")
+    o_ode = OUTPUT_DIR / "loglog_overlay_ode.png"
+    overlay_ode.savefig(o_ode, dpi=150, bbox_inches='tight')
+    plt.close(overlay_ode)
+    print(f"  Overlay ODE salvo         : {o_ode}")
+
+    overlay_int = plot_overlay(integracao_results, " — Integração Numérica")
+    o_int = OUTPUT_DIR / "loglog_overlay_integracao.png"
+    overlay_int.savefig(o_int, dpi=150, bbox_inches='tight')
+    plt.close(overlay_int)
+    print(f"  Overlay Integração salvo  : {o_int}")
 
     print(f"\n  Todos os gráficos em: {OUTPUT_DIR}\n")
 
