@@ -66,7 +66,7 @@ def get_initial_user_prompt() -> str:
         # Puxa os arquivos .txt e ordena alfabeticamente
         spec_files = sorted([f for f in specs_dir.iterdir() if f.suffix == '.txt'])
 
-    print("MENU DE CASO DE USOS:\n")
+    print("MENU DE CASO DE USOS (digite a opção desejada):\n")
     for i, file_path in enumerate(spec_files, start=1):
         print(f"{i}. {file_path.name}")
     
