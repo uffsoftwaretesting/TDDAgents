@@ -147,6 +147,9 @@ class TDDOrchestrator:
             "is_type_fault": "",
             "test_faults": 0,        
             "implementation_faults": 0,
+            "subreq_success_count": 0,
+            "subreq_failure_count": 0,
+            "subreq_results": [],
         }
 
         logger.info("\n" + "#" * 80)

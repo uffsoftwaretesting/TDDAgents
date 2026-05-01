@@ -45,6 +45,9 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
     status = state.get("status", "")
     failed_requirements: list[dict] = list(state.get("failed_requirements", []))
     current_req = plan[current_index] if plan else ""
+    subreq_results: list[dict] = list(state.get("subreq_results", []))
+    subreq_success_count = state.get("subreq_success_count", 0)
+    subreq_failure_count = state.get("subreq_failure_count", 0)
 
     audit_entries: list = []
 
@@ -59,6 +62,16 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
             "last_iteration": state.get("iteration", 0),
         }
         failed_requirements.append(failure_info)
+        subreq_results.append(
+            {
+                "index": current_index,
+                "requirement": current_req,
+                "status": "failed",
+                "reason": reason,
+                "last_iteration": state.get("iteration", 0),
+            }
+        )
+        subreq_failure_count += 1
 
         logger.error(f"❌ Sub-requisito FALHOU: '{current_req}'")
         logger.error(f"   Motivo : {reason}")
@@ -76,6 +89,9 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 **state,
                 "status": "sandbox_failed", 
                 "failed_requirements": failed_requirements,
+                "subreq_results": subreq_results,
+                "subreq_success_count": subreq_success_count,
+                "subreq_failure_count": subreq_failure_count,
                 "audit_log": audit_entries,
             }
         elif status == "developer_failed":
@@ -84,6 +100,9 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 **state,
                 "status": "developer_failed", 
                 "failed_requirements": failed_requirements,
+                "subreq_results": subreq_results,
+                "subreq_success_count": subreq_success_count,
+                "subreq_failure_count": subreq_failure_count,
                 "audit_log": audit_entries,
             }
         elif status == "tester_failed":
@@ -92,6 +111,9 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 **state,
                 "status": "tester_failed", 
                 "failed_requirements": failed_requirements,
+                "subreq_results": subreq_results,
+                "subreq_success_count": subreq_success_count,
+                "subreq_failure_count": subreq_failure_count,
                 "audit_log": audit_entries,
             }
         elif status == "max_retries_exceeded":
@@ -102,6 +124,16 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
         audit_entries.append(
             AIMessage(content=f"[Evaluator] Concluído '{current_req}'.")
         )
+        subreq_results.append(
+            {
+                "index": current_index,
+                "requirement": current_req,
+                "status": "success",
+                "reason": "ok",
+                "last_iteration": state.get("iteration", 0),
+            }
+        )
+        subreq_success_count += 1
 
     logger.info(
         f"📈 Progresso geral: {current_index + 1}/{total} "
@@ -132,6 +164,9 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
             "current_sub_req": next_req,
             "iteration": 1,
             "failed_requirements": failed_requirements,
+            "subreq_results": subreq_results,
+            "subreq_success_count": subreq_success_count,
+            "subreq_failure_count": subreq_failure_count,
             **history_resets,
             "audit_log": audit_entries,
         }
@@ -157,5 +192,8 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
             **state,
             "status": final_status,
             "failed_requirements": failed_requirements,
+            "subreq_results": subreq_results,
+            "subreq_success_count": subreq_success_count,
+            "subreq_failure_count": subreq_failure_count,
             "audit_log": audit_entries,
         }

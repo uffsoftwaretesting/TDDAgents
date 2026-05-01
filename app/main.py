@@ -7,6 +7,7 @@ import sys
 import textwrap
 
 from app.utils.resilience_metrics import write_resilience_metrics
+from app.utils.pass_rate import write_pass_rate_report
 
 # Permite executar este arquivo diretamente sem perder imports absolutos `app.*`.
 if __package__ in (None, ""):
@@ -135,6 +136,8 @@ def _write_token_report(artifacts_dir: str, orchestrator: TDDOrchestrator) -> No
     summary = orchestrator.token_tracker.summary()
     totals = summary["totals"]
 
+    os.makedirs(artifacts_dir, exist_ok=True)
+
     logger.info(
         "📊 Token Usage — total: %d | prompt: %d | completion: %d | cached: %d",
         totals["total_tokens"],
@@ -176,7 +179,8 @@ def main() -> None:
         logger.info(f"🔑 thread_id derivado da especificação: {thread_id}")
 
     # ── Configuração de Workspace e Logs ──────────────────────────────────────
-    workspace_dir = f"workspace_output_{thread_id}"
+    workspace_dir_name = f"workspace_output_{thread_id}"
+    workspace_dir = os.path.abspath(workspace_dir_name)
     os.makedirs(workspace_dir, exist_ok=True)
 
     artifacts_dir = os.path.join(workspace_dir, "metrics_and_logging")
@@ -226,10 +230,10 @@ def main() -> None:
     print("\n" + "=" * 80)
     print("🚀  FASE 2: ORQUESTRAÇÃO TDD MULTI-AGENTE (SANDBOX E2B)")
     print("=" * 80)
-    print(f"📂 Output Directory: ./{workspace_dir}/")
+    print(f"📂 Output Directory: ./{workspace_dir_name}/")
     print("📜 Prévia da Especificação Técnica que guiará os agentes:")
     print("-" * 80)
-    print(f"{specification[:500]}...\n\n[CONTINUA NA MEMÓRIA DOS AGENTES...]\n")
+    print(f"{specification[:500]}...\n\n[VEJA O ARQUIVO engineer_specifications.txt...]\n")
     print("-" * 80 + "\n")
 
     orchestrator = TDDOrchestrator(task_key=thread_id)
@@ -300,6 +304,12 @@ def main() -> None:
     test_faults = final_state.get("test_faults", 0)
     implementation_faults = final_state.get("implementation_faults", 0)
     write_resilience_metrics(artifacts_dir, total_failures, corrected_failures, test_faults, implementation_faults)
+
+    # 6. gerar relatório de sucesso/falha por sub-requisito
+    subreq_success = final_state.get("subreq_success_count", 0)
+    subreq_failure = final_state.get("subreq_failure_count", 0)
+    subreq_results = final_state.get("subreq_results", [])
+    write_pass_rate_report(artifacts_dir, plan, subreq_results, subreq_success, subreq_failure)
 
     print("📁 Todos os artefatos e logs foram salvos com sucesso!")
 

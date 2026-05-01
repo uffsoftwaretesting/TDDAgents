@@ -68,6 +68,11 @@ class AgentState(TypedDict):
     is_type_fault: str
     test_faults: int
     implementation_faults: int
+
+    # ── Métricas por sub-requisito ────────────────────────────────────────────
+    subreq_success_count: int
+    subreq_failure_count: int
+    subreq_results: list[dict]
     
 
 
