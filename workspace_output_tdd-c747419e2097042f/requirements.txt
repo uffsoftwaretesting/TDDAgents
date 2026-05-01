@@ -1,2 +1,0 @@
-httpx>=0.23.0
-pydantic-settings>=2.0.0

@@ -1,9 +1,0 @@
-[tool.black]
-exclude = 'tests'
-# Configurações do Black
-
-[tool.flake8]
-# Configurações do Flake8
-
-[tool.mypy]
-# Configurações do Mypy
