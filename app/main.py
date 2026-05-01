@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 import textwrap
+from pathlib import Path
 
 from app.utils.resilience_metrics import write_resilience_metrics
 from app.utils.pass_rate import write_pass_rate_report
@@ -38,6 +39,67 @@ def make_thread_id(specification: str) -> str:
     return "tdd-" + hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 
+def get_initial_user_prompt() -> str:
+    """
+    Exibe o menu de casos de uso lendo os arquivos .txt do diretório specs,
+    mostra o aviso padrão e retorna o prompt escolhido (ou digitado) pelo usuário.
+    """
+    mensagem_aviso = (
+        "Os prompts abaixo foram utilizados para realizar os testes.\n\n"
+        "ATENÇÃO: O agente analyzer pode perguntar mais detalhes sobre os requisitos, "
+        "o que irá requerer mais interação e prompts provenientes do usuário. Para fins "
+        "da pesquisa científica realizada, consideramos tentativas onde o agente Analyzer não "
+        "perguntava nenhum detalhe a mais de implementação e considerava o prompt inicial "
+        "suficiente para elicitar os requisitos. Por isso, recomendamos que, ao acionar "
+        "alguma das opções utilizadas de prompt, descarte quaisquer tentativas "
+        "de pedidos de detalhamento maior. Somente considere aquelas tentatiivas em que o prompt INICIAL é suficiente para elicitação de requisitos.\n"
+    )
+    print(mensagem_aviso)
+
+    # Resolve o caminho para o diretório de specs
+    specs_dir = Path("app/prompts/specs")
+    
+    if not specs_dir.exists() or not specs_dir.is_dir():
+        print(f"⚠️ Aviso: Diretório de specs não encontrado em '{specs_dir}'.\n")
+        spec_files = []
+    else:
+        # Puxa os arquivos .txt e ordena alfabeticamente
+        spec_files = sorted([f for f in specs_dir.iterdir() if f.suffix == '.txt'])
+
+    print("MENU DE CASO DE USOS:\n")
+    for i, file_path in enumerate(spec_files, start=1):
+        print(f"{i}. {file_path.name}")
+    
+    custom_input_option = len(spec_files) + 1
+    print(f"{custom_input_option}. Digite seu próprio prompt\n")
+
+    while True:
+        try:
+            escolha_str = input("Selecione uma opção: ").strip()
+            if not escolha_str:
+                continue
+            
+            escolha = int(escolha_str)
+            
+            # Caso o usuário escolha um dos arquivos .txt
+            if 1 <= escolha <= len(spec_files):
+                selected_file = spec_files[escolha - 1]
+                with open(selected_file, "r", encoding="utf-8") as f:
+                    prompt = f.read().strip()
+                print(f"\n✅ [Prompt carregado de '{selected_file.name}']\n")
+                return prompt
+                
+            # Caso o usuário decida digitar o próprio prompt
+            elif escolha == custom_input_option:
+                prompt = input("\n👤 [Sua Solicitação Inicial]: ").strip()
+                return prompt
+                
+            else:
+                print("❌ Opção inválida. Tente novamente.")
+        except ValueError:
+            print("❌ Entrada inválida. Por favor, digite um número correspondente ao menu.")
+
+
 def run_requirements_gathering() -> tuple[str, str, list[str]]:
     """Fase interativa de levantamento de requisitos."""
     print("\n" + "=" * 80)
@@ -47,7 +109,8 @@ def run_requirements_gathering() -> tuple[str, str, list[str]]:
     print("Seja detalhado. O Analista fará perguntas se algo estiver vago.\n")
 
     try:
-        initial_input = input("👤 [Sua Solicitação Inicial]: ").strip()
+        # Substituído o input manual pela função com o menu dinâmico
+        initial_input = get_initial_user_prompt()
     except (KeyboardInterrupt, EOFError):
         print("\n👋 Operação cancelada pelo usuário.")
         sys.exit(0)
