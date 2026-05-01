@@ -5,6 +5,7 @@
   "method_key": "simpson_1_3",
   "problem_type": "integracao",
   "final_status": "PASS",
+  "scipy_reference": 1.851937051982466,
   "unit_test_success": {
     "passed": 29,
     "failed": 0,
