@@ -130,8 +130,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _write_token_report(workspace_dir: str, orchestrator: TDDOrchestrator) -> None:
-    """Logs token usage and persists a report to workspace_dir/token_usage.txt."""
+def _write_token_report(artifacts_dir: str, orchestrator: TDDOrchestrator) -> None:
+    """Logs token usage and persists a report to artifacts_dir/token_usage.txt."""
     summary = orchestrator.token_tracker.summary()
     totals = summary["totals"]
 
@@ -143,7 +143,7 @@ def _write_token_report(workspace_dir: str, orchestrator: TDDOrchestrator) -> No
         totals["cached_tokens"],
     )
 
-    token_report_path = os.path.join(workspace_dir, "token_usage.txt")
+    token_report_path = os.path.join(artifacts_dir, "token_usage.txt")
     with open(token_report_path, "w", encoding="utf-8") as f:
         f.write("TOKEN USAGE REPORT\n")
         f.write("=" * 80 + "\n\n")
@@ -179,7 +179,10 @@ def main() -> None:
     workspace_dir = f"workspace_output_{thread_id}"
     os.makedirs(workspace_dir, exist_ok=True)
 
-    log_file_path = os.path.join(workspace_dir, "execution_logs.txt")
+    artifacts_dir = os.path.join(workspace_dir, "metrics_and_logging")
+    os.makedirs(artifacts_dir, exist_ok=True)
+
+    log_file_path = os.path.join(artifacts_dir, "execution_logs.txt")
     file_handler = logging.FileHandler(log_file_path, mode="w", encoding="utf-8")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
@@ -187,7 +190,7 @@ def main() -> None:
 
     formatted_requirements = format_dialogue_text(requirements)
 
-    prompts_path = os.path.join(workspace_dir, "user_analyst_dialogue.txt")
+    prompts_path = os.path.join(artifacts_dir, "user_analyst_dialogue.txt")
     with open(prompts_path, "w", encoding="utf-8") as f:
         f.write("PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL\n")
         f.write("=" * 80 + "\n")
@@ -207,7 +210,7 @@ def main() -> None:
         f.write(formatted_requirements + "\n")
         f.write("=" * 80 + "\n")
 
-    initial_prompt_path = os.path.join(workspace_dir, "initial_user_prompt.txt")
+    initial_prompt_path = os.path.join(artifacts_dir, "initial_user_prompt.txt")
     initial_prompt = user_prompts[0] if user_prompts else ""
     wrapped_initial_prompt = "\n".join(
         textwrap.fill(line, width=80) if line.strip() else ""
@@ -238,7 +241,7 @@ def main() -> None:
         sys.exit(0)
 
     # ── Token Usage Report ────────────────────────────────────────────────────
-    _write_token_report(workspace_dir, orchestrator)
+    _write_token_report(artifacts_dir, orchestrator)
 
     # ── Resultado e Extração ──────────────────────────────────────────────────
     final_status = final_state.get("status", "unknown")
@@ -268,7 +271,7 @@ def main() -> None:
 
     # 2. Extrai o planner.txt
     if plan:
-        plan_path = os.path.join(workspace_dir, "planner.txt")
+        plan_path = os.path.join(artifacts_dir, "planner.txt")
         with open(plan_path, "w", encoding="utf-8") as f:
             f.write("PLANO DE SUB-REQUISITOS TDD\n")
             f.write("=" * 80 + "\n")
@@ -277,14 +280,14 @@ def main() -> None:
             f.write("=" * 80 + "\n")
 
     # 3. Extrai as especificações do Engenheiro
-    spec_path = os.path.join(workspace_dir, "engineer_specifications.txt")
+    spec_path = os.path.join(artifacts_dir, "engineer_specifications.txt")
     with open(spec_path, "w", encoding="utf-8") as f:
         f.write("ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO\n")
         f.write("=" * 80 + "\n")
         f.write(specification)
 
     # 4. Extrai o histórico dos requisitos validados
-    reqs_path = os.path.join(workspace_dir, "confirmed_user_requirements.txt")
+    reqs_path = os.path.join(artifacts_dir, "confirmed_user_requirements.txt")
     with open(reqs_path, "w", encoding="utf-8") as f:
         f.write("REQUISITOS ENVIADOS PELO USUÁRIO\n")
         f.write("=" * 80 + "\n")
@@ -296,7 +299,7 @@ def main() -> None:
     corrected_failures = final_state.get("autonomously_corrected_failures", 0)
     test_faults = final_state.get("test_faults", 0)
     implementation_faults = final_state.get("implementation_faults", 0)
-    write_resilience_metrics(workspace_dir, total_failures, corrected_failures, test_faults, implementation_faults)
+    write_resilience_metrics(artifacts_dir, total_failures, corrected_failures, test_faults, implementation_faults)
 
     print("📁 Todos os artefatos e logs foram salvos com sucesso!")
 

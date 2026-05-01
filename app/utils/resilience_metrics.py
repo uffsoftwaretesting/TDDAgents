@@ -1,7 +1,7 @@
 import os
 import logging
 
-def write_resilience_metrics(workspace_dir: str, total_failures: int, corrected_failures: int, test_faults: int, implementation_faults: int):
+def write_resilience_metrics(artifacts_dir: str, total_failures: int, corrected_failures: int, test_faults: int, implementation_faults: int):
     """Calcula e exporta a taxa de autocorreção e proporção de falhas para um arquivo de texto."""
     
     # Taxa Geral
@@ -12,7 +12,7 @@ def write_resilience_metrics(workspace_dir: str, total_failures: int, corrected_
     test_prop = (test_faults / total_red_green * 100) if total_red_green > 0 else 0.0
     impl_prop = (implementation_faults / total_red_green * 100) if total_red_green > 0 else 0.0
 
-    metrics_path = os.path.join(workspace_dir, "resilience_metrics.txt")
+    metrics_path = os.path.join(artifacts_dir, "resilience_metrics.txt")
     
     with open(metrics_path, "w", encoding="utf-8") as f:
         f.write("RELATORIO DE METRICAS DE RESILIENCIA (TDD)\n")
