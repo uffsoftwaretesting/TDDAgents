@@ -175,11 +175,11 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
         if failed_requirements:
             n = len(failed_requirements)
             logger.warning(f"\n⚠️  PLANO CONCLUÍDO COM {n} FALHA(S).")
-            logger.warning("➡️  Encaminhando para o Quality Gate com relatório de falhas...")
+            logger.warning("🧾 Encerrando o fluxo TDD com falhas registradas.")
             final_status = "plan_complete_with_failures"
         else:
             logger.info("\n✅ PLANO CONCLUÍDO COM SUCESSO.")
-            logger.info("➡️  Encaminhando para o Quality Gate para validação final...")
+            logger.info("🧾 Encerrando o fluxo TDD com sucesso.")
             final_status = "plan_complete"
 
         audit_entries.append(

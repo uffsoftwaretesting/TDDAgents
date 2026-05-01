@@ -6,7 +6,6 @@ from .execute_runner_red import node_execute_runner_red
 from .execute_developer import node_execute_developer
 from .execute_runner_green import node_execute_runner_green
 from .execute_progress_evaluator import node_execute_progress_evaluator
-from .execute_quality_gate import node_execute_quality_gate
 
 __all__ = [
     "node_plan_task",
@@ -15,5 +14,4 @@ __all__ = [
     "node_execute_developer",
     "node_execute_runner_green",
     "node_execute_progress_evaluator",
-    "node_execute_quality_gate",
 ]

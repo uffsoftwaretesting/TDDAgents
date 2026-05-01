@@ -11,7 +11,6 @@ from app.config.config import AgentState, Config
 from app.graph.nodes import (
     node_plan_task,
     node_execute_progress_evaluator,
-    node_execute_quality_gate,
 )
 from app.graph.subgraphs.build_tdd_subgraph import build_tdd_subgraph
 from app.utils.token_metrics import GlobalTokenTracker
@@ -90,7 +89,6 @@ class TDDOrchestrator:
         workflow.add_node("planner", node_plan_task)
         workflow.add_node("tdd_execution", build_tdd_subgraph())
         workflow.add_node("evaluator", node_execute_progress_evaluator)
-        workflow.add_node("quality_gate", node_execute_quality_gate)
 
         workflow.set_entry_point("planner")
 
@@ -106,16 +104,15 @@ class TDDOrchestrator:
 
         workflow.add_edge("tdd_execution", "evaluator")
 
-        def route_evaluator(state: AgentState) -> Literal["tdd_execution", "quality_gate", END]:
+        def route_evaluator(state: AgentState) -> Literal["tdd_execution", END]:
             status = state.get("status")
             if status in ("sandbox_failed", "tester_failed", "developer_failed"):
                 return END
             if status == "next_req":
                 return "tdd_execution"
-            return "quality_gate"
+            return END
 
         workflow.add_conditional_edges("evaluator", route_evaluator)
-        workflow.add_edge("quality_gate", END)
 
         return workflow.compile(checkpointer=checkpointer)
 
