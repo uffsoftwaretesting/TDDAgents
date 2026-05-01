@@ -1,0 +1,93 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. projete e implemente uma função em Python puro responsável por converter um número em
+   formato de algarismo romano para seu equivalente inteiro, seguindo boas práticas de
+   código limpo, tipagem estática com typing, baixo acoplamento e alta coesão,
+   organizando o código de forma simples mas clara, podendo opcionalmente separar lógica
+   em funções auxiliares para facilitar manutenção e testes; a função deve receber uma
+   string representando o número romano e retornar um inteiro correspondente, suportando
+   corretamente os símbolos básicos (I, V, X, L, C, D, M) e as regras de subtração (como
+   IV = 4, IX = 9, XL = 40, XC = 90, CD = 400, CM = 900), validando entradas inválidas
+   como strings vazias, caracteres não permitidos, combinações inválidas (como IC ou
+   VX), repetições ilegais de símbolos e formatos incorretos, podendo lançar exceções
+   apropriadas como ValueError nesses casos; o desenvolvimento deve seguir abordagem
+   orientada a testes, com implementação de testes unitários utilizando pytest cobrindo
+   casos simples (III = 3), casos com subtração (IV = 4, IX = 9), combinações maiores
+   (MCMXCIV = 1994), entradas inválidas e limites típicos, garantindo robustez da
+   função; o código deve ser autoexplicativo, bem documentado com docstrings e preparado
+   para fácil reutilização em outros contextos sem dependência de bibliotecas externas.
+2. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: projete e implemente uma função em Python puro responsável por converter um
+           número em formato de algarismo romano para seu equivalente inteiro, seguindo
+           boas práticas de código limpo, tipagem estática com typing, baixo acoplamento
+           e alta coesão, organizando o código de forma simples mas clara, podendo
+           opcionalmente separar lógica em funções auxiliares para facilitar manutenção
+           e testes; a função deve receber uma string representando o número romano e
+           retornar um inteiro correspondente, suportando corretamente os símbolos
+           básicos (I, V, X, L, C, D, M) e as regras de subtração (como IV = 4, IX = 9,
+           XL = 40, XC = 90, CD = 400, CM = 900), validando entradas inválidas como
+           strings vazias, caracteres não permitidos, combinações inválidas (como IC ou
+           VX), repetições ilegais de símbolos e formatos incorretos, podendo lançar
+           exceções apropriadas como ValueError nesses casos; o desenvolvimento deve
+           seguir abordagem orientada a testes, com implementação de testes unitários
+           utilizando pytest cobrindo casos simples (III = 3), casos com subtração (IV =
+           4, IX = 9), combinações maiores (MCMXCIV = 1994), entradas inválidas e
+           limites típicos, garantindo robustez da função; o código deve ser
+           autoexplicativo, bem documentado com docstrings e preparado para fácil
+           reutilização em outros contextos sem dependência de bibliotecas externas.
+[Analista]: Segue o checklist de requisitos técnicos para a função de conversão de
+            numerais romanos em inteiro:
+
+1. Assinatura da função:
+• Nome: roman_to_int(roman: str) -> int
+• Local: módulo Python independente, sem dependências externas
+2. Tipagem estática:
+• Usar typing: parâmetro roman: str, retorno int
+• Adicionar tipo em variáveis locais quando necessário
+3. Estrutura e modularidade:
+• Implementação principal isolada em roman_to_int
+• Funções auxiliares para: validação de caracteres, validação de repetições e
+combinações, cálculo de valor
+• Baixo acoplamento entre responsabilidades (validação vs. cálculo)
+4. Mapeamento de símbolos:
+• Dicionário interno: {'I':1,'V':5,'X':10,'L':50,'C':100,'D':500,'M':1000}
+5. Regras de subtração:
+• Definir pares válidos: IV, IX, XL, XC, CD, CM
+• Lógica que detecta e processa par subtrativo antes do cálculo sequencial
+6. Validação de entrada e formato:
+• String não-vazia: ValueError para ''
+• Apenas símbolos I, V, X, L, C, D, M: ValueError para qualquer outro
+• Limite de repetições: I, X, C, M ≤ 3 vezes consecutivas; V, L, D não se repetem
+• Proibir combinações inválidas (ex.: IC, VX, IL)
+• Definir domínio suportado (1 a 3999) e lançar ValueError fora dele
+7. Tratamento de erros:
+• Lançar ValueError com mensagem clara
+• Não capturar exceções internas que escondam a causa original
+8. Boas práticas de código:
+• Nomeclatura PEP8 (snake_case)
+• Linhas ≤ 79 caracteres
+• Sem variáveis globais mutáveis
+• Documentar funções com docstrings seguindo padrão Google ou NumPy
+9. Documentação:
+• Docstring da função principal com descrição, parâmetros, retorno e exceções
+• Docstring breve para cada função auxiliar
+10. Testes unitários (pytest):
+• Casos simples: 'III' → 3, 'VIII' → 8
+• Casos de subtração: 'IV' → 4, 'IX' → 9, 'XL' → 40, 'XC' → 90, 'CD' → 400, 'CM' → 900
+• Combinações complexas: 'MCMXCIV' → 1994, 'MMXXIII' → 2023, 'MMMCMXCIX' → 3999
+• Invalid inputs: '', 'IC', 'VX', 'IIII', 'ABC', 'IM'
+• Limites de domínio: 'I' → 1, 'MMMCMXCIX' → 3999, testar acima de 3999 para erro
+• Estrutura de testes clara: arrange-act-assert, nomes descritivos
+11. Coverage e qualidade:
+• Cobertura mínima de 100% nas linhas da função
+• Integrar com pytest para execução rápida
+12. Manutenção e reutilização:
+• Código autoexplicativo, funções pequenas e focadas
+• Sem lógica duplicada
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

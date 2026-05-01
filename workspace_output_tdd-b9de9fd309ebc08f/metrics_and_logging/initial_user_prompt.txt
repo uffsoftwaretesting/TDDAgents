@@ -1,0 +1,21 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+projete e implemente uma função em Python puro responsável por converter um
+número em formato de algarismo romano para seu equivalente inteiro, seguindo
+boas práticas de código limpo, tipagem estática com typing, baixo acoplamento e
+alta coesão, organizando o código de forma simples mas clara, podendo
+opcionalmente separar lógica em funções auxiliares para facilitar manutenção e
+testes; a função deve receber uma string representando o número romano e
+retornar um inteiro correspondente, suportando corretamente os símbolos básicos
+(I, V, X, L, C, D, M) e as regras de subtração (como IV = 4, IX = 9, XL = 40, XC
+= 90, CD = 400, CM = 900), validando entradas inválidas como strings vazias,
+caracteres não permitidos, combinações inválidas (como IC ou VX), repetições
+ilegais de símbolos e formatos incorretos, podendo lançar exceções apropriadas
+como ValueError nesses casos; o desenvolvimento deve seguir abordagem orientada
+a testes, com implementação de testes unitários utilizando pytest cobrindo casos
+simples (III = 3), casos com subtração (IV = 4, IX = 9), combinações maiores
+(MCMXCIV = 1994), entradas inválidas e limites típicos, garantindo robustez da
+função; o código deve ser autoexplicativo, bem documentado com docstrings e
+preparado para fácil reutilização em outros contextos sem dependência de
+bibliotecas externas.
+================================================================================
