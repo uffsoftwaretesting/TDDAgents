@@ -309,7 +309,7 @@ def main() -> None:
     subreq_success = final_state.get("subreq_success_count", 0)
     subreq_failure = final_state.get("subreq_failure_count", 0)
     subreq_results = final_state.get("subreq_results", [])
-    write_pass_rate_report(artifacts_dir, plan, subreq_results, subreq_success, subreq_failure)
+    write_pass_rate_report(artifacts_dir, plan, subreq_results, subreq_success, subreq_failure, failed)
 
     print("📁 Todos os artefatos e logs foram salvos com sucesso!")
 

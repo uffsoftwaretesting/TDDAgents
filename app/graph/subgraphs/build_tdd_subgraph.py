@@ -23,8 +23,16 @@ def wrapper_runner_red(state: AgentState) -> dict:
     result = node_execute_runner_red(state)
     status = result.get("status")
     if status in ("test_review_needed", "max_retries_exceeded"):
-        return _increment_failures(state, result, fault_type="test_faults")
+        result = _increment_failures(state, result, fault_type="test_faults")
     
+    if status in ("max_retries_exceeded", "sandbox_failed", "tester_failed"):
+        plan_index = state.get("plan_index", 0)
+        flow_types = list(state.get("is_flow_type", []))
+        while len(flow_types) <= plan_index:
+            flow_types.append("")
+        flow_types[plan_index] = ""
+        result["is_flow_type"] = flow_types
+        
     return result
     
 
@@ -42,17 +50,49 @@ def wrapper_runner_green(state: AgentState) -> dict:
         
     else:
         if status == "test_review_needed":
-            return _increment_failures(state, result, fault_type="test_faults")
+            result = _increment_failures(state, result, fault_type="test_faults")
 
         elif status == "green_failed":
-            return _increment_failures(state, result, fault_type="implementation_faults")
+            result = _increment_failures(state, result, fault_type="implementation_faults")
         
         elif status == "max_retries_exceeded":
             if is_type_fault == "test_faults":
-                return _increment_failures(state, result, fault_type="test_faults")
+                result = _increment_failures(state, result, fault_type="test_faults")
             elif is_type_fault == "implementation_faults":
-                return _increment_failures(state, result, fault_type="implementation_faults")
+                result = _increment_failures(state, result, fault_type="implementation_faults")
+                
+    if status in ("max_retries_exceeded", "sandbox_failed", "tester_failed", "developer_failed"):
+        plan_index = state.get("plan_index", 0)
+        flow_types = list(state.get("is_flow_type", []))
+        while len(flow_types) <= plan_index:
+            flow_types.append("")
+        flow_types[plan_index] = ""
+        result["is_flow_type"] = flow_types
         
+    return result
+
+def wrapper_tester(state: AgentState) -> dict:
+    result = node_execute_tester(state)
+    status = result.get("status")
+    if status in ("tester_failed", "sandbox_failed", "max_retries_exceeded"):
+        plan_index = state.get("plan_index", 0)
+        flow_types = list(state.get("is_flow_type", []))
+        while len(flow_types) <= plan_index:
+            flow_types.append("")
+        flow_types[plan_index] = ""
+        result["is_flow_type"] = flow_types
+    return result
+
+def wrapper_developer(state: AgentState) -> dict:
+    result = node_execute_developer(state)
+    status = result.get("status")
+    if status in ("developer_failed", "sandbox_failed", "max_retries_exceeded"):
+        plan_index = state.get("plan_index", 0)
+        flow_types = list(state.get("is_flow_type", []))
+        while len(flow_types) <= plan_index:
+            flow_types.append("")
+        flow_types[plan_index] = ""
+        result["is_flow_type"] = flow_types
     return result
 
 def build_tdd_subgraph():
@@ -61,9 +101,9 @@ def build_tdd_subgraph():
     """
     workflow = StateGraph(AgentState)
 
-    workflow.add_node("tester", node_execute_tester)
+    workflow.add_node("tester", wrapper_tester)
     workflow.add_node("runner_red", wrapper_runner_red)
-    workflow.add_node("developer", node_execute_developer)
+    workflow.add_node("developer", wrapper_developer)
     workflow.add_node("runner_green", wrapper_runner_green)
 
     workflow.add_edge(START, "tester")

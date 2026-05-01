@@ -147,6 +147,7 @@ class TDDOrchestrator:
             "subreq_success_count": 0,
             "subreq_failure_count": 0,
             "subreq_results": [],
+            "is_flow_type": [],
         }
 
         logger.info("\n" + "#" * 80)

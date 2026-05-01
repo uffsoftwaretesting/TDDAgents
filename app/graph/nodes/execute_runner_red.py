@@ -14,6 +14,7 @@ logger = logging.getLogger("TDDOrchestrator")
 
 def node_execute_runner_red(state: AgentState) -> AgentState:
     sub_req = state["current_sub_req"]
+    plan_index = state.get("plan_index", 0)
     iteration = state.get("iteration", 1)
     max_retries_state = state.get("max_retries", Config.MAX_ITERATIONS)
     infra_retries = state.get("infra_retries", 0)
@@ -50,9 +51,16 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
     existing_reviewer_len = len(state.get("reviewer_messages", []))
     audit_entries: list = []
 
+    flow_types = list(state.get("is_flow_type", []))
+    
+    while len(flow_types) <= plan_index:
+        flow_types.append("")
+
     if has_failures:
         logger.info("✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.")
         logger.info("   ➡️  Executando análise de confirmação...")
+
+        flow_types[plan_index] = "F1"
 
         # Puxa o código atual do file_system para contexto do Reviewer
         current_codebase = read_all_files_from_state(state.get("file_system", {}))
@@ -120,6 +128,7 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
             "iteration": next_iteration,
             "infra_retries": 0,
             "reviewer_messages": new_reviewer_turns,
+            "is_flow_type": flow_types,
             "audit_log": audit_entries,
         }
 
@@ -143,11 +152,14 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
         # O LangGraph fará o append automático nessa lista e o Developer a lerá como o `feedback` atual.
         alert_message = HumanMessage(content=feedback_text)
 
+        flow_types[plan_index] = "F2"
+
         return {
             **state,
             "status": "red_confirmed", 
             "iteration": iteration,
             "infra_retries": 0,
             "reviewer_messages": [alert_message],
+            "is_flow_type": flow_types,
             "audit_log": audit_entries,
         }

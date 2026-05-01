@@ -48,6 +48,7 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
     subreq_results: list[dict] = list(state.get("subreq_results", []))
     subreq_success_count = state.get("subreq_success_count", 0)
     subreq_failure_count = state.get("subreq_failure_count", 0)
+    flow_types = list(state.get("is_flow_type", []))
 
     audit_entries: list = []
 
@@ -69,6 +70,7 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 "status": "failed",
                 "reason": reason,
                 "last_iteration": state.get("iteration", 0),
+                "flow_type": "",
             }
         )
         subreq_failure_count += 1
@@ -124,6 +126,11 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
         audit_entries.append(
             AIMessage(content=f"[Evaluator] Concluído '{current_req}'.")
         )
+        flow_type = ""
+        if "F2" in flow_types:
+            flow_type = "F2"
+        elif "F1" in flow_types:
+            flow_type = "F1"
         subreq_results.append(
             {
                 "index": current_index,
@@ -131,6 +138,7 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 "status": "success",
                 "reason": "ok",
                 "last_iteration": state.get("iteration", 0),
+                "flow_type": flow_type,
             }
         )
         subreq_success_count += 1
@@ -167,6 +175,7 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
             "subreq_results": subreq_results,
             "subreq_success_count": subreq_success_count,
             "subreq_failure_count": subreq_failure_count,
+            "is_flow_type": [],
             **history_resets,
             "audit_log": audit_entries,
         }

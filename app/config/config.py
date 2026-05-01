@@ -73,6 +73,7 @@ class AgentState(TypedDict):
     subreq_success_count: int
     subreq_failure_count: int
     subreq_results: list[dict]
+    is_flow_type: list[str]
     
 
 

@@ -72,5 +72,6 @@ def node_plan_task(state: AgentState) -> AgentState:
         "tester_messages": [],
         "developer_messages": [],
         "reviewer_messages": [],
+        "is_flow_type": [],
         "audit_log": [audit_entry],
     }
