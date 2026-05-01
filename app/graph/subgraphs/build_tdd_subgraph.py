@@ -9,6 +9,52 @@ from app.graph.nodes import (
     node_execute_runner_green,
 )
 
+def _increment_failures(state: AgentState, result: dict, fault_type: str = None) -> dict:
+    """Função auxiliar para incrementar falhas, categorizando se necessário."""
+    result["total_detected_failures"] = state.get("total_detected_failures", 0) + 1
+    result["current_subreq_failures"] = state.get("current_subreq_failures", 0) + 1
+    
+    if fault_type:
+        result[fault_type] = state.get(fault_type, 0) + 1
+        
+    return result
+
+def wrapper_runner_red(state: AgentState) -> dict:
+    result = node_execute_runner_red(state)
+    status = result.get("status")
+    if status in ("test_review_needed", "max_retries_exceeded"):
+        return _increment_failures(state, result, fault_type="test_faults")
+    
+    return result
+    
+
+def wrapper_runner_green(state: AgentState) -> dict:
+    result = node_execute_runner_green(state)
+    status = result.get("status")
+    is_type_fault = result.get("is_type_fault", "")
+        
+    if status == "green_passed":
+        failures_this_req = state.get("current_subreq_failures", 0)
+        if failures_this_req > 0:
+            result["autonomously_corrected_failures"] = state.get("autonomously_corrected_failures", 0) + failures_this_req
+        
+        result["current_subreq_failures"] = 0
+        
+    else:
+        if status == "test_review_needed":
+            return _increment_failures(state, result, fault_type="test_faults")
+
+        elif status == "green_failed":
+            return _increment_failures(state, result, fault_type="implementation_faults")
+        
+        elif status == "max_retries_exceeded":
+            if is_type_fault == "test_faults":
+                return _increment_failures(state, result, fault_type="test_faults")
+            elif is_type_fault == "implementation_faults":
+                return _increment_failures(state, result, fault_type="implementation_faults")
+        
+    return result
+
 def build_tdd_subgraph():
     """
     Constrói o ciclo TDD interno:  Tester → RunnerRed → Developer → RunnerGreen
@@ -16,9 +62,9 @@ def build_tdd_subgraph():
     workflow = StateGraph(AgentState)
 
     workflow.add_node("tester", node_execute_tester)
-    workflow.add_node("runner_red", node_execute_runner_red)
+    workflow.add_node("runner_red", wrapper_runner_red)
     workflow.add_node("developer", node_execute_developer)
-    workflow.add_node("runner_green", node_execute_runner_green)
+    workflow.add_node("runner_green", wrapper_runner_green)
 
     workflow.add_edge(START, "tester")
 

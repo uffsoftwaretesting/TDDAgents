@@ -141,6 +141,12 @@ class TDDOrchestrator:
             "status": "starting",
             "max_retries": Config.MAX_ITERATIONS,
             "failed_requirements": [],
+            "total_detected_failures": 0,
+            "autonomously_corrected_failures": 0,
+            "current_subreq_failures": 0,
+            "is_type_fault": "",
+            "test_faults": 0,        
+            "implementation_faults": 0,
         }
 
         logger.info("\n" + "#" * 80)

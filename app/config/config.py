@@ -61,6 +61,15 @@ class AgentState(TypedDict):
     max_retries: int
     failed_requirements: list[dict]
 
+    # ── Métricas de Autocorreção ──────────────────────────────────────────────
+    total_detected_failures: int
+    autonomously_corrected_failures: int
+    current_subreq_failures: int
+    is_type_fault: str
+    test_faults: int
+    implementation_faults: int
+    
+
 
 class RequirementsState(TypedDict):
     user_input: str

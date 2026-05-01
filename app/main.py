@@ -6,6 +6,8 @@ import os
 import sys
 import textwrap
 
+from app.utils.resilience_metrics import write_resilience_metrics
+
 # Permite executar este arquivo diretamente sem perder imports absolutos `app.*`.
 if __package__ in (None, ""):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -288,6 +290,13 @@ def main() -> None:
         f.write("=" * 80 + "\n")
         f.write(formatted_requirements + "\n")
         f.write("=" * 80 + "\n")
+
+    # 5. gerar relatório de métricas de resiliência
+    total_failures = final_state.get("total_detected_failures", 0)
+    corrected_failures = final_state.get("autonomously_corrected_failures", 0)
+    test_faults = final_state.get("test_faults", 0)
+    implementation_faults = final_state.get("implementation_faults", 0)
+    write_resilience_metrics(workspace_dir, total_failures, corrected_failures, test_faults, implementation_faults)
 
     print("📁 Todos os artefatos e logs foram salvos com sucesso!")
 

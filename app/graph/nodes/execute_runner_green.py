@@ -16,6 +16,7 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
     iteration = state.get("iteration", 1)
     max_retries_state = state.get("max_retries", Config.MAX_ITERATIONS)
     infra_retries = state.get("infra_retries", 0)
+    is_type_fault = state.get("is_type_fault", "")
 
     logger.info("\n" + "-" * 80)
     logger.info(f"🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração {iteration}/{max_retries_state}")
@@ -105,24 +106,29 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
     new_reviewer_turns = updated_reviewer_history[existing_reviewer_len:]
     extra_audit: list = []
 
-    # ── Decisão de Roteamento e Lógica de Incremento ──
     if "[ERRO NO TESTE]" in analysis:
-        logger.warning(f"   ⚠️  Reviewer identificou falha no teste. Solicitando REVISÃO ao Tester.")
-        status = "test_review_needed"
-        extra_audit.append(
-            HumanMessage(content=f"[RunnerGreen] Iteração {iteration}: Reviewer apontou erro no código de teste. Escalando para Tester.")
-        )
-        next_iteration = iteration + 1  # Incrementa porque volta pro Tester
-        
-    elif iteration >= max_retries_state:
-        logger.error(f"   ⛔  Limite de tentativas excedido ({max_retries_state}). Abortando.")
-        status = "max_retries_exceeded"
-        next_iteration = iteration
-        
-    else:
-        logger.info("   🔄  Retornando ao Developer para correção da implementação.")
-        status = "green_failed"
-        next_iteration = iteration + 1  # Incrementa porque volta pro Developer
+        if iteration >= max_retries_state:
+            logger.error(f"   ⛔  Limite de tentativas excedido ({max_retries_state}). Abortando.")
+            status = "max_retries_exceeded"
+            is_type_fault = "test_faults"
+            next_iteration = iteration
+        else:
+            logger.warning(f"   ⚠️  Reviewer identificou falha no teste. Solicitando REVISÃO ao Tester.")
+            status = "test_review_needed"
+            extra_audit.append(
+                HumanMessage(content=f"[RunnerGreen] Iteração {iteration}: Reviewer apontou erro no código de teste. Escalando para Tester.")
+            )
+            next_iteration = iteration + 1  # Incrementa porque volta pro Tester
+    else: # Falha na implementação
+        if iteration >= max_retries_state:
+            logger.error(f"   ⛔  Limite de tentativas excedido ({max_retries_state}). Abortando.")
+            status = "max_retries_exceeded"
+            is_type_fault = "implementation_faults"
+            next_iteration = iteration
+        else:
+            logger.info("   🔄  Retornando ao Developer para correção da implementação.")
+            status = "green_failed"
+            next_iteration = iteration + 1  # Incrementa porque volta pro Developer
 
     audit_entry = AIMessage(
         content=f"[RunnerGreen] Iteração {iteration}: {status}. Análise armazenada."
@@ -135,4 +141,5 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
         "infra_retries": 0,
         "reviewer_messages": new_reviewer_turns,
         "audit_log": [audit_entry] + extra_audit,
+        "is_type_fault": is_type_fault,
     }
