@@ -1,5 +1,0 @@
-[tool.ruff]
-# Configuration for ruff linter
-line-length = 88
-select = ["E", "F", "W", "C90"]
-ignore = []
