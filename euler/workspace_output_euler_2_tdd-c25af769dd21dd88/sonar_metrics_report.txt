@@ -2,7 +2,7 @@
       RELATORIO DE METRICAS DE QUALIDADE (SONAR)      
 ======================================================
 Projeto: euler-explicito
-Gerado em: 2026-05-01 23:33:38
+Gerado em: 2026-05-02 02:14:39
 Linhas de Código Úteis (NCLOC): 24
 Total de Code Smells:           0
 

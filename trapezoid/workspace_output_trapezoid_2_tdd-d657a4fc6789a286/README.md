@@ -1,4 +1,4 @@
-# Projeto de Integração Numérica – Regra do Trapézio Composta
+backup/analyze.sh# Projeto de Integração Numérica – Regra do Trapézio Composta
 
 Este projeto implementa a função `solve(f, a, b, n)` para aproximar integrais definidas usando a regra do trapézio composta.
 

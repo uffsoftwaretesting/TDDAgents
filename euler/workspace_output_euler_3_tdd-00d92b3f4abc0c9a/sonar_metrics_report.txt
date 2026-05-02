@@ -1,11 +1,13 @@
 ======================================================
-      RELATORIO DE METRICAS DE QUALIDADE (SONAR)      
+      RELATÓRIO DE MÉTRICAS DE QUALIDADE (SONAR)      
 ======================================================
 Projeto: euler-explicito
-Gerado em: 2026-05-01 23:35:10
+Gerado em: 2026-05-02 02:15:46
 Linhas de Código Úteis (NCLOC): 30
 Total de Code Smells:           1
+Sucesso dos Testes Unitários:   100%
 
+Sucesso dos Testes           Valor:     100% | Meta: >= 100%   | PASSED
 Complexidade Cognitiva       Valor:        9 | Meta: <= 15     | PASSED
 Complexidade Ciclomatica     Valor:       10 | Meta: <= 10     | PASSED
 Densidade Code Smells        Valor:     3.33 | Meta: <= 5      | PASSED

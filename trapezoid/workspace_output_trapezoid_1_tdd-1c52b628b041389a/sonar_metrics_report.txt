@@ -2,7 +2,7 @@
       RELATÓRIO DE MÉTRICAS DE QUALIDADE (SONAR)      
 ======================================================
 Projeto: trapezoid
-Gerado em: 2026-05-02 01:02:24
+Gerado em: 2026-05-02 02:44:40
 Linhas de Código Úteis (NCLOC): 19
 Total de Code Smells:           0
 Sucesso dos Testes Unitários:   100%

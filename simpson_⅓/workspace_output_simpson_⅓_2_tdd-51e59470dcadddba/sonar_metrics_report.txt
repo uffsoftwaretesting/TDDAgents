@@ -1,11 +1,13 @@
 ======================================================
-      RELATORIO DE METRICAS DE QUALIDADE (SONAR)      
+      RELATÓRIO DE MÉTRICAS DE QUALIDADE (SONAR)      
 ======================================================
 Projeto: simpson-1_3
-Gerado em: 2026-05-01 23:48:08
+Gerado em: 2026-05-02 02:23:45
 Linhas de Código Úteis (NCLOC): 26
 Total de Code Smells:           1
+Sucesso dos Testes Unitários:   100%
 
+Sucesso dos Testes           Valor:     100% | Meta: >= 100%   | PASSED
 Complexidade Cognitiva       Valor:        9 | Meta: <= 15     | PASSED
 Complexidade Ciclomatica     Valor:        9 | Meta: <= 10     | PASSED
 Densidade Code Smells        Valor:     3.85 | Meta: <= 5      | PASSED
