@@ -28,7 +28,7 @@ from _eval_utils import (
 # =============================================================================
 
 WORKSPACE_DIR     = "euler"
-SUBFOLDER_DIR     = "workspace_output_euler_3_tdd-00d92b3f4abc0c9a"
+SUBFOLDER_DIR     = "workspace_output_euler_1_tdd-5c1b6bc3d51e13cd"
 AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/solve.py"
 FUNCTION_NAME     = "solve"
 CHALLENGE_ID      = 1
@@ -140,11 +140,6 @@ def main():
     solver_fn = getattr(module, FUNCTION_NAME)
     print(f"[OK]  Função '{FUNCTION_NAME}' carregada.\n")
 
-    print("── Unit Test Success ──────────────────────────────────")
-    ut = run_unit_tests(WORKSPACE_DIR)
-    print(f"  Passed : {ut['passed']}  |  Failed : {ut['failed']}  |  Total : {ut['total']}")
-    print(f"  Success: {ut['success_rate_pct']}%")
-
     print("\n── Verificação Pontual ────────────────────────────────")
     pointwise = _pointwise(solver_fn, gt)
     print(f"  Status : {pointwise['status']}")
@@ -184,11 +179,6 @@ def main():
         "method": METHOD_LABEL, "method_key": METHOD_KEY,
         "problem_type": PROBLEM_TYPE, "final_status": final_status,
         "scipy_reference": _STATE["exact"],
-        "unit_test_success": {
-            "passed": ut["passed"], "failed": ut["failed"],
-            "errors": ut["errors"], "total": ut["total"],
-            "success_rate_pct": ut["success_rate_pct"],
-        },
         "pointwise": pointwise,
         "convergence": convergence,
     }

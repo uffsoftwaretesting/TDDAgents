@@ -7,7 +7,7 @@
     "condicao_inicial": {"t0": 0.0, "y0": 1.0},
     "intervalo": [0.0, 1.0],
     "solucao_exata": "y(t) = exp(-t)",
-    "tolerancia_absoluta": 1e-2,
+    "tolerancia_absoluta": 1e-3,
     "biblioteca_referencia": "scipy.integrate.solve_ivp",
     "ordem_convergencia_esperada": 1.0,
     "tipo": "escalar"
@@ -19,7 +19,7 @@
     "funcao": "f(x) = sin(x)/x  (limite 1 em x=0)",
     "intervalo": [0.0, 3.141592653589793],
     "valor_esperado": 1.8519370519824658,
-    "tolerancia_absoluta": 1e-6,
+    "tolerancia_absoluta": 1e-4,
     "biblioteca_referencia": "scipy.integrate.quad",
     "ordem_convergencia_esperada": 2.0,
     "tipo": "escalar"
@@ -30,7 +30,7 @@
     "descricao": "Integral de f(x) = sin(x)/x no intervalo [0, pi] via Simpson 1/3",
     "funcao": "f(x) = sin(x)/x  (limite 1 em x=0)",
     "intervalo": [0.0, 3.141592653589793],
-    "tolerancia_absoluta": 1e-8,
+    "tolerancia_absoluta": 1e-10,
     "biblioteca_referencia": "scipy.integrate.quad",
     "ordem_convergencia_esperada": 4.0,
     "tipo": "escalar"

@@ -6,13 +6,6 @@
   "problem_type": "integracao",
   "final_status": "PASS",
   "scipy_reference": 1.851937051982466,
-  "unit_test_success": {
-    "passed": 0,
-    "failed": 0,
-    "errors": 0,
-    "total": 0,
-    "success_rate_pct": 0.0
-  },
   "pointwise": {
     "status": "PASS",
     "abs_error": 6.550315845288424e-14

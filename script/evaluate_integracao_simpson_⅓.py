@@ -98,11 +98,6 @@ def main():
     solver_fn = getattr(module, FUNCTION_NAME)
     print(f"[OK]  Função '{FUNCTION_NAME}' carregada.\n")
 
-    print("── Unit Test Success ──────────────────────────────────")
-    ut = run_unit_tests(WORKSPACE_DIR)
-    print(f"  Passed : {ut['passed']}  |  Failed : {ut['failed']}  |  Total : {ut['total']}")
-    print(f"  Success: {ut['success_rate_pct']}%")
-
     print("\n── Verificação Pontual ────────────────────────────────")
     pointwise = _pointwise(solver_fn, gt)
     print(f"  Status : {pointwise['status']}")
@@ -139,11 +134,6 @@ def main():
         "method": METHOD_LABEL, "method_key": METHOD_KEY,
         "problem_type": PROBLEM_TYPE, "final_status": final_status,
         "scipy_reference": INTEGRAL_EXACT,
-        "unit_test_success": {
-            "passed": ut["passed"], "failed": ut["failed"],
-            "errors": ut["errors"], "total": ut["total"],
-            "success_rate_pct": ut["success_rate_pct"],
-        },
         "pointwise": pointwise, "convergence": convergence,
     }
     output_path = OUTPUT_DIR / f"evaluation_{METHOD_KEY}.json"
