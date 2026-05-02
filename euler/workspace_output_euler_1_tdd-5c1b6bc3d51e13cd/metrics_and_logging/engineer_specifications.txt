@@ -1,0 +1,67 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: Solver de EDO por Método de Euler Explícito
+
+## 1. Visão Geral do Sistema
+Implementar uma função `solve(f, t0, tf, y0, n)` que realize a integração numérica de uma equação diferencial ordinária de primeira ordem  
+y′ = f(t, y)  
+no intervalo \[t0, tf\] usando o método de Euler explícito com malha uniforme de n passos, retornando apenas o valor aproximado y(tf) como float, sem efeitos colaterais.
+
+## 2. Estruturas de Dados e Interfaces
+
+### 2.1 Função Pública
+- Assinatura:
+  - `def solve(f, t0, tf, y0, n) -> float:`
+- Parâmetros:
+  - `f`: Callable[[float, float], float]  
+    Função que recebe (t, y) e devolve y′.
+  - `t0`: int | float  
+    Tempo inicial.
+  - `tf`: int | float  
+    Tempo final.
+  - `y0`: int | float  
+    Condição inicial y(t0).
+  - `n`: int  
+    Número de passos de discretização (deve ser > 0).
+
+- Retorno:
+  - `y_tf`: float  
+    Aproximação de y(tf).
+
+### 2.2 Localização do Código
+- Módulo: `src/solve.py`
+- Não deve haver código executável ao nível de módulo (apenas definição da função e docstring).
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+1. **Tipo de f**  
+   - Se `f` não for callable, lançar `TypeError("f must be callable")`.
+
+2. **Tipo de t0, tf, y0**  
+   - Se algum não for `int` ou `float`, lançar `TypeError("t0, tf and y0 must be numeric")`.
+
+3. **Tipo e valor de n**  
+   - Se `n` não for `int` ou `n <= 0`, lançar `ValueError("n must be a positive integer")`.
+
+4. **Caso tf == t0**  
+   - h = 0.0; retorno imediato de `float(y0)` após iteração zero.
+
+5. **Caso tf < t0**  
+   - h negativo é permitido; iteração prossegue de t0 a tf em n passos.
+
+6. **Overflow ou divergência numérica**  
+   - Qualquer `OverflowError` ou valor infinito resultante deve ser propagado naturalmente.
+
+7. **Erros internos de f**  
+   - Se `f(t, y)` disparar exceção, propagar sem capturar.
+
+## 4. Contexto Técnico
+- Linguagem-alvo: Python 3.7+  
+- Paradigma: programação funcional/imperativa, sem estado global.  
+- Estilo: PEP8, opcionais type hints (PEP 484) e docstring em formato numpydoc ou Google style.  
+- Determinismo: não usar variáveis globais, não modificar `sys.path` nem variáveis de ambiente.  
+- Local de execução dos testes: raiz do projeto, sem configuração adicional de import paths.
+
+## 5. Dependências Base (Core Dependencies)
+- Python Standard Library (typing para `Callable`).  
+- Ferramenta de testes: `pytest` (padrão-ouro para TDD em Python).

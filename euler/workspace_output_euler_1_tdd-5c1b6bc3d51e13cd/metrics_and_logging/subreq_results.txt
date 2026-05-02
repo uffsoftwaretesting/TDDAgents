@@ -1,0 +1,23 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 8
+Success: 8
+Failed: 0
+Clean TDD Rate (F1) = 3 / 8 (37.5%)
+Green in Red Rate (F2) = 5 / 8 (62.5%)
+Fail rate = 0 / 8 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Configurar ambiente de desenvolvimento na Sandbox. Instalar pytest, criar estrutura de diretórios (`src/`, `tests/`), adicionar `__init__.py` em ambos, criar o arquivo vazio `src/solve.py` e inicializar repositório Git.
+2. [SUCCESS] [F1] FASE 1 - VALIDAÇÃO DE PARÂMETROS: Escrever testes em `tests/test_solve_validation.py` que verifiquem: TypeError se `f` não for callable; TypeError se `t0`, `tf` ou `y0` não forem int/float; ValueError se `n` não for int ou `n <= 0`. Fazer o Tester rodar pytest para garantir falha dos testes, depois o Developer implementar a checagem e corrigir até os testes passarem.
+3. [SUCCESS] [F2] FASE 2 - CASO TF IGUAL A T0: Criar testes em `tests/test_solve_trivial.py` para o cenário `tf == t0`: chamar `solve(f, t0, t0, y0, n)` retorna exatamente `float(y0)` sem iteração. Garantir red-green do teste e implementar a condição de retorno imediato no código.
+4. [SUCCESS] [F1] FASE 3 - IMPLEMENTAÇÃO BÁSICA DO MÉTODO DE EULER: Em `tests/test_solve_euler_simple.py`, definir um ODE trivial (por ex. f(t,y)=c constante) e validar o resultado de `solve` com n=1 e n=2 comparado ao valor esperado manual. Após o Tester criar os testes, Developer implementar o loop de Euler: calcular h=(tf-t0)/n, iterar atualizando y e t, retornar y final.
+5. [SUCCESS] [F2] FASE 4 - SUPORTE A PASSOS NEGATIVOS: Em `tests/test_solve_negative_step.py`, escrever casos onde `tf < t0` (h<0) e comparar com soluções manuais de Euler retroativo. Após falha dos testes, ajustar implementação para aceitar h negativo sem mudanças adicionais.
+6. [SUCCESS] [F2] FASE 5 - PROPAGAÇÃO DE ERROS E OVERFLOW: Em `tests/test_solve_error_propagation.py`, criar duas situações: f lança exceção (ex: ZeroDivisionError) e f produz valores muito grandes (OverflowError ou infinito). Validar que `solve` não captura internamente essas exceções e as propaga. Ajustar código caso haja captura indesejada.
+7. [SUCCESS] [F2] FASE 6 - TIPO HINTS E DOCSTRING: Adicionar na definição de `solve` type hints (typing.Callable[[float, float], float], float, float, float, int -> float) e docstring no formato numpydoc ou Google style em `src/solve.py`. Não requer teste automatizado, mas deve passar revisão de código.
+8. [SUCCESS] [F2] FASE 7 - INTEGRAÇÃO E VALIDAÇÃO FINAL: Executar todo o conjunto de testes com pytest na raiz do projeto, garantir cobertura total dos cenários definidos, corrigir eventuais falhas de importação ou estilo PEP8. Gerar relatório de cobertura como evidência de qualidade.
+================================================================================

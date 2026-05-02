@@ -7,14 +7,14 @@ import sys
 import textwrap
 from pathlib import Path
 
-from app.utils.resilience_metrics import write_resilience_metrics
-from app.utils.pass_rate import write_pass_rate_report
-
 # Permite executar este arquivo diretamente sem perder imports absolutos `app.*`.
 if __package__ in (None, ""):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
+
+from app.utils.resilience_metrics import write_resilience_metrics
+from app.utils.pass_rate import write_pass_rate_report
 
 from dotenv import load_dotenv
 
