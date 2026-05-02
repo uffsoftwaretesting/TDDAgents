@@ -27,9 +27,10 @@ from _eval_utils import (
 #  CONFIGURAÇÃO
 # =============================================================================
 
-WORKSPACE_DIR     = "workspace_output_tdd-c753409f79d42d21"
-AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/src/solver_euler.py"
-FUNCTION_NAME     = "euler_explicito"
+WORKSPACE_DIR     = "euler"
+SUBFOLDER_DIR     = "workspace_output_euler_1_tdd-5c1b6bc3d51e13cd"
+AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/solve.py"
+FUNCTION_NAME     = "solve"
 CHALLENGE_ID      = 1
 METHOD_KEY        = "euler_explicito"
 METHOD_LABEL      = "Euler Explícito"
@@ -39,7 +40,7 @@ PLOT_COLOR        = "#2196F3"
 PLOT_MARKER       = "o"
 
 GROUND_TRUTH_FILE = Path(__file__).parent / "ground_truth.json"
-OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / "evaluation"
+OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / SUBFOLDER_DIR / "evaluation"
 H_LEVELS          = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 
 # =============================================================================
@@ -76,11 +77,29 @@ def _setup_ode(gt):
 
 
 def _call_solver(solver_fn, h):
+    """
+    Adapta a chamada ao solver para assinaturas que recebem h (step size)
+    ou n (número de passos).
+    """
     sig = inspect.signature(solver_fn)
-    if len(sig.parameters) <= 5:
+    params = list(sig.parameters.values())
+
+    # Detecta se o último parâmetro numérico espera int (n) ou float (h)
+    last_param = params[-1] if params else None
+    expects_n = (
+        last_param is not None
+        and last_param.annotation in (int, inspect.Parameter.empty)
+        and last_param.name in ("n", "num_steps", "steps", "N")
+    )
+
+    if expects_n:
+        n = max(1, round((_STATE["t_f"] - _STATE["t0"]) / h))
+        result = solver_fn(_STATE["rhs"], _STATE["t0"], _STATE["t_f"], _STATE["y0"], n)
+    elif len(sig.parameters) <= 5:
         result = solver_fn(_STATE["rhs"], _STATE["t0"], _STATE["y0"], _STATE["t_f"], h)
     else:
         result = solver_fn(_STATE["rhs"], _STATE["t0"], _STATE["y0"], _STATE["t_f"], h, 1e-8, 50)
+
     if isinstance(result, tuple):
         return result[1][-1] if len(result) >= 2 else result[0][-1]
     if hasattr(result, "__len__") and hasattr(result, "__getitem__"):

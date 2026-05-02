@@ -1,0 +1,25 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 10
+Success: 10
+Failed: 0
+Clean TDD Rate (F1) = 3 / 10 (30.0%)
+Green in Red Rate (F2) = 7 / 10 (70.0%)
+Fail rate = 0 / 10 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Instalar pytest como dependência de desenvolvimento; criar estrutura de diretórios: pasta raiz com subpastas 'src' e 'tests'; criar arquivo vazio 'src/solve.py' e 'tests/test_solve.py'; adicionar pytest.ini com configuração padrão.
+2. [SUCCESS] [F1] FASE 1 - VALIDAÇÃO DE ENTRADAS – TESTES: No 'tests/test_solve.py', escrever testes unitários que verifiquem: se f não for callable lança TypeError adequado; se a ou b não forem int/float lança TypeError; se n não for int ou n < 1 lança ValueError; se a >= b lança ValueError.
+3. [SUCCESS] [F2] FASE 2 - VALIDAÇÃO DE ENTRADAS – IMPLANTAÇÃO: Em 'src/solve.py', implementar a camada de validações iniciais para f, a, b e n conforme os testes da Fase 1; garantir que exceções sejam levantadas antes de qualquer cálculo.
+4. [SUCCESS] [F2] FASE 3 – CASO MÍNIMO (n=1) – TESTES: Adicionar testes para n=1 usando funções simples (ex: f(x)=x, f(x)=constant) e verificar que o resultado coincide com (f(a)+f(b))*(b-a)/2.
+5. [SUCCESS] [F2] FASE 4 – CASO MÍNIMO – IMPLANTAÇÃO: Estender 'solve' para tratar n=1 aplicando a fórmula trapezoidal básica; refatorar cálculo de h e retorno para este caso; validar testes da Fase 3.
+6. [SUCCESS] [F2] FASE 5 – CASO GERAL (n>1) – TESTES: Escrever testes de integração numérica para n>1 em funções com integral conhecida (ex: f(x)=x**2 de 0 a 1 => 1/3; f(x)=sin(x) de 0 a π), usando diversos n para validar convergência.
+7. [SUCCESS] [F2] FASE 6 – CASO GERAL – IMPLANTAÇÃO: Implementar loop que calcula pontos x_i, soma f(x_0)+f(x_n) com peso 1 e 2·∑ f(x_i) para i=1..n-1, multiplica por h/2; garantir precisão em floats e passar nos testes da Fase 5.
+8. [SUCCESS] [F2] FASE 7 – PROPAGAÇÃO DE EXCEÇÕES DE f – TESTES: Criar testes onde f lança exceção em pontos internos ou extremos e verificar que 'solve' não captura e propaga a exceção original.
+9. [SUCCESS] [F1] FASE 8 – DOCSTRING E TYPE HINTS: Em 'src/solve.py', adicionar docstring no formato Google ou NumPy com descrição, parâmetros, retorno e exceções; inserir type hints PEP484 para todos os parâmetros e o retorno; validar conformidade com pytest-docstyle ou linter opcional.
+10. [SUCCESS] [F2] FASE 9 – CONFIRMAÇÃO DE QUALIDADE & CI LOCAL: Ajustar pytest.ini para relatórios claros; executar 'pytest --maxfail=1 --disable-warnings --strict-markers'; garantir cobertura 100% no módulo 'solve'; documentar passo-a-passo de execução de testes na README.
+================================================================================

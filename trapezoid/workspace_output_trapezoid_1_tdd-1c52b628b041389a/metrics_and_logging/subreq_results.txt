@@ -1,0 +1,26 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 11
+Success: 11
+Failed: 0
+Clean TDD Rate (F1) = 5 / 11 (45.5%)
+Green in Red Rate (F2) = 6 / 11 (54.5%)
+Fail rate = 0 / 11 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Instalar pytest (via pip), criar a estrutura de diretórios (`src/`, `tests/`), e arquivos vazios `src/solve.py` e `tests/test_solve.py`; configurar pytest na raiz (pode ser `pyproject.toml` ou `setup.cfg`).
+2. [SUCCESS] [F1] FASE 1 - VALIDAÇÕES INICIAIS (TESTES): Em `tests/test_solve.py`, escrever testes unitários que verifiquem: TypeError se `f` não for callable; TypeError se `a` ou `b` não forem int/float; TypeError se `n` não for int; ValueError se `n <= 0`.
+3. [SUCCESS] [F2] FASE 1 - VALIDAÇÕES INICIAIS (IMPLEMENTAÇÃO): Em `src/solve.py`, implementar apenas as checagens de entrada conforme os testes (lançar as exceções corretas), sem implementar lógica de integração.
+4. [SUCCESS] [F1] FASE 2 - CASOS ESPECIAIS (TESTES): Em `tests/test_solve.py`, adicionar testes para: `b == a` deve retornar `0.0`; conversão de `a` e `b` para float; comportamento com `b < a` gerando resultado negativo consistente.
+5. [SUCCESS] [F2] FASE 2 - CASOS ESPECIAIS (IMPLEMENTAÇÃO): Ajustar `src/solve.py` para tratar `b == a` (retornar `0.0`), converter `a` e `b` para float, permitir `b < a` sem erro.
+6. [SUCCESS] [F2] FASE 3 - CÁLCULO DA REGRA DO TRAPÉZIO (TESTES): Em `tests/test_solve.py`, escrever testes de precisão determinística para funções conhecidas (ex: f(x)=x em [0,1] com n=1; f(x)=x**2 em [0,2] com múltiplos n; f(x)=sin(x) em [0,π]), garantindo resultados dentro de tolerância.
+7. [SUCCESS] [F2] FASE 3 - CÁLCULO DA REGRA DO TRAPÉZIO (IMPLEMENTAÇÃO): Em `src/solve.py`, implementar o algoritmo composto da regra do trapézio: calcular h=(b–a)/n, somar f(a)+f(b)+2*Σf(a+i·h) em ordem crescente de i, e retornar (h/2)*S.
+8. [SUCCESS] [F1] FASE 4 - DOCSTRING E ESTILO (TESTES): Configurar um teste simples (por exemplo via pydocstyle ou inspeção) que verifique a presença de docstring na função `solve` no formato Google/Numpy e sem warns de PEP8.
+9. [SUCCESS] [F1] FASE 4 - DOCSTRING E ESTILO (IMPLEMENTAÇÃO): Em `src/solve.py`, adicionar docstring seguindo padrão Google/Numpy, garantir conformidade PEP8 (pode usar flake8 localmente) e remover quaisquer prints ou logs.
+10. [SUCCESS] [F2] FASE 5 - SUÍTE COMPLETA & REFACTOR: Executar toda a suíte pytest para confirmar 100% de cobertura em `solve`; refatorar código para clareza e performance sem mudar comportamentos; corrigir eventuais issues de lint.
+11. [SUCCESS] [F2] FASE 6 - INTEGRAÇÃO FINAL: Validar que o módulo `src/solve.py` funciona isoladamente via import em outro script mínimo, sem depender de variáveis de ambiente ou path hacks; preparar para merge.
+================================================================================
