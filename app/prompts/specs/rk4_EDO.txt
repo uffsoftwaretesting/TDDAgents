@@ -1,0 +1,20 @@
+Aja como um engenheiro de software especializado em métodos numéricos e
+computação científica, com foco em precisão, determinismo e compatibilidade com
+sistemas automatizados de avaliação. Implemente uma função em Python chamada
+rk4_classico(f, t0, y0, t_final, h) que resolva numericamente um problema de
+valor inicial de uma equação diferencial ordinária escalar de primeira ordem
+utilizando o método clássico de Runge-Kutta de quarta ordem (RK4). A função deve
+tratar f como uma função pura f(t, y) que retorna a derivada dy/dt sem efeitos
+colaterais e garantir tipagem consistente para todos os parâmetros. Construa a
+malha temporal de forma robusta, assegurando estritamente que o último ponto
+avaliado seja exatamente igual a t_final. Caso o passo nominal h não divida o
+intervalo exatamente, o tamanho do último passo deve ser obrigatoriamente
+truncado e ajustado para alcançar exatamente t_final sem ultrapassá-lo. Em cada
+iteração de tamanho de passo dt, calcule iterativamente k1 = f(t, y), k2 = f(t +
+dt/2, y + dtk1/2), k3 = f(t + dt/2, y + dtk2/2), k4 = f(t + dt, y + dtk3) e
+atualize o valor de y fazendo y = y + (dt/6)(k1 + 2k2 + 2k3 + k4), preservando a
+precisão matemática analítica da quarta ordem. A resolução deve ser estritamente
+determinística, desprovida da instrução print ou efeitos colaterais e blindada
+para avaliadores automáticos, devendo retornar estritamente e unicamente um
+valor do tipo float correspondente à estimativa exata de y em t_final, sem
+retornar litas, arrays ou históricos da malha.
