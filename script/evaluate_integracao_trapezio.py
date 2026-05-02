@@ -26,7 +26,7 @@ from _eval_utils import (
 # =============================================================================
 
 WORKSPACE_DIR     = "trapezoid"
-SUBFOLDER_DIR     = "workspace_output_trapezoid_1_tdd-1c52b628b041389a"
+SUBFOLDER_DIR     = "workspace_output_trapezoid_3_tdd-6b8d5a687a7b542d"
 AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/solve.py"
 FUNCTION_NAME     = "solve"
 CHALLENGE_ID      = 3

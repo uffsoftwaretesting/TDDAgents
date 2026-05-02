@@ -1,0 +1,49 @@
+{
+  "challenge_id": 3,
+  "module": "trapezoid/workspace_output_trapezoid_3_tdd-6b8d5a687a7b542d/src/solve.py",
+  "method": "Trapézio Composto",
+  "method_key": "trapezio",
+  "problem_type": "integracao",
+  "final_status": "PASS",
+  "scipy_reference": 1.851937051982466,
+  "unit_test_success": {
+    "passed": 0,
+    "failed": 0,
+    "errors": 0,
+    "total": 0,
+    "success_rate_pct": 0.0
+  },
+  "pointwise": {
+    "status": "PASS",
+    "abs_error": 2.592009169521958e-07
+  },
+  "convergence": {
+    "status": "PASS",
+    "estimated_order": 2.0046,
+    "expected_order": 2.0,
+    "acceptable_range": [
+      1.6,
+      2.4
+    ],
+    "r_squared": 1.0,
+    "avg_reduction": 4.0213,
+    "expected_reduction": 4.0,
+    "h_vals": [
+      0.1,
+      0.05,
+      0.025,
+      0.0125,
+      0.00625,
+      0.003125
+    ],
+    "errors": [
+      0.00027244220561728483,
+      6.596211690212961e-05,
+      1.6490328251128616e-05,
+      4.15548413013056e-06,
+      1.034743645211833e-06,
+      2.592009169521958e-07
+    ],
+    "reason": "OK"
+  }
+}

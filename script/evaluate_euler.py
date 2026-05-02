@@ -28,7 +28,7 @@ from _eval_utils import (
 # =============================================================================
 
 WORKSPACE_DIR     = "euler"
-SUBFOLDER_DIR     = "workspace_output_euler_1_tdd-5c1b6bc3d51e13cd"
+SUBFOLDER_DIR     = "workspace_output_euler_3_tdd-00d92b3f4abc0c9a"
 AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/solve.py"
 FUNCTION_NAME     = "solve"
 CHALLENGE_ID      = 1

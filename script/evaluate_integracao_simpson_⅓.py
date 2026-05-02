@@ -26,7 +26,7 @@ from _eval_utils import (
 # =============================================================================
 
 WORKSPACE_DIR     = "simpson_⅓"
-SUBFOLDER_DIR     = "workspace_output_simpson_⅓_1_tdd-2f8127d30a635de2"
+SUBFOLDER_DIR     = "workspace_output_simpson_⅓_3_tdd-5b7a28ae5f8b5624"
 AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/integracao.py"
 FUNCTION_NAME     = "integracao_simpson_1_3"
 CHALLENGE_ID      = 4
