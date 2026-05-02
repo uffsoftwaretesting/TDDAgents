@@ -1,0 +1,28 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 13
+Success: 13
+Failed: 0
+Clean TDD Rate (F1) = 3 / 13 (23.1%)
+Green in Red Rate (F2) = 10 / 13 (76.9%)
+Fail rate = 0 / 13 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Criar estrutura de diretórios `src/` e `tests/`; inicializar venv; instalar dependências base (pytest e typing é nativo); criar arquivos vazios `src/adams_bashforth_3.py` e `tests/test_adams_bashforth_3.py`.
+2. [SUCCESS] [F2] FASE 1 - ESQUEMA DE INTERFACE: No módulo, declarar a assinatura `def adams_bashforth_3(f, t0, y0, t_final, h) -> float: ...`; no teste, importar a função e verificar que ela existe e é chamável.
+3. [SUCCESS] [F2] FASE 2 - VALIDAÇÕES DE TIPO: Escrever testes TDD para garantir que se `f` não for chamável ou parâmetros não forem floats, a função lança TypeError com mensagens apropriadas; implementar as checagens em `adams_bashforth_3`.
+4. [SUCCESS] [F2] FASE 3 - VALIDAÇÕES DE VALOR BÁSICAS: Criar testes para h <= 0 e t_final < t0 lançarem ValueError com mensagens corretas; implementar essas validações.
+5. [SUCCESS] [F2] FASE 4 - CASO T_FINAL == T0: Escrever teste que chama `adams_bashforth_3` com t_final == t0 e valida retorno exato de y0 sem chamar f; implementar retorno antecipado.
+6. [SUCCESS] [F2] FASE 5 - IMPLEMENTAÇÃO DE RK4 PARA 2 PASSOS INICIAIS: Desenvolver testes para ODE simples (ex: f(t,y)=y) que gerem y1 e y2 usando RK4; implementar rotina interna de RK4 em `adams_bashforth_3`.
+7. [SUCCESS] [F2] FASE 6 - PASSOS UNIFORMES COM AB3: Escrever testes para integrar ODE linear (ex: y'=1) em malha exata (divisível por h), comparando com solução analítica; implementar loop Adams–Bashforth de 3ª ordem assumindo passo constante h.
+8. [SUCCESS] [F2] FASE 7 - ÚLTIMO PASSO ADAPTATIVO: Criar teste onde (t_final - t0) não é múltiplo de h, verificando que o último passo é truncado e aplicado corretamente; adaptar implementação para usar dt_last.
+9. [SUCCESS] [F2] FASE 8 - INTERVALO MENOR QUE 3 PASSOS: Escrever teste para caso h > (t_final-t0) que resulte em menos de três pontos para AB3 inicial, esperando ValueError("passos insuficientes para AB3"); implementar verificação e exceção.
+10. [SUCCESS] [F1] FASE 9 - TRATAMENTO DE ERROS EM f: Criar teste onde f lança ValueError ou ZeroDivisionError; verificar que adams_bashforth_3 captura e relança como RuntimeError com prefixo 'erro ao avaliar f:'; implementar bloco try/except.
+11. [SUCCESS] [F2] FASE 10 - DETECÇÃO DE DIVISÃO POR ZERO INTERNA: Escrever teste simulando erro interno de divisão por zero (ex: f retorna valor que cause divisão zero); garantir que ZeroDivisionError seja convertido em ValueError("erro numérico: divisão por zero"); implementar captura específica.
+12. [SUCCESS] [F1] FASE 11 - TESTE DE INTEGRAÇÃO FINAL E PRECISÃO: Desenvolver teste de integração completo para ODE não trivial (ex: y'=2*t, solução y=y0 + t^2) levando t0->t_final com h arbitrário; verificar resultado com `math.isclose` e tolerância pequena.
+13. [SUCCESS] [F2] FASE 12 - REVISÃO DE COBERTURA E REFACTORIZAÇÃO: Executar pytest --cov, garantir cobertura próxima de 100%; refatorar código para remover duplicação, renomear variáveis e organizar código seguindo paradigma funcional sem estado global.
+================================================================================

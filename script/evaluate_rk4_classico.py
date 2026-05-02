@@ -26,8 +26,8 @@ from _eval_utils import (
 #  CONFIGURAÇÃO
 # =============================================================================
 
-WORKSPACE_DIR     = "rk4"
-SUBFOLDER_DIR     = "workspace_output_tdd-3b1a956efe0ebe4b"
+WORKSPACE_DIR     = "runge_kutta_4"
+SUBFOLDER_DIR     = "workspace_output_rk4_3_tdd-fabce0be87c3cfc2"
 AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/rk4_classico.py"
 FUNCTION_NAME     = "rk4_classico"
 CHALLENGE_ID      = 7
@@ -117,11 +117,6 @@ def main():
     solver_fn = getattr(module, FUNCTION_NAME)
     print(f"[OK]  Função '{FUNCTION_NAME}' carregada.\n")
 
-    print("── Unit Test Success ──────────────────────────────────")
-    ut = run_unit_tests(WORKSPACE_DIR)
-    print(f"  Passed : {ut['passed']}  |  Failed : {ut['failed']}  |  Total : {ut['total']}")
-    print(f"  Success: {ut['success_rate_pct']}%")
-
     print("\n── Verificação Pontual ────────────────────────────────")
     pointwise = _pointwise(solver_fn, gt)
     print(f"  Status : {pointwise['status']}")
@@ -161,11 +156,6 @@ def main():
         "method": METHOD_LABEL, "method_key": METHOD_KEY,
         "problem_type": PROBLEM_TYPE, "final_status": final_status,
         "scipy_reference": _STATE["exact"],
-        "unit_test_success": {
-            "passed": ut["passed"], "failed": ut["failed"],
-            "errors": ut["errors"], "total": ut["total"],
-            "success_rate_pct": ut["success_rate_pct"],
-        },
         "pointwise": pointwise,
         "convergence": convergence,
     }

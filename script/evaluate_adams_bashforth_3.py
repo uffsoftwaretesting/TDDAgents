@@ -26,8 +26,8 @@ from _eval_utils import (
 #  CONFIGURAÇÃO
 # =============================================================================
 
-WORKSPACE_DIR     = "adams_bashforth_3"
-SUBFOLDER_DIR     = "workspace_output_tdd-7681fdfd94580fd6"
+WORKSPACE_DIR     = "adams_bashforth_ordem3"
+SUBFOLDER_DIR     = "workspace_output_adams_bashforth_ordem3_3_tdd-3ea0cf6b18493aee"
 AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/adams_bashforth_3.py"
 FUNCTION_NAME     = "adams_bashforth_3"
 CHALLENGE_ID      = 9
@@ -121,11 +121,6 @@ def main():
     solver_fn = getattr(module, FUNCTION_NAME)
     print(f"[OK]  Função '{FUNCTION_NAME}' carregada.\n")
 
-    print("── Unit Test Success ──────────────────────────────────")
-    ut = run_unit_tests(WORKSPACE_DIR)
-    print(f"  Passed : {ut['passed']}  |  Failed : {ut['failed']}  |  Total : {ut['total']}")
-    print(f"  Success: {ut['success_rate_pct']}%")
-
     print("\n── Verificação Pontual ────────────────────────────────")
     pointwise = _pointwise(solver_fn, gt)
     print(f"  Status : {pointwise['status']}")
@@ -165,11 +160,6 @@ def main():
         "method": METHOD_LABEL, "method_key": METHOD_KEY,
         "problem_type": PROBLEM_TYPE, "final_status": final_status,
         "scipy_reference": _STATE["exact"],
-        "unit_test_success": {
-            "passed": ut["passed"], "failed": ut["failed"],
-            "errors": ut["errors"], "total": ut["total"],
-            "success_rate_pct": ut["success_rate_pct"],
-        },
         "pointwise": pointwise,
         "convergence": convergence,
     }

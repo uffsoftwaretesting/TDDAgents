@@ -6,13 +6,6 @@
   "problem_type": "ode_ivp",
   "final_status": "PASS",
   "scipy_reference": 0.0183156388887564,
-  "unit_test_success": {
-    "passed": 0,
-    "failed": 0,
-    "errors": 0,
-    "total": 0,
-    "success_rate_pct": 0.0
-  },
   "pointwise": {
     "status": "PASS",
     "abs_error": 4.989279822620318e-12

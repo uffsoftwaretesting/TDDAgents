@@ -1,0 +1,42 @@
+{
+  "challenge_id": 9,
+  "module": "adams_bashforth_ordem3/workspace_output_adams_bashforth_ordem3_1_tdd-9c6b56b654a89aab/src/solver.py",
+  "method": "Adams-Bashforth 3 Passos",
+  "method_key": "adams_bashforth_3",
+  "problem_type": "ode_ivp",
+  "final_status": "PASS",
+  "scipy_reference": 0.36787944117151955,
+  "pointwise": {
+    "status": "PASS",
+    "abs_error": 4.197830416607928e-09
+  },
+  "convergence": {
+    "status": "PASS",
+    "estimated_order": 2.9706,
+    "expected_order": 3.0,
+    "acceptable_range": [
+      2.4,
+      3.6
+    ],
+    "r_squared": 1.0,
+    "avg_reduction": 7.8237,
+    "expected_reduction": 8.0,
+    "h_vals": [
+      0.1,
+      0.05,
+      0.025,
+      0.0125,
+      0.00625,
+      0.003125
+    ],
+    "errors": [
+      0.0001228996965679241,
+      1.6376906932735746e-05,
+      2.1034352742366202e-06,
+      2.662497907146566e-07,
+      3.348282368031974e-08,
+      4.197830416607928e-09
+    ],
+    "reason": "OK"
+  }
+}
