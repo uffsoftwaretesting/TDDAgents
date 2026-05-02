@@ -25,9 +25,10 @@ from _eval_utils import (
 #  CONFIGURAÇÃO
 # =============================================================================
 
-WORKSPACE_DIR     = "workspace_output_tdd-c0d2da4616eb323c"
-AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/src/integracao_trapezio.py"
-FUNCTION_NAME     = "integracao_trapezio"
+WORKSPACE_DIR     = "trapezoid"
+SUBFOLDER_DIR     = "workspace_output_trapezoid_1_tdd-1c52b628b041389a"
+AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/solve.py"
+FUNCTION_NAME     = "solve"
 CHALLENGE_ID      = 3
 METHOD_KEY        = "trapezio"
 METHOD_LABEL      = "Trapézio Composto"
@@ -37,7 +38,7 @@ PLOT_COLOR        = "#00BCD4"
 PLOT_MARKER       = "D"
 
 GROUND_TRUTH_FILE = Path(__file__).parent / "ground_truth.json"
-OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / "evaluation"
+OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / SUBFOLDER_DIR / "evaluation"
 H_LEVELS          = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 
 A, B = 0.0, np.pi

@@ -25,8 +25,9 @@ from _eval_utils import (
 #  CONFIGURAÇÃO
 # =============================================================================
 
-WORKSPACE_DIR     = "workspace_output_tdd-a3f452e8f75c316f"
-AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/src/integracao_simpson_1_3.py"
+WORKSPACE_DIR     = "simpson_⅓"
+SUBFOLDER_DIR     = "workspace_output_simpson_⅓_1_tdd-2f8127d30a635de2"
+AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/integracao.py"
 FUNCTION_NAME     = "integracao_simpson_1_3"
 CHALLENGE_ID      = 4
 METHOD_KEY        = "simpson_1_3"
@@ -37,7 +38,7 @@ PLOT_COLOR        = "#9C27B0"
 PLOT_MARKER       = "s"
 
 GROUND_TRUTH_FILE = Path(__file__).parent / "ground_truth.json"
-OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / "evaluation"
+OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / SUBFOLDER_DIR / "evaluation"
 H_LEVELS          = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 
 A, B = 0.0, np.pi

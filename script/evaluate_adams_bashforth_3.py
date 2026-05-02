@@ -26,8 +26,9 @@ from _eval_utils import (
 #  CONFIGURAÇÃO
 # =============================================================================
 
-WORKSPACE_DIR     = "workspace_output_tdd-7681fdfd94580fd6"
-AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/src/adams_bashforth_3.py"
+WORKSPACE_DIR     = "adams_bashforth_3"
+SUBFOLDER_DIR     = "workspace_output_tdd-7681fdfd94580fd6"
+AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/adams_bashforth_3.py"
 FUNCTION_NAME     = "adams_bashforth_3"
 CHALLENGE_ID      = 9
 METHOD_KEY        = "adams_bashforth_3"
@@ -38,7 +39,7 @@ PLOT_COLOR        = "#FF5722"
 PLOT_MARKER       = "P"
 
 GROUND_TRUTH_FILE = Path(__file__).parent / "ground_truth.json"
-OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / "evaluation"
+OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / SUBFOLDER_DIR / "evaluation"
 H_LEVELS          = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 
 _STATE = {}

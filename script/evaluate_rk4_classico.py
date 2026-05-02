@@ -26,8 +26,9 @@ from _eval_utils import (
 #  CONFIGURAÇÃO
 # =============================================================================
 
-WORKSPACE_DIR     = "workspace_output_tdd-3b1a956efe0ebe4b"
-AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/src/rk4_classico.py"
+WORKSPACE_DIR     = "rk4"
+SUBFOLDER_DIR     = "workspace_output_tdd-3b1a956efe0ebe4b"
+AGENT_MODULE_PATH = f"{WORKSPACE_DIR}/{SUBFOLDER_DIR}/src/rk4_classico.py"
 FUNCTION_NAME     = "rk4_classico"
 CHALLENGE_ID      = 7
 METHOD_KEY        = "rk4"
@@ -38,7 +39,7 @@ PLOT_COLOR        = "#4CAF50"
 PLOT_MARKER       = "^"
 
 GROUND_TRUTH_FILE = Path(__file__).parent / "ground_truth.json"
-OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / "evaluation"
+OUTPUT_DIR        = Path(__file__).resolve().parent.parent / WORKSPACE_DIR / SUBFOLDER_DIR / "evaluation"
 H_LEVELS          = [0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
 
 _STATE = {}
