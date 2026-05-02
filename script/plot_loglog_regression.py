@@ -49,7 +49,7 @@ ODE_CONFIGS = [
         "marker": "^",
     },
     {
-        "method_dir": "adams-bashforth_ordem3",
+        "method_dir": "adams_bashforth_ordem3",
         "eval_filename": "evaluation_adams_bashforth_3.json",
         "label": "Adams-Bashforth 3",
         "color": "#FF5722",
