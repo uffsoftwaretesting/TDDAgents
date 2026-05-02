@@ -1,0 +1,12 @@
+PLANO DE SUB-REQUISITOS TDD
+================================================================================
+1. FASE 0 - SETUP: Criar estrutura de diretórios isolada na Cloud Sandbox com layout “src/” e “tests/”; adicionar arquivo vazio src/rk4_classico.py e tests/test_rk4_classico.py; inicializar projeto Python 3.8+ (ex: pyproject.toml ou setup.cfg mínimo); instalar pytest via pip e garantir typing disponível.
+2. FASE 1 - VALIDAÇÃO DE PARÂMETROS: Escrever testes pytest que invoquem rk4_classico com f não chamável (espera TypeError), t_final < t0 (ValueError), h <= 0 (ValueError); implementar validações iniciais em src/rk4_classico.py para falhar todos os casos.
+3. FASE 2 - CASO BASE t_final == t0: Escrever teste onde t_final == t0 e qualquer f, validando retorno imediato igual a y0; implementar condição de saída precoce em rk4_classico.
+4. FASE 3 - CÁLCULO DE N E PASSO PADRÃO: Escrever teste com f(t,y)=0, t0=0, y0=5, t_final=2, h arbitrário (ex:0.5) validando output==5; implementar computação de N=floor((t_final-t0)/h) e loop que atualize t e y sem alterar (k1..k4=0).
+5. FASE 4 - ITERAÇÃO RK4 COM PASSO FIXO: Escrever teste para ODE simples f(t,y)=C constante (ex: C=2), comparando y(t_final)≈y0+C*(t_final-t0) com h que divide exatamente intervalo; implementar fórmula clássica de k1,k2,k3,k4 e update de y,t com dt=h.
+6. FASE 5 - PASSO FINAL TRUNCADO: Escrever teste para f(t,y)=1, t0=0, y0=0, t_final=1, h=0.3; validar que N=floor(1/0.3)=3 passos de 0.3 e passo final dt_last=0.1, resultando em y==1; implementar lógica de dt_last=t_final-t_current no último passo.
+7. FASE 6 - TIPO DE RETORNO DE f E PROPAGAÇÃO DE EXCEÇÕES: Escrever teste onde f retorna tipo não-float no primeiro k1, esperando TypeError; escrever teste onde f lança exceção, esperando propagação sem captura; implementar checagem de isinstance(resultado, float) após cada chamada de f e não capturar outras exceções.
+8. FASE 7 - PRECISÃO DE PONTO FLUTUANTE: Escrever teste que valide que soma cumulativa de dt nunca ultrapassa t_final (ex: t0=0, t_final=1, h=0.1+1e-16) e ainda retorna valor correto para f=0; ajustar comparações e acumulação de t para usar cálculo exato de t_current+dt_last no final.
+9. FASE 8 - DOCSTRING E TYPE HINTS: Escrever teste que use inspect.getdoc(rk4_classico) para confirmar presença de descrição de parâmetros, algoritmo e retorno; adicionar docstring completa em src/rk4_classico.py com assinatura, descrição de f,t0,y0,t_final,h, algoritmo RK4 e exceções.
+================================================================================

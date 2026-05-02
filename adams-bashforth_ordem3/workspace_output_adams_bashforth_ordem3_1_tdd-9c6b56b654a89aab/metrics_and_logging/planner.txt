@@ -1,0 +1,15 @@
+PLANO DE SUB-REQUISITOS TDD
+================================================================================
+1. FASE 0 - SETUP: Instalar pytest e definir a estrutura de diretórios na sandbox: criar src/solver.py, tests/test_solver.py e arquivos __init__.py; configurar virtual environment com Python 3.7+ e adicionar pytest às dependências.
+2. FASE 1 - FRAMEWORK E ASSINATURAS: Escrever testes em tests/test_solver.py que importem adams_bashforth_3 de src/solver.py e verifiquem a existência da função com a assinatura correta (f: Callable, t0,y0,t_final,h: float -> float).
+3. FASE 2 - VALIDAÇÃO DE TIPOS E PARÂMETROS: Criar testes que garantam TypeError se f não for chamável ou t0,y0,t_final,h não forem float, e ValueError se h≤0 ou t_final<t0; implementar checagens no início de adams_bashforth_3.
+4. FASE 3 - IMPLEMENTAÇÃO RK4 PARA PASSO ÚNICO: Escrever teste para cenário t_final − t0 < h usando ODE simples com solução analítica, validar que adams_bashforth_3 devolve resultado via um único passo RK4; implementar detecção desse caso e chamada a RK4.
+5. FASE 4 - FUNÇÃO AUXILIAR RK4: Em tests/test_solver.py criar testes para uma função privada _rk4_step(f, t,y,dt) que calcule corretamente y_next em um passo, usando casos com solução conhecida; implementar _rk4_step em solver.py.
+6. FASE 5 - INICIALIZAÇÃO DO HISTÓRICO COM RK4: Escrever testes que, quando t_final−t0 ≥ h, o histórico inicial de três tuplas (t,y,f) seja preenchido para os dois primeiros passos via RK4 e a avaliação de f; implementar lógica de sliding window inicial.
+7. FASE 6 - IMPLEMENTAÇÃO DO PASSO AB3: Criar testes unitários para uma função privada _ab3_step(hist,dt) que recebe o histórico de três (t,y,f) e retorne y_{n+1} conforme fórmula de Adams–Bashforth de 3ª ordem; implementar _ab3_step.
+8. FASE 7 - LAÇO PRINCIPAL DE INTEGRAÇÃO: Escrever teste de integração que simule múltiplos passos até t_final, incluindo ajuste de dt < h no último passo, e confirme que o laço atualiza o histórico corretamente e atinge exatamente t_final; codificar o loop principal em adams_bashforth_3.
+9. FASE 8 - VALIDAÇÃO DE RETORNOS E EXCEÇÕES DE f: Criar testes que verifiquem propagação de exceções lançadas por f e TypeError quando f retorna non-float; ajustar código para não capturar exceções de f e validar tipo de retorno de f.
+10. FASE 9 - DOCSTRING E DOCUMENTAÇÃO INTERNA: Escrever teste que confirme a presença de docstring em adams_bashforth_3 contendo assinatura, breve explicação de RK4 e fórmula AB3; adicionar docstring formatada em solver.py.
+11. FASE 10 - TESTE DE VALIDAÇÃO FINAL: Implementar testes de aceitação resolvendo y'=y (solução exp(t)), comparando y_final com exp(t_final−t0) dentro de tolerância numérica (e.g. atol=1e-6); ajustar possíveis detalhes de arredondamento e precisão.
+12. FASE 11 - INTEGRAÇÃO CONTÍNUA: Configurar um comando pytest no CI local (por exemplo, no Makefile ou script shell) para rodar toda a suíte após cada mudança, garantindo feedback rápido.
+================================================================================

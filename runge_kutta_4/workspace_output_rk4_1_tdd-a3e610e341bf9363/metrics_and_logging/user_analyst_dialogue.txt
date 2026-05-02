@@ -1,0 +1,93 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Aja como um engenheiro de software especializado em métodos numéricos e computação
+   científica, com foco em precisão, determinismo e compatibilidade com sistemas
+   automatizados de avaliação. Implemente uma função em Python chamada rk4_classico(f,
+   t0, y0, t_final, h) que resolva numericamente um problema de valor inicial de uma
+   equação diferencial ordinária escalar de primeira ordem utilizando o método clássico
+   de Runge-Kutta de quarta ordem (RK4). A função deve tratar f como uma função pura
+   f(t, y) que retorna a derivada dy/dt sem efeitos colaterais e garantir tipagem
+   consistente para todos os parâmetros. Construa a malha temporal de forma robusta,
+   assegurando estritamente que o último ponto avaliado seja exatamente igual a t_final.
+   Caso o passo nominal h não divida o intervalo exatamente, o tamanho do último passo
+   deve ser obrigatoriamente truncado e ajustado para alcançar exatamente t_final sem
+   ultrapassá-lo. Em cada iteração de tamanho de passo dt, calcule iterativamente k1 =
+   f(t, y), k2 = f(t + dt/2, y + dtk1/2), k3 = f(t + dt/2, y + dtk2/2), k4 = f(t + dt, y
+   + dtk3) e atualize o valor de y fazendo y = y + (dt/6)(k1 + 2k2 + 2k3 + k4),
+   preservando a precisão matemática analítica da quarta ordem. A resolução deve ser
+   estritamente determinística, desprovida da instrução print ou efeitos colaterais e
+   blindada para avaliadores automáticos, devendo retornar estritamente e unicamente um
+   valor do tipo float correspondente à estimativa exata de y em t_final, sem retornar
+   litas, arrays ou históricos da malha.
+2. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Aja como um engenheiro de software especializado em métodos numéricos e
+           computação científica, com foco em precisão, determinismo e compatibilidade
+           com sistemas automatizados de avaliação. Implemente uma função em Python
+           chamada rk4_classico(f, t0, y0, t_final, h) que resolva numericamente um
+           problema de valor inicial de uma equação diferencial ordinária escalar de
+           primeira ordem utilizando o método clássico de Runge-Kutta de quarta ordem
+           (RK4). A função deve tratar f como uma função pura f(t, y) que retorna a
+           derivada dy/dt sem efeitos colaterais e garantir tipagem consistente para
+           todos os parâmetros. Construa a malha temporal de forma robusta, assegurando
+           estritamente que o último ponto avaliado seja exatamente igual a t_final.
+           Caso o passo nominal h não divida o intervalo exatamente, o tamanho do último
+           passo deve ser obrigatoriamente truncado e ajustado para alcançar exatamente
+           t_final sem ultrapassá-lo. Em cada iteração de tamanho de passo dt, calcule
+           iterativamente k1 = f(t, y), k2 = f(t + dt/2, y + dtk1/2), k3 = f(t + dt/2, y
+           + dtk2/2), k4 = f(t + dt, y + dtk3) e atualize o valor de y fazendo y = y +
+           (dt/6)(k1 + 2k2 + 2k3 + k4), preservando a precisão matemática analítica da
+           quarta ordem. A resolução deve ser estritamente determinística, desprovida da
+           instrução print ou efeitos colaterais e blindada para avaliadores
+           automáticos, devendo retornar estritamente e unicamente um valor do tipo
+           float correspondente à estimativa exata de y em t_final, sem retornar litas,
+           arrays ou históricos da malha.
+[Analista]: 📝 Checklist de Requisitos Técnico e Testável para rk4_classico(f, t0, y0,
+            t_final, h):
+
+1. Validação de Parâmetros
+- f deve ser do tipo callable e aceitar assinatura f(t: float, y: float) -> float.
+- t0, y0, t_final, h devem ser do tipo float.
+- h deve ser > 0 e t_final ≥ t0.
+- Em caso de tipos ou valores inválidos, lançar TypeError ou ValueError apropriado.
+
+2. Construção da Malha Temporal
+- Calcular número inteiro de passos N = ⌊(t_final – t0)/h⌋.
+- Gerar passos de tamanho h para os primeiros N intervalos.
+- Ajustar o último passo dt_final = t_final – (t0 + N·h), truncando h se necessário para
+que t_final seja alcançado exatamente.
+- Garantir que soma cumulativa dos dt resulte em t_final sem erro de arredondamento
+excessivo.
+
+3. Lógica do Método Clássico RK4 por Iteração
+Para cada passo i de 0 até N (incluindo o passo final truncado):
+- Seja dt = h para i < N, ou dt = dt_final para i == N.
+- Calcular k1 = f(t, y)
+- Calcular k2 = f(t + dt/2, y + dt·k1/2)
+- Calcular k3 = f(t + dt/2, y + dt·k2/2)
+- Calcular k4 = f(t + dt, y + dt·k3)
+- Atualizar y ← y + (dt/6)·(k1 + 2·k2 + 2·k3 + k4)
+- Atualizar t ← t + dt
+- Assegurar precisão numérica (usar float de dupla precisão padrão do Python).
+
+4. Retorno e Interfaces
+- A função NÃO deve imprimir nada, nem gravar estados internos.
+- Deve retornar um único valor float com a estimativa de y(t_final).
+- NÃO retornar listas, arrays, tuplas ou históricos de malha.
+
+5. Determinismo e Pureza
+- Ausência total de efeitos colaterais externos.
+- Uso somente de operações matemáticas determinísticas.
+- Garantir comportamento idêntico em múltiplas execuções com mesmos parâmetros.
+
+6. Testes Automatizados Sugeridos (TDD)
+- Teste com equação linear y'=k·y (solução analítica e^(kt)).
+- Teste com passo que divide exatamente o intervalo.
+- Teste com passo que requer truncamento no último passo.
+- Teste de lançamento de exceção para parâmetros inválidos.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================
