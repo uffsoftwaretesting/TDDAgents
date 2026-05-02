@@ -32,6 +32,6 @@ def test_compare_with_numpy_trapz():
     a, b, n = 0.0, 1.0, 1000
     xs = np.linspace(a, b, n + 1)
     ys = xs**2
-    np_result = np.trapz(ys, xs)
+    np_result = np.trapezoid(ys, xs)
     solve_result = solve(lambda x: x**2, a, b, n)
     assert solve_result == pytest.approx(np_result, rel=1e-6)

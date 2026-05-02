@@ -54,10 +54,7 @@ if ! "$PYTHON_BIN" -m pylint --version >/dev/null 2>&1; then
   "$PYTHON_BIN" -m pip install --disable-pip-version-check pylint
 fi
 if ! "$PYTHON_BIN" -m pytest --version >/dev/null 2>&1; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check pytest
-fi
-if ! "$PYTHON_BIN" -c "import pytest_cov" >/dev/null 2>&1; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check pytest-cov
+  "$PYTHON_BIN" -m pip install --disable-pip-version-check pytest pytest-cov
 fi
 
 echo "🧪 3. Rodando a suíte TDD e gerando o relatório de coverage..."

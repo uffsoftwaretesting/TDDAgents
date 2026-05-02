@@ -1,0 +1,6 @@
+Complexidade Cognitiva ≤ 15
+Complexidade Ciclomática ≤ 10
+Densidade de Code Smells ≤ 5 por 100 LOC
+Duplicação de Código ≤ 3%
+Cobertura de Testes ≥ 80%
+Debt Ratio ≤ 5%
