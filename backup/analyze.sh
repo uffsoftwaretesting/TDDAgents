@@ -11,8 +11,12 @@ SONAR_API_URL="${SONAR_API_URL:-http://localhost:9000}"
 METRICS_REPORT_FILE="${METRICS_REPORT_FILE:-sonar_metrics_report.txt}"
 
 echo "🧪 1. Rodando a suíte TDD e gerando relatórios (Coverage e Execução)..."
+# Ativa o virtualenv para garantir que pytest e dependências estão disponíveis
+if [ -f ".venv/bin/activate" ]; then
+  source .venv/bin/activate
+fi
 # O '|| true' garante que o script não aborta se os testes falharem (Red phase do TDD)
-PYTHONPATH=src pytest tests/ --cov=src --cov-report=xml --junitxml=test-results.xml || true
+PYTHONPATH=. pytest tests/ --cov=src --cov-report=xml --junitxml=test-results.xml || true
 
 echo "🔧 2. Corrigindo caminhos do XML para o Docker entender..."
 sed -i "s|$(pwd)|/usr/src|g" coverage.xml
@@ -20,6 +24,7 @@ sed -i "s|$(pwd)|/usr/src|g" test-results.xml
 
 echo "🔍 3. Enviando os resultados para o SonarQube..."
 docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
   -e SONAR_HOST_URL="http://host.docker.internal:9000" \
   -e SONAR_TOKEN="$SONAR_TOKEN" \
   -v "$(pwd):/usr/src" \

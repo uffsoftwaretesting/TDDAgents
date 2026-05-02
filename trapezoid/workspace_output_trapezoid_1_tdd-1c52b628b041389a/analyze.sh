@@ -8,100 +8,44 @@ fi
 
 PROJECT_KEY=$(grep '^sonar.projectKey=' sonar-project.properties | cut -d= -f2-)
 SONAR_API_URL="${SONAR_API_URL:-http://localhost:9000}"
-SONAR_HOST_URL="${SONAR_HOST_URL:-http://localhost:9000}"
 METRICS_REPORT_FILE="${METRICS_REPORT_FILE:-sonar_metrics_report.txt}"
 
-if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
-  PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
-elif [ -x "../.venv/bin/python" ]; then
-  PYTHON_BIN="../.venv/bin/python"
-elif [ -x ".venv/bin/python" ]; then
-  PYTHON_BIN=".venv/bin/python"
-else
-  echo "🐍 Criando ambiente virtual local em .venv..."
-  python3 -m venv .venv
-  PYTHON_BIN=".venv/bin/python"
+echo "🧪 1. Rodando a suíte TDD e gerando relatórios (Coverage e Execução)..."
+# Ativa o virtualenv para garantir que pytest e dependências estão disponíveis
+if [ -f ".venv/bin/activate" ]; then
+  source .venv/bin/activate
 fi
+# O '|| true' garante que o script não aborta se os testes falharem (Red phase do TDD)
+PYTHONPATH=. pytest tests/ --cov=src --cov-report=xml --junitxml=test-results.xml || true
 
-PYTHON_BIN_DIR=$(dirname "$PYTHON_BIN")
-export PATH="$PYTHON_BIN_DIR:$PATH"
-
-echo "📦 1. Preparando instalador Python (pip)..."
-if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
-  echo "ℹ️  pip não encontrado neste ambiente. Executando ensurepip..."
-  "$PYTHON_BIN" -m ensurepip --upgrade
-fi
-
-echo "📦 2. Instalando dependências do projeto (quando disponíveis)..."
-if [ -f "requirements.txt" ]; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check -r requirements.txt
-elif [ -f "setup.py" ]; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check -e .
-elif [ -f "pyproject.toml" ] && grep -Eq '^\[(project|tool\.poetry|tool\.setuptools)\]' pyproject.toml; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check -e .
-else
-  echo "ℹ️  Nenhum requirements.txt ou metadado de pacote encontrado. Pulando instalação de dependências."
-fi
-
-echo "🧰 2.1 Garantindo ferramentas de qualidade necessárias..."
-if ! "$PYTHON_BIN" -m flake8 --version >/dev/null 2>&1; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check flake8
-fi
-if ! "$PYTHON_BIN" -m mypy --version >/dev/null 2>&1; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check mypy
-fi
-if ! "$PYTHON_BIN" -m pylint --version >/dev/null 2>&1; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check pylint
-fi
-if ! "$PYTHON_BIN" -m pytest --version >/dev/null 2>&1; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check pytest
-fi
-if ! "$PYTHON_BIN" -c "import pytest_cov" >/dev/null 2>&1; then
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check pytest-cov
-fi
-
-echo "🧪 3. Rodando a suíte TDD e gerando o relatório de coverage..."
-PYTHONPATH=src "$PYTHON_BIN" -m pytest tests/ --cov=src --cov-report=xml
-
-echo "🔧 4. Corrigindo caminhos do XML para o Docker entender..."
+echo "🔧 2. Corrigindo caminhos do XML para o Docker entender..."
 sed -i "s|$(pwd)|/usr/src|g" coverage.xml
+sed -i "s|$(pwd)|/usr/src|g" test-results.xml
 
-echo "🔍 5. Enviando os resultados para o SonarQube..."
-SCANNER_HOST_URL="$SONAR_HOST_URL"
-ADD_HOST_ARGS=()
-DOCKER_NET_ARGS=()
-if [ "$(uname -s)" = "Linux" ]; then
-  DOCKER_NET_ARGS=(--network host)
-elif [[ "$SONAR_HOST_URL" =~ ^https?://(localhost|127\.0\.0\.1)(:([0-9]+))?(/.*)?$ ]]; then
-  SCANNER_HOST_URL="${SONAR_HOST_URL/localhost/host.docker.internal}"
-  SCANNER_HOST_URL="${SCANNER_HOST_URL/127.0.0.1/host.docker.internal}"
-  ADD_HOST_ARGS=(--add-host host.docker.internal:host-gateway)
-fi
-
+echo "🔍 3. Enviando os resultados para o SonarQube..."
 docker run --rm \
-  "${DOCKER_NET_ARGS[@]}" \
-  "${ADD_HOST_ARGS[@]}" \
-  -e SONAR_HOST_URL="$SCANNER_HOST_URL" \
+  --add-host=host.docker.internal:host-gateway \
+  -e SONAR_HOST_URL="http://host.docker.internal:9000" \
   -e SONAR_TOKEN="$SONAR_TOKEN" \
   -v "$(pwd):/usr/src" \
-  sonarsource/sonar-scanner-cli
+  sonarsource/sonar-scanner-cli \
+  -Dsonar.python.xunit.reportPath=test-results.xml
 
-echo "📊 6. Extraindo Relatório Oficial de Métricas do SonarQube..."
+echo "📊 4. Extraindo Relatório Oficial de Métricas do SonarQube..."
 sleep 5
 
 METRICS_JSON=""
 LAST_HTTP_CODE=""
 LAST_BODY=""
 for i in {1..30}; do
-  # NOTA: ncloc foi adicionado na lista de metricKeys abaixo
   RESPONSE=$(curl -sS -u "$SONAR_TOKEN:" \
     -w $'\n%{http_code}' \
-    "${SONAR_API_URL}/api/measures/component?component=${PROJECT_KEY}&metricKeys=coverage,duplicated_lines_density,sqale_debt_ratio,code_smells,complexity,cognitive_complexity,ncloc" || true)
+    "${SONAR_API_URL}/api/measures/component?component=${PROJECT_KEY}&metricKeys=coverage,duplicated_lines_density,sqale_debt_ratio,code_smells,complexity,cognitive_complexity,ncloc,test_success_density" || true)
 
   HTTP_CODE="${RESPONSE##*$'\n'}"
   BODY="${RESPONSE%$'\n'*}"
 
-  if [ "$HTTP_CODE" = "200" ] && printf '%s' "$BODY" | "$PYTHON_BIN" -c "import json,sys; json.load(sys.stdin)" >/dev/null 2>&1; then
+  if [ "$HTTP_CODE" = "200" ] && printf '%s' "$BODY" | python3 -c "import json,sys; json.load(sys.stdin)" >/dev/null 2>&1; then
     METRICS_JSON="$BODY"
     break
   fi
@@ -122,7 +66,7 @@ if [ -z "$METRICS_JSON" ]; then
   exit 1
 fi
 
-METRICS_JSON="$METRICS_JSON" METRICS_REPORT_FILE="$METRICS_REPORT_FILE" "$PYTHON_BIN" - <<'PY'
+METRICS_JSON="$METRICS_JSON" METRICS_REPORT_FILE="$METRICS_REPORT_FILE" python3 - <<'PY'
 import json
 import os
 from datetime import datetime
@@ -168,6 +112,7 @@ def format_value(value, suffix=""):
 # --- INÍCIO DO CÁLCULO DE DENSIDADE ---
 code_smells = to_float(measures.get("code_smells", 0)) or 0.0
 ncloc = to_float(measures.get("ncloc", 0)) or 0.0
+unit_tests_success = to_float(measures.get("test_success_density"))
 
 if ncloc > 0:
     code_smells_density = (code_smells / ncloc) * 100
@@ -178,6 +123,7 @@ measures["code_smells_density"] = code_smells_density
 # --- FIM DO CÁLCULO ---
 
 rules = [
+  ("test_success_density", "Sucesso dos Testes", ">=", 100.0, "%"),
   ("cognitive_complexity", "Complexidade Cognitiva", "<=", 15.0, ""),
   ("complexity", "Complexidade Ciclomatica", "<=", 10.0, ""),
   ("code_smells_density", "Densidade Code Smells", "<=", 5.0, ""),
@@ -203,12 +149,13 @@ timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 report_lines = [
   "======================================================",
-  "      RELATORIO DE METRICAS DE QUALIDADE (SONAR)      ",
+  "      RELATÓRIO DE MÉTRICAS DE QUALIDADE (SONAR)      ",
   "======================================================",
   f"Projeto: {project_key}",
   f"Gerado em: {timestamp}",
   f"Linhas de Código Úteis (NCLOC): {int(ncloc)}",
   f"Total de Code Smells:           {int(code_smells)}",
+  f"Sucesso dos Testes Unitários:   {format_value(unit_tests_success, '%')}",
   "",
   *rows,
   "",
@@ -223,7 +170,7 @@ with open(report_path, "w", encoding="utf-8") as handle:
   handle.write(report_text + "\n")
 
 print("\n" + report_text)
-print(f"\nRelatorio salvo em: {report_path}\n")
+print(f"\nRelatório salvo em: {report_path}\n")
 PY
 
 echo "✅ Análise concluída!"
