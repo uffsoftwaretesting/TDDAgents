@@ -1,0 +1,22 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 7
+Success: 7
+Failed: 0
+Clean TDD Rate (F1) = 3 / 7 (42.9%)
+Green in Red Rate (F2) = 4 / 7 (57.1%)
+Fail rate = 0 / 7 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Criar e ativar virtualenv Python 3.x; instalar pytest; criar estrutura de diretórios isolada: src/ com __init__.py e converter.py vazio, tests/ com test_converter.py vazio; inicializar repositório (opcional git) e configurar pytest no projeto
+2. [SUCCESS] [F2] FASE 1 - ASSINATURA E IMPORTAÇÃO: No tests/test_converter.py, escrever teste que importe a função fahrenheit_to_celsius do módulo src.converter e verifique sua existência; executar pytest para confirmar falha de importação
+3. [SUCCESS] [F1] FASE 2 - VALIDAÇÃO DE TIPO: Adicionar testes parametrizados em test_converter.py para entradas inválidas (None, '123', [], {}) que esperam TypeError com mensagem exata 'fahrenheit must be int or float'; em src/converter.py, implementar checagem de tipo e lançamento de TypeError para passar nos testes
+4. [SUCCESS] [F1] FASE 3 - TRATAMENTO DE NaN E INFINITOS: Em test_converter.py, escrever testes que forneçam math.nan, math.inf e -math.inf e esperem retorno idêntico (propagação de valores especiais); implementar lógica em converter.py usando math.isnan e math.isinf para satisfazer esses casos
+5. [SUCCESS] [F2] FASE 4 - CÁLCULO NUMÉRICO: Em test_converter.py, adicionar testes para casos típicos (32→0.0, 212→100.0), negativos (-40→-40.0, -58→-50.0) e fracionários (98.6→37.0, 0.5→-17.5); em converter.py, implementar fórmula (fahrenheit - 32) * 5.0/9.0 garantindo operação em float
+6. [SUCCESS] [F2] FASE 5 - GARANTIA DE TIPO DE RETORNO: Escrever teste que verifica que mesmo entrada int retorna float (usar isinstance(result, float)); ajustar implementação para converter o resultado explicitamente para float se necessário
+7. [SUCCESS] [F2] FASE 6 - COBERTURA E REVISÃO FINAL: Executar pytest com cobertura (--cov) para assegurar 100% de cobertura em src/converter.py; revisar aderência a PEP8 e docstrings dos módulos; refatorar mensagens de exceção e nomes conforme convenções antes de fechar o ciclo
+================================================================================

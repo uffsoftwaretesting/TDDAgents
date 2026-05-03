@@ -1,0 +1,99 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Aja como um engenheiro de software especializado em Python. O caso de uso consiste em
+   converter números representados como strings em algarismos romanos para seus
+   equivalentes inteiros. A tarefa é projetar e implementar uma função em Python puro,
+   sem uso de bibliotecas externas, que receba uma única string como entrada e retorne
+   um inteiro como saída. A saída deve ser um número inteiro correspondente ao valor
+   romano válido ou lançar uma exceção do tipo ValueError em caso de entrada inválida. O
+   método deve implementar os símbolos básicos I, V, X, L, C, D, M e respeitar as regras
+   de subtração IV, IX, XL, XC, CD, CM, além de tratar a entrada de forma
+   case-insensitive. As premissas incluem suporte apenas para valores entre 1 e 3999,
+   rejeição de strings vazias, caracteres inválidos, sequências malformadas, repetições
+   ilegais e combinações inválidas como IC, IL e VX. Os testes devem incluir casos
+   válidos (por exemplo, III, IX, LVIII, MCMXCIV), inválidos (como IC, XXXX, VV, string
+   vazia) e casos de borda (como I e MMMCMXCIX). Não devem ser implementados testes de
+   documentação, docstrings ou types.
+2. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Aja como um engenheiro de software especializado em Python. O caso de uso
+           consiste em converter números representados como strings em algarismos
+           romanos para seus equivalentes inteiros. A tarefa é projetar e implementar
+           uma função em Python puro, sem uso de bibliotecas externas, que receba uma
+           única string como entrada e retorne um inteiro como saída. A saída deve ser
+           um número inteiro correspondente ao valor romano válido ou lançar uma exceção
+           do tipo ValueError em caso de entrada inválida. O método deve implementar os
+           símbolos básicos I, V, X, L, C, D, M e respeitar as regras de subtração IV,
+           IX, XL, XC, CD, CM, além de tratar a entrada de forma case-insensitive. As
+           premissas incluem suporte apenas para valores entre 1 e 3999, rejeição de
+           strings vazias, caracteres inválidos, sequências malformadas, repetições
+           ilegais e combinações inválidas como IC, IL e VX. Os testes devem incluir
+           casos válidos (por exemplo, III, IX, LVIII, MCMXCIV), inválidos (como IC,
+           XXXX, VV, string vazia) e casos de borda (como I e MMMCMXCIX). Não devem ser
+           implementados testes de documentação, docstrings ou types.
+[Analista]: Checklist de Requisitos Técnicos e Testáveis para a Função de Conversão de
+            Numerais Romanos:
+
+1. Validação de Entrada
+1.1 Se o argumento não for do tipo str, lançar TypeError.
+1.2 Se a string estiver vazia (len == 0), lançar ValueError.
+
+2. Normalização
+2.1 Converter toda a string para uppercase antes do processamento.
+
+3. Validação de Caracteres
+3.1 Cada caractere deve pertencer ao conjunto {I, V, X, L, C, D, M}. Caso contrário,
+lançar ValueError.
+
+4. Regras de Repetição
+4.1 Os símbolos I, X, C e M não podem se repetir mais do que 3 vezes consecutivas (ex.:
+“IIII” é inválido).
+4.2 Os símbolos V, L e D não podem se repetir consecutivamente (ex.: “VV” é inválido).
+
+5. Regras de Subtração
+5.1 Somente os pares IV, IX, XL, XC, CD e CM são permitidos.
+5.2 Um símbolo de menor valor só pode preceder um símbolo de valor maior se fizer parte
+de um dos pares acima.
+5.3 Não permitir repetições de subtrações (ex.: “IIV”, “XXL”).
+
+6. Sequências Ilegais
+6.1 Detectar e rejeitar combinações inválidas como IC, IL, ID, IM, VX, VL, VC, VD, VM,
+XD, XM.
+
+7. Lógica de Parsing
+7.1 Definir dicionário de valores: {I:1, V:5, X:10, L:50, C:100, D:500, M:1000}.
+7.2 Iterar pela string: para cada símbolo, comparar com o próximo.
+- Se valor_atual < valor_próximo, subtrair valor_atual do total.
+- Caso contrário, somar valor_atual ao total.
+7.3 Acumular o resultado final.
+
+8. Verificação de Faixa
+8.1 Após o parsing, se resultado < 1 ou > 3999, lançar ValueError.
+
+9. Retorno
+9.1 Retornar o inteiro correspondente ao numeral romano válido.
+
+10. Casos de Teste Unitários
+10.1 Válidos:
+- “III” → 3
+- “IV” → 4
+- “IX” → 9
+- “LVIII” → 58
+- “MCMXCIV” → 1994
+- Case-insensitive: “mcmxciv” → 1994
+10.2 Inválidos:
+- String vazia (“”)
+- Caracteres inválidos (“A”, “IL”, “IC”, “ID”, “IM”, “VX”)
+- Repetições ilegais (“XXXX”, “VV”, “IIV”)
+- Fora de faixa (“MMMM” -> 4000)
+10.3 Casos de Borda:
+- “I” → 1
+- “MMMCMXCIX” → 3999
+10.4 Tipo de argumento errado:
+- 123, None, listas etc.: devem lançar TypeError.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

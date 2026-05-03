@@ -1,0 +1,89 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Aja como um engenheiro de software especializado em Python. O caso de uso consiste em
+   verificar se uma string representa um palíndromo. A tarefa é projetar e implementar,
+   em Python puro e sem uso de bibliotecas externas, uma função que receba uma string
+   como entrada e retorne um valor booleano, sendo True para palíndromos e False caso
+   contrário. A saída deve refletir corretamente a verificação após normalização da
+   entrada. O método deve tornar a verificação case-insensitive, remover espaços em
+   branco, ignorar pontuação e caracteres não alfanuméricos, e operar com complexidade
+   O(n). As premissas incluem validação rigorosa de tipos, lançando TypeError para
+   entradas inválidas como None, números ou outros objetos, e tratamento de
+   comportamento para casos de borda como string vazia e strings com um único caractere.
+   Os testes devem incluir casos válidos, casos não palíndromos, e casos de borda
+   (string vazia e um único caractere). Não devem ser implementados testes de
+   documentação, docstrings ou types.
+2. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Aja como um engenheiro de software especializado em Python. O caso de uso
+           consiste em verificar se uma string representa um palíndromo. A tarefa é
+           projetar e implementar, em Python puro e sem uso de bibliotecas externas, uma
+           função que receba uma string como entrada e retorne um valor booleano, sendo
+           True para palíndromos e False caso contrário. A saída deve refletir
+           corretamente a verificação após normalização da entrada. O método deve tornar
+           a verificação case-insensitive, remover espaços em branco, ignorar pontuação
+           e caracteres não alfanuméricos, e operar com complexidade O(n). As premissas
+           incluem validação rigorosa de tipos, lançando TypeError para entradas
+           inválidas como None, números ou outros objetos, e tratamento de comportamento
+           para casos de borda como string vazia e strings com um único caractere. Os
+           testes devem incluir casos válidos, casos não palíndromos, e casos de borda
+           (string vazia e um único caractere). Não devem ser implementados testes de
+           documentação, docstrings ou types.
+[Analista]: Checklist de Requisitos Técnico para a função is_palindrome(s):
+
+1. Assinatura da Função
+1.1. Definição: def is_palindrome(s)
+1.2. Retorno: booleano (True se palíndromo, False caso contrário)
+
+2. Validação de Entrada
+2.1. Verificar se o parâmetro s é instância de str.
+- Se não for str, lançar TypeError com mensagem clara (“Input must be a string”).
+
+3. Normalização da String (Pré-processamento)
+3.1. Remover todos os caracteres não alfanuméricos.
+3.2. Ignorar espaços em branco.
+3.3. Converter todos os caracteres para caixa baixa (case-insensitive).
+3.4. Operar somente sobre caracteres alfanuméricos resultantes.
+
+4. Lógica de Verificação de Palíndromo
+4.1. Implementar em complexidade O(n):
+- Abordagem sugerida: ponteiros (i no início, j no fim) que se movem até se encontrarem.
+- Em cada passo, comparar caracteres normalizados.
+4.2. Retornar True se todas as comparações coincidirem; caso contrário, False.
+
+5. Tratamento de Casos de Borda
+5.1. String vazia (“”): retornar True.
+5.2. String com único caractere: retornar True.
+
+6. Exceções e Erros
+6.1. Entrada None, números, listas, dicionários ou outros tipos → TypeError.
+6.2. Mensagem de erro deve indicar tipo esperado e tipo recebido.
+
+7. Critérios de Performance
+7.1. Tempo de execução linear em relação ao tamanho da string (O(n)).
+7.2. Uso de memória adicional proporcional apenas ao tamanho da substring alfanumérica
+(também O(n)), sem estruturas extras desnecessárias.
+
+8. Casos de Teste Obrigatórios
+8.1. Palíndromos válidos:
+- "A man, a plan, a canal: Panama"
+- "racecar"
+- "No lemon, no melon"
+8.2. Não-palíndromos:
+- "hello"
+- "race a car"
+8.3. Casos de borda:
+- "" (string vazia)
+- "a" (um único caractere)
+8.4. Tipos inválidos (espera-se TypeError):
+- None
+- 123 (int)
+- 12.3 (float)
+- [] (lista)
+- {} (dicionário)
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

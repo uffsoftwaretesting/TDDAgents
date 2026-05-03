@@ -1,0 +1,61 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: Calculadora de Desconto
+
+## 1. Visão Geral do Sistema
+Implementar uma função em Python para cálculo de desconto aplicado a um produto, retornando tanto o valor economizado quanto o preço final a pagar. A solução deve validar tipos e domínios de entrada, aplicar fórmula de desconto e garantir precisão numérica com arredondamento de duas casas decimais.
+
+## 2. Estruturas de Dados e Interfaces
+
+### Função pública
+- Nome: `calculate_discount`
+- Parâmetros:
+  - `price` (int | float): preço original do produto
+  - `discount_percentage` (int | float): percentual de desconto a ser aplicado
+- Retorno:
+  - dict com chaves:
+    - `"discount_amount"`: float — valor do desconto calculado (arredondado)
+    - `"final_price"`: float — preço final após desconto (arredondado)
+
+### Contratos e formatos
+- Entrada:
+  - Ambos os parâmetros são obrigatórios.
+  - Tipos aceitos: int ou float.
+- Saída:
+  - Sempre um dicionário com as duas chaves indicadas, mesmo que valor zero.
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+1. Validação de tipos (TypeError)
+   - `price` não int/float → levantar `TypeError` com mensagem clara.
+   - `discount_percentage` não int/float → levantar `TypeError`.
+2. Validação de domínio (ValueError)
+   - `price < 0` → levantar `ValueError`.
+   - `discount_percentage < 0` ou `discount_percentage > 100` → levantar `ValueError`.
+3. Cálculo e arredondamento
+   - Sempre aplicar:
+     - `discount_amount = round(price * (discount_percentage / 100), 2)`
+     - `final_price = round(price - discount_amount, 2)`
+4. Casos de teste esperados
+   - Válidos:
+     - price=100, discount_percentage=10 → discount_amount=10.00, final_price=90.00
+     - price=99.99, discount_percentage=12.5 → corretos e arredondados
+   - Borda:
+     - discount_percentage=0 → discount_amount=0.00, final_price=price original
+     - discount_percentage=100 → discount_amount=price original, final_price=0.00
+   - Inválidos:
+     - `price < 0` (ex: -1)
+     - `discount_percentage < 0` ou `> 100` (ex: -10, 150)
+     - `price` como string (ex: "100"), `discount_percentage` como None, objetos não numéricos
+
+## 4. Contexto Técnico
+- Linguagem: Python 3.x, sem uso de bibliotecas externas além da biblioteca padrão.
+- Paradigma: programação funcional simples; sem classes.
+- Precisão: arredondamento explícito para 2 casas decimais.
+- Mensagens de exceção devem ser descritivas mas não seguem formato específico.
+- Não implementar docstrings ou tipagem estática; foco em TDD de comportamento.
+
+## 5. Dependências Base (Core Dependencies)
+- Python Standard Library
+- pytest (biblioteca de testes)
+- pytest-mock (opcional, para simulação de exceções)

@@ -1,0 +1,20 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Aja como um engenheiro de software especializado em Python. O caso de uso
+consiste em formatar códigos de CEP no padrão brasileiro. A tarefa é projetar e
+implementar, em Python puro e sem uso de bibliotecas externas além da biblioteca
+padrão, uma função que receba como entrada uma sequência representando um CEP e
+retorne uma string formatada no padrão “XXXXX-XXX”. A saída deve ser uma string
+contendo exatamente oito dígitos com inserção automática de hífen após o quinto
+dígito. O método deve validar e normalizar a entrada garantindo que apenas
+dígitos sejam considerados, podendo aceitar tanto strings quanto inteiros desde
+que representem exatamente 8 dígitos, e então aplicar a formatação por meio de
+manipulação de strings. As premissas incluem validação rigorosa de tipos e
+conteúdo, rejeitando entradas inválidas como strings com caracteres não
+numéricos, valores com quantidade diferente de 8 dígitos, None ou outros
+objetos, lançando exceções apropriadas como TypeError e ValueError com mensagens
+claras. Os testes devem incluir casos válidos (por exemplo, "24350310" →
+"24350-310", 12345678 → "12345-678"), casos inválidos (como "1234", "abcdefgh",
+"123456789", None) e casos de borda (como entradas com zeros à esquerda). Não
+devem ser implementados testes de documentação, docstrings ou types.
+================================================================================

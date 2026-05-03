@@ -1,0 +1,19 @@
+======================================================
+      RELATÓRIO DE MÉTRICAS DE QUALIDADE (SONAR)      
+======================================================
+Projeto: roman-to-int
+Gerado em: 2026-05-02 20:39:09
+Linhas de Código Úteis (NCLOC): 50
+Total de Code Smells:           2
+Sucesso dos Testes Unitários:   100%
+
+Sucesso dos Testes           Valor:     100% | Meta: >= 100%   | PASSED
+Complexidade Cognitiva       Valor:       25 | Meta: <= 15     | FAILED
+Complexidade Ciclomatica     Valor:       17 | Meta: <= 10     | FAILED
+Densidade Code Smells        Valor:        4 | Meta: <= 5      | PASSED
+Duplicacao de Codigo         Valor:       0% | Meta: <= 3%     | PASSED
+Cobertura de Testes          Valor:     100% | Meta: >= 80%    | PASSED
+Debt Ratio                   Valor:    1.30% | Meta: <= 5%     | PASSED
+
+STATUS GERAL: FAILED
+======================================================
