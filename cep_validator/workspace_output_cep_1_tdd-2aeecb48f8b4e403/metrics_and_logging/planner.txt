@@ -1,0 +1,10 @@
+PLANO DE SUB-REQUISITOS TDD
+================================================================================
+1. FASE 0 - SETUP: Criar um ambiente isolado (virtualenv/venv com Python >=3.6), instalar pytest e inicializar a estrutura de diretórios: src/cep_formatter.py (com stub de função), tests/test_format_cep.py (vazio) e arquivo pytest.ini (configuração básica).
+2. FASE 1 - TIPOS E CONVERSÃO: Escrever testes unitários que verifiquem TypeError com mensagem "CEP deve ser uma string ou inteiro" para entradas None, float e object(); implementar em format_cep a checagem de tipo e, se for int, converter para str.
+3. FASE 2 - VALIDAÇÃO DE DÍGITOS: Criar testes que disparem ValueError("CEP deve conter apenas dígitos") para strings com letras, espaços ou qualquer caractere não numérico; implementar validação usando str.isdigit().
+4. FASE 3 - VALIDAÇÃO DE COMPRIMENTO: Escrever testes que levantem ValueError("CEP deve ter exatamente 8 dígitos") para strings/de strings derivadas de int com comprimento diferente de 8; implementar checagem de len(cep_str) == 8.
+5. FASE 4 - FORMATAÇÃO E CASOS VÁLIDOS: Adicionar testes de sucesso para entradas válidas ("24350310", 12345678, "00000000", "00123456"), verificando retorno formatado no padrão "XXXXX-XXX"; implementar a lógica de inserir hífen entre quinto e sexto dígitos.
+6. FASE 5 - TESTE DE SINAL NEGATIVO: Incluir casos de teste específicos para int negativo (-12345678) garantindo que a conversão produza '-' e seja capturada como ValueError("CEP deve conter apenas dígitos"); ajustar validações se necessário.
+7. FASE 6 - INTEGRAÇÃO E CI: Configurar pipeline de CI (ex: GitHub Actions) para rodar pytest a cada push, incluir relatório de cobertura mínima e falha em testes; garantir relatório claro de erros e sucesso.
+================================================================================

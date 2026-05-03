@@ -1,57 +1,45 @@
+import time
 import logging
-import re
-from app.config import RequirementsState
+from app.config.config import Config, RequirementsState
 from app.agents.langgraph.engineer import generate_specification
+from app.errors.agents.handler import handle_llm_exception
+from app.errors.exceptions import TransientInfraError, FatalInfraError
 
+logger = logging.getLogger("TDDOrchestrator")
 
 def node_engineer(state: RequirementsState) -> RequirementsState:
-    """Nó do grafo que gera a especificação técnica final."""
-    logging.info("=" * 70)
-    logging.info("⚙️ ENGENHEIRO - Gerando especificação técnica")
-    logging.info("=" * 70)
+    logger.info("=" * 70)
+    logger.info("⚙️ ENGENHEIRO - Consolidando a Especificação")
+    logger.info("=" * 70)
     
     conversation_history = state["conversation_history"]
+    infra_retries = state.get("infra_retries", 0)
     
-    logging.info(f"📚 Processando histórico: {len(conversation_history.split('\\n'))} linhas")
+    try:
+        requirements = conversation_history
+        specification = generate_specification(requirements, conversation_history)
+            
+    except TransientInfraError as exc:
+        infra_retries += 1
+        if infra_retries >= Config.MAX_INFRA_RETRIES:
+            logger.error(f"❌ ENGENHEIRO: Falha de Infra (Limite Atingido): {exc.original_exc}")
+            return {**state, "status": "engineer_failed", "infra_retries": 0}
+        
+        logger.warning(f"⚠️ ENGENHEIRO: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
+        time.sleep(3)
+        return {**state, "status": "infra_error_engineer", "infra_retries": infra_retries}
+
+    except FatalInfraError as exc:
+        logger.error(f"❌ ENGENHEIRO: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "engineer_failed", "infra_retries": 0}
     
-    # Extrair os requisitos do histórico (última mensagem do analista que contém checklist)
-    requirements = ""
-    lines = conversation_history.split('\n')
-    for i, line in enumerate(lines):
-        if "[Analista]:" in line and "===CHECKLIST_END===" in conversation_history[conversation_history.find(line):]:
-            # Encontrar o final desta mensagem do analista
-            analyst_message = line.replace("[Analista]:", "").strip()
-            j = i + 1
-            while j < len(lines) and not lines[j].startswith("["):
-                analyst_message += "\n" + lines[j]
-                j += 1
-            requirements = analyst_message
-            break
+    except Exception as exc:
+        logger.error(f"❌ ENGENHEIRO: Falha Fatal de Infraestrutura")
+        return {**state, "status": "engineer_failed", "infra_retries": 0}
     
-    if not requirements:
-        requirements = conversation_history  # fallback
-    
-    logging.info(f"📋 Requisitos extraídos: {len(requirements)} caracteres")
-    
-    specification = generate_specification(requirements)
-    
-    # Extrair nome da função da especificação
-    function_name = "generated_function"
-    for line in specification.split('\n'):
-        if line.strip().startswith("#"):
-            parts = line.replace("#", "").strip().split()
-            if parts:
-                function_name = parts[0].lower().replace(" ", "_")
-                break
-    
-    logging.info(f"🎯 Nome da função detectado: {function_name}")
-    logging.info(f"📄 Especificação gerada: {len(specification)} caracteres")
-    
-    new_state: RequirementsState = {
+    return {
         **state,
         "final_specification": specification,
-        "function_name": function_name,
+        "infra_retries": 0,
         "status": "specification_ready"
     }
-    
-    return new_state

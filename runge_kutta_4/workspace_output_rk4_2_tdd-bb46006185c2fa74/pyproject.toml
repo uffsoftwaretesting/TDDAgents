@@ -1,0 +1,10 @@
+[project]
+name = "rk4-classico"
+version = "0.1.0"
+description = "Implementation of classical RK4 method"
+requires-python = ">=3.8"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = ["tests"]

@@ -1,0 +1,61 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: Verificador de Palíndromos
+
+## 1. Visão Geral do Sistema
+O módulo fornece uma única função, `is_palindrome`, responsável por verificar se uma dada string é um palíndromo. A verificação é feita após normalização (remoção de caracteres não alfanuméricos e espaços, conversão para minúsculas) e utiliza algoritmo de dois ponteiros para garantir complexidade de tempo O(n).
+
+## 2. Estruturas de Dados e Interfaces
+
+### Função Pública
+- **Assinatura**  
+  `is_palindrome(s: str) -> bool`
+
+- **Parâmetro de Entrada**  
+  - `s`: instância de `str`.  
+
+- **Comportamento**  
+  1. **Validação de tipo**  
+     - Se `s` não for `str`, deve ser lançado `TypeError` com a mensagem exata:  
+       `"Entrada deve ser uma string"`.
+  2. **Normalização**  
+     - Converter `s` para minúsculas.  
+     - Filtrar apenas caracteres alfanuméricos (`c.isalnum()`).  
+     - Construir a string normalizada `normalized: str`.
+  3. **Verificação de Palíndromo**  
+     - Utilizar dois ponteiros (`left` e `right`) para comparar caracteres em posições simétricas de `normalized`.  
+     - Se algum par não corresponder, retornar `False`.  
+     - Se todas as comparações passarem ou a string for de comprimento ≤ 1, retornar `True`.
+
+- **Retorno**  
+  - `True` se `s`, após normalização, for palíndromo;  
+  - `False` caso contrário.
+
+## 3. Casos de Borda e Validações (Edge Cases)
+- **Tipo Inválido**  
+  - `s = None`, `123`, `[]`, objetos não-`str` → lança `TypeError("Entrada deve ser uma string")`.
+- **String vazia**  
+  - `s = ""` ou somente caracteres removíveis (pontuação/espaços):  
+    normalizada vira `""`, deve retornar `True`.
+- **Único caractere**  
+  - `s` de comprimento 1 (ex.: `"x"`) → retorna `True`.
+- **Palíndromos válidos com espaços e pontuação**  
+  - `"A man, a plan, a canal: Panama"` → `True`.  
+  - `"No 'x' in Nixon"` → `True`.
+- **Não-palíndromos**  
+  - `"hello"` → `False`.  
+  - `"abc123"` → `False`.
+
+## 4. Contexto Técnico
+- **Linguagem alvo**: Python 3.7+  
+- **Paradigma**: função pura, estilo imperativo.  
+- **Complexidade de tempo**: O(n), onde n é o tamanho da string original.  
+- **Complexidade de espaço**: O(n) devido à string normalizada.  
+- **Tratamento de erros**: lançar exatamente `TypeError("Entrada deve ser uma string")` para tipo inválido.  
+- **Restrições**:  
+  - Não usar bibliotecas externas.  
+  - Não incluir docstrings, anotações de tipo além da assinatura, nem I/O.
+
+## 5. Dependências Base (Core Dependencies)
+- Python Standard Library (sem pacotes externos)  
+- pytest (para suíte de testes)

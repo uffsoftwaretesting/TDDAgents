@@ -1,0 +1,27 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Aja como um engenheiro de software especializado em métodos numéricos e
+computação científica, com foco em precisão, determinismo e compatibilidade com
+sistemas automatizados de avaliação rigorosos. Implemente uma função em Python
+chamada adams_bashforth_3(f, t0, y0, t_final, h) que resolva numericamente um
+problema de valor inicial de uma equação diferencial ordinária escalar de
+primeira ordem utilizando o método explícito de Adams Bashforth de terceira
+ordem. A função deve tratar f como uma função pura f(t, y) que retorna a
+derivada dy por dt sem efeitos colaterais e garantir tipagem consistente para
+todos os parâmetros. Como o método é de múltiplos passos, inicialize
+obrigatoriamente os dois primeiros valores adicionais utilizando um método de
+passo único de ordem suficiente como Runge Kutta de quarta ordem para obter y1 e
+y2 a partir de t0 e y0 com passo h. Construa a malha temporal de forma robusta
+assegurando estritamente que o último ponto avaliado seja exatamente igual a
+t_final e, caso o passo nominal h não divida o intervalo exatamente, o tamanho
+do último passo deve ser truncado e ajustado dinamicamente para alcançar
+exatamente t_final sem ultrapassá lo, incluindo na etapa final a recomputação
+consistente das avaliações necessárias de f. A partir do terceiro ponto, em cada
+iteração de tamanho de passo dt, aplique a fórmula y_{n+1} igual a y_n mais dt
+vezes a combinação linear um sobre doze de vinte e três f(t_n, y_n) menos
+dezesseis f(t_{n-1}, y_{n-1}) mais cinco f(t_{n-2}, y_{n-2}), garantindo
+atualização correta e ordenada dos históricos de estados e derivadas. A
+implementação deve ser estritamente determinística e deve retornar
+exclusivamente um valor do tipo float correspondente à estimativa final de y em
+t_final sem retornar listas, arrays ou qualquer histórico intermediário.
+================================================================================

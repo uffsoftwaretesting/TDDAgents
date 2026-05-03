@@ -1,0 +1,26 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 11
+Success: 11
+Failed: 0
+Clean TDD Rate (F1) = 7 / 11 (63.6%)
+Green in Red Rate (F2) = 4 / 11 (36.4%)
+Fail rate = 0 / 11 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Criar um virtualenv Python 3.x, instalar pytest (pip install pytest), estruturar diretórios src/ e tests/, criar arquivos vazios src/roman.py e tests/test_roman.py e configurar pytest.ini
+2. [SUCCESS] [F1] FASE 1 - VALIDAÇÃO DE TIPO: Escrever testes unitários (pytest) em tests/test_roman.py que chamem roman_to_int com inputs não-str (None, 123, []) e esperem TypeError; executar para vermelhar
+3. [SUCCESS] [F1] FASE 2 - NORMALIZAÇÃO: Adicionar teste para entrada lowercase (ex.: 'mcmxciv' → 1994) esperando sucesso; implementar roman = roman.upper() antes de qualquer validação
+4. [SUCCESS] [F1] FASE 3 - STRING VAZIA: Escrever teste que invoque roman_to_int('') e espera ValueError; implementar verificação len(roman) > 0 e lançar ValueError caso vazio
+5. [SUCCESS] [F2] FASE 4 - VALIDAÇÃO DE CARACTERES: Criar testes para inputs com caracteres inválidos (ex.: 'A', 'B1') esperando ValueError; implementar checagem de cada símbolo estar em ROMAN_VALUES
+6. [SUCCESS] [F1] FASE 5 - REGRAS DE REPETIÇÃO: Escrever testes para repetições ilegais (ex.: 'IIII','XXXX','VV') aguardando ValueError; implementar lógica que conte repetições consecutivas conforme regras do domínio
+7. [SUCCESS] [F1] FASE 6 - REGRAS DE SUBTRAÇÃO: Adicionar testes para pares válidos (IV, IX, XL, XC, CD, CM) e inválidos (IIV, IL, IC); esperar ValueError nos inválidos; implementar validação de pares usando VALID_SUBTRACTIVE_PAIRS
+8. [SUCCESS] [F2] FASE 7 - PARSING E SOMA/SUBTRAÇÃO: Escrever testes para conversão de casos simples ('III'→3,'LVIII'→58) e compostos ('MCMXCIV'→1994); implementar loop de parsing que compara valor atual com o próximo e soma/subtrai conforme regras
+9. [SUCCESS] [F1] FASE 8 - VERIFICAÇÃO DE FAIXA: Criar testes para resultado fora de domínio (ex.: 'MMMM'→4000) esperando ValueError e para borda ('I'→1,'MMMCMXCIX'→3999) retornando o valor correto; implementar checagem do resultado final em [MIN_VALUE,MAX_VALUE]
+10. [SUCCESS] [F2] FASE 9 - INTEGRAÇÃO FINAL: Consolidar testes de todos os exemplos válidos e inválidos da especificação, garantir cobertura completa, e executar pytest para validar fluxo end-to-end
+11. [SUCCESS] [F2] FASE 10 - CI E LINT (OPCIONAL): Configurar lint (flake8/mypy), adicionar comando pytest no pipeline de CI e assegurar qualidade de código antes do merge
+================================================================================

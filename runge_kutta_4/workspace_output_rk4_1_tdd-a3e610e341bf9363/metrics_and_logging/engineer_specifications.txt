@@ -1,0 +1,81 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: rk4_classico
+
+## 1. Visão Geral do Sistema
+A função `rk4_classico(f, t0, y0, t_final, h)` resolve um problema de valor inicial de equação diferencial ordinária escalar de primeira ordem  
+dy/dt = f(t, y)  
+através do método clássico de Runge-Kutta de quarta ordem (RK4). Recebe condições iniciais e passo nominal, ajusta o último passo para alcançar exatamente `t_final` e retorna o valor aproximado de y em `t_final` como float, de forma pura, determinística e sem efeitos colaterais.
+
+## 2. Estruturas de Dados e Interfaces
+
+### Assinatura
+```python
+def rk4_classico(
+    f: Callable[[float, float], float],
+    t0: float,
+    y0: float,
+    t_final: float,
+    h: float
+) -> float:
+    ...
+```
+
+### Parâmetros
+- `f`: callable puro, recebe `(t: float, y: float)` e retorna `float` correspondente a dy/dt.
+- `t0`: `float` — valor inicial de tempo.
+- `y0`: `float` — valor inicial de y em `t0`.
+- `t_final`: `float` — tempo de saída, deve satisfazer `t_final ≥ t0`.
+- `h`: `float` — passo nominal, deve ser `> 0`.
+
+### Retorno
+- Valor `float` correspondente à estimativa de y em `t_final`.
+
+### Propriedades
+- Determinismo total: mesma saída para mesmas entradas.
+- Pureza: sem impressão, sem gravação de estado ou efeitos colaterais.
+- Precisão: uso de floats de dupla precisão (padrão Python).
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+1. Validações de tipo e valor:
+   - Se `f` não for callable: raise TypeError.
+   - Se `t0`, `y0`, `t_final` ou `h` não forem `float`: raise TypeError.
+   - Se `h ≤ 0`: raise ValueError.
+   - Se `t_final < t0`: raise ValueError.
+
+2. Construção da malha temporal:
+   - Calcular `N = floor((t_final - t0) / h)`, número de passos completos.
+   - Para os primeiros `N` passos, usar passo `h`.
+   - Calcular `dt_final = t_final - (t0 + N*h)`.  
+     - Se `dt_final` for zero (dentro de tolerância de ponto flutuante), não adicionar passo extra.
+     - Caso contrário (`dt_final > 0`), usá-lo como passo final único truncado.
+   - Garantir que `t0 + N·h + dt_final == t_final` sem extrapolação além de `t_final`.
+
+3. Iteração RK4:
+   - Para cada passo com tamanho `dt` (seja `h` ou `dt_final`):
+     1. `k1 = f(t, y)`
+     2. `k2 = f(t + dt/2, y + dt*k1/2)`
+     3. `k3 = f(t + dt/2, y + dt*k2/2)`
+     4. `k4 = f(t + dt,   y + dt*k3)`
+     5. `y ← y + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)`
+     6. `t ← t + dt`
+   - Nenhum outro tipo de passo é permitido.
+
+4. Comportamento em erros de avaliação de `f`:
+   - Se `f(...)` retornar não-float ou lançar exceção, propagar o erro ao chamador (sem captura interna).
+
+## 4. Contexto Técnico
+- Linguagem alvo: Python 3.8+.
+- Paradigma: programação funcional/pura para métodos numéricos.
+- Precisão: floats de dupla precisão.
+- Tolerância de arredondamento: usar operações diretas de ponto flutuante; não aplicar correções adicionais além da definição de `dt_final`.
+- Não utilizar logs, prints, I/O ou estados globais.
+- Compatível com sistemas de avaliação automatizados (autograders).
+
+## 5. Dependências Base (Core Dependencies)
+- Python Standard Library:
+  - `typing` (para anotações: `Callable`).
+  - `math` (opcional, se necessário para funções auxiliares).
+- Ferramenta de testes sugerida:
+  - `pytest` (para TDD e assertions).

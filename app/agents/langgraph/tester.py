@@ -1,81 +1,72 @@
-import re
-import ast
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
-from app.config import Config
+import logging
+from app.errors.agents.handler import handle_llm_exception
+from app.utils.chat_model_factory import get_chat_model
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from app.config.config import Config
 from app.utils.prompt_loader import load_prompt
+from app.schema.schema import AgentAction
+from app.utils.sandbox_utils import read_all_files_from_state
 
-def extract_code(text: str) -> str:
-    """Extrai código Python de blocos markdown ou retorna o texto como está."""
-    match = re.search(r'```(?:python)?\s*(.*?)\s*```', text, re.DOTALL)
-    return match.group(1).strip() if match else text.strip()
+logger = logging.getLogger("TDDOrchestrator")
 
 def generate_test_for_sub_req(
     sub_requirement: str,
-    function_name: str,
-    all_tests_code: str = "",
-    feedback: str = ""
-) -> str:
-    """Gera um novo teste pytest para o sub-requisito ou REVISA testes existentes."""
-    llm = ChatOpenAI(model=Config.MODEL, temperature=0.2)
-    module_name = Config.IMPLEMENTATION_MODULE
+    specification: str,
+    file_system: dict,
+    feedback: str = "",
+    conversation_history: list | None = None,
+    is_review_mode: bool = False,
+) -> tuple[AgentAction, list]:
+    """
+    Gera a ação estruturada contendo as modificações na suíte de testes (via Pytest).
+    """
+    llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
+    structured_llm = llm.with_structured_output(AgentAction)
 
-    # ⚠️ DETECTA SE É MODO DE REVISÃO DE TESTES
-    is_test_review = "REVISÃO DE TESTES NECESSÁRIA" in feedback
-    
-    context = ""
-    if all_tests_code:
-        num_tests = len([l for l in all_tests_code.split('\n') if 'def test_' in l])
-        context += f"TESTES EXISTENTES ({num_tests} funções):\n```python\n{all_tests_code}\n```\n\n"
-    if feedback:
-        context += f"FEEDBACK DO REVISOR:\n{feedback}\n\n"
+    history: list = list(conversation_history) if conversation_history else []
+    current_codebase = read_all_files_from_state(file_system)
 
-    # ==================== MODO REVISÃO DE TESTES ====================
-    if is_test_review:
-        rendered_sys_message = load_prompt(
-            template_name='agents/langgraph/tester/sys_prompt_review.jinja2',
-            function_name=function_name,
-            module_name=module_name
-        )
-        system_msg = SystemMessage(content=rendered_sys_message)
+    template_sys = (
+        'agents/langgraph/tester/sys_prompt_review.jinja2'
+        if is_review_mode else 'agents/langgraph/tester/sys_prompt_normal.jinja2'
+    )
+    template_hum = (
+        'agents/langgraph/tester/hum_prompt_review.jinja2'
+        if is_review_mode else 'agents/langgraph/tester/hum_prompt_normal.jinja2'
+    )
 
-        rendered_hum_message = load_prompt(
-            template_name='agents/langgraph/tester/hum_prompt_review.jinja2',
-            function_name=function_name,
+    if not history:
+        # Primeira chamada: envia a spec completa (sem feedback)
+        system_content = load_prompt(template_name=template_sys)
+        human_content = load_prompt(
+            template_name=template_hum,
             sub_requirement=sub_requirement,
-            context=context
+            specification=specification,
+            current_codebase=current_codebase,
+            feedback=""
         )
-        human_msg = HumanMessage(content=rendered_hum_message)
-
+        
+        history = [
+            SystemMessage(content=system_content),
+            HumanMessage(content=human_content),
+        ]
     else:
-        rendered_sys_message = load_prompt(
-            template_name='agents/langgraph/tester/sys_prompt_normal.jinja2',
-            function_name=function_name,
-            module_name=module_name
-        )
-        system_msg = SystemMessage(content=rendered_sys_message)
-
-        rendered_hum_message = load_prompt(
-            template_name='agents/langgraph/tester/hum_prompt_normal.jinja2',
-            function_name=function_name,
+        # Próximas chamadas: usa o mesmo template de human, mas passa o feedback
+        human_content = load_prompt(
+            template_name=template_hum,
             sub_requirement=sub_requirement,
-            context=context
+            current_codebase=current_codebase,
+            feedback=feedback
         )
-        human_msg = HumanMessage(content=rendered_hum_message)
+        history.append(HumanMessage(content=human_content))
 
-    response = llm.invoke([system_msg, human_msg])
-    clean_code = extract_code(str(response.content).strip())
+    # Invoca o LLM forçando a saída estruturada do AgentAction
+    try:
+        action: AgentAction = structured_llm.invoke(history)
+    except Exception as exc:
+        handle_llm_exception(exc, context="generate_test_for_sub_req")
+    
+    # Armazena a resposta formatada como JSON no histórico de conversa
+    history.append(AIMessage(content=action.model_dump_json(indent=2)))
 
-    if not clean_code:
-        raise ValueError("LLM retornou código vazio")
-
-    if "import pytest" not in clean_code:
-        clean_code = "import pytest\n" + clean_code
-
-    if f"from {module_name} import {function_name}" not in clean_code:
-        raise ValueError(
-            f"Código de teste não importa a função {function_name} corretamente.\n"
-            f"Código gerado:\n{clean_code}"
-        )
-
-    return clean_code
+    return action, history

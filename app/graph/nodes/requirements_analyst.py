@@ -1,70 +1,57 @@
 import logging
-import re
-from app.config import RequirementsState
+import time
+from app.config.config import Config, RequirementsState
 from app.agents.langgraph.analyst import analyze_requirements
+from app.errors.exceptions import FatalInfraError, TransientInfraError
 
+logger = logging.getLogger("TDDOrchestrator")
 
 def node_analyst(state: RequirementsState) -> RequirementsState:
-    """Nó do grafo que analisa requisitos e faz perguntas para esclarecimento."""
-    logging.info("=" * 70)
-    logging.info("🧠 ANALISTA - Analisando requisitos")
-    logging.info("=" * 70)
+    logger.info("=" * 70)
+    logger.info("🧠 ANALISTA - Coletando e Analisando Requisitos")
+    logger.info("=" * 70)
     
     user_input = state["user_input"]
     conversation_history = state["conversation_history"]
-    interaction_count = state.get("interaction_count", 0) + 1
-    
-    logging.info(f"📝 Input do usuário: {user_input[:100]}...")
-    logging.info(f"📚 Histórico: {len(conversation_history.split('\\n'))} linhas")
-    logging.info(f"🔄 Interação número: {interaction_count}")
-    
-    # Após 4 interações, forçar checklist
-    if interaction_count >= 4:
-        logging.warning("🚨 Limite de interações atingido - forçando geração de checklist")
-        
-        # Gerar checklist baseado no que já foi coletado
-        forced_checklist = f"""Baseado nas informações coletadas, aqui está o checklist de requisitos:
+    interaction_count = state.get("interaction_count", 0)
+    infra_retries = state.get("infra_retries", 0)
 
-Checklist de Requisitos:
-1. Função que verifica se um número é quadrado perfeito
-2. Retorna True se for quadrado perfeito, False caso contrário  
-3. Para entradas não-inteiras, exibir no console "formato incorreto"
-4. Tratar números negativos retornando False
-5. Tratar zero como caso especial (retornar True)
+    # Incrementa o contador de interações do usuário
+    interaction_count += 1
 
-Posso prosseguir?
+    try:
+        result = analyze_requirements(user_input, conversation_history)
+    except TransientInfraError as exc:
+        infra_retries += 1
+        if infra_retries >= Config.MAX_INFRA_RETRIES:
+            logger.error(f"❌ ANALISTA: Falha de Infra (Limite Atingido): {exc.original_exc}")
+            return {**state, "status": "analyst_failed", "infra_retries": 0}
+        
+        logger.warning(f"⚠️ ANALISTA: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
+        time.sleep(3)
+        return {**state, "status": "infra_error_analyst", "infra_retries": infra_retries}
 
-===CHECKLIST_END==="""
-        
-        new_history = conversation_history
-        if conversation_history:
-            new_history += f"\n\n[Usuário]: {user_input}\n[Analista]: {forced_checklist}"
-        else:
-            new_history = f"[Usuário]: {user_input}\n[Analista]: {forced_checklist}"
-        
-        return {
-            **state,
-            "conversation_history": new_history,
-            "current_response": forced_checklist,
-            "needs_clarification": False,
-            "has_checklist": True,
-            "interaction_count": interaction_count,
-            "status": "awaiting_user"
-        }
+    except FatalInfraError as exc:
+        logger.error(f"❌ ANALISTA: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        return {**state, "status": "analyst_failed", "infra_retries": 0}
     
-    result = analyze_requirements(user_input, conversation_history)
+    logger.info(f"🔍 Precisa esclarecimento: {result['needs_clarification']}")
+    logger.info(f"📋 Tem checklist: {result['has_checklist']}")
     
-    logging.info(f"🔍 Precisa esclarecimento: {result['needs_clarification']}")
-    logging.info(f"📋 Tem checklist: {result['has_checklist']}")
-    
-    # Atualizar histórico da conversa
+    # Prevenção contra loop infinito do usuário
+    if interaction_count >= 5 and not result['has_checklist']:
+        logger.warning("🚨 Limite de interações atingido. Sugerindo aprovação.")
+        result['response'] += "\n\nJá temos bastantes informações. Aqui está o Checklist de Requisitos atual. Posso prosseguir para a equipe de engenharia?"
+        result['has_checklist'] = True
+        result['needs_clarification'] = False
+
     new_history = conversation_history
     if conversation_history:
         new_history += f"\n\n[Usuário]: {user_input}\n[Analista]: {result['response']}"
     else:
         new_history = f"[Usuário]: {user_input}\n[Analista]: {result['response']}"
     
-    new_state: RequirementsState = {
+    return {
         **state,
         "conversation_history": new_history,
         "current_response": result['response'],
@@ -73,5 +60,3 @@ Posso prosseguir?
         "interaction_count": interaction_count,
         "status": "awaiting_user" if result['needs_clarification'] or result['has_checklist'] else "analyzing"
     }
-    
-    return new_state

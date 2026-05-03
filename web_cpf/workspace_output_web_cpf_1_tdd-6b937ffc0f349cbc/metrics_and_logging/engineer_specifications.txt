@@ -1,0 +1,110 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: API de Validação de CPF
+
+## 1. Visão Geral do Sistema
+A API expõe um endpoint REST POST `/validate-cpf` que recebe um JSON com o campo `cpf` (string), valida a conformidade do CPF (apenas dígitos após sanitização, cálculo de dígitos verificadores) e retorna um JSON `{ "valid": true|false }`. Entradas mal-formadas são rejeitadas com HTTP 422. A arquitetura segue Clean Architecture com camadas domain, application, infrastructure e interfaces, injeção de dependência e TDD.
+
+## 2. Estruturas de Dados e Interfaces
+
+### 2.1 Domain Layer
+#### Entidade CPF
+- Classe `CPF(value: str)`
+  - Propriedade `value: str` (somente dígitos, length == 11)
+  - Sanitização: remover pontos e traços
+  - Validação de formato: deve restar exatamente 11 caracteres numéricos
+  - Cálculo de dígitos verificadores conforme algoritmo oficial
+  - Lança `InvalidCPFError` se:
+    - Comprimento ≠ 11
+    - Todos os dígitos iguais (ex: `"11111111111"`)
+    - Dígitos verificadores incorretos
+
+#### Exceções Customizadas
+- `InvalidCPFError(message: str)`
+
+### 2.2 Application Layer
+#### Porta / Interface
+- `IValidateCpfUseCase`
+  - Método `execute(cpf_str: str) -> bool`
+
+#### Caso de Uso
+- `ValidateCpfUseCase(repository: IValidateCpfRepository) : IValidateCpfUseCase`
+  - `execute(cpf_str: str)`: sanitiza entrada, instancia `CPF`, retorna `True` se válido, `False` caso `InvalidCPFError`
+
+### 2.3 Infrastructure Layer
+#### Porta / Interface
+- `IValidateCpfRepository`
+  - Método `validate(cpf_str: str) -> bool`
+
+#### Adapter Externo
+- `ValidateDocbrAdapter` implementa `IValidateCpfRepository`
+  - Usa biblioteca `validate-docbr` (classe `validate_docbr.CPF()`)
+  - Método `validate`: delega à biblioteca externa, retorna boolean
+
+### 2.4 Interfaces / Presentation Layer
+#### Pydantic Models
+- `ValidateCpfRequest`
+  - Campo `cpf: str`
+  - Validador customizado:
+    - Sanitiza (`str.replace`) pontos e traços
+    - Verifica se resultante é dígitos puros; caso contrário: `ValueError`
+- `ValidateCpfResponse`
+  - Campo `valid: bool`
+
+#### Controller FastAPI
+- Rota POST `/validate-cpf`
+  - Parâmetro de corpo: `ValidateCpfRequest`
+  - Injeta `ValidateCpfUseCase` via `Depends`
+  - Chama `use_case.execute(cpf)`
+  - Retorna 200 + `ValidateCpfResponse(valid=...)`
+  - Exceções de validação de payload → 422 automático pelo Pydantic
+  - Exceções não capturadas → 500 genérico
+
+## 3. Casos de Borda e Validações (Edge Cases)
+- CPF omitido, nulo ou campo ausente  
+  → Pydantic retorna 422
+- CPF string vazia (`""`)  
+  → Validador Pydantic detecta falta de dígitos → 422
+- CPF com caracteres não numéricos inesperados (ex: letras, símbolos)  
+  → Validador Pydantic detecta não-dígitos após sanitização → 422
+- CPF com máscara correta (ex: `"123.456.789-09"`)  
+  → Sanitizado, validado; retorna `{ "valid": true|false }`
+- CPF sem máscara (ex: `"12345678909"`)  
+  → Validado idem; retorna `{ "valid": true|false }`
+- CPF com todos dígitos iguais (ex: `"11111111111"`)  
+  → Domain lança `InvalidCPFError`; `execute` captura e retorna `False`
+- CPF com dígitos verificadores incorretos  
+  → Domain lança `InvalidCPFError`; retorna `False`
+- Erro inesperado na biblioteca externa  
+  → Adapter propaga exceção; controller converte em 500
+
+## 4. Contexto Técnico
+- Linguagem: Python 3.9+
+- Framework web: FastAPI
+- Paradigma: Clean Architecture, TDD
+- Configuração via arquivo `.env` (usar `python-dotenv` em `core/config`)
+- Documentação automática via OpenAPI/Swagger (endpoint `/docs`)
+- Server: Uvicorn
+- Testes: pytest (estrutura espelhada de diretórios)
+- Code style: flake8, typing estática (mypy opcional)
+- Projeto organizado em:
+  - `src/`
+    - `domain/`
+    - `application/`
+    - `infrastructure/`
+    - `interfaces/`
+    - `core/`
+    - `main.py`
+  - `tests/` (mesma divisão de subpastas)
+
+## 5. Dependências Base (Core Dependencies)
+- fastapi
+- uvicorn[standard]
+- pydantic
+- validate-docbr
+- python-dotenv
+- pytest
+- pytest-cov
+- flake8
+- httpx (para testes de API)
+- mypy (opcional)

@@ -1,0 +1,18 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Aja como um engenheiro de software especializado em Python. O caso de uso
+consiste em converter números representados como strings em algarismos romanos
+para seus equivalentes inteiros. A tarefa é projetar e implementar uma função em
+Python puro, sem uso de bibliotecas externas, que receba uma única string como
+entrada e retorne um inteiro como saída. A saída deve ser um número inteiro
+correspondente ao valor romano válido ou lançar uma exceção do tipo ValueError
+em caso de entrada inválida. O método deve implementar os símbolos básicos I, V,
+X, L, C, D, M e respeitar as regras de subtração IV, IX, XL, XC, CD, CM, além de
+tratar a entrada de forma case-insensitive. As premissas incluem suporte apenas
+para valores entre 1 e 3999, rejeição de strings vazias, caracteres inválidos,
+sequências malformadas, repetições ilegais e combinações inválidas como IC, IL e
+VX. Os testes devem incluir casos válidos (por exemplo, III, IX, LVIII,
+MCMXCIV), inválidos (como IC, XXXX, VV, string vazia) e casos de borda (como I e
+MMMCMXCIX). Não devem ser implementados testes de documentação, docstrings ou
+types.
+================================================================================

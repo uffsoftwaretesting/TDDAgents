@@ -1,0 +1,63 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: RK4 Clássico
+
+## 1. Visão Geral do Sistema
+Implementar uma função pura em Python que resolva numericamente um problema de valor inicial para uma equação diferencial ordinária escalar de primeira ordem, usando o método clássico de Runge-Kutta de quarta ordem (RK4). A função deve ser determinística, sem efeitos colaterais, e retornar apenas o valor aproximado de y em t_final.
+
+## 2. Estruturas de Dados e Interfaces
+Função pública:
+```python
+def rk4_classico(
+    f: Callable[[float, float], float],
+    t0: float,
+    y0: float,
+    t_final: float,
+    h: float
+) -> float
+```
+Parâmetros:
+- f: função pura que recebe (t: float, y: float) e retorna dy/dt (float).
+- t0: tempo inicial do problema (float).
+- y0: valor inicial de y em t0 (float).
+- t_final: instante de avaliação da solução (float).
+- h: passo nominal de integração (float).
+
+Retorno:
+- float correspondente à estimativa de y em t_final.
+
+## 3. Casos de Borda e Validações (Edge Cases)
+1. Validação de tipos:
+   - Se `not callable(f)`: lançar TypeError("f deve ser callable").
+   - Se qualquer um de `t0`, `y0`, `t_final`, `h` não for float: lançar TypeError("<param> deve ser float").
+2. Validação de domínio:
+   - Se `h <= 0`: lançar ValueError("Passo h deve ser positivo").
+   - Se `t_final < t0`: lançar ValueError("t_final deve ser maior ou igual a t0").
+3. Caso inicial trivial:
+   - Se `t0 == t_final`: retornar imediatamente `y0`.
+4. Construção da malha e iterações:
+   - Inicializar `t = t0`, `y = y0`.
+   - Enquanto `t < t_final`:
+     • Calcular `dt = min(h, t_final - t)` assegurando `t + dt <= t_final`.
+     • Calcular:
+       - `k1 = f(t, y)`
+       - `k2 = f(t + dt/2, y + dt*k1/2)`
+       - `k3 = f(t + dt/2, y + dt*k2/2)`
+       - `k4 = f(t + dt,     y + dt*k3)`
+     • Atualizar `y = y + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)`
+     • Atualizar `t = t + dt`
+5. Condições de erro interno:
+   - Se em qualquer iteração `dt <= 0` (devido a precisão de ponto flutuante): lançar RuntimeError("Passo de integração não positivo").
+6. Retorno final:
+   - Após sair do loop, retornar o valor de `y` (float).
+
+## 4. Contexto Técnico
+- Linguagem-alvo: Python 3.7+ com type hints.
+- Paradigma: funcional, sem estados globais.
+- Precisão: método de quarta ordem, confiando em operações padrão de ponto flutuante.
+- Determinismo absoluto: não usar `print`, `logging` ou qualquer efeito colateral.
+- Compatibilidade com sistemas de avaliação automatizados: retorno único e previsível.
+
+## 5. Dependências Base (Core Dependencies)
+- Python Standard Library (typing).
+- pytest (para implementação dos testes via TDD).

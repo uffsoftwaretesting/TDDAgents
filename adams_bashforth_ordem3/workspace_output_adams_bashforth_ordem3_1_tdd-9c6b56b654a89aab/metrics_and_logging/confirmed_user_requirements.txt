@@ -1,0 +1,86 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Aja como um engenheiro de software especializado em métodos numéricos e
+           computação científica, com foco em precisão, determinismo e compatibilidade
+           com sistemas automatizados de avaliação rigorosos. Implemente uma função em
+           Python chamada adams_bashforth_3(f, t0, y0, t_final, h) que resolva
+           numericamente um problema de valor inicial de uma equação diferencial
+           ordinária escalar de primeira ordem utilizando o método explícito de Adams
+           Bashforth de terceira ordem. A função deve tratar f como uma função pura f(t,
+           y) que retorna a derivada dy por dt sem efeitos colaterais e garantir tipagem
+           consistente para todos os parâmetros. Como o método é de múltiplos passos,
+           inicialize obrigatoriamente os dois primeiros valores adicionais utilizando
+           um método de passo único de ordem suficiente como Runge Kutta de quarta ordem
+           para obter y1 e y2 a partir de t0 e y0 com passo h. Construa a malha temporal
+           de forma robusta assegurando estritamente que o último ponto avaliado seja
+           exatamente igual a t_final e, caso o passo nominal h não divida o intervalo
+           exatamente, o tamanho do último passo deve ser truncado e ajustado
+           dinamicamente para alcançar exatamente t_final sem ultrapassá lo, incluindo
+           na etapa final a recomputação consistente das avaliações necessárias de f. A
+           partir do terceiro ponto, em cada iteração de tamanho de passo dt, aplique a
+           fórmula y_{n+1} igual a y_n mais dt vezes a combinação linear um sobre doze
+           de vinte e três f(t_n, y_n) menos dezesseis f(t_{n-1}, y_{n-1}) mais cinco
+           f(t_{n-2}, y_{n-2}), garantindo atualização correta e ordenada dos históricos
+           de estados e derivadas. A implementação deve ser estritamente determinística
+           e deve retornar exclusivamente um valor do tipo float correspondente à
+           estimativa final de y em t_final sem retornar listas, arrays ou qualquer
+           histórico intermediário.
+[Analista]: Checklist de Requisitos Técnicos para a função adams_bashforth_3:
+
+1. Assinatura e Tipagem
+• Função: adams_bashforth_3(f: Callable[[float, float], float], t0: float, y0: float,
+t_final: float, h: float) -> float
+• f deve ser pura: não ter efeitos colaterais e receber/retornar float.
+
+2. Validação de Entrada
+• Verificar que todos os parâmetros são do tipo float (excepto f).
+• h > 0; se não, lançar ValueError.
+• t_final ≥ t0; se não, lançar ValueError.
+
+3. Construção Robusta da Malha Temporal
+• Inicializar t_current = t0.
+• Enquanto t_current + h < t_final: usar h como passo.
+• Se t_current + h ≥ t_final: dt_final = t_final − t_current.
+• Assegurar que o último ponto seja exatamente t_final.
+
+4. Inicialização com Runge–Kutta 4
+• Calcular y1 em t1 = t0 + h (ou dt_final se intervalo < h).
+• Calcular y2 em t2 = t0 + 2·h (ou ajustar se ultrapassar t_final).
+• Ambas usando RK4 de passo único dt = h.
+
+5. Histórico de Estados e Derivadas
+• Após RK4, armazenar f0 = f(t0, y0), f1 = f(t1, y1), f2 = f(t2, y2).
+• Manter sempre os três últimos pares (t_{n−2}, y_{n−2}), (t_{n−1}, y_{n−1}), (t_n, y_n)
+e respectivos f.
+
+6. Loop Principal de Múltiplos Passos (a partir de n=2)
+Para cada iteração até t_current == t_final:
+• Calcular dt = min(h, t_final − t_current).
+• Recomputar f_{n−2}, f_{n−1}, f_n conforme necessário (para o passo final truncado).
+• Aplicar fórmula AB3:
+y_{n+1} = y_n + dt * (1/12) * (23·f_n − 16·f_{n−1} + 5·f_{n−2})
+• Atualizar histórico: deslocar estados e derivadas para as próximas iterações.
+• Atualizar t_current = t_current + dt, y_n = y_{n+1}.
+
+7. Tratamento do Passo Final Truncado
+• Se o último passo dt < h, usar dt no lugar de h e recomputar as avaliações de f
+necessárias para AB3.
+
+8. Determinismo e Imutabilidade
+• Não usar variáveis globais ou aleatoriedade.
+• Toda dependência de estado deve vir de f e dos parâmetros explícitos.
+
+9. Saída
+• Retornar exclusivamente o valor float y_final em t_final.
+• Não retornar listas, arrays ou qualquer histórico intermédio.
+
+10. Tratamento de Erros e Exceções
+• Lançar exceções claras (ValueError, TypeError) em validações de entrada.
+• Propagar outras exceções de f para sinalizar erros em avaliações.
+
+11. Documentação e Comentários
+• Documentar assinatura da função, parâmetros e comportamento do método.
+• Indicar claramente a aproximação de ordem 3 e uso de RK4 nas inicializações.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

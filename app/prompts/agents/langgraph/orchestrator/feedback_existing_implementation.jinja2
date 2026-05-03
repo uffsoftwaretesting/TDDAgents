@@ -1,3 +1,12 @@
-Teste passou sem nova implementação (tentativa {{ attempt }}).
-A implementação existente aparenta cobrir este comportamento.
-Verifique se há algo adicional a implementar ou se pode prosseguir.
+⚠️ ALERTA DE FLUXO TDD (GREEN NO RED) - Tentativa {{ attempt }}
+
+A suíte de testes recém-gerada pelo Engenheiro de Qualidade (Tester) passou imediatamente, ANTES mesmo de você escrever qualquer nova implementação de código.
+
+Isso geralmente indica um de dois cenários:
+1. A implementação existente na base de código já atende perfeitamente a este comportamento (por consequência de iterações passadas).
+2. O teste recém-criado é um "falso positivo" (ex: uma asserção muito permissiva ou teste de variável vazia) e não está validando o requisito com o rigor necessário.
+
+🎯 SUA TAREFA:
+Analise a base de código e os testes atuais com máxima atenção:
+- Se a funcionalidade já estiver implementada de forma sólida e o teste for totalmente válido, devolva o código atual sem grandes alterações estruturais (apenas para concluir o ciclo).
+- Se houver necessidade de ajustes, refatorações de limpeza, ou se você notar que a lógica precisa ser aprimorada para evitar falsos positivos, atue adequadamente agora.

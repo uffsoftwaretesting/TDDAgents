@@ -1,5 +1,5 @@
 import os
-from app.config import Config
+from app.config.config import Config
 
 def load_spec(filename: str) -> str:
     """Carrega apenas o texto cru (para as specs em markdown)"""

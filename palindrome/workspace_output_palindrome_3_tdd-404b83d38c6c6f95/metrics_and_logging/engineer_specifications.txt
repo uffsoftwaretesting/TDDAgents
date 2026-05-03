@@ -1,0 +1,82 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: Verificador de Palíndromos em Python
+
+## 1. Visão Geral do Sistema
+O sistema oferece uma única função, `is_palindrome(s: str) -> bool`, que verifica se uma string é um palíndromo. A entrada é normalizada removendo caracteres não alfanuméricos, convertendo tudo para minúsculas e eliminando espaços, garantindo verificação case-insensitive e O(n) de complexidade.
+
+## 2. Estruturas de Dados e Interfaces
+
+Entidades e Tipos
+- Parâmetro de entrada:
+  - `s` (str): string a ser verificada.
+- Valor de retorno:
+  - `bool`: `True` se `s` for palíndromo após normalização; `False` caso contrário.
+
+Interface Pública
+- Função:
+  ```
+  is_palindrome(s: str) -> bool
+  ```
+  - Recebe um único argumento obrigatório `s`.
+  - Lança `TypeError` caso `s` não seja do tipo `str`.
+
+Fluxo de Normalização (O(n))
+1. Iterar sobre cada caractere de `s`.
+2. Filtrar apenas caracteres onde `char.isalnum() == True`.
+3. Converter cada caractere filtrado para minúsculo (via `char.lower()`).
+4. Acumular em nova string `normalized`.
+
+Lógica de Verificação (O(n))
+- Comparar `normalized` com sua versão invertida:
+  ```
+  normalized == normalized[::-1]
+  ```
+- Retornar o resultado dessa comparação.
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+1. Validação de Tipo
+   - Se `s` não for `str`, lançar:
+     ```
+     TypeError("O argumento 's' deve ser do tipo str")
+     ```
+
+2. Strings Especiais
+   - String vazia (`""`): retorna `True`.
+   - String de um único caractere (ex.: `"x"`): retorna `True`.
+   - Caracteres não alfanuméricos são simplesmente removidos.
+
+3. Cenários de Teste
+   a) Casos Válidos (devolvem True)
+   - `"A man, a plan, a canal: Panama"`
+   - `"RaceCar"`
+   - `"No 'x' in Nixon"`
+   - `""` (string vazia)
+   - `"Z"`
+
+   b) Casos Não Palíndromos (devolvem False)
+   - `"hello"`
+   - `"Palindrome"`
+   - `"123ab321"`
+
+   c) Erros de Tipo (lançam TypeError)
+   - `None`
+   - `12345` (int)
+   - `["a", "b"]` (lista)
+
+4. Domínio de Valores Fora do Expectado
+   - Caracteres fora de `isalnum()` são ignorados.
+   - Espaços em branco não afetam o resultado.
+
+## 4. Contexto Técnico
+- Linguagem-alvo: Python 3.x (suporte mínimo Python 3.6+).
+- Paradigma: função pura, sem efeitos colaterais.
+- Complexidade de tempo: O(n); Complexidade de espaço: O(n) para a string normalizada.
+- Proibição de bibliotecas externas — usar somente padrão Python.
+- Não incluir docstrings nem checagens de tipo adicionais além de `TypeError` para entrada inválida.
+- Estratégia de desenvolvimento: Test-Driven Development (TDD).
+
+## 5. Dependências Base (Core Dependencies)
+- Python 3.x (ambiente padrão).
+- Framework de testes: pytest (versão 6.x ou superior).

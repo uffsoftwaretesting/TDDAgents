@@ -1,0 +1,10 @@
+RELATORIO DE METRICAS DE RESILIENCIA (TDD)
+================================================================================
+Total de Falhas Detectadas (Geral):        14
+Falhas Corrigidas Autonomamente:           14
+Taxa de Sucesso de Autocorrecao:           100.00%
+--------------------------------------------------------------------------------
+PROPORCAO DE TIPOS FALHAS (Testes vs Implementacao)
+Falhas em Testes (Runner Red):             4 (28.57%)
+Falhas em Implementacao (Runner Green):    10 (71.43%)
+================================================================================

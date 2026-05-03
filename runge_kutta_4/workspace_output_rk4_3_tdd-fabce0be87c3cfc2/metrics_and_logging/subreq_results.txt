@@ -1,0 +1,24 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 9
+Success: 9
+Failed: 0
+Clean TDD Rate (F1) = 2 / 9 (22.2%)
+Green in Red Rate (F2) = 7 / 9 (77.8%)
+Fail rate = 0 / 9 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Criar ambiente virtual (venv), instalar pytest e typing (std-lib) via pip; configurar pytest.ini; estruturar diretórios: src/rk4_classico.py e tests/test_rk4_classico.py com arquivos vazios.
+2. [SUCCESS] [F2] FASE 1 - VALIDAÇÃO DE TIPOS: Criar testes que assegurem TypeError para f não callable e para cada parâmetro t0, y0, t_final, h que não seja float. Em seguida, implementar essas checagens no início de rk4_classico.
+3. [SUCCESS] [F2] FASE 2 - VALIDAÇÃO DE DOMÍNIO: Criar testes que lancem ValueError para h<=0 e para t_final < t0. Implementar verificações correspondentes após as validações de tipo.
+4. [SUCCESS] [F2] FASE 3 - CASO TRIVIAL: Criar teste que garante que, se t0 == t_final, a função retorna y0 imediatamente sem loops. Implementar early return y0 nesse cenário.
+5. [SUCCESS] [F2] FASE 4 - ESTRUTURA DE LOOP E MALHA: Criar teste para ODE trivial f(t,y)=0 com t_final > t0 e passo h, garantindo que y permanece y0 e não levanta exceção. Implementar inicialização de t, y, while t<t_final: calcular dt=min(h, t_final-t), lançar RuntimeError se dt<=0, atualizar t += dt (mantendo y inalterado).
+6. [SUCCESS] [F1] FASE 5 - PASSO ÚNICO RK4: Criar teste para ODE constante f(t,y)=1 com t_final = t0 + h, validando que y retorna exatamente y0 + h. Em code, implementar cálculos k1–k4 e y += (dt/6)*(k1+2*k2+2*k3+k4), atualizar t.
+7. [SUCCESS] [F2] FASE 6 - MULTI-STEP RK4: Criar teste para ODE f(t,y)=2*t (solução analítica y=t²) em intervalo [t0,t_final] com múltiplos passos de h, comparando resultado aproximado com valor exato dentro de tolerância. Ajustar loop para várias iterações.
+8. [SUCCESS] [F2] FASE 7 - DT FINAL AJUSTADO: Criar teste para garantir que quando (t_final-t0)/h não é inteiro, dt no último passo é <h e y ainda converge corretamente para ODE simples (ex: f(t,y)=1). Verificar funcionamento do min(h, t_final-t).
+9. [SUCCESS] [F2] FASE 8 - TIPAGEM E DOCUMENTAÇÃO: Adicionar type hints PEP484 e docstring com descrição de parâmetros, exceções e retorno; configurar mypy no CI e garantir zero erros de tipo; remover quaisquer prints/logging.
+================================================================================

@@ -1,14 +1,20 @@
-📋 ESPECIFICAÇÃO COMPLETA:
-{{ specification }}
-
 🎯 SUB-REQUISITO ATUAL:
 {{ sub_requirement }}
 
-📊 SAÍDA DO TESTE (falha):
+📋 ESPECIFICAÇÃO GERAL (FONTE DA VERDADE):
+"""
+{{ specification }}
+"""
+
+💻 CÓDIGO ATUAL NO WORKSPACE (O que temos até agora):
+{{ current_code }}
+
+❌ SAÍDA DO RUNNER (PYTEST FALHOU):
 {{ test_output }}
 
-💻 CÓDIGO ATUAL:
-```python
-{{ current_code }}
-```
-Extraia APENAS as regras da especificação relevantes para corrigir esta falha.
+🔄 ITERAÇÃO ATUAL: {{ iteration }}/{{ max_retries }}
+
+TAREFA DE ANÁLISE:
+Analise o stack trace acima. O erro está na lógica de negócio (a implementação falhou) ou o próprio arquivo de teste foi escrito de forma incorreta/incompatível com o workspace atual?
+
+Forneça seu raciocínio, a classificação de culpa (`is_test_fault`) e o feedback corretivo usando a estrutura de saída obrigatória.

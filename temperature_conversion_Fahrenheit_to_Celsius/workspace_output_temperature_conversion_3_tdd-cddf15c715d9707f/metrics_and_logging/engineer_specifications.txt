@@ -1,0 +1,71 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: Conversor Fahrenheit → Celsius
+
+## 1. Visão Geral do Sistema  
+Função pura em Python que converte uma temperatura em Fahrenheit para Celsius segundo a fórmula C = (F − 32) × 5/9. Validação rigorosa de tipos e tratamento explícito de valores especiais de ponto flutuante (NaN, +∞, −∞), sem efeitos colaterais e sem dependências externas além da biblioteca padrão.
+
+## 2. Estruturas de Dados e Interfaces  
+
+Entidade principal:  
+- Função pública  
+  - Nome: `fahrenheit_to_celsius`  
+  - Assinatura:  
+      • Recebe um único parâmetro `fahrenheit`  
+      • Retorna um `float`
+
+Parâmetro:  
+- `fahrenheit`: deve ser `int` ou `float`
+
+Retorno:  
+- Sempre um `float`, conforme as regras de cálculo ou propagação de valores especiais
+
+Exceções:  
+- Lança `TypeError("fahrenheit must be int or float")` se o tipo do argumento for diferente de `int` ou `float`
+
+Dependências internas:  
+- módulo `math` (para `math.isnan` e `math.isinf`)
+
+## 3. Casos de Borda e Validações (Edge Cases)  
+
+1. Validação de tipo  
+   - Entrada `None`, string, lista, dict, objeto arbitrário → lança `TypeError("fahrenheit must be int or float")`
+
+2. Valores especiais de ponto flutuante  
+   - `fahrenheit` é NaN (`math.isnan(fahrenheit) == True`) → retorna NaN  
+   - `fahrenheit` é +∞ ou −∞ (`math.isinf(fahrenheit) == True`) → retorna +∞ ou −∞ respectivamente  
+
+3. Cálculo numérico  
+   - Aplica fórmula `(fahrenheit - 32) * 5.0/9.0`  
+   - Garante operação em float  
+   - Retorna sempre `float` mesmo que a entrada seja `int`
+
+4. Exemplos de casos para testes  
+   4.1 Casos Típicos  
+       - Input: 32 → Output: 0.0  
+       - Input: 212 → Output: 100.0  
+   4.2 Valores Negativos  
+       - Input: -40 → Output: -40.0  
+       - Input: -58 → Output: -50.0  
+   4.3 Valores Fracionários  
+       - Input: 98.6 → Output: 37.0  
+       - Input: 0.5 → Output: -17.5  
+   4.4 Casos Especiais de Float  
+       - Input: NaN → Output: NaN  
+       - Input: +∞ → Output: +∞  
+       - Input: −∞ → Output: −∞  
+   4.5 Erro de Tipo  
+       - Input: `None`, `"123"`, `[]`, `{}` → `TypeError("fahrenheit must be int or float")`
+
+## 4. Contexto Técnico  
+- Linguagem-alvo: Python 3.x  
+- Paradigma: funcional, sem efeitos colaterais  
+- Precisão: dupla precisão padrão de `float` em Python  
+- Convenções de estilo: PEP 8  
+- Tratamento de exceções: uso de `TypeError` para tipos inválidos  
+- Não usar decorators ou bibliotecas externas de validação ou tipagem  
+
+## 5. Dependências Base (Core Dependencies)  
+- Python 3.x  
+- Biblioteca padrão: módulo `math`  
+- Ferramenta de teste recomendada: pytest

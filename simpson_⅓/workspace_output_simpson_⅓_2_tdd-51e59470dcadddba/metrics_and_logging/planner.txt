@@ -1,0 +1,13 @@
+PLANO DE SUB-REQUISITOS TDD
+================================================================================
+1. FASE 0 - SETUP: Criar estrutura de diretórios 'src/' e 'tests/', adicionar arquivo vazio 'src/integration.py' e 'tests/test_integration.py'; inicializar virtualenv e instalar dependências base (pytest) conforme Seção 5.
+2. FASE 1 - TESTES DE VALIDAÇÃO DE TIPOS: Escrever testes pytest em 'tests/test_integration.py' que verifiquem se integracao_simpson_1_3 lança TypeError quando f não é callable, a ou b não são numéricos e N não é int.
+3. FASE 2 - IMPLEMENTAÇÃO DE VALIDAÇÕES DE TIPO E CONVERSÃO: No módulo 'src/integration.py', implementar checagens iniciais: validar callable(f), converter a e b para float ou lançar TypeError, validar tipo de N como int.
+4. FASE 3 - TESTES DE VALIDAÇÃO DE VALORES DE N: Adicionar casos de teste que esperam ValueError quando N ≤ 0 ou N é ímpar, e que não disparam erro quando N é par e maior que zero.
+5. FASE 4 - IMPLEMENTAÇÃO DE VALIDAÇÃO DE N: Expandir o código em 'integracao_simpson_1_3' para lançar ValueError para N inválido e aceitar N par positivo.
+6. FASE 5 - TESTES DE CÁLCULO PARA POLINÔMIOS GRAU ≤ 3: Escrever testes unitários para f(x)=c, f(x)=x, f(x)=x^2, f(x)=x^3 em intervalos genéricos e vários N pares, comparando com resultados analíticos exatos.
+7. FASE 6 - IMPLEMENTAÇÃO DO ALGORITMO DE SIMPSON 1/3 COMPOSTA: No 'src/integration.py', calcular h=(b-a)/N, gerar pontos xi, aplicar soma ponderada (4/2), retornar resultado float, de modo a passar os testes polinomiais.
+8. FASE 7 - TESTE E IMPLEMENTAÇÃO PARA a > b: Adicionar teste para caso a>b (por exemplo a=1,b=0,N=2) validando sinal invertido; ajustar implementação para suportar h negativo sem alterações no algoritmo.
+9. FASE 8 - TESTES DE CONVERGÊNCIA EM FUNÇÕES TRANSCENDENTES: Criar testes para f(x)=sin(x) e f(x)=exp(x) comparando com referências de math.integral (ou fórmulas fechadas) dentro de tolerância (ex: 1e-6) para diferentes N pares.
+10. FASE 9 - REFINAMENTO, DOCUMENTAÇÃO E PEP8: Revisar código em 'src/integration.py' para conformidade PEP8, adicionar docstring completa, configurar pytest.ini ou pyproject.toml para lint e garantir execução de 'pytest' a partir da raiz sem ajustes de path.
+================================================================================

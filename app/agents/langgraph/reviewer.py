@@ -1,128 +1,72 @@
-import re
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
-from app.config import Config
+import logging
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from pydantic import BaseModel, Field
+
+from app.config.config import Config
+from app.errors.agents.handler import handle_llm_exception
+from app.utils.chat_model_factory import get_chat_model
 from app.utils.prompt_loader import load_prompt
 
-def extract_relevant_spec_context(
-    specification: str,
-    sub_requirement: str,
-    test_output: str,
-    current_code: str
-) -> str:
-    """
-    Usa LLM para extrair APENAS a parte relevante da especificação.
-    Sem heurísticas frágeis, deixa a LLM decidir o que é relevante.
-    """
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
-    
-    rendered_sys_message = load_prompt(
-        template_name='agents/langgraph/reviewer/sys_prompt_1.jinja2',
-    )
-    
-    rendered_hum_message = load_prompt(
-        template_name='agents/langgraph/reviewer/hum_prompt_1.jinja2',
-        specification=specification,
-        sub_requirement=sub_requirement,
-        test_output=test_output,
-        current_code=current_code,
-    )
-    
-    response = llm.invoke([
-        SystemMessage(content=rendered_sys_message),
-        HumanMessage(content=rendered_hum_message),
-    ])
-    return str(response.content).strip()
+logger = logging.getLogger("TDDOrchestrator")
 
+# ── Pydantic Schema para o Reviewer ──────────────────────────────────────────
+class ReviewAnalysis(BaseModel):
+    thoughts: str = Field(
+        description="Seu raciocínio interno lendo o stack trace do erro e comparando com os arquivos existentes no workspace."
+    )
+    is_test_fault: bool = Field(
+        description="True se o erro ocorreu porque o código de teste está mal escrito, tentando importar algo que não deveria, ou testando a coisa errada. False se o teste for válido e a culpa for da implementação do Developer."
+    )
+    feedback_to_agent: str = Field(
+        description="Uma instrução técnica, direta e clara para o Developer (ou Tester) sobre o que ele precisa alterar no código para os testes passarem. Indique os nomes dos arquivos."
+    )
 
 def analyze_failures(
     test_output: str,
     specification: str,
     sub_requirement: str,
-    iteration: int = 0,
-    max_retries: int = 3,
-    current_code: str = "",
-    test_code: str = ""
-) -> str:
+    current_code: str,
+    iteration: int,
+    max_retries: int,
+    conversation_history: list | None = None,
+) -> tuple[str, list]:
     """
-    Analisa falhas com feedback GRADUAL usando LLM para filtragem.
+    Analisa a saída de erro do Pytest contra a base de código atual e fornece feedback estruturado.
     """
-    llm = ChatOpenAI(model=Config.MODEL, temperature=0.3)
+    llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
+    structured_llm = llm.with_structured_output(ReviewAnalysis)
 
-    # --- Extrai métricas do pytest ---
-    passed_match = re.search(r'(\d+)\s+passed', test_output)
-    failed_match = re.search(r'(\d+)\s+failed', test_output)
-    
-    passed_count = int(passed_match.group(1)) if passed_match else 0
-    failed_count = int(failed_match.group(1)) if failed_match else 0
-    
-    total = passed_count + failed_count
-    
-    # --- ESTRATÉGIA DE FEEDBACK GRADUAL ---
-    if iteration == 0:
-        feedback_mode = "MINIMAL"
-        spec_context = ""  # Sem contexto de spec
-        
-    elif iteration == 1:
-        feedback_mode = "CONTEXTUAL"
-        # ⚠️ LLM extrai contexto relevante
-        spec_context = extract_relevant_spec_context(
-            specification=specification,
-            sub_requirement=sub_requirement,
-            test_output=test_output,
-            current_code=current_code
-        )
-        
-    else:  # iteration >= 2
-        feedback_mode = "ARCHITECTURAL"
-        spec_context = specification  # Spec completa para análise profunda
+    history: list = list(conversation_history) if conversation_history else []
 
-    # --- SYSTEM MESSAGE (instruções de comportamento) ---
-    rendered_sys_message = load_prompt(
-        template_name='agents/langgraph/reviewer/sys_prompt_2.jinja2',
-        feedback_mode=feedback_mode,
+    if not history:
+        sys_prompt = load_prompt(template_name='agents/langgraph/reviewer/sys_prompt_1.jinja2')
+        history.append(SystemMessage(content=sys_prompt))
+
+    # Carrega o prompt humano com todo o contexto do erro
+    human_content = load_prompt(
+        template_name='agents/langgraph/reviewer/hum_prompt_1.jinja2',
+        sub_requirement=sub_requirement,
+        specification=specification,
+        current_code=current_code,
+        test_output=test_output,
         iteration=iteration,
         max_retries=max_retries
     )
-    system_msg = SystemMessage(content=rendered_sys_message)
+    history.append(HumanMessage(content=human_content))
 
-    # --- HUMAN MESSAGE (contexto específico por modo) ---
-    if feedback_mode == "MINIMAL":
-        rendered_hum_message = load_prompt(
-            template_name='agents/langgraph/reviewer/hum_prompt_2_minimal.jinja2',
-            sub_requirement=sub_requirement,
-            passed_count=passed_count,
-            failed_count=failed_count,
-            test_output=test_output
-        )
+    try:
+        # Invoca o LLM forçando a saída para o modelo Pydantic
+        review: ReviewAnalysis = structured_llm.invoke(history)
         
-    elif feedback_mode == "CONTEXTUAL":
-        rendered_hum_message = load_prompt(
-            template_name='agents/langgraph/reviewer/hum_prompt_2_contextual.jinja2',
-            sub_requirement=sub_requirement,
-            passed_count=passed_count,
-            failed_count=failed_count,
-            attempt=iteration + 1,
-            spec_context=spec_context,
-            current_code=current_code,
-            test_output=test_output
-        )
+        logger.info(f"🧐 Reviewer Thoughts: {review.thoughts}")
         
-    else:  # ARCHITECTURAL
-        rendered_hum_message = load_prompt(
-            template_name='agents/langgraph/reviewer/hum_prompt_2_architectural.jinja2',
-            sub_requirement=sub_requirement,
-            passed_count=passed_count,
-            failed_count=failed_count,
-            attempt=iteration + 1,
-            max_retries=max_retries,
-            specification=specification,
-            current_code=current_code,
-            test_code=test_code,
-            test_output=test_output
-        )
-    
-    human_msg = HumanMessage(content=rendered_hum_message)
+        # Adiciona uma tag visual no feedback para guiar o fluxo e o console
+        prefix = "[ERRO NO TESTE]" if review.is_test_fault else "[ERRO NA IMPLEMENTAÇÃO]"
+        final_feedback = f"{prefix} {review.feedback_to_agent}"
 
-    response = llm.invoke([system_msg, human_msg])
-    return str(response.content).strip()
+        history.append(AIMessage(content=final_feedback))
+        return final_feedback, history
+        
+    except Exception as exc:
+        logger.error(f"❌ Reviewer falhou ao gerar análise")
+        handle_llm_exception(exc, context="analyze_failures")

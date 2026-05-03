@@ -1,0 +1,73 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: Formatador de CEP
+
+## 1. Visão Geral do Sistema
+O sistema fornece uma única função, `format_cep(cep)`, que recebe um CEP brasileiro em formato string ou inteiro e retorna uma string no padrão “XXXXX-XXX”. A função valida tipo, conteúdo e comprimento, normaliza a entrada e formata o resultado, levantando exceções claras para entradas inválidas.
+
+## 2. Estruturas de Dados e Interfaces
+
+Função pública  
+- Assinatura:
+  - `format_cep(cep: Union[str, int]) -> str`
+
+Parâmetro  
+- `cep`: string ou inteiro que represente exatamente 8 dígitos.
+
+Retorno  
+- String formatada no padrão `"XXXXX-XXX"` (9 caracteres: 5 dígitos + hífen + 3 dígitos).
+
+Exceções  
+- `TypeError("CEP deve ser string ou inteiro")`  
+  Disparado quando `cep` não for `str` nem `int`.  
+- `ValueError("CEP deve conter apenas dígitos")`  
+  Disparado quando, após conversão para string, houver qualquer caractere não numérico.  
+- `ValueError("CEP deve ter exatamente 8 dígitos")`  
+  Disparado quando o comprimento da string de dígitos for diferente de 8.
+
+Fluxo interno  
+1. Verificar tipo de `cep`.  
+2. Converter inteiro para string (método `str()`).  
+3. Validar que a string resultante contenha somente dígitos (`str.isdigit()`).  
+4. Validar comprimento exato de 8 caracteres (`len(cep_str) == 8`).  
+5. Retornar `cep_str[:5] + "-" + cep_str[5:]`.
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+- Tipo inválido  
+  - Entrada: `None`, `12.345678`, `[]`, `{}`  
+  - Comportamento: lançar `TypeError("CEP deve ser string ou inteiro")`.
+
+- Inteiro negativo  
+  - Entrada: `-12345678`  
+  - Fluxo: convertido para `"-12345678"`, falha em `isdigit()` → `ValueError("CEP deve conter apenas dígitos")`.
+
+- Float ou outros tipos numéricos não inteiros  
+  - Entrada: `12.345678`  
+  - Comportamento: `TypeError("CEP deve ser string ou inteiro")`.
+
+- String com caracteres não numéricos  
+  - Entrada: `"abcdefgh"`, `"12.345-678"`  
+  - Comportamento: `ValueError("CEP deve conter apenas dígitos")`.
+
+- Comprimento diferente de 8  
+  - Entradas menores: `"1234"`, `1234`  
+  - Entradas maiores: `"123456789"`, `123456789`  
+  - Comportamento: `ValueError("CEP deve ter exatamente 8 dígitos")`.
+
+- Zeros à esquerda  
+  - Entradas como `"00000000"`, `10000000`  
+  - Comportamento: válidos; formatados corretamente (ex.: `"00000-000"`, `"10000-000"`).
+
+## 4. Contexto Técnico
+- Linguagem alvo: Python 3 (compatível a partir da versão 3.6+).  
+- Paradigma: programação funcional/pura para essa operação.  
+- Bibliotecas externas: nenhuma, somente biblioteca padrão.  
+- Formato de saída: `str` imutável contendo 9 caracteres.  
+- Tratamento de exceções: mensagens devem coincidir exatamente com as especificadas.  
+- Não há persistência nem I/O adicional.
+
+## 5. Dependências Base (Core Dependencies)
+- Python 3.6+  
+- pytest (para suíte de testes TDD)  
+- Ferramentas padrão: biblioteca unittest (opcional) ou pytest.

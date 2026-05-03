@@ -1,0 +1,42 @@
+{
+  "challenge_id": 7,
+  "module": "runge_kutta_4/workspace_output_rk4_3_tdd-fabce0be87c3cfc2/src/rk4_classico.py",
+  "method": "Runge-Kutta 4 Clássico",
+  "method_key": "rk4",
+  "problem_type": "ode_ivp",
+  "final_status": "PASS",
+  "scipy_reference": 0.0183156388887564,
+  "pointwise": {
+    "status": "PASS",
+    "abs_error": 4.989279822620318e-12
+  },
+  "convergence": {
+    "status": "PASS",
+    "estimated_order": 4.0704,
+    "expected_order": 4.0,
+    "acceptable_range": [
+      3.2,
+      4.8
+    ],
+    "r_squared": 0.9999,
+    "avg_reduction": 16.8852,
+    "expected_reduction": 16.0,
+    "h_vals": [
+      0.1,
+      0.05,
+      0.025,
+      0.0125,
+      0.00625,
+      0.003125
+    ],
+    "errors": [
+      6.8133783029840356e-06,
+      3.7253997754380097e-07,
+      2.1770183558644796e-08,
+      1.3155410025222913e-09,
+      8.082630398309476e-11,
+      4.989279822620318e-12
+    ],
+    "reason": "OK"
+  }
+}

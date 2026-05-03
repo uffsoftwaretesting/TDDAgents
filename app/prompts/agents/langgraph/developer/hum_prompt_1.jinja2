@@ -1,20 +1,46 @@
-NOME DA FUNÇÃO (use EXATAMENTE este): {{ function_name }}
+{% if not feedback %}
+📋 ESPECIFICAÇÃO TÉCNICA (CONTEXTO GERAL):
+"""
+{{ specification }}
+"""
 
-TESTES QUE DEVEM PASSAR:
+🧩 SUB-REQUISITO (FOCO DA ITERAÇÃO):
+"""
+{{ sub_requisite }}
+"""
 
-```python
-{{ test_code }}
-```
+💻 CÓDIGO ATUAL NO WORKSPACE:
+{{ current_codebase }}
 
-{{ context }}
+🎯 TAREFA TDD (RED -> GREEN):
+Sua missão inicial é escrever a implementação para que a atual suíte de testes passe.
 
-TAREFA:
+Diretrizes:
+- Use a "Especificação Técnica" apenas para entender a lógica de negócio, tipos de dados e nomes exigidos.
+- Use o "Sub-requisito" como foco principal desta iteração.
+- NÃO implemente validações ou regras complexas se os testes atuais não exigem isso. Deixe a complexidade para as próximas iterações do Tester.
+- Escreva código limpo, organize em arquivos adequados em diferente pastas ou subpastas (se a complexidade exigir) e cumpra o objetivo.
 
-1. Implemente a função {{ function_name }}.
-2. Faça com que TODOS os testes acima passem.
-3. Escreva apenas o código MÍNIMO necessário.
-4. Quando houver muitos testes variados, você pode começar a generalizar a lógica.
+Gere sua resposta usando a estrutura JSON/Action exigida.
 
-⚠️ IMPORTANTE: Retorne APENAS o código Python puro, SEM blocos markdown.
+{% else %}
+⚠️ O TESTE FALHOU NA ÚLTIMA TENTATIVA.
 
-Código da função {{ function_name }}:
+A implementação que você gerou anteriormente não passou na suíte de testes. Leia com atenção o relatório de falha e o feedback do Engenheiro de Qualidade (Reviewer).
+
+📝 FEEDBACK DO REVIEWER:
+{{ feedback }}
+
+🧩 SUB-REQUISITO (FOCO DA ITERAÇÃO):
+"""
+{{ sub_requisite }}
+"""
+
+💻 CÓDIGO ATUAL ATUALIZADO:
+{{ current_codebase }}
+
+🎯 TAREFA DE CORREÇÃO:
+Com base no feedback, no sub-requisito e no erro apontado, atualize ou crie os arquivos necessários para corrigir a falha e fazer a suíte passar. Lembre-se de retornar o código do arquivo completo, sem abreviações.
+
+Gere sua resposta usando a estrutura JSON/Action exigida.
+{% endif %}
