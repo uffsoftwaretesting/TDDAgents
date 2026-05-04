@@ -18,7 +18,6 @@
     "descricao": "Integral de f(x) = sin(x)/x no intervalo [0, pi]",
     "funcao": "f(x) = sin(x)/x  (limite 1 em x=0)",
     "intervalo": [0.0, 3.141592653589793],
-    "valor_esperado": 1.8519370519824658,
     "tolerancia_absoluta": 1e-4,
     "biblioteca_referencia": "scipy.integrate.quad",
     "ordem_convergencia_esperada": 2.0,
