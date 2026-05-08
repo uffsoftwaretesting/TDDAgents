@@ -9,7 +9,7 @@
 
 **An autonomous, multi-agent system that executes the full Test-Driven Development lifecycle — transforming natural language requirements into validated, production-quality code through an orchestrated Red-Green-Refactor cycle.**
 
-*Research prototype developed at [Universidade Federal Fluminense (UFF)](https://www.uff.br) and presented at [SBES 2026](https://cbsoft.sbc.org.br/2026/sbes/).*
+*Research prototype developed at [Universidade Federal Fluminense (UFF)](https://www.uff.br) and presented at [SBES 2026](https://cbsoft.sbc.org.br/2026/).*
 
 </div>
 
