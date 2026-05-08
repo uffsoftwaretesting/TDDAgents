@@ -28,7 +28,8 @@
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
 - [Usage](#usage)
-  - [Execution Flags](#execution-flags)
+  - [Run Main Entry](#run-main-entry)
+- [Execution Flags](#execution-flags)
 - [Output & Deliverables](#output--deliverables)
 - [Experimental Results](#experimental-results)
 
@@ -300,18 +301,36 @@ pip install -r requirements.txt
 
 ### Run the main entry point:
 
-1. Run `python -m app.main`.
-2. Read the warning message shown by the CLI.
-3. Select a number to load a .txt prompt used in the numerical_methods experiments, or choose the last option to provide a custom prompt manually.
-4. The selected text becomes the initial input to the requirements phase.
+### Step 1 — Start the Application
+
+```bash
+python -m app.main
+```
+
+Launches the main CLI entry point of the application.
+
+---
+
+### Step 2 — Read the CLI Warning
+
+Carefully read the warning message displayed by the CLI before continuing.
+
+---
+
+### Step 3 — Select an Input Prompt
+
+Choose one of the available options:
+
+- Select a number to load a predefined `.txt` prompt used in the `numerical_methods` experiments.
+- Or choose the last option to manually provide a custom prompt.
 
 Note: The warning explains that the Analyst can ask follow-up questions. For evaluation/experiment runs, keep only the attempts where the initial prompt was enough to elicit requirements.
 
 ---
 
-### Execution Flags
+## Execution Flags
 
-#### Resume Execution *(continue from checkpoint)*
+### Resume Execution *(continue from checkpoint)*
 
 ```bash
 python -m app.main --thread-id "tdd-1a2b3c4d..."
