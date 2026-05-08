@@ -301,7 +301,7 @@ pip install -r requirements.txt
 
 ### Run the main entry point:
 
-### Step 1 — Start the Application
+#### Step 1 — Start the Application
 
 ```bash
 python -m app.main
@@ -311,13 +311,13 @@ Launches the main CLI entry point of the application.
 
 ---
 
-### Step 2 — Read the CLI Warning
+#### Step 2 — Read the CLI Warning
 
 Carefully read the warning message displayed by the CLI before continuing.
 
 ---
 
-### Step 3 — Select an Input Prompt
+#### Step 3 — Select an Input Prompt
 
 Choose one of the available options:
 
