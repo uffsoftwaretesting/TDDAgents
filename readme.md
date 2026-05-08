@@ -69,7 +69,7 @@ Before any code is written, the system interacts with the user to transform a va
 
 | Step | Agent | Action |
 |------|-------|--------|
-| **1** | **Analyst** | Interviews the user iteratively. It identifies ambiguities and produces a validated requirements checklist. Enforces a maximum of 5 clarification rounds before auto-finalizing. |
+| **1** | **Analyst** | Interviews the user iteratively. It identifies ambiguities and produces a validated requirements checklist. After the checklist is validated, the system waits for explicit user confirmation before proceeding to next phases. |
 | **2** | **Engineer** | Consumes the conversation history and produces a structured Markdown Technical Specification — covering data structures, interfaces, edge cases, and environment dependencies. No implementation code is included; the spec defines contracts only. |
 
 The Technical Specification is designed to be consumed by AI agents, not humans. It serves as the single source of truth for the entire autonomous TDD phase.
