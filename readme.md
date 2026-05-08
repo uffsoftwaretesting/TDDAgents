@@ -392,7 +392,7 @@ All evaluation artifacts — including execution logs, sonar reports, coverage d
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------
 ### Collecting Results
 
-We collected several reports, including token usage, quantity of self-correction loops per type, and other execution metrics. All generated artifacts are stored in the folder `experimental_executions`. In the following section, we describe how to execute the convergence error regression scripts and configure SonarQube tools to collect metrics for each experiment.
+We collected several reports, including token usage, fault counts by type, and other execution metrics. All generated artifacts are stored in the folder `experimental_executions`. In the following section, we describe how to execute the convergence error regression scripts and configure SonarQube tools to collect metrics for each experiment.
 
 #### Evaluations Scripts
 
