@@ -350,18 +350,17 @@ Upon completion, each run produces a `workspace_output/` directory containing:
 workspace_output/
 ├── src/                          # Generated production code
 ├── tests/                        # Generated pytest test suites
-├── metrics_and_logging/
-│   ├── initial_user_prompt.txt
-│   ├── confirmed_user_requirements.txt
-│   ├── engineer_specifications.txt
-│   ├── planner.txt               # tdd_plan decomposition
-│   ├── execution_logs.txt        # Full agent trace
-│   ├── resilience_metrics.txt    # Fault counts by type
-│   ├── token_usage.txt           # Token cost per agent call
-│   ├── subreq_results.txt
-│   └── user_analyst_dialogue.txt
-├── coverage.xml                  # pytest-cov coverage report
-└── sonar-project.properties      # SonarQube config for quality analysis
+└── metrics_and_logging/
+    ├── initial_user_prompt.txt
+    ├── confirmed_user_requirements.txt
+    ├── engineer_specifications.txt
+    ├── planner.txt               # tdd_plan decomposition
+    ├── execution_logs.txt        # Full agent trace
+    ├── resilience_metrics.txt    # Fault counts by type
+    ├── token_usage.txt           # Token cost per agent call
+    ├── subreq_results.txt
+    └── user_analyst_dialogue.txt
+
 ```
 
 Note: these two artifacts (`coverage.xml` and `sonar-project.properties`) are not produced automatically on each TDD run. The `coverage.xml` file is generated when running the [backup/analyze.sh](backup/analyze.sh) script inside the `workspace_output/` folder produced by a specific execution, while `sonar-project.properties` is a manually defined configuration file that tells SonarQube (via Docker) which metrics should be analyzed and collected.
