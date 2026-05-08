@@ -364,6 +364,8 @@ workspace_output/
 └── sonar-project.properties      # SonarQube config for quality analysis
 ```
 
+Note: these two artifacts (`coverage.xml` and `sonar-project.properties`) are not produced automatically on each TDD run. The `coverage.xml` file is generated when running the [backup/analyze.sh](backup/analyze.sh) script inside the `workspace_output/` folder produced by a specific execution, while `sonar-project.properties` is a manually defined configuration file that tells SonarQube (via Docker) which metrics should be analyzed and collected.
+
 ---
 
 ## Experimental Results
