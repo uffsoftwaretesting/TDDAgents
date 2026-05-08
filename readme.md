@@ -298,7 +298,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-Run the main entry point:
+### Run the main entry point:
 
 1. Run `python -m app.main`.
 2. Read the warning message shown by the CLI.
@@ -310,17 +310,6 @@ Note: The warning explains that the Analyst can ask follow-up questions. For eva
 ---
 
 ### Execution Flags
-
-
-#### Fresh Run *(force new session)*
-
-```bash
-python -m app.main --fresh
-```
-
-Generates a new random Thread ID, guaranteeing a clean state regardless of prior runs.
-
----
 
 #### Resume Execution *(continue from checkpoint)*
 
