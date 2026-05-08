@@ -4,3 +4,11 @@ Densidade de Code Smells ≤ 5 por 100 LOC
 Duplicação de Código ≤ 3%
 Cobertura de Testes ≥ 80%
 Debt Ratio ≤ 5%
+Porcentagem de Testes Unitários ≥ 100%
+
+'/home/allber/Projects/TDDAgentsUFF/readme.md' Crie neste README uma nova seção explicando sobre o papel do sonar cube nesse projeto/artigo e como fazer o setup dele. Depois de fornecer um breve resumo sobre o que é a 
+  ferramenta, pra que ela serve e por que ela está sendo utilizada no projeto, comece a explicar essa etapa do setup. A pessoa deve executar o comando "docker compose -f docker-compose.sonarqube.yaml up -d", depois acessar
+  o serviço, fazer o login com as credenciais "admin" de login e "admin" como senha. Será pedido pra definir uma senha nova. Ao entrar, deveremos configurar um quality gate universal respeitando as restrições presentes no
+  arquivo '/home/allber/Projects/TDDAgentsUFF/backup/restrictions.txt'. Após isso, a pessoa precisaria criar um workspace, define o nome e a chave do workspace, no qual esses dois parâmetros serão utilizados no arquivo
+  sonar-project.properties que deverá estar na raiz da pasta de output do fluxo tdd nos campos, onde o nome do workspace deverá estar na variavel sonar.projectName e a chave deverá estar na variável sonar.projectKey. Após
+  criado o workspace, após isso nós vamos na seção de quality gate do próprio workspace nós selecionamos o quality gate universal que criamos anteriormente. Feito isso,  
