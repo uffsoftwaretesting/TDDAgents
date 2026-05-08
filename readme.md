@@ -367,7 +367,7 @@ Note: these two artifacts (`coverage.xml` and `sonar-project.properties`) are no
 
 ---
 
-## Experimental Results
+## Experiments
 
 TDDAgents was evaluated on **15 executions** across 5 numerical methods (3 independent runs per method), as part of a study submitted to [SBES 2026](https://cbsoft.sbc.org.br/2026/sbes/). All code and test artifacts were generated fully autonomously. The evaluation results are available in the `experimental_executions/` directory.
 
@@ -388,6 +388,46 @@ TDDAgents was evaluated on **15 executions** across 5 numerical methods (3 indep
 
 All evaluation artifacts — including execution logs, sonar reports, coverage data, and convergence plots — are preserved in `experimental_executions/`.
 
+## Experiment Results
+-----------------------------------------------------------------------------------------------------
+### Running evaluation scripts
+
+### 1) Run an evaluation script
+
+Run any script under the script/ folder. Examples:
+
+```bash
+python script/evaluate_euler.py
+python script/evaluate_rk4_classico.py
+python script/evaluate_adams_bashforth_3.py
+python script/evaluate_integracao_trapezio.py
+python "script/evaluate_integracao_simpson_⅓.py"
+```
+
+### 2) If the solver module is not found
+
+Each evaluation script points to a specific generated workspace output. If your output folder differs, update these constants near the top of the script:
+
+- WORKSPACE_DIR
+- SUBFOLDER_DIR
+- AGENT_MODULE_PATH
+
+You can inspect available outputs under experimental_executions/ and use that path to update the constants.
+
+### 3) Outputs
+
+Each run writes:
+
+- A JSON report under an evaluation/ folder inside the selected workspace output
+- A log-log convergence plot saved in the same evaluation/ folder
+
+## 4) Optional: combined plots
+
+To generate aggregated log-log comparison plots:
+
+```bash
+python script/plot_loglog_regression.py
+```
 ---
 
 *This project is an open-source research prototype. Contributions and extensions are welcome.*
