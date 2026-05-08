@@ -300,25 +300,17 @@ pip install -r requirements.txt
 
 Run the main entry point:
 
-```bash
-python -m app.main
-```
+1. Run `python -m app.main`.
+2. Read the warning message shown by the CLI.
+3. Select a number to load a .txt prompt used in the numerical_methods experiments, or choose the last option to provide a custom prompt manually.
+4. The selected text becomes the initial input to the requirements phase.
 
-Describe your software requirement when prompted. The pipeline launches autonomously from there.
+Note: The warning explains that the Analyst can ask follow-up questions. For evaluation/experiment runs, keep only the attempts where the initial prompt was enough to elicit requirements.
 
 ---
 
 ### Execution Flags
 
-#### Standard Run *(default)*
-
-```bash
-python -m app.main
-```
-
-Generates a deterministic Thread ID from the input. Identical requirements reuse the same session state.
-
----
 
 #### Fresh Run *(force new session)*
 
