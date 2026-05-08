@@ -344,7 +344,7 @@ Resumes a previous session from the LangGraph checkpoint stored in PostgreSQL. U
 
 ## Output & Deliverables
 
-Upon completion, each run produces a `workspace_output/` directory containing:
+Upon completion, each run produces a `workspace_output_tdd_<thread_id>/` directory (with the specific thread_id of the execution) containing:
 
 ```
 workspace_output/
