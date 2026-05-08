@@ -28,10 +28,11 @@
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
 - [Usage](#usage)
-  - [Run Main Entry](#run-main-entry)
+  - [Run the main entry point](#run-the-main-entry-point)
 - [Execution Flags](#execution-flags)
 - [Output & Deliverables](#output--deliverables)
-- [Experimental Results](#experimental-results)
+- [Experimentas](#experiments)
+- [Experiment Results](#experimental-results)
 
 ---
 
