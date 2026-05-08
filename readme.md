@@ -413,7 +413,7 @@ Each evaluation script points to a specific generated workspace output. If your 
 - AGENT_MODULE_PATH
 - FUNCTION_NAME (Name of the numerical method function evaluated by the script. Each execution generates a distinct file under workspace_output_tdd-<thread_id>/src/<file-name>, where the file name is uniquely defined for every run.)
 
-You can inspect available outputs under experimental_executions/ and use that path to update the constants.
+You can inspect the available outputs in workspace_output_tdd-<thread_id> to identify the generated files and update the corresponding constants accordingly.
 
 ### 3) Outputs
 
