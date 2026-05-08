@@ -237,9 +237,9 @@ TDDAgentsUFF/
 | **Python** | 3.10+ | Runtime |
 | **Docker** | Latest | Hosts PostgreSQL locally |
 | **LLM API Key** | — | OpenAI, Anthropic, Gemini, or DeepSeek |
-| **E2B API Key** | — | Cloud sandbox code execution |
+| **E2B API Key** | e2b_309a046e57b5b145e9855b913af9745d824b2e52 | Cloud sandbox code execution (research api key token) |
 
-> **Get your E2B API key** at [e2b.dev](https://e2b.dev) — required for all code execution.
+> **Get your own E2B API key** at [e2b.dev](https://e2b.dev) — required for all code execution. (they give you $100 dollars of credit).
 
 ---
 
