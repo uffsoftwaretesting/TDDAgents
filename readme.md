@@ -388,6 +388,7 @@ TDDAgents was evaluated on **15 executions** across 5 numerical methods (3 indep
 - **Average token cost:** ~255,454 tokens per execution (model: `gpt-4o-mini`, temperature fixed at 1.0).
 
 All evaluation artifacts — including execution logs, sonar reports, coverage data, and convergence plots — are preserved in `experimental_executions/`.
+
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------
 ### Collecting Results
 
