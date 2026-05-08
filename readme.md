@@ -41,7 +41,7 @@
 The workflow is structured into two well-defined phases:
 
 1. **Interactive Requirements Gathering** — An AI Analyst collaborates with the user to eliminate ambiguities and produce a structured Technical Specification.
-2. **Autonomous TDD Cycle** — A team of specialized agents executes the Red-Green-Refactor loop for each decomposed sub-requirement.
+2. **Autonomous TDD Cycle** — A team of specialized agents executes an adapted Red-Green-Refactor cycle for each decomposed sub-requirement.
 
 ```
   🔴 RED                     🟢 GREEN                  🔵 REFACTOR
