@@ -1,4 +1,4 @@
-# TDD Agents
+# TDDAgents
 
 <div align="center">
 
@@ -7,16 +7,20 @@
 ![E2B](https://img.shields.io/badge/E2B-Cloud_Sandbox-00C7B7?style=for-the-badge)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-State_Persistence-336791?style=for-the-badge&logo=postgresql&logoColor=white)
 
-**An autonomous, multi-agent orchestration of the Test-Driven Development (TDD) lifecycle, utilizing isolated cloud sandboxing to transform technical specifications into software through iterative 'Red-Green-Refactor' cycles.**
+**An autonomous, multi-agent system that executes the full Test-Driven Development lifecycle — transforming natural language requirements into validated, production-quality code through an orchestrated Red-Green-Refactor cycle.**
+
+*Research prototype developed at [Universidade Federal Fluminense (UFF)](https://www.uff.br) and presented at [SBES 2026](https://cbsoft.sbc.org.br/2026/sbes/).*
 
 </div>
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [How It Works](#how-it-works)
+  - [Phase 1 — Requirements Gathering](#phase-1--requirements-gathering)
+  - [Phase 2 — Autonomous TDD Cycle](#phase-2--autonomous-tdd-cycle)
 - [Key Features](#key-features)
 - [The Agent Team](#the-agent-team)
 - [Project Structure](#project-structure)
@@ -26,201 +30,226 @@
 - [Usage](#usage)
   - [Execution Flags](#execution-flags)
 - [Output & Deliverables](#output--deliverables)
+- [Experimental Results](#experimental-results)
+
 ---
 
 ## Overview
 
-**Test-Driven Development Agents** is an experimental, multi-phase software engineering pipeline prototype orchestrated entirely by AI agents, designed to autonomously analyze requirements, generate tests, implement code, and iteratively refine solutions.
+**TDDAgents** is an open-source, multi-agent software engineering pipeline that autonomously executes the full TDD lifecycle. It takes a natural language problem description as input and produces validated, tested Python code as output — without human intervention after the initial requirements are confirmed.
 
-The core differentiator lies in its **Test-Driven Development (TDD) enforcement cycle**, combined with a **cloud-based Linux sandbox** that securely executes code generation, testing, and validation in an isolated environment.
+The workflow is structured into two well-defined phases:
 
-Our pipeline follows the guidelines proposed by the standard TDD workflow:
+1. **Interactive Requirements Gathering** — An AI Analyst collaborates with the user to eliminate ambiguities and produce a structured Technical Specification.
+2. **Autonomous TDD Cycle** — A team of specialized agents executes the Red-Green-Refactor loop for each decomposed sub-requirement.
 
 ```
+  🔴 RED                     🟢 GREEN                  🔵 REFACTOR
 
-  🔴 RED            🟢 GREEN          🔵 REFACTOR
+  ──────────────             ─────────────────          ──────────────────
 
-  ─────────         ─────────         ───────────
-
-  Tester writes  →  Developer writes  →  Reviewer assesses 
-  a failing test    minimum code to      the generated code
-                    statisfy the test    and requests refactoring                        
+  Test Engineer writes  →    Developer writes      →    Reviewer analyzes
+  failing tests              minimum code to            logs, classifies
+  (no implementation)        satisfy the tests          fault, routes fix
 ```
 
-To guarantee reliability, the system executes agent-generated code inside secure **E2B sandbox environments** using the E2B Code Interpreter runtime. This ensures safe execution in the cloud and keeps dependencies and the file system isolated from the host. The workflow is managed by a **LangGraph** state machine backed by PostgreSQL, allowing the pipeline to handle interruptions, persist agent memory, and resume execution seamlessly without data loss.
+All agent-generated code runs inside isolated **E2B Linux containers**. Orchestration state is persisted in **PostgreSQL** via LangGraph checkpointing, enabling resumable, fault-tolerant long-running executions.
 
-![Requirements Gathering Workflow](assets/Overview.png)
+<div align="center">
+  <img src="assets/arquitetura_geral.png" alt="TDDAgents Architecture" width="80%"/>
+</div>
 
 ---
 
 ## How It Works
 
-Built on **LangGraph**, the pipeline operates in three stages: first, it collaborates with the user to consolidate technical specifications, second, it launches an autonomous team of agents to implement the code via Test-Driven Development, and third, the results are evaluated by a Quality agent.
-
----
-
 ### Phase 1 — Requirements Gathering
 
-Before a single line of code is written, the system engages the user in a collaborative validation loop. An AI Analyst actively refines the scope by asking clarifying questions and incorporating feedback or warnings, strictly awaiting the user's explicit approval on the final checklist. Once confirmed, these requirements are handed to an Engineer Agent, who authors the formal Technical Specification that serves as the blueprint for the subsequent autonomous TDD stage.
-
-![Requirements Gathering Workflow](assets/Req_Gathering.png)
+Before any code is written, the system interacts with the user to transform a vague or informal description into a formal, machine-readable Technical Specification.
 
 | Step | Agent | Action |
 |------|-------|--------|
-| **1** | **Requirements Analyst** | Interviews the user to surface ambiguities. Produces a validated checklist of functional and non-functional requirements. |
-| **2** | **Requirements Engineer** | Converts the checklist into a formal, structured **Technical Specification** (Markdown). |
+| **1** | **Analyst** | Interviews the user iteratively. Identifies ambiguities, evaluates complexity (low / medium / high), and produces a validated requirements checklist. Enforces a maximum of 5 clarification rounds before auto-finalizing. |
+| **2** | **Engineer** | Consumes the conversation history and produces a structured Markdown Technical Specification — covering data structures, interfaces, edge cases, and environment dependencies. No implementation code is included; the spec defines contracts only. |
+
+The Technical Specification is designed to be consumed by AI agents, not humans. It serves as the single source of truth for the entire autonomous TDD phase.
 
 ---
 
-### Phase 2 — The TDD Engineering Loop
+### Phase 2 — Autonomous TDD Cycle
 
-Once the technical specification is approved, the orchestration transitions to the **Planner Agent**, which is responsible for decomposing the documentation into atomic, testable sub-requirements. Each sub-requirement is then executed within a specialized **SubGraph** that encapsulates the State Machine governing the "Red-Green-Refactor" workflow.
+The Technical Specification feeds into the **Planner Agent**, which decomposes it into an ordered list of atomic, testable sub-requirements (`tdd_plan`). The first item is always an environment setup step. Subsequent items represent incremental functional slices ordered by complexity.
 
-To ensure enterprise-grade reliability, every architectural decision and code change is persisted in a **PostgreSQL** database via a unique **thread_id**, allowing the system to recover seamlessly from interruptions without data loss.
+Each sub-requirement is processed by a dedicated **TDD Subgraph** that encapsulates the full Red-Green-Refactor loop:
 
-The process operates within a strict execution loop:
+<div align="center">
+  <img src="assets/subgrafo.png" alt="TDD Subgraph" width="60%"/>
+</div>
 
-1. **Tester Agent**: Receives a sub-requirement and the current workspace to generate or update test files.
+**Execution flow inside the TDD Subgraph:**
 
-2. **Red Phase**: Executes the tests in an isolated E2B Cloud Sandbox to confirm failure against the current implementation, ensuring the test is valid and not a false positive.
+1. **Test Engineer (Tester):** Writes failing tests for the current sub-requirement before any implementation exists. Produces an `AgentAction` with test files, dependencies to install, and optional bash setup commands.
 
-3. **Reviewer Agent**: Analyzes execution logs and stack traces to provide technical insights and feedback.
+2. **Executor Red:** Runs the test suite via pytest inside the E2B container. Three outcomes are handled:
+   - `red_confirmed` — tests fail due to missing implementation → advance to Developer.
+   - `test_review_needed` — Reviewer flags a malformed test (`[ERRO NO TESTE]`) → Test Engineer rewrites the suite.
+   - `green_in_red` — tests pass immediately (prior iteration already satisfied the requirement) → Reviewer injects a warning and Developer inspects for false positives.
 
-4. **Developer Agent**: Utilizes the sub-requirements, Reviewer conclusions, and the workspace to implement the minimum code necessary to satisfy the tests.
+3. **Developer:** Writes the minimum production code to make the current test suite pass. Respects the TDD minimum-implementation principle: no speculative features.
 
-5. **Green Phase**: Re-executes the test suite in the sandbox to validate the new implementation. If all tests pass, the cycle advances to the next sub-requirement.
+4. **Executor Green:** Re-runs the full test suite. If all pass, `green_passed` is emitted and the cycle advances to the next sub-requirement. If tests fail, the Reviewer classifies the fault and routes back to either the Developer (implementation error) or Test Engineer (test error).
 
-If either the Red or Green phase fails to meet the TDD criteria, the **Reviewer Agent** acts as the primary judge, performing **Intelligent Fault Attribution**. By analyzing the stack trace and the codebase, it dynamically routes the workflow back to either the Tester (to fix flawed tests or imports) or the Developer (to correct the logic), ensuring every requirement is fully validated.
+5. **Reviewer:** Acts as external judge throughout the cycle. Receives the full workspace state, the current sub-requirement, and the complete Technical Specification as context. Emits a binary diagnosis: implementation fault vs. test fault. This role separation is an intentional architectural decision to prevent biased self-correction.
 
-The **Runner Agent** is responsible for orchestrating the execution of agent-generated code within an isolated E2B Cloud Sandbox. It serves as the bridge between the LLM's logic and a real Linux environment, executing the specific commands and functions required to validate both the Red Phase (confirming a failing test) and the Green Phase (verifying the implementation). By managing the sandbox lifecycle, the Runner ensures that every test is performed in a deterministic, secure, and clean environment, returning the exact **stdout** and **stderr** logs needed for the **Reviewer** to perform fault attribution.
-
-![TDD Engeneering Workflow](assets/TDD_ENGENEERING_WORKFLOW.png)
-
----
-
-### Phase 3 — Quality assessement
-
-Upon completion, the workspace_output folder receives a final structured report generated by the **Quality Agent** containing:
-
-- **Cyclomatic Complexity** scores per function and module
-- **SOLID Principle** adherence analysis
-- **Architectural notes** and refactoring recommendations
-
-![TDD Engeneering Workflow](assets/Quality_Agent.png)
+The self-healing loop runs for a configurable maximum number of iterations. Resilience metrics (total failures, failures by type, auto-recovery rate) are collected throughout.
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 | Feature | Description |
 |---------|-------------|
-| 🛡️ **Real Execution Environment** | Every test runs inside a real, isolated E2B Linux container. Dependencies are installed via `pip`. Results are deterministic. |
-| 🧠 **Intelligent Fault Attribution** | The Reviewer agent distinguishes between *bad implementation* and *bad tests* by analyzing the full traceback — routing the fix to the correct agent automatically. |
-| 💾 **State Persistence & Resumability** | PostgreSQL checkpoints the full LangGraph state after every node. Stop execution at any time and resume exactly where you left off using a Thread ID. |
-| 🔄 **Self-Healing Retry Loop** | When tests fail, agents read the error output, reason about the root cause, apply a targeted fix, and re-execute — iterating until resolution or escalation. |
-| 📊 **Automated Quality Reports** | Upon completion, `quality.py` generates a final audit log with Cyclomatic Complexity scores, SOLID principle adherence, and architectural notes. |
-| 🗂️ **Structured Output Delivery** | All generated source code and test suites are extracted from the Sandbox and saved locally to `./workspace_output/` for immediate use. |
+| **Real Execution Environment** | Every test runs inside an isolated E2B Linux container. Dependencies installed via `pip`. Results are deterministic. |
+| **Intelligent Fault Attribution** | The Reviewer distinguishes between bad implementation and bad tests by analyzing the full traceback — routing the fix to the correct agent automatically. |
+| **State Persistence & Resumability** | PostgreSQL checkpoints the full LangGraph state after every node. Stop at any time and resume from the exact checkpoint using a Thread ID. |
+| **Self-Healing Retry Loop** | When tests fail, agents read the error output, reason about the root cause, apply a targeted fix, and re-execute — iterating until resolution or hitting the retry limit. |
+| **Multi-Provider LLM Support** | Supports OpenAI, Anthropic, Gemini, and DeepSeek via a unified `chat_model_factory`. Swap the provider in `.env` without changing any agent code. |
+| **Structured Output Delivery** | All generated source files and test suites are extracted from the E2B sandbox and saved locally to `./workspace_output/`. |
 
 ---
 
-## 🧩 The Agent Team
+## The Agent Team
 
 ```
-  ╔═════════════╦══════════════════╦═══════════════════════════════════════════════════════╗
-  ║   AGENT     ║   ROLE           ║   RESPONSIBILITY                                      ║
-  ╠═════════════╬══════════════════╬═══════════════════════════════════════════════════════╣
-  ║  Analyst    ║  Product Manager ║  Converses with user. Clarifies "What" and "Why".     ║
-  ║             ║                  ║  Produces a validated requirements checklist.         ║
-  ╠═════════════╬══════════════════╬═══════════════════════════════════════════════════════╣
-  ║  Engineer   ║  Tech Lead       ║  Converts checklist into a formal Markdown            ║
-  ║             ║                  ║  Technical Specification document.                    ║
-  ╠═════════════╬══════════════════╬═══════════════════════════════════════════════════════╣
-  ║  Planner    ║  Architect       ║  Breaks the spec into atomic, testable vertical       ║
-  ║             ║                  ║  slices. Sequences the TDD execution plan.            ║
-  ╠═════════════╬══════════════════╬═══════════════════════════════════════════════════════╣
-  ║  Tester     ║  QA Engineer     ║  Writes test files before any implementation          ║
-  ║             ║                  ║  exists. Must strictly follow the spec.               ║
-  ╠═════════════╬══════════════════╬═══════════════════════════════════════════════════════╣
-  ║  Developer  ║  Software Eng.   ║  Writes Python implementation to make tests pass.     ║
-  ║             ║                  ║  Reads errors. Iterates until green.                  ║
-  ╠═════════════╬══════════════════╬═══════════════════════════════════════════════════════╣
-  ║  Reviewer   ║  Debugger/Judge  ║  Reads stderr and stdout stack traces.                ║
-  ║             ║                  ║  Assigns fault to either bad code or bad tests.       ║
-  ║             ║                  ║  Routes the fix accordingly.                          ║
-  ╠═════════════╬══════════════════╬═══════════════════════════════════════════════════════╣
-  ║  Qaulity    ║    Auditor       ║  Final static analysis. Scores Cyclomatic Complexity  ║
-  ║             ║                  ║  and SOLID principle adherence. Generates audit log.  ║
-  ╚═════════════╩══════════════════╩═══════════════════════════════════════════════════════╝
+  ╔══════════════════╦════════════════╦══════════════════════════════════════════════════════╗
+  ║   AGENT          ║   ROLE         ║   RESPONSIBILITY                                     ║
+  ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
+  ║  Analyst         ║  Product Mgr   ║  Converses with user. Surfaces ambiguities.          ║
+  ║                  ║                ║  Produces a validated requirements checklist.        ║
+  ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
+  ║  Engineer        ║  Tech Lead     ║  Converts checklist into a formal Markdown           ║
+  ║                  ║                ║  Technical Specification (contracts only, no code).  ║
+  ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
+  ║  Planner         ║  Architect     ║  Decomposes the spec into ordered, atomic vertical   ║
+  ║                  ║                ║  slices. Produces the tdd_plan execution sequence.   ║
+  ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
+  ║  Test Engineer   ║  QA Engineer   ║  Writes failing test files before any implementation ║
+  ║  (Tester)        ║                ║  exists. Rewrites tests when Reviewer flags errors.  ║
+  ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
+  ║  Developer       ║  Software Eng. ║  Writes minimum production code to satisfy tests.   ║
+  ║                  ║                ║  Applies targeted fixes guided by Reviewer feedback. ║
+  ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
+  ║  Runner          ║  Executor      ║  Manages E2B sandbox lifecycle. Executes Red and     ║
+  ║  (Red / Green)   ║                ║  Green phases. Returns exact stdout/stderr logs.     ║
+  ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
+  ║  Reviewer        ║  Judge/Debugger║  Analyzes stack traces. Emits binary fault diagnosis ║
+  ║                  ║                ║  (implementation vs. test). Routes fix accordingly.  ║
+  ╚══════════════════╩════════════════╩══════════════════════════════════════════════════════╝
 ```
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
-TDDAgents-SandBoxv2.0/
+TDDAgentsUFF/
 │
 ├── app/
-│   │
 │   ├── agents/
-│   │   └── langgraph/                  # Core agent logic — prompts & tool definitions
-│   │       ├── analyst.py              # Requirements Analyst: user interview & checklist
-│   │       ├── developer.py            # Developer: code implementation from failing tests
-│   │       ├── engineer.py             # Engineer: Technical Specification generation
-│   │       ├── planner.py              # Planner/Architect: TDD plan decomposition
-│   │       ├── quality.py              # Quality: final static analysis & scoring
-│   │       ├── reviewer.py             # Reviewer/Judge: traceback analysis & fault routing
-│   │       ├── runner.py               # Runner: E2B Sandbox test execution (Red & Green)
-│   │       └── tester.py               # Tester/QA: pytest file generation
+│   │   └── langgraph/                   # Agent logic — LLM calls & structured outputs
+│   │       ├── analyst.py               # Requirements Analyst
+│   │       ├── developer.py             # Developer: production code generation
+│   │       ├── engineer.py              # Engineer: Technical Specification authoring
+│   │       ├── planner.py               # Planner/Architect: TDD plan decomposition
+│   │       ├── reviewer.py              # Reviewer/Judge: fault attribution
+│   │       ├── runner.py                # Runner: E2B sandbox execution (Red & Green)
+│   │       └── tester.py                # Test Engineer: pytest file generation
 │   │
-│   ├── graph/                          # LangGraph graph definitions
-│   │   ├── nodes/                      # Individual graph node implementations
-│   │   └── subgraphs/                  # The inner TDD loop subgraph
+│   ├── config/
+│   │   └── config.py                    # App settings & LangGraph AgentState TypedDicts
 │   │
-│   ├── prompts/                        # Jinja2 templates for LLM system prompts
-│   ├── schema/                         # Pydantic models for structured LLM output
-│   ├── utils/                          # Shared helpers (E2B client, factories, etc.)
+│   ├── errors/                          # Structured error handling
+│   │   ├── agents/handler.py
+│   │   ├── sandbox/handler.py
+│   │   └── exceptions.py
 │   │
-│   ├── config.py                       # App settings & LangGraph State TypedDicts
-│   ├── main.py                         # CLI entry point
-│   ├── orchestrator.py                 # Main LangGraph construction & compilation
-│   └── requirements_orchestrator.py   # Requirements-phase graph construction
+│   ├── graph/
+│   │   ├── nodes/                       # Individual LangGraph node implementations
+│   │   │   ├── execute_developer.py
+│   │   │   ├── execute_progress_evaluator.py
+│   │   │   ├── execute_runner_green.py
+│   │   │   ├── execute_runner_red.py
+│   │   │   ├── execute_tester.py
+│   │   │   ├── plan_task.py
+│   │   │   ├── requirements_analyst.py
+│   │   │   ├── requirements_engineer.py
+│   │   │   └── requirements_user_input.py
+│   │   ├── subgraphs/
+│   │   │   ├── build_tdd_subgraph.py    # Inner TDD Red-Green-Refactor subgraph
+│   │   │   └── requirements_orchestrator_subgraph.py
+│   │   └── orchestrator.py              # Main LangGraph graph construction & compilation
+│   │
+│   ├── prompts/
+│   │   ├── agents/langgraph/            # Jinja2 system & human prompt templates per agent
+│   │   └── specs/                       # Example problem specifications for testing
+│   │
+│   ├── schema/
+│   │   └── schema.py                    # Pydantic models for structured LLM output
+│   │
+│   ├── utils/
+│   │   ├── chat_model_factory.py        # Multi-provider LLM client factory
+│   │   ├── pass_rate.py
+│   │   ├── prompt_loader.py
+│   │   ├── resilience_metrics.py        # Fault tracking & recovery metrics
+│   │   ├── sandbox_utils.py
+│   │   ├── spec_loader.py
+│   │   ├── token_metrics.py             # Token usage tracking
+│   │   └── workspace.py
+│   │
+│   └── main.py                          # CLI entry point
 │
-├── workspace_output/                   # ← Generated code is saved here after execution
+├── assets/
+│   ├── arquitetura_geral.png            # Overall architecture diagram (two-phase flow)
+│   └── subgrafo.png                     # TDD Subgraph internal structure
 │
-├── docker-compose.yaml                 # PostgreSQL service configuration
-├── requirements.txt                    # Python package dependencies
-└── .env.example                        # Environment variable template
+├── experimental_executions/             # Evaluation artifacts (15 runs across 5 methods)
+│   ├── adams_bashforth_ordem3/
+│   ├── euler/
+│   ├── rk4/
+│   ├── simpson/
+│   └── trapezio/
+│
+├── backup/                              # SonarQube analysis scripts & config
+├── docker-compose.yaml                  # PostgreSQL service
+├── docker-compose.sonarqube.yaml        # SonarQube service for quality analysis
+├── requirements.txt                     # Python package dependencies
+└── .env.example                         # Environment variable template
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
-
-Ensure the following are installed and available on your system before proceeding.
 
 | Requirement | Version | Purpose |
 |-------------|---------|---------|
 | **Python** | 3.10+ | Runtime |
 | **Docker** | Latest | Hosts PostgreSQL locally |
-| **OpenAI API Key** | — | LLM backbone (or swap for Anthropic / DeepSeek) |
-| **E2B API Key** | — | Cloud Sandbox execution environment |
+| **LLM API Key** | — | OpenAI, Anthropic, Gemini, or DeepSeek |
+| **E2B API Key** | — | Cloud sandbox code execution |
 
-> 🔑 **Get your E2B API key** at [e2b.dev](https://e2b.dev) — required for all code execution.
+> **Get your E2B API key** at [e2b.dev](https://e2b.dev) — required for all code execution.
 
 ---
 
 ### Installation
 
-Follow these steps in order to get the system running locally.
-
 #### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/TDDAgents-SandBoxv2.0.git
-cd TDDAgents-SandBoxv2.0
+git clone https://github.com/uffsoftwaretesting/TDDAgents.git
+cd TDDAgents
 ```
 
 #### 2. Configure Environment Variables
@@ -232,26 +261,26 @@ cp .env.example .env
 Open `.env` and fill in your credentials:
 
 ```env
-# ─── LLM Provider ───────────────────────────────────────────────
-OPENAI_API_KEY=sk-...          # Required: Your OpenAI API key
+# ─── LLM Provider (pick one or more) ──────────────────────────────
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
+DEEPSEEK_API_KEY=...
 
-# ─── E2B Cloud Sandbox ──────────────────────────────────────────
-E2B_API_KEY=e2b_...            # Required: Your E2B API key
+# ─── E2B Cloud Sandbox ─────────────────────────────────────────────
+E2B_API_KEY=e2b_...
 
-# ─── Database (Docker) ──────────────────────────────────────────
-POSTGRES_URL=postgresql://...  # Auto-configured if using docker-compose
-REDIS_URL=redis://localhost:6379
+# ─── Database (Docker) ─────────────────────────────────────────────
+POSTGRES_URL=postgresql://tdd_user:tdd_password@localhost:5432/tdd_db
 ```
 
 #### 3. Start the Infrastructure
-
-Spin up PostgreSQL and Redis using Docker Compose:
 
 ```bash
 docker-compose up -d
 ```
 
-Verify services are running:
+Verify PostgreSQL is running:
 
 ```bash
 docker-compose ps
@@ -260,13 +289,8 @@ docker-compose ps
 #### 4. Create a Virtual Environment and Install Dependencies
 
 ```bash
-# Create virtual environment
 python -m venv venv
-
-# Activate it
 source venv/bin/activate       # macOS / Linux
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
@@ -274,47 +298,45 @@ pip install -r requirements.txt
 
 ## Usage
 
-Run the main orchestrator entry point:
+Run the main entry point:
 
 ```bash
 python -m app.main
 ```
 
-The system will prompt you to describe your software requirement. It then launches the full pipeline autonomously.
+Describe your software requirement when prompted. The pipeline launches autonomously from there.
 
 ---
 
 ### Execution Flags
 
-The CLI supports three operational modes:
-
-#### ▶ Standard Run *(default)*
+#### Standard Run *(default)*
 
 ```bash
 python -m app.main
 ```
 
-Prompts for a new requirement. Generates a deterministic Thread ID derived from the input, so identical requirements reuse the same session state.
+Generates a deterministic Thread ID from the input. Identical requirements reuse the same session state.
 
 ---
 
-#### 🆕 Fresh Run *(force new session)*
+#### Fresh Run *(force new session)*
 
 ```bash
 python -m app.main --fresh
 ```
 
-Generates a new random Thread ID, guaranteeing a completely clean state regardless of prior runs with the same requirement.
+Generates a new random Thread ID, guaranteeing a clean state regardless of prior runs.
 
 ---
 
-#### ⏯ Resume Execution *(continue from checkpoint)*
+#### Resume Execution *(continue from checkpoint)*
 
 ```bash
 python -m app.main --thread-id "tdd-1a2b3c4d..."
 ```
 
-Resumes a previous session from the exact LangGraph checkpoint stored in PostgreSQL. Useful for recovering from crashes, timeouts, or manual interrupts.
+Resumes a previous session from the LangGraph checkpoint stored in PostgreSQL. Useful for recovering from crashes or manual interrupts.
 
 > **Thread IDs** are printed to the console at the start of every run. Save them to resume long-running sessions.
 
@@ -322,17 +344,49 @@ Resumes a previous session from the exact LangGraph checkpoint stored in Postgre
 
 ## Output & Deliverables
 
-Upon successful completion, the system produces the following outputs:
-
-### 1. Real-Time Console Logs
-Live stream of agent reasoning, test execution results, error analysis, and fix attempts — visible directly in the terminal as the pipeline progresses.
-
-### 2. Local Source Files — `./workspace_output/`
-
-All generated artifacts are extracted from the E2B Sandbox and saved locally:
+Upon completion, each run produces a `workspace_output/` directory containing:
 
 ```
 workspace_output/
+├── src/                          # Generated production code
+├── tests/                        # Generated pytest test suites
+├── metrics_and_logging/
+│   ├── initial_user_prompt.txt
+│   ├── confirmed_user_requirements.txt
+│   ├── engineer_specifications.txt
+│   ├── planner.txt               # tdd_plan decomposition
+│   ├── execution_logs.txt        # Full agent trace
+│   ├── resilience_metrics.txt    # Fault counts by type
+│   ├── token_usage.txt           # Token cost per agent call
+│   ├── subreq_results.txt
+│   └── user_analyst_dialogue.txt
+├── coverage.xml                  # pytest-cov coverage report
+└── sonar-project.properties      # SonarQube config for quality analysis
 ```
 
 ---
+
+## Experimental Results
+
+TDDAgents was evaluated on **15 executions** across 5 numerical methods (3 independent runs per method), as part of a study submitted to [SBES 2026](https://cbsoft.sbc.org.br/2026/sbes/). All code and test artifacts were generated fully autonomously. The evaluation results are available in the `experimental_executions/` directory.
+
+| Domain | ID | Numerical Method | Order |
+|--------|-----|-----------------|-------|
+| ODE | RK4 | Runge-Kutta 4th Order | 4 |
+| ODE | EULER | Explicit Euler | 1 |
+| ODE | ADAM | Adams-Bashforth 3-Step | 3 |
+| Numerical Integration | SIMP | Composite Simpson 1/3 | 4 |
+| Numerical Integration | TRAP | Composite Trapezoid | 2 |
+
+**Summary of results:**
+
+- **Functional correctness:** 100% unit test pass rate across all 15 executions. Empirical convergence orders matched theoretical values (e.g., RK4 → 4.07, Euler → 1.01, Simpson → 3.98).
+- **Architectural quality:** Test coverage between 85.2%–100% (threshold: ≥80%). Code duplication: 0.0% in all runs. Technical Debt Ratio ≤ 2.2%.
+- **Resilience:** The system recovered autonomously from all test faults (avg. 1–5 per run) and most implementation faults. Implementation faults carried significantly higher token cost: TRAP-1 peaked at ~803K tokens (10 implementation faults); test fault recovery averaged well under 50K additional tokens.
+- **Average token cost:** ~255,454 tokens per execution (model: `gpt-4o-mini`, temperature fixed at 1.0).
+
+All evaluation artifacts — including execution logs, sonar reports, coverage data, and convergence plots — are preserved in `experimental_executions/`.
+
+---
+
+*This project is an open-source research prototype. Contributions and extensions are welcome.*
