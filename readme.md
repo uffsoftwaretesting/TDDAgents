@@ -389,7 +389,7 @@ TDDAgents was evaluated on **15 executions** across 5 numerical methods (3 indep
 All evaluation artifacts — including execution logs, sonar reports, coverage data, and convergence plots — are preserved in `experimental_executions/`.
 
 ## Experiment Results
------------------------------------------------------------------------------------------------------
+
 ### Running evaluation scripts
 
 ### 1) Run an evaluation script
