@@ -401,7 +401,7 @@ python script/evaluate_euler.py
 python script/evaluate_rk4_classico.py
 python script/evaluate_adams_bashforth_3.py
 python script/evaluate_integracao_trapezio.py
-python "script/evaluate_integracao_simpson_⅓.py"
+python script/evaluate_integracao_simpson_⅓.py
 ```
 
 ### 2) If the solver module is not found
