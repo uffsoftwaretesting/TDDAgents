@@ -33,6 +33,15 @@
 - [Output & Deliverables](#output--deliverables)
 - [Experiments](#experiments)
   - [Collecting Results](#collecting-results)
+- [SonarQube — Code Quality Analysis](#sonarqube--code-quality-analysis)
+  - [What is SonarQube?](#what-is-sonarqube)
+  - [1. Start SonarQube](#1-start-sonarqube)
+  - [2. First Login](#2-first-login)
+  - [3. Configure the Universal Quality Gate](#3-configure-the-universal-quality-gate)
+  - [4. Create a Project](#4-create-a-project)
+  - [5. Configure the Project's Quality Gate](#5-configure-the-projects-quality-gate)
+  - [6. Generate an Analysis Token](#6-generate-an-analysis-token)
+  - [7. Run the Analysis](#7-run-the-analysis)
 
 ---
 
@@ -433,6 +442,139 @@ To generate aggregated log-log comparison plots:
 ```bash
 python script/plot_loglog_regression.py
 ```
+---
+
+---
+
+## SonarQube — Code Quality Analysis
+
+### What is SonarQube?
+
+[SonarQube](https://www.sonarsource.com/products/sonarqube/) is an open-source static analysis platform that continuously inspects source code for bugs, code smells, security vulnerabilities, test coverage, code duplication, and technical debt. It provides a persistent dashboard where quality metrics are tracked across analysis runs.
+
+In this project, SonarQube serves as the **external quality oracle** for the autonomous TDD pipeline. After the agent system generates code and tests for a given problem, SonarQube validates whether the output meets the research-defined quality thresholds — coverage, complexity, duplication, debt ratio, and test success rate. This provides an objective, reproducible quality signal that is independent of the agents themselves, and the `sonar_metrics_report.txt` artifact produced by each run is used directly in the paper's evaluation results.
+
+---
+
+### 1. Start SonarQube
+
+From the repository root, bring up the SonarQube container:
+
+```bash
+docker compose -f docker-compose.sonarqube.yaml up -d
+```
+
+Wait ~30 seconds for the service to initialize.
+
+---
+
+### 2. First Login
+
+1. Open [http://localhost:9000](http://localhost:9000) in your browser.
+2. Log in with the default credentials:
+   - **Login:** `admin`
+   - **Password:** `admin`
+3. You will be prompted to set a new password. Choose one and confirm it.
+
+---
+
+### 3. Configure the Universal Quality Gate
+
+This quality gate defines the acceptance thresholds that every generated workspace must satisfy. It will be applied to all projects.
+
+Navigate to **Quality Gates** (top menu) → **Create** → give it a recognizable name (e.g., `TDDAgents Universal Gate`).
+
+Then add the following conditions:
+
+| Metric | Operator | Threshold |
+|--------|----------|-----------|
+| Cognitive Complexity | is less than or equal to | `15` |
+| Cyclomatic Complexity | is less than or equal to | `10` |
+| Code Smells Density *(per 100 LOC)* | is less than or equal to | `5` |
+| Duplicated Lines (%) | is less than or equal to | `3` |
+| Coverage | is greater than or equal to | `80` |
+| Technical Debt Ratio | is less than or equal to | `5` |
+| Unit Test Success (%) | is greater than or equal to | `100` |
+
+> **Note:** SonarQube does not expose "Code Smells Density" as a native metric. The `analyze.sh` script computes this value as `(code_smells / ncloc) × 100` and evaluates it locally in `sonar_metrics_report.txt`. Add the remaining metrics as native conditions in the quality gate UI.
+
+---
+
+### 4. Create a Project
+
+1. From the SonarQube dashboard, click **Create Project → Manually**.
+2. Fill in:
+   - **Project display name** — a human-readable label (e.g., `RK4 Run 1`). This value goes into `sonar.projectName` in `sonar-project.properties`.
+   - **Project key** — a unique machine identifier (e.g., `rk4-run-1`). This value goes into `sonar.projectKey` in `sonar-project.properties`.
+3. When asked how to set the **New Code definition**, select **"Follow the instance's default"** and click **Create project**.
+
+---
+
+### 5. Configure the Project's Quality Gate
+
+After the project is created, navigate to the project's **Project Settings → Quality Gate** and select the universal gate you created in step 3.
+
+---
+
+### 6. Generate an Analysis Token
+
+1. Inside the project, go to **Analysis Method → Locally**.
+2. Under **Generate a token**, provide:
+   - A token name (e.g., `tddagents-token`)
+   - An expiration date
+3. Click **Generate**.
+4. **Copy the token value immediately** — it will not be shown again. You will pass it to `analyze.sh` via the `SONAR_TOKEN` environment variable.
+
+---
+
+### 7. Run the Analysis
+
+The `analyze.sh` script orchestrates the full pipeline: it runs pytest with coverage, sends the results to SonarQube via the scanner container, polls the API for metrics, and writes the final quality report.
+
+#### Prepare the workspace
+
+Copy the required files into the **root of the TDD output workspace** (`workspace_output_tdd_<thread_id>/`):
+
+```bash
+# From the repository root
+cp backup/analyze.sh  workspace_output_tdd_<thread_id>/
+cp backup/sonar-project.properties  workspace_output_tdd_<thread_id>/
+chmod +x workspace_output_tdd_<thread_id>/analyze.sh
+```
+
+#### Configure sonar-project.properties
+
+Edit the `sonar-project.properties` file you just copied and set the project name and key from step 4:
+
+```properties
+sonar.projectKey=<your-project-key>
+sonar.projectName=<your-project-name>
+sonar.sources=src
+sonar.tests=tests
+sonar.python.coverage.reportPaths=coverage.xml
+sonar.host.url=http://localhost:9000
+```
+
+#### Run the script
+
+```bash
+cd workspace_output_tdd_<thread_id>/
+export SONAR_TOKEN=<paste-token-here>
+./analyze.sh
+```
+
+#### Outputs
+
+After the script completes, the following artifacts are written to the workspace root:
+
+| File | Description |
+|------|-------------|
+| `coverage.xml` | Coverage report generated by pytest-cov |
+| `test-results.xml` | JUnit-format test execution log |
+| `sonar_metrics_report.txt` | Human-readable quality report with PASSED/FAILED verdict per metric |
+
+All metrics are also visible in the SonarQube project dashboard at [http://localhost:9000](http://localhost:9000).
+
 ---
 
 *This project is an open-source research prototype. Contributions and extensions are welcome.*
