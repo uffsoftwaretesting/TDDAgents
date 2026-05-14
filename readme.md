@@ -147,7 +147,7 @@ The self-healing loop runs for a configurable maximum number of iterations. Resi
   ║  Test Engineer   ║  QA Engineer   ║  Writes failing test files before any implementation ║
   ║  (Tester)        ║                ║  exists. Rewrites tests when Reviewer flags errors.  ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
-  ║  Developer       ║  Software Eng. ║  Writes minimum production code to satisfy tests.   ║
+  ║  Developer       ║  Software Eng. ║  Writes minimum production code to satisfy tests.    ║
   ║                  ║                ║  Applies targeted fixes guided by Reviewer feedback. ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
   ║  Runner          ║  Executor      ║  Manages E2B sandbox lifecycle. Executes Red and     ║
