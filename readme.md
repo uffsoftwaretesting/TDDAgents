@@ -32,16 +32,16 @@
 - [Execution Flags](#execution-flags)
 - [Output & Deliverables](#output--deliverables)
 - [Experiments](#experiments)
-  - [Collecting Results](#collecting-results)
-- [SonarQube — Code Quality Analysis](#sonarqube--code-quality-analysis)
-  - [What is SonarQube?](#what-is-sonarqube)
-  - [1. Start SonarQube](#1-start-sonarqube)
-  - [2. First Login](#2-first-login)
-  - [3. Configure the Universal Quality Gate](#3-configure-the-universal-quality-gate)
-  - [4. Create a Project](#4-create-a-project)
-  - [5. Configure the Project's Quality Gate](#5-configure-the-projects-quality-gate)
-  - [6. Generate an Analysis Token](#6-generate-an-analysis-token)
-  - [7. Run the Analysis](#7-run-the-analysis)
+  - [Numerical Evaluations Scripts](#numerical-evaluation-scripts)
+  - [SonarQube — Code Quality Analysis](#sonarqube--code-quality-analysis)
+    - [What is SonarQube?](#what-is-sonarqube)
+    - [1. Start SonarQube](#1-start-sonarqube)
+    - [2. First Login](#2-first-login)
+    - [3. Configure the Universal Quality Gate](#3-configure-the-universal-quality-gate)
+    - [4. Create a Project](#4-create-a-project)
+    - [5. Configure the Project's Quality Gate](#5-configure-the-projects-quality-gate)
+    - [6. Generate an Analysis Token](#6-generate-an-analysis-token)
+    - [7. Run the Analysis](#7-run-the-analysis)
 
 ---
 
@@ -376,7 +376,7 @@ workspace_output/
 
 ## Experiments
 
-TDDAgents was evaluated on **15 executions** across 5 numerical methods (3 independent runs per method), as part of a study submitted to [SBES 2026](https://cbsoft.sbc.org.br/2026/sbes/). All code and test artifacts were generated fully autonomously. The evaluation results are available in the `experimental_executions/` directory.
+TDDAgents was evaluated on **15 executions** across 5 numerical methods (3 independent runs per method), as part of a study submitted to [SBES 2026](https://cbsoft.sbc.org.br/2026/sbes/). All code and test artifacts were generated fully autonomously. The evaluation results are available in the `experimental_executions/` directory. We collected several reports, including token usage, fault counts by type, and other execution metrics. All generated artifacts are stored in the folder experimental_executions. In the following sections, we describe how to execute the convergence error regression scripts and configure SonarQube tools to collect metrics for each experiment.
 
 | Domain | ID | Numerical Method | Order |
 |--------|-----|-----------------|-------|
@@ -396,13 +396,9 @@ TDDAgents was evaluated on **15 executions** across 5 numerical methods (3 indep
 All evaluation artifacts — including execution logs, sonar reports, coverage data, and convergence plots — are preserved in `experimental_executions/`.
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------
-### Collecting Results
+### Numerical Evaluations Scripts
 
-We collected several reports, including token usage, fault counts by type, and other execution metrics. All generated artifacts are stored in the folder `experimental_executions`. In the following section, we describe how to execute the convergence error regression scripts and configure SonarQube tools to collect metrics for each experiment.
-
-#### Evaluations Scripts
-
-#### 1) Run an evaluation script
+#### 1) Run a numerical evaluation script
 
 Run any script under the script/ folder. Examples:
 
@@ -443,9 +439,9 @@ python script/plot_loglog_regression.py
 
 ---
 
-## SonarQube — Code Quality Analysis
+### SonarQube — Code Quality Analysis
 
-### What is SonarQube?
+#### What is SonarQube?
 
 [SonarQube](https://www.sonarsource.com/products/sonarqube/) is an open-source static analysis platform that continuously inspects source code for bugs, code smells, security vulnerabilities, test coverage, code duplication, and technical debt. It provides a persistent dashboard where quality metrics are tracked across analysis runs.
 
@@ -453,7 +449,7 @@ In this project, SonarQube serves as the **external quality oracle** for the aut
 
 ---
 
-### 1. Start SonarQube
+#### 1. Start SonarQube
 
 From the repository root, bring up the SonarQube container:
 
@@ -465,7 +461,7 @@ Wait ~30 seconds for the service to initialize.
 
 ---
 
-### 2. First Login
+#### 2. First Login
 
 1. Open [http://localhost:9000](http://localhost:9000) in your browser.
 2. Log in with the default credentials:
@@ -475,7 +471,7 @@ Wait ~30 seconds for the service to initialize.
 
 ---
 
-### 3. Configure the Universal Quality Gate
+#### 3. Configure the Universal Quality Gate
 
 This quality gate defines the acceptance thresholds that every generated workspace must satisfy. It will be applied to all projects.
 
@@ -497,7 +493,7 @@ Then add the following conditions:
 
 ---
 
-### 4. Create a Project
+#### 4. Create a Project
 
 1. From the SonarQube dashboard, click **Create Project → Manually**.
 2. Fill in:
@@ -507,13 +503,13 @@ Then add the following conditions:
 
 ---
 
-### 5. Configure the Project's Quality Gate
+#### 5. Configure the Project's Quality Gate
 
 After the project is created, navigate to the project's **Project Settings → Quality Gate** and select the universal gate you created in step 3.
 
 ---
 
-### 6. Generate an Analysis Token
+#### 6. Generate an Analysis Token
 
 1. Inside the project, go to **Analysis Method → Locally**.
 2. Under **Generate a token**, provide:
@@ -524,11 +520,11 @@ After the project is created, navigate to the project's **Project Settings → Q
 
 ---
 
-### 7. Run the Analysis
+#### 7. Run the Analysis
 
 The `analyze.sh` script orchestrates the full pipeline: it runs pytest with coverage, sends the results to SonarQube via the scanner container, polls the API for metrics, and writes the final quality report.
 
-#### Prepare the workspace
+##### Prepare the workspace
 
 Copy the required files into the **root of the TDD output workspace** (`workspace_output_tdd_<thread_id>/`):
 
@@ -539,7 +535,7 @@ cp backup/sonar-project.properties  workspace_output_tdd_<thread_id>/
 chmod +x workspace_output_tdd_<thread_id>/analyze.sh
 ```
 
-#### Configure sonar-project.properties
+##### Configure sonar-project.properties
 
 Edit the `sonar-project.properties` file you just copied and set the project name and key from step 4:
 
@@ -552,7 +548,7 @@ sonar.python.coverage.reportPaths=coverage.xml
 sonar.host.url=http://localhost:9000
 ```
 
-#### Run the script
+##### Run the script
 
 ```bash
 cd workspace_output_tdd_<thread_id>/
@@ -560,7 +556,7 @@ export SONAR_TOKEN=<paste-token-here>
 ./analyze.sh
 ```
 
-#### Outputs
+##### Outputs
 
 After the script completes, the following artifacts are written to the workspace root:
 
