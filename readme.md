@@ -67,7 +67,7 @@ The workflow is structured into two well-defined phases:
 All agent-generated code runs inside isolated **E2B Linux containers**. Orchestration state is persisted in **PostgreSQL** via LangGraph checkpointing, enabling resumable, fault-tolerant long-running executions.
 
 <div align="center">
-  <img src="assets/arquitetura_geral.png" alt="TDDAgents Architecture" width="80%"/>
+  <img src="assets/arquitetura.png" alt="TDDAgents Architecture" width="80%"/>
 </div>
 
 ---
