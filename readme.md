@@ -333,8 +333,8 @@ Choose one of the available options:
 
 - Select a number to load a predefined `.txt` prompt used in the `numerical_methods` experiments.
 - Or choose the last option to manually provide a custom prompt.
-
-Note: The warning explains that the Analyst can ask follow-up questions. For evaluation/experiment runs, keep only the attempts where the initial prompt was enough to elicit requirements.
+- The Analyst can ask follow-up questions. For evaluation/experiment runs, keep only the attempts where the initial prompt was enough to elicit requirements.
+- Once you are satisfied with the Requirements displayed in the terminal screen, type `/sim` as answer. This will trigger the execution graph to move to the Engineer phase.
 
 ---
 
