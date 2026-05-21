@@ -334,7 +334,9 @@ Choose one of the available options:
 - Select a number to load a predefined `.txt` prompt used in the `numerical_methods` experiments.
 - Or choose the last option to manually provide a custom prompt.
 - The Analyst can ask follow-up questions. For evaluation/experiment runs, keep only the attempts where the initial prompt was enough to elicit requirements.
-- Once you are satisfied with the Requirements displayed in the terminal screen, type `/sim` as answer. This will trigger the execution graph to move to the Engineer phase.
+- Once you see the Requirements displayed in the terminal screen, type `/sim` as an answer. This will trigger the execution graph to move to the Engineer phase.
+
+Note: The Analyst can ask more questions. You can also ask fore more features or corrections to be mande in the requiremenst collected. However, for research purposes, we only consider executions where the Analyst immediatelly collects and displays the requirements with no questions. No other requirements are asked after too.
 
 ---
 
