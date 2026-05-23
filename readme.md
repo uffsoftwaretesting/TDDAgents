@@ -336,7 +336,7 @@ Choose one of the available options:
 - The Analyst can ask follow-up questions. For evaluation/experiment runs, keep only the attempts where the initial prompt was enough to elicit requirements.
 - Once you see the Requirements displayed in the terminal screen, type `/sim` as an answer. This will trigger the execution graph to move to the Engineer phase.
 
-Note: The Analyst can ask more questions. You can also ask more features or corrections to be made in the requiremenst collected. However, for research purposes, we only consider executions where the Analyst immediatelly collects and displays the requirements with no questions. Also, no other features are asked after the requirements are defined.
+Note: The Analyst can ask more questions. You can also ask more features or corrections to be made. However, for research purposes, we only consider executions where the Analyst immediatelly collects and displays the requirements with no questions asked. Also, no other features are asked after the requirements are defined.
 
 ---
 
