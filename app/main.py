@@ -45,10 +45,9 @@ def get_initial_user_prompt() -> str:
     mostra o aviso padrão e retorna o prompt escolhido (ou digitado) pelo usuário.
     """
     mensagem_aviso = (
-        "Os prompts abaixo foram utilizados para realizar os testes.\n\n"
-        "ATENÇÃO: O agente analyzer pode perguntar mais detalhes sobre os requisitos, "
+        "ATENÇÃO: O agente Analista pode perguntar mais detalhes sobre os requisitos, "
         "o que irá requerer mais interação e prompts provenientes do usuário. Para fins "
-        "da pesquisa científica realizada, consideramos tentativas onde o agente Analyzer não "
+        "da pesquisa científica realizada, consideramos tentativas onde o agente Analista não "
         "perguntava nenhum detalhe a mais de implementação e considerava o prompt inicial "
         "suficiente para elicitar os requisitos. Por isso, recomendamos que, ao acionar "
         "alguma das opções utilizadas de prompt, descarte quaisquer tentativas "
@@ -105,8 +104,8 @@ def run_requirements_gathering() -> tuple[str, str, list[str]]:
     print("\n" + "=" * 80)
     print("🤖  FASE 1: LEVANTAMENTO DE REQUISITOS (PRODUCT MANAGER)")
     print("=" * 80)
-    print("Descreva a aplicação, framework ou funcionalidade que você deseja construir.")
-    print("Seja detalhado. O Analista fará perguntas se algo estiver vago.\n")
+    print("Descreva a aplicação ou funcionalidade que você deseja construir.")
+    print("O Analista fará perguntas se algo estiver vago.\n")
 
     try:
         # Substituído o input manual pela função com o menu dinâmico
