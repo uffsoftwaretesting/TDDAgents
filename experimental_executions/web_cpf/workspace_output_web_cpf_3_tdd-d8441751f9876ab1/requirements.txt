@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+validate-docbr
+pytest
+pytest-asyncio
+httpx
+flake8
+mypy
+pydantic-settings

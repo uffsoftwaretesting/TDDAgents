@@ -1,0 +1,23 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 8
+Success: 8
+Failed: 0
+Clean TDD Rate (F1) = 4 / 8 (50.0%)
+Green in Red Rate (F2) = 4 / 8 (50.0%)
+Fail rate = 0 / 8 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Instalar dependências base em ambiente virtual: fastapi, uvicorn, pydantic, validate-docbr (ou python-cpf), pytest, pytest-asyncio, httpx, flake8, mypy. Criar estrutura de diretórios: src/domain, src/application, src/infrastructure, src/interfaces, tests/ (espelhando src/). Adicionar arquivos iniciais: pyproject.toml ou requirements.txt, README.md, .env.example, src/settings.py (pydantic.BaseSettings stub), mypy.ini, .flake8.
+2. [SUCCESS] [F2] FASE 1 - DOMAIN – ENTIDADE CPF: Criar testes em tests/domain/test_cpf_entity.py para a classe CPF cobrindo: criação com 11 dígitos numéricos válidos; normalização de máscara; InvalidCPFFormatError (tamanho ≠11, caracteres inválidos); InvalidCPFSequenceError (todos dígitos iguais). Em seguida implementar src/domain/cpf.py com classe CPF e exceções para passar os testes.
+3. [SUCCESS] [F1] FASE 2 - APPLICATION – CASO DE USO: Em tests/application/test_validate_cpf_usecase.py, criar mocks de ICPFValidator para validar que ValidateCPFUseCase.execute(cpf) retorna True quando validator.is_valid é True e False quando é False. Definir interface ICPFValidator em src/application/validators.py. Implementar src/application/validate_cpf_usecase.py injetando ICPFValidator e satisfazendo os testes.
+4. [SUCCESS] [F1] FASE 3 - INFRASTRUCTURE – ADAPTER: Em tests/infrastructure/test_cpfvalidator_adapter.py, simular comportamento da biblioteca externa: normalização de string (remover . e -), retorno True/False, e lançamento de exceções convertidas em False. Implementar src/infrastructure/cpfvalidator_adapter.py usando validate-docbr (ou python-cpf), tratando exceções e retornando booleano conforme tests.
+5. [SUCCESS] [F2] FASE 4 - INTERFACES – MODELS: Em tests/interfaces/test_models.py, criar casos para ValidateCPFRequest (cpf: str) validando regex, min/max length, caracteres permitidos; e ValidateCPFResponse(valid: bool). Depois implementar src/interfaces/models.py com ambos os Pydantic models para passar os testes.
+6. [SUCCESS] [F2] FASE 5 - INTERFACES – ROTA REST: Em tests/interfaces/test_api_route.py usar httpx.TestClient para testar POST /validate-cpf: payloads válidos → HTTP 200 com valid True/False; payloads inválidos (tamanho, caracteres, ausente) → HTTP 422. Stubar ValidateCPFUseCase via Depends. Implementar src/interfaces/api.py com FastAPI app, rota POST, injecção de ValidateCPFUseCase, leitura de ValidateCPFRequest e retorno de ValidateCPFResponse.
+7. [SUCCESS] [F2] FASE 6 - INTEGRAÇÃO – E2E: Em tests/integration/test_end_to_end.py criar testes de integração sem mocks, usando TestClient contra a aplicação completa exposta: CPFs válidos mascarados e não, sequências inválidas, dígitos de verificação errados e exceções internas, validando códigos HTTP e payloads de resposta.
+8. [SUCCESS] [F1] FASE 7 – QUALIDADE E PIPELINE: Configurar e testar static analysis: rodar mypy --strict em src/ e tests/, garantir tipagem sem erros; executar flake8 e alcançar zero warnings; configurar cobertura de testes (coverage ≥ 90%).
+================================================================================

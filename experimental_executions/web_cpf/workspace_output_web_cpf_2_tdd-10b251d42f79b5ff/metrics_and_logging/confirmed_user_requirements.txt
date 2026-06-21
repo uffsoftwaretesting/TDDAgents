@@ -1,0 +1,118 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Como desenvolvedor backend experiente, projete e implemente uma API REST
+           utilizando FastAPI em Python, seguindo rigorosamente os princípios de Clean
+           Architecture com separação clara de camadas tanto no diretório src quanto em
+           tests, garantindo baixo acoplamento, alta coesão e uso de injeção de
+           dependência, sem colocar lógica de negócio nas rotas, organizando o projeto
+           em domain (regras de negócio e entidades puras), application (casos de uso),
+           infrastructure (integrações externas como validate-docbr ou python-cpf) e
+           interfaces ou presentation (controladores FastAPI), com a estrutura de testes
+           espelhando a de src; o objetivo é expor um endpoint POST /validate-cpf que
+           receba um JSON com o campo cpf como string e retorne se o CPF é válido ou não
+           utilizando uma biblioteca confiável, aceitando CPFs com e sem máscara como
+           123.456.789-09 e 12345678909, validando corretamente dígitos verificadores,
+           rejeitando CPFs com entradas inválidas, como strings vazias, campos ausentes
+           ou nulos, caracteres não numéricos inesperados e etc; o contrato da API deve
+           retornar 200 para requisições válidas com um JSON como { "valid": true } e
+           422 para payloads inválidos usando validação automática com Pydantic; o
+           desenvolvimento deve seguir TDD com implementação exclusiva de testes
+           unitários usando pytest cobrindo todos os cenários relevantes e com estrutura
+           espelhada de diretórios; além disso, a aplicação deve incluir configuração
+           completa de Docker para desenvolvimento (com hot reload e volume mount) e
+           produção (com imagem otimizada e build multi-stage), com Dockerfile e
+           opcionalmente docker-compose, e um pipeline de CI com GitHub Actions
+           incluindo instalação de dependências, execução de testes, lint com flake8 e
+           opcionalmente build da imagem, seguindo boas práticas como tipagem estática,
+           uso de .env, código limpo e suporte à documentação automática via
+           OpenAPI/Swagger.
+[Analista]: Checklist de Requisitos Técnico – API FastAPI + Clean Architecture + TDD:
+
+1. Estrutura de Diretórios
+• src/
+– domain/
+* entities/
+* exceptions/
+* interfaces/ (port interfaces para validação de CPF)
+– application/
+* use_cases/
+* dtos/ (separação opcional)
+– infrastructure/
+* cpf_validator/ (adapter para biblioteca validate-docbr ou python-cpf)
+* config/ (carregamento de .env)
+– interfaces/
+* api/
+- routers/
+- controllers/
+* main.py
+• tests/ (espelhando src/)
+– domain/
+– application/
+– infrastructure/
+– interfaces/
+
+2. Domain Layer
+• Definir Value Object Cpf com validação de formato puro (somente dígitos) e dígitos
+verificadores
+• Lançar exceções específicas (ex: InvalidCpfFormat, InvalidCpfCheckDigits)
+• Sem dependências externas
+
+3. Application Layer
+• Implementar UseCase ValidateCpfUseCase que recebe string e retorna boolean
+• Receber via interface de porta abstrata ICpfValidator
+• Sem dependências de infraestrutura ou FastAPI
+
+4. Infrastructure Layer
+• Criar adapter CpfValidatorAdapter usando biblioteca escolhida (configure via DI)
+• Respeitar interface ICpfValidator
+• Configurar leitura de .env com python-dotenv ou Pydantic BaseSettings
+
+5. Interfaces/Presentation (FastAPI)
+• Definir Pydantic Model Input (campo cpf: str)
+• Definir Pydantic Model Output ({ valid: bool })
+• Criar router POST /validate-cpf
+- Injeta ValidateCpfUseCase
+- Retorna 200 + { valid: true/false }
+- Pydantic gera 422 para payloads inválidos (campo ausente, tipo errado, string vazia)
+• Incluir documentação automática (tags, summaries, exemplos)
+
+6. Testes (TDD com pytest)
+• Configurar pytest.ini para coletar todos os testes em tests/
+• Testes unitários para:
+– Domain: Value Object Cpf (cenários válidos, inválidos, máscaras, caracteres especiais)
+– Application: ValidateCpfUseCase (mock ICpfValidator)
+– Infrastructure: CpfValidatorAdapter (integração com biblioteca externa)
+– Interfaces: TestClient FastAPI para endpoint (200, 422, false valid)
+• Alvo de cobertura mínimo 100% nas regras de negócio
+
+7. Docker
+• Dockerfile.dev
+– Base Python3.X
+– Instala dev dependencies
+– Copia src/ e mounts em volume
+– CMD uvicorn main:app --reload --host 0.0.0.0
+• Dockerfile (produção)
+– Build multi-stage (builder + runtime slim)
+– Instala apenas dependências necessárias
+– Definir ENTRYPOINT uvicorn
+• Opcional docker-compose.yml
+– Serviço api-dev com volume e variável de ambiente
+
+8. CI com GitHub Actions (.github/workflows/ci.yml)
+• gatilho: push, pull_request em main
+• steps:
+– checkout
+– setup-python (versão X.X)
+– install dependencies (pip install -r requirements.txt)
+– lint com flake8 (fail-on-error)
+– run pytest --cov
+– opcional: build imagem Docker via docker/build-push-action
+
+9. Boas Práticas
+• Type hints em todo o código (mypy opcional)
+• .env para configurações (secure vars no CI)
+• Código limpo: nomes autoexplicativos, métodos pequenos
+• Logs via standard logging se necessário
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================
