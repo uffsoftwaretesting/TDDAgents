@@ -1,0 +1,10 @@
+[run]
+# Avaliar apenas fontes em src/
+source = src
+# Ignorar testes e arquivos externos
+omit =
+    tests/*
+
+[report]
+# Exigir 100% de cobertura
+fail_under = 100

@@ -1,0 +1,24 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 9
+Success: 9
+Failed: 0
+Clean TDD Rate (F1) = 7 / 9 (77.8%)
+Green in Red Rate (F2) = 2 / 9 (22.2%)
+Fail rate = 0 / 9 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F2] FASE 0 - SETUP: Instalar pytest na sandbox, criar a estrutura de diretórios 'roman_converter/' com '__init__.py' e 'converter.py' vazios, e 'tests/' com submódulos 'test_preprocess.py', 'test_validate_chars.py', 'test_validate_reps.py', 'test_validate_subs.py', 'test_compute_value.py', 'test_range.py' e 'test_integration.py'. Configurar pyproject.toml ou setup.cfg para rodar pytest.
+2. [SUCCESS] [F1] FASE 1 - PREPROCESSAMENTO: Escrever testes em 'test_preprocess.py' que verifiquem: entrada com espaços em volta é normalizada (strip+upper) e string vazia após strip lança ValueError("Entrada vazia"). Implementar 'preprocess_input(s: str) -> str' em converter.py até os testes passarem.
+3. [SUCCESS] [F1] FASE 2 - VALIDAÇÃO DE CARACTERES: Em 'test_validate_chars.py', criar casos de teste para strings contendo apenas I,V,X,L,C,D,M (aceitas) e para caracteres inválidos (ex: 'A','Z'), esperando ValueError("Caractere inválido: {c}"). Implementar 'validate_characters(s: str) -> None'.
+4. [SUCCESS] [F1] FASE 3 - VALIDAÇÃO DE REPETIÇÕES: Em 'test_validate_reps.py', definir testes que garantam erro para more than 3 repetições consecutivas de I,X,C,M (ex: 'IIII') e para repetições de V,L,D (ex: 'VV'). Implementar 'validate_repetition(s: str) -> None'.
+5. [SUCCESS] [F1] FASE 4 - VALIDAÇÃO DE SUBTRAÇÕES: Em 'test_validate_subs.py', testar pares válidos (IV, IX, XL, XC, CD, CM) sem erro e pares ilegais (ex: 'IL','IC','VX') lançando ValueError("Subtração inválida: {par}"). Implementar 'validate_subtraction_pairs(s: str) -> None'.
+6. [SUCCESS] [F1] FASE 5 - CÁLCULO DO VALOR: Em 'test_compute_value.py', escrever testes para casos típicos e edge cases: 'III'→3, 'IV'→4, 'IX'→9, 'LVIII'→58, 'MCMXCIV'→1994, 'MMMCMXCIX'→3999. Implementar 'compute_value(s: str) -> int' usando o mapeamento e lógica de vizinhança para soma/subtração.
+7. [SUCCESS] [F1] FASE 6 - VALIDAÇÃO DE INTERVALO: Em 'test_range.py', criar testes que gerem resultados <1 ou >3999 (ex: '','MMMM') e confirmem ValueError("Valor fora do intervalo permitido"). Adicionar checagem de intervalo em 'roman_to_int' ou em função auxiliar.
+8. [SUCCESS] [F1] FASE 7 - FUNÇÃO PRINCIPAL E INTEGRAÇÃO: Em 'test_integration.py', escrever testes end-to-end para entradas válidas e inválidas consistentemente. Implementar 'roman_to_int(s: str) -> int' em converter.py orquestrando preprocess_input, validate_characters, validate_repetition, validate_subtraction_pairs, compute_value e validação de intervalo.
+9. [SUCCESS] [F2] FASE 8 - QUALIDADE E CI: Configurar pipeline básico de CI (GitHub Actions ou similar) para executar pytest em cada commit, adicionar cobertura mínima e badge no README.
+================================================================================

@@ -1,0 +1,23 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 8
+Success: 8
+Failed: 0
+Clean TDD Rate (F1) = 3 / 8 (37.5%)
+Green in Red Rate (F2) = 5 / 8 (62.5%)
+Fail rate = 0 / 8 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP AMBIENTE: Criar e ativar um ambiente virtual Python 3.x; instalar dependências base com "pip install pytest pytest-mock"; estruturar diretórios do projeto: src/ (com __init__.py) e tests/; criar arquivos vazios src/discount.py e tests/test_discount.py.
+2. [SUCCESS] [F2] FASE 1 - NÚCLEO LÓGICO BÁSICO: No tests/test_discount.py, escrever testes unitários para o cenário feliz (price=100, discount_percentage=10 → discount_amount=10.00, final_price=90.00); implementar em src/discount.py um stub de calculate_discount que retorne valores fixos para passar o teste.
+3. [SUCCESS] [F1] FASE 2 - VALIDAÇÃO DE TIPOS: Adicionar testes que chamem calculate_discount com price ou discount_percentage não numéricos (ex: '100', None) e aguardem TypeError; estender a função para checar isinstance(price, (int,float)) e isinstance(discount_percentage, (int,float)) e lançar TypeError com mensagem clara.
+4. [SUCCESS] [F1] FASE 3 - VALIDAÇÃO DE DOMÍNIO: Criar testes que invoquem calculate_discount com price < 0 e discount_percentage < 0 ou > 100, aguardando ValueError; implementar na função as checagens de valor e lançar ValueError descritivo para cada cenário inválido.
+5. [SUCCESS] [F2] FASE 4 - LÓGICA DE CÁLCULO E ARREDONDAMENTO: Escrever testes para entrada float (price=99.99, discount_percentage=12.5) validando discount_amount e final_price arredondados a duas casas decimais; implementar cálculo usando round(price * (discount_percentage/100),2) e round(price - discount_amount,2).
+6. [SUCCESS] [F2] FASE 5 - CASOS DE BORDA: Adicionar testes específicos para discount_percentage=0 (retorno discount_amount=0.00, final_price=price) e =100 (discount_amount=price, final_price=0.00); ajustar implementação para lidar corretamente com esses extremos.
+7. [SUCCESS] [F2] FASE 6 - CONTRATO DE SAÍDA: Criar teste de contrato que verifica se calculate_discount sempre retorna um dict contendo apenas as chaves 'discount_amount' e 'final_price' com valores float; refatorar código para garantir conformidade exata do contrato.
+8. [SUCCESS] [F2] FASE 7 - INTEGRAÇÃO E COVERAGE: Configurar pytest para gerar relatório de coverage; executar toda a suíte de testes, garantindo 100% de coverage sobre src/discount.py; corrigir quaisquer lacunas de teste ou implementação apontadas pelo relatório.
+================================================================================

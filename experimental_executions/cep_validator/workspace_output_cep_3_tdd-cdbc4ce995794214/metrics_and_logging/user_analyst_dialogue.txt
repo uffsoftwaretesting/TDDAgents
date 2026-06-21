@@ -1,0 +1,93 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Aja como um engenheiro de software especializado em Python. O caso de uso consiste em
+   formatar códigos de CEP no padrão brasileiro. A tarefa é projetar e implementar, em
+   Python puro e sem uso de bibliotecas externas além da biblioteca padrão, uma função
+   que receba como entrada uma sequência representando um CEP e retorne uma string
+   formatada no padrão “XXXXX-XXX”. A saída deve ser uma string contendo exatamente oito
+   dígitos com inserção automática de hífen após o quinto dígito. O método deve validar
+   e normalizar a entrada garantindo que apenas dígitos sejam considerados, podendo
+   aceitar tanto strings quanto inteiros desde que representem exatamente 8 dígitos, e
+   então aplicar a formatação por meio de manipulação de strings. As premissas incluem
+   validação rigorosa de tipos e conteúdo, rejeitando entradas inválidas como strings
+   com caracteres não numéricos, valores com quantidade diferente de 8 dígitos, None ou
+   outros objetos, lançando exceções apropriadas como TypeError e ValueError com
+   mensagens claras. Os testes devem incluir casos válidos (por exemplo, "24350310" →
+   "24350-310", 12345678 → "12345-678"), casos inválidos (como "1234", "abcdefgh",
+   "123456789", None) e casos de borda (como entradas com zeros à esquerda). Não devem
+   ser implementados testes de documentação, docstrings ou types.
+2. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Aja como um engenheiro de software especializado em Python. O caso de uso
+           consiste em formatar códigos de CEP no padrão brasileiro. A tarefa é projetar
+           e implementar, em Python puro e sem uso de bibliotecas externas além da
+           biblioteca padrão, uma função que receba como entrada uma sequência
+           representando um CEP e retorne uma string formatada no padrão “XXXXX-XXX”. A
+           saída deve ser uma string contendo exatamente oito dígitos com inserção
+           automática de hífen após o quinto dígito. O método deve validar e normalizar
+           a entrada garantindo que apenas dígitos sejam considerados, podendo aceitar
+           tanto strings quanto inteiros desde que representem exatamente 8 dígitos, e
+           então aplicar a formatação por meio de manipulação de strings. As premissas
+           incluem validação rigorosa de tipos e conteúdo, rejeitando entradas inválidas
+           como strings com caracteres não numéricos, valores com quantidade diferente
+           de 8 dígitos, None ou outros objetos, lançando exceções apropriadas como
+           TypeError e ValueError com mensagens claras. Os testes devem incluir casos
+           válidos (por exemplo, "24350310" → "24350-310", 12345678 → "12345-678"),
+           casos inválidos (como "1234", "abcdefgh", "123456789", None) e casos de borda
+           (como entradas com zeros à esquerda). Não devem ser implementados testes de
+           documentação, docstrings ou types.
+[Analista]: Checklist Técnico de Requisitos para função format_cep
+
+1. Assinatura da função
+• Deve chamar-se format_cep(cep) e retornar uma string.
+
+2. Validação de tipo de entrada
+• Se cep não for str nem int → lançar TypeError com mensagem clara (ex.: "CEP deve ser
+string ou inteiro").
+
+3. Normalização da entrada
+• Se for int, converter para str.
+• Se for str, usar diretamente.
+
+4. Validação de conteúdo da string normalizada
+• Deve conter apenas dígitos → caso contrário, ValueError("CEP deve conter apenas
+dígitos").
+• Comprimento exato de 8 caracteres → caso contrário, ValueError("CEP deve ter
+exatamente 8 dígitos").
+
+5. Formatação
+• Inserir hífen após o quinto dígito: cep_str[:5] + "-" + cep_str[5:].
+• Resultado deve ter 9 caracteres (5 dígitos, hífen, 3 dígitos).
+
+6. Casos de teste obrigatórios (TDD)
+6.1 Casos válidos (assert):
+- format_cep("24350310") → "24350-310"
+- format_cep(12345678) → "12345-678"
+- format_cep("01234567") → "01234-567"
+- format_cep(10000000) → "10000-000"
+- format_cep("00000000") → "00000-000"
+
+6.2 Casos inválidos que disparam ValueError:
+- format_cep("1234")
+- format_cep("123456789")
+- format_cep("abcdefgh")
+- format_cep(1234)
+- format_cep(123456789)
+- format_cep(-12345678)
+
+6.3 Casos inválidos que disparam TypeError:
+- format_cep(None)
+- format_cep(12.345678)
+- format_cep([])
+- format_cep({})
+
+7. Critérios de aceitação
+• Cobertura de todas as validações de tipo, conteúdo e formatação.
+• Mensagens de exceção exatamente conforme o especificado.
+• Nenhum uso de bibliotecas externas além da biblioteca padrão.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

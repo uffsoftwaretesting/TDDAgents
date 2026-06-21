@@ -1,0 +1,23 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 8
+Success: 8
+Failed: 0
+Clean TDD Rate (F1) = 3 / 8 (37.5%)
+Green in Red Rate (F2) = 5 / 8 (62.5%)
+Fail rate = 0 / 8 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F1] FASE 0 - SETUP: Criar estrutura de diretórios na sandbox: pasta src/ com __init__.py e cep_formatter.py, pasta tests/ com __init__.py; configurar ambiente Python 3.x e instalar dependências base (pytest, flake8, black) conforme Especificação (Seção 5).
+2. [SUCCESS] [F2] FASE 1 - TESTE DE TIPO: Escrever casos de teste em tests/test_cep_type.py para garantir que format_cep lance TypeError com mensagem "Tipo inválido: esperado str ou int." ao receber None, float, list e dict; implementar stub de validação de tipo em cep_formatter.py.
+3. [SUCCESS] [F2] FASE 2 - TESTE DE CONVERSÃO E NÚMEROS: Em tests/test_cep_numeric.py, criar testes que validem conversão de int para str e verifiquem ValueError("CEP deve conter apenas dígitos.") para entradas como "abcdefgh", "12345-678", " 12345678 "; implementar lógica de conversão int→str e checagem de dígitos em cep_formatter.py.
+4. [SUCCESS] [F2] FASE 3 - TESTE DE TAMANHO: Em tests/test_cep_length.py, escrever testes para entradas com menos ou mais de 8 dígitos limpos (ex.: "1234", "123456789") esperando ValueError("CEP deve ter exatamente 8 dígitos."); implementar validação de comprimento exato em cep_formatter.py.
+5. [SUCCESS] [F2] FASE 4 - TESTE DE FORMATAÇÃO BÁSICA: Em tests/test_cep_format.py, criar testes para casos válidos: format_cep("24350310")→"24350-310", format_cep(12345678)→"12345-678"; implementar formatação digits[:5] + '-' + digits[5:] em cep_formatter.py.
+6. [SUCCESS] [F1] FASE 5 - TESTE DE ZEROS À ESQUERDA: Em tests/test_cep_leading_zeros.py, testar casos como format_cep("00000001")→"00000-001" e format_cep(1) com zfill(8)→"00000-001"; ajustar implementação para usar zfill quando necessário.
+7. [SUCCESS] [F2] FASE 6 - INTEGRAÇÃO E COBERTURA: Executar pytest cobrindo todos os módulos de teste; refinar mensagens de exceção e garantir 100% de cobertura para fluxo completo (tipo, conversão, dígitos, tamanho, formatação).
+8. [SUCCESS] [F1] FASE 7 - QUALIDADE E CI: Configurar flake8 e black no projeto, criar configuração básica (tox.ini ou pyproject.toml), e adicionar script no README para lint e formatação automática.
+================================================================================

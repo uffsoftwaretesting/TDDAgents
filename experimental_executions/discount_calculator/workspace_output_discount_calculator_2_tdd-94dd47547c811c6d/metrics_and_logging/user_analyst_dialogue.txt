@@ -1,0 +1,88 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Aja como um engenheiro de software especializado em Python. O caso de uso consiste em
+   calcular o valor de desconto aplicado a um produto. A tarefa é projetar e
+   implementar, em Python puro e sem uso de bibliotecas externas além da biblioteca
+   padrão, uma função que receba dois valores numéricos (int ou float), representando o
+   preço original e a porcentagem de desconto. A saída deve ser uma estrutura bem
+   definida (como uma tupla ou dicionário) contendo o valor economizado e o preço final
+   a pagar, ambos como números reais. O método deve aplicar corretamente as fórmulas
+   desconto = preço * (percentual / 100) e preço_final = preço - desconto, garantindo
+   precisão numérica e, se necessário, arredondamento explícito (por exemplo, duas casas
+   decimais). As premissas incluem validação rigorosa de tipos (rejeitando strings, None
+   e objetos não numéricos com TypeError) e de domínio (preço não negativo e percentual
+   entre 0 e 100, com ValueError em casos inválidos). Os testes devem incluir casos
+   válidos (como preço=100, desconto=10), casos de borda (0% e 100%) e casos inválidos
+   (tipos incorretos, valores negativos e percentuais fora do intervalo). Não devem ser
+   implementados testes de documentação, docstrings ou types.
+2. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Aja como um engenheiro de software especializado em Python. O caso de uso
+           consiste em calcular o valor de desconto aplicado a um produto. A tarefa é
+           projetar e implementar, em Python puro e sem uso de bibliotecas externas além
+           da biblioteca padrão, uma função que receba dois valores numéricos (int ou
+           float), representando o preço original e a porcentagem de desconto. A saída
+           deve ser uma estrutura bem definida (como uma tupla ou dicionário) contendo o
+           valor economizado e o preço final a pagar, ambos como números reais. O método
+           deve aplicar corretamente as fórmulas desconto = preço * (percentual / 100) e
+           preço_final = preço - desconto, garantindo precisão numérica e, se
+           necessário, arredondamento explícito (por exemplo, duas casas decimais). As
+           premissas incluem validação rigorosa de tipos (rejeitando strings, None e
+           objetos não numéricos com TypeError) e de domínio (preço não negativo e
+           percentual entre 0 e 100, com ValueError em casos inválidos). Os testes devem
+           incluir casos válidos (como preço=100, desconto=10), casos de borda (0% e
+           100%) e casos inválidos (tipos incorretos, valores negativos e percentuais
+           fora do intervalo). Não devem ser implementados testes de documentação,
+           docstrings ou types.
+[Analista]: Checklist de Requisitos Técnico para a função de cálculo de desconto em
+            Python (TDD):
+
+1. Assinatura da função
+• Nome: calculate_discount
+• Parâmetros:
+– price (int | float)
+– discount_percentage (int | float)
+• Retorno:
+– dict contendo:
+* "discount_amount": float
+* "final_price": float
+
+2. Validação de tipos (TypeError)
+• Se price não for int ou float → levantar TypeError
+• Se discount_percentage não for int ou float → levantar TypeError
+
+3. Validação de domínio (ValueError)
+• Se price < 0 → levantar ValueError
+• Se discount_percentage < 0 ou > 100 → levantar ValueError
+
+4. Cálculo do desconto
+• discount_amount = price * (discount_percentage / 100)
+• final_price = price - discount_amount
+
+5. Precisão e arredondamento
+• Aplicar round() em discount_amount e final_price para 2 casas decimais
+
+6. Estrutura de saída
+• Retornar {'discount_amount': <valor>, 'final_price': <valor>}
+
+7. Casos de teste (unitários)
+a) Válidos
+– preço=100, desconto=10 → discount_amount=10.00, final_price=90.00
+– preço=99.99, desconto=12.5 → valores arredondados corretamente
+b) Borda
+– desconto=0% → discount_amount=0.00, final_price=price
+– desconto=100% → discount_amount=price, final_price=0.00
+c) Inválidos
+– price < 0
+– discount_percentage < 0 ou > 100
+– price como string, discount_percentage None, objetos não numéricos
+
+8. Outros
+• Não usar bibliotecas externas além da biblioteca padrão
+• Não implementar testes de docstrings ou de tipagem estática
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

@@ -1,0 +1,4 @@
+# Dependências para desenvolvimento e CI
+pytest
+flake8
+mypy
