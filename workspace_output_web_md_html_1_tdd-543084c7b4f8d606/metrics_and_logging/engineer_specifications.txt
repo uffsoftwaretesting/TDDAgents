@@ -1,0 +1,82 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: API de Conversão de Markdown para HTML
+
+## 1. Visão Geral do Sistema
+O sistema expõe uma API RESTful em FastAPI para receber conteúdo em Markdown via requisição HTTP e retornar o HTML convertido. Visa atender integrações que necessitem de renderização de texto Markdown, garantindo validação de entrada, tratamento padronizado de erros e configurações via variáveis de ambiente.
+
+## 2. Estruturas de Dados e Interfaces
+
+### 2.1 Models (Pydantic Schemas)
+- RequestModel  
+  - markdown: str  
+    • Obrigatório, min_length=1  
+- ResponseModel  
+  - html: str  
+  - message: Optional[str]  (mensagem de sucesso, ex: "Conversion successful")  
+- ErrorModel  
+  - detail: str  
+  - code: int  
+
+### 2.2 Serviço de Conversão
+Interface:  
+- Função `convert(markdown_text: str) -> str`  
+  • Recebe string Markdown  
+  • Retorna string HTML usando biblioteca de conversão (markdown ou markdown2)  
+  • Encapsula possíveis falhas de conversão em exceções específicas  
+
+### 2.3 Camada de Rotas
+- POST /convert-markdown  
+  • Input: RequestModel (JSON)  
+  • Output 200: ResponseModel  
+  • Erros:  
+    – 422: validação de payload (Pydantic)  
+    – 500: falha interna (ErrorModel)  
+  • Documentação automática: tag “markdown”, descrição clara do endpoint  
+
+### 2.4 Configuração
+- config.py  
+  - Classe Settings(Pydantic BaseSettings) com campos:  
+    • APP_NAME: str  
+    • DEBUG: bool  
+    • HOST: str  
+    • PORT: int  
+  - Carregamento de variáveis via python-dotenv  
+
+## 3. Casos de Borda e Validações (Edge Cases)
+- Entrada ausente ou JSON inválido  
+  • Retornar 422 Unprocessable Entity com lista de erros Pydantic  
+- Campo `markdown` vazio ou menor que 1 caractere  
+  • Mesma resposta 422, mensagem “markdown: ensure this value has at least 1 characters”  
+- Tipos de dado incorretos (ex: markdown como número)  
+  • 422 com detalhes de tipo esperado `str`  
+- Falha na biblioteca de conversão (ex: erro interno)  
+  • Capturar exceção genérica, retornar 500 Internal Server Error com ErrorModel  
+    – detail: “Internal conversion error”  
+    – code: 5001 (código específico para conversão)  
+- Endpoint inexistente  
+  • 404 Not Found com formato de resposta padrão do FastAPI ou customizado  
+- Valores de ambiente faltando ou mal formatados  
+  • Erro na inicialização da aplicação com trace ou mensagem clara de variáveis obrigatórias  
+- Tempo limite de request (quando aplicável no servidor)  
+  • 504 Gateway Timeout ou fallback padrão do servidor HTTP  
+
+## 4. Contexto Técnico
+- Linguagem: Python 3.9+  
+- Framework web: FastAPI (asyncio)  
+- Validação e settings: Pydantic BaseSettings + python-dotenv  
+- Servidor ASGI: uvicorn com recarga em DEBUG  
+- Arquitetura: camadas separadas config/, schemas/, services/, routes/, main.py  
+- Configuração: variáveis via `.env`, exemplo em `.env.example`  
+- Logging: configurado conforme DEBUG (stdout em dev, arquivos em prod)  
+- Documentação: OpenAPI nativa do FastAPI em `/docs` e `/redoc`  
+
+## 5. Dependências Base (Core Dependencies)
+- fastapi  
+- uvicorn[standard]  
+- pydantic  
+- markdown ou markdown2  
+- python-dotenv  
+- pytest (para TDD)  
+- mypy (opcional para tipagem estática)  
+- pytest-asyncio (para testes de endpoints async)

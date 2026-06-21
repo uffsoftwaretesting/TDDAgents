@@ -1,0 +1,234 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Crie um backend em FastAPI que disponibilize uma API para converter texto Markdown em
+   HTML. O sistema deve expor um endpoint que receba conteúdo em Markdown via requisição
+   HTTP e retorne o HTML correspondente, utilizando uma biblioteca adequada para a
+   conversão. Organize o projeto seguindo boas práticas de desenvolvimento, separando
+   configurações, schemas, serviços e rotas. Implemente validação dos dados de entrada,
+   tratamento de erros e respostas padronizadas. Todas as configurações devem ser
+   carregadas por variáveis de ambiente utilizando um arquivo .env, fornecendo também um
+   arquivo .env.example com exemplos das variáveis necessárias para configuração do
+   projeto. Inclua todas as dependências necessárias em um arquivo requirements.txt,
+   especificando as bibliotecas utilizadas para execução da aplicação.
+2. Adicione explicitamente para criar o arquivo requirements.txt e colocar todas as
+   dependências nele. Adicione para criar um arquivo .env.example com todas as variáveis
+   de ambiente.
+3. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Crie um backend em FastAPI que disponibilize uma API para converter texto
+           Markdown em HTML. O sistema deve expor um endpoint que receba conteúdo em
+           Markdown via requisição HTTP e retorne o HTML correspondente, utilizando uma
+           biblioteca adequada para a conversão. Organize o projeto seguindo boas
+           práticas de desenvolvimento, separando configurações, schemas, serviços e
+           rotas. Implemente validação dos dados de entrada, tratamento de erros e
+           respostas padronizadas. Todas as configurações devem ser carregadas por
+           variáveis de ambiente utilizando um arquivo .env, fornecendo também um
+           arquivo .env.example com exemplos das variáveis necessárias para configuração
+           do projeto. Inclua todas as dependências necessárias em um arquivo
+           requirements.txt, especificando as bibliotecas utilizadas para execução da
+           aplicação.
+[Analista]: Checklist de Requisitos Técnico para API de Conversão Markdown → HTML:
+
+1. Estrutura do Projeto
+1.1. Diretórios principais:
+• app/
+– main.py
+– config/
+– schemas/
+– services/
+– routes/
+• tests/
+• .env
+• .env.example
+• requirements.txt
+• README.md
+1.2. Seguir padrões de import absolute e agrupar módulos por responsabilidade.
+
+2. Configuração e Variáveis de Ambiente
+2.1. Criar arquivo .env com variáveis:
+• APP_NAME (ex: "MarkdownConverter")
+• HOST (ex: "0.0.0.0")
+• PORT (ex: "8000")
+• LOG_LEVEL (ex: "INFO")
+2.2. Fornecer .env.example com valores de exemplo.
+2.3. Implementar carregamento via pydantic.BaseSettings em config/settings.py.
+
+3. Dependências
+3.1. Gerar requirements.txt com versões fixas de:
+• fastapi
+• uvicorn
+• pydantic
+• python-dotenv
+• markdown (ou markdown2)
+3.2. Incluir instruções de instalação no README.md.
+
+4. Schemas de Dados (schemas/markdown.py)
+4.1. InputModel:
+• campo markdown: str (não vazio, máximo 10000 caracteres)
+4.2. OutputModel:
+• campo html: str
+• status: Literal['success']
+4.3. ErrorModel padrão para respostas de erro:
+• status: Literal['error']
+• message: str
+• details: Optional[Any]
+
+5. Serviço de Conversão (services/converter.py)
+5.1. Função convert_markdown_to_html(markdown_text: str) -> str:
+• Utilizar biblioteca python-markdown ou markdown2
+• Testar conversão correta de headings, listas, links, imagens, código inline/blocos de
+código.
+• Lidar com strings vazias retornando string vazia.
+
+6. Rotas e Endpoints (routes/markdown.py)
+6.1. Definir APIRouter com prefix '/markdown' e tag 'Markdown'.
+6.2. Endpoint POST '/convert':
+• Recebe InputModel em JSON
+• Chama serviço convert_markdown_to_html
+• Retorna OutputModel com HTML convertido
+• Respostas esperadas:
+– 200: conversão bem-sucedida
+– 422: validação de payload
+– 500: erro interno de conversão
+
+7. Tratamento de Erros e Respostas Padronizadas
+7.1. Utilizar exceções HTTPException do FastAPI.
+7.2. Implementar exceção genérica para erros de conversão.
+7.3. Retornar ErrorModel em JSON com status, message e details (se aplicável).
+
+8. Validação e Respostas HTTP
+8.1. Garantir retorno de status code corretos:
+• 200 OK → sucesso
+• 400 Bad Request → payload inválido ou vazio
+• 500 Internal Server Error → falha inesperada
+8.2. Mensagens de erro descritivas para facilitar debug.
+
+9. Carregamento e Execução da Aplicação (main.py)
+9.1. Instanciar FastAPI com título e versão.
+9.2. Incluir middleware de logging (opcional).
+9.3. Incluir rotas definidas.
+9.4. Configurar host e porta via settings carregados do .env.
+
+10. Testes Automatizados (TDD)
+10.1. test_services/test_converter.py:
+• cenários: markdown simples, headings, listas, links, imagens, código.
+• string vazia → string vazia.
+10.2. test_routes/test_markdown_endpoint.py:
+• sucesso 200 com HTML válido
+• 422 payload sem campo ‘markdown’
+• 422 markdown nulo ou tipo errado
+• simular erro interno → 500
+
+11. Documentação e README
+11.1. Explicar como configurar .env e instalar dependências.
+11.2. Exemplos de requisição via curl ou HTTPie.
+11.3. Como executar testes.
+
+Posso prosseguir para a equipe de engenharia?
+
+[Usuário]: Adicione explicitamente para criar o arquivo requirements.txt e colocar todas
+           as dependências nele. Adicione para criar um arquivo .env.example com todas
+           as variáveis de ambiente.
+[Analista]: Checklist de Requisitos Técnico para API de Conversão Markdown → HTML:
+
+1. Estrutura do Projeto
+1.1. Diretórios e arquivos principais na raiz:
+• app/
+– main.py
+– config/
+– schemas/
+– services/
+– routes/
+• tests/
+• .env                       ← carregamento em tempo de execução
+• .env.example               ← modelo com todas as variáveis de ambiente
+• requirements.txt           ← listagem de todas as dependências
+• README.md
+1.2. Utilizar imports absolutos e organizar módulos por responsabilidade.
+
+2. Configuração e Variáveis de Ambiente
+2.1. Criar arquivo .env com as variáveis:
+• APP_NAME (ex: "MarkdownConverter")
+• HOST (ex: "0.0.0.0")
+• PORT (ex: "8000")
+• LOG_LEVEL (ex: "INFO")
+2.2. Criar arquivo .env.example contendo exatamente as mesmas chaves do .env, com
+valores de exemplo.
+2.3. Implementar carregamento via pydantic.BaseSettings em app/config/settings.py.
+
+3. Dependências e requirements.txt
+3.1. Criar arquivo requirements.txt na raiz do projeto.
+3.2. Listar todas as dependências com versões fixas, por exemplo:
+• fastapi==<versão>
+• uvicorn==<versão>
+• pydantic==<versão>
+• python-dotenv==<versão>
+• markdown==<versão> ou markdown2==<versão>
+3.3. Incluir instruções de instalação (pip install -r requirements.txt) no README.md.
+
+4. Schemas de Dados (app/schemas/markdown.py)
+4.1. InputModel:
+• markdown: str — obrigatório, não vazio, máx. 10000 caracteres.
+4.2. OutputModel:
+• html: str
+• status: Literal['success']
+4.3. ErrorModel:
+• status: Literal['error']
+• message: str
+• details: Optional[Any]
+
+5. Serviço de Conversão (app/services/converter.py)
+5.1. Função convert_markdown_to_html(markdown_text: str) -> str:
+• Usa biblioteca python-markdown ou markdown2.
+• Converte headings, listas, links, imagens, código inline/blocos.
+• Retorna string vazia se input for vazio.
+
+6. Rotas e Endpoints (app/routes/markdown.py)
+6.1. Configurar APIRouter com prefix '/markdown' e tag 'Markdown'.
+6.2. Endpoint POST '/convert':
+• Recebe JSON conforme InputModel.
+• Chama convert_markdown_to_html.
+• Retorna OutputModel e status 200.
+• Erros:
+– 422: payload inválido
+– 500: erro interno (retornar ErrorModel)
+
+7. Tratamento de Erros e Respostas Padronizadas
+7.1. Usar HTTPException para erros HTTP.
+7.2. Exceção genérica para falha de conversão.
+7.3. Retornar ErrorModel com status, message e details (se houver).
+
+8. Validação e Códigos HTTP
+8.1. 200 OK → conversão bem-sucedida.
+8.2. 400 Bad Request → payload inválido (campo ausente ou vazio).
+8.3. 422 Unprocessable Entity → tipo incorreto no payload.
+8.4. 500 Internal Server Error → falha inesperada.
+
+9. Inicialização e Execução (app/main.py)
+9.1. Instanciar FastAPI com título e versão.
+9.2. Carregar configurações de app/config/settings.py.
+9.3. Incluir middleware de logging (opcional).
+9.4. Incluir roteadores.
+9.5. Configurar host e porta via uvicorn com valores do .env.
+
+10. Testes Automatizados (TDD)
+10.1. test_services/test_converter.py:
+• Casos: markdown simples, headings, listas, links, imagens, código.
+• Caso de string vazia.
+10.2. test_routes/test_markdown_endpoint.py:
+• Sucesso 200 com HTML.
+• 422 para payload sem 'markdown'.
+• 422 para markdown nulo ou tipo errado.
+• 500 simulando erro interno.
+
+11. Documentação e README.md
+11.1. Como configurar .env e .env.example.
+11.2. Como instalar dependências (pip install -r requirements.txt).
+11.3. Exemplos de requisição via curl ou HTTPie.
+11.4. Como executar testes.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================
