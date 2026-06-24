@@ -1,0 +1,82 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: Markdown to HTML Conversion Service
+
+## 1. Visão Geral do Sistema
+O sistema fornece um backend em FastAPI que expõe um endpoint HTTP para receber texto em Markdown e retornar o HTML correspondente. Ele garante boas práticas de organização de código, carregamento de configurações via variáveis de ambiente, validação de payloads, tratamento uniforme de erros e documentação automática via OpenAPI.
+
+## 2. Estruturas de Dados e Interfaces
+
+### 2.1 Configurações (app/config/settings.py)
+- Classe `Settings` (herda de `pydantic.BaseSettings`)
+  - APP_ENV: str (ex: "development", "production")  
+  - DEBUG: bool  
+  - HOST: str  
+  - PORT: int  
+- Mecanismo de carregamento: arquivo `.env`; variáveis acessíveis via `app.settings`
+
+### 2.2 Schemas (app/schemas/markdown.py)
+- RequestModel
+  - markdown: str  
+    - Obrigatório, não vazio, comprimento máximo 10 000 caracteres  
+- ResponseModel
+  - data:  
+    - html: str  
+  - error: Optional[str] (null em casos de sucesso)  
+
+### 2.3 Serviço de Conversão (app/services/converter.py)
+- Função pública:
+  - convert_markdown_to_html(markdown_text: str) → str  
+    - Interface síncrona ou assíncrona  
+    - Usa biblioteca `markdown` (ou `markdown2`) com configurações padrão  
+
+### 2.4 Rotas / API (app/routes/markdown.py)
+- Endpoint: POST `/convert`  
+  - Input: JSON conforme `RequestModel`  
+  - Output: JSON conforme `ResponseModel`  
+  - Códigos HTTP:
+    - 200: conversão bem-sucedida  
+    - 422: validação de payload (via Pydantic)  
+    - 500: erro interno genérico  
+  - Documentação automática via FastAPI / OpenAPI  
+
+### 2.5 Tratamento de Erros e Respostas (app/core)
+- errors.py
+  - Exceções customizadas (ex: `ConversionError`)  
+- responses.py
+  - Funções para padronizar saída:
+    - sucesso: `{"data": {...}, "error": null}`  
+    - falha de negócio ou técnica: `{"data": null, "error": "mensagem"}`  
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+1. Payload ausente ou malformado  
+   - Resultado: HTTP 422 com detalhes de erro do Pydantic  
+2. Campo `markdown` vazio (`""`)  
+   - Validação customizada em schema → HTTP 422, mensagem “Markdown content must not be empty.”  
+3. Campo `markdown` excede 10 000 caracteres  
+   - Validação customizada em schema → HTTP 422, mensagem “Markdown content too large (max 10000 chars).”  
+4. Texto Markdown minimalista (ex: `""`)  
+   - Saída HTML vazia (`""`), HTTP 200  
+5. Conversão de elementos complexos (listas, links, imagens)  
+   - Garantir HTML válido conforme especificações da biblioteca  
+6. Exceções imprevistas no serviço de conversão  
+   - Capturar e mapear para HTTP 500, resposta `{"data": null, "error": "<mensagem genérica>"}`  
+
+## 4. Contexto Técnico
+- Linguagem: Python 3.9+  
+- Framework web: FastAPI (async-ready)  
+- Configuração via `.env` e `python-dotenv`  
+- Paradigma: rotas RESTful, injeção de dependência nativa do FastAPI  
+- Formato de comunicação: JSON (RFC 8259)  
+- Documentação gerada automaticamente (Swagger UI / ReDoc)  
+
+## 5. Dependências Base (Core Dependencies)
+- fastapi  
+- uvicorn  
+- python-dotenv  
+- markdown (ou markdown2)  
+- pydantic  
+- pytest (framework de testes)  
+- httpx (para TestClient, testes de integração)  
+- pytest-asyncio (opcional, para testes de rotas assíncronas)

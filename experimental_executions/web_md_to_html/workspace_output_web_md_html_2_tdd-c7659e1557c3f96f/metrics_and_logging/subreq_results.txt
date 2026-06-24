@@ -1,0 +1,22 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 7
+Success: 7
+Failed: 0
+Clean TDD Rate (F1) = 3 / 7 (42.9%)
+Green in Red Rate (F2) = 4 / 7 (57.1%)
+Fail rate = 0 / 7 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F2] FASE 0 - SETUP: Instalar dependências base definidas (fastapi, uvicorn, python-dotenv, markdown ou markdown2, pydantic, pytest, httpx, pytest-asyncio). Configurar estrutura de diretórios em app/{config,schemas,services,core,routes} e tests/{unit,integration}. Criar arquivos __init__.py vazios e arquivo .env.example.
+2. [SUCCESS] [F1] FASE 1 - CONFIGURAÇÕES: Criar testes unitários em tests/unit/config/test_settings.py para validar o carregamento de APP_ENV, DEBUG, HOST e PORT via Pydantic BaseSettings. Depois, implementar app/config/settings.py com classe Settings e instância global app.settings, carregando variáveis de ambiente do .env.
+3. [SUCCESS] [F2] FASE 2 - SCHEMAS: Escrever testes em tests/unit/schemas/test_markdown_schema.py verificando validações de RequestModel (campo markdown obrigatório, não vazio, máximo 10000 caracteres) e ResponseModel (html string e error opcional). Em seguida, implementar app/schemas/markdown.py com Pydantic, incluindo validators customizados e mensagens de erro específicas.
+4. [SUCCESS] [F1] FASE 3 - SERVIÇO DE CONVERSÃO: Criar testes em tests/unit/services/test_converter.py para a função convert_markdown_to_html cobrindo casos: texto vazio, cabeçalhos, listas, links, imagens e simulação de falha para gerar ConversionError. Depois, implementar app/services/converter.py usando a biblioteca markdown(markdown2) e lançando ConversionError em exceções internas.
+5. [SUCCESS] [F1] FASE 4 - TRATAMENTO DE ERROS E PADRONIZAÇÃO DE RESPOSTAS: Desenvolver testes em tests/unit/core/test_responses_errors.py para classes customizadas em errors.py (ConversionError) e funções de responses.py gerando payloads {data, error}. Implementar app/core/errors.py e app/core/responses.py com estrutura de resposta padrão.
+6. [SUCCESS] [F2] FASE 5 - ROTAS / API: Criar testes de rota em tests/unit/routes/test_markdown_route.py usando TestClient (httpx) para endpoint POST /convert, validando HTTP 200 (sucesso), 422 (payload ausente/malformado, campo vazio, excesso de caracteres) e 500 (erro interno). Depois, implementar app/routes/markdown.py em FastAPI, injetar Settings, chamar service, usar respostas padronizadas e exceções capturadas, garantindo OpenAPI.
+7. [SUCCESS] [F2] FASE 6 - TESTES DE INTEGRAÇÃO: Escrever testes end-to-end em tests/integration/test_end_to_end.py com AsyncClient para executar a aplicação completa, cobrindo chamadas a /convert, verificando JSON de resposta, códigos HTTP, e checando endpoints de documentação (/docs, /openapi.json).
+================================================================================

@@ -1,0 +1,14 @@
+PROMPT INICIAL ENVIADO PELO USUARIO
+================================================================================
+Crie um backend em FastAPI que disponibilize uma API para converter texto
+Markdown em HTML. O sistema deve expor um endpoint que receba conteúdo em
+Markdown via requisição HTTP e retorne o HTML correspondente, utilizando uma
+biblioteca adequada para a conversão. Organize o projeto seguindo boas práticas
+de desenvolvimento, separando configurações, schemas, serviços e rotas.
+Implemente validação dos dados de entrada, tratamento de erros e respostas
+padronizadas. Todas as configurações devem ser carregadas por variáveis de
+ambiente utilizando um arquivo .env, fornecendo também um arquivo .env.example
+com exemplos das variáveis necessárias para configuração do projeto. Inclua
+todas as dependências necessárias em um arquivo requirements.txt, especificando
+as bibliotecas utilizadas para execução da aplicação.
+================================================================================
