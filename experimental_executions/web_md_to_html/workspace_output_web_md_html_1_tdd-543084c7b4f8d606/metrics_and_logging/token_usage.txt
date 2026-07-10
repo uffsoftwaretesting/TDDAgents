@@ -1,0 +1,16 @@
+TOKEN USAGE REPORT
+================================================================================
+
+BY MODEL:
+  o4-mini-2025-04-16:
+    input_tokens: 142815
+    total_tokens: 192813
+    output_token_details: {'reasoning': 39296, 'audio': 0}
+    input_token_details: {'audio': 0, 'cache_read': 25728}
+    output_tokens: 49998
+
+TOTALS:
+  total_tokens: 192813
+  prompt_tokens: 142815
+  completion_tokens: 49998
+  cached_tokens: 25728

@@ -1,0 +1,87 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Crie um backend em FastAPI que disponibilize uma API para converter texto
+           Markdown em HTML. O sistema deve expor um endpoint que receba conteúdo em
+           Markdown via requisição HTTP e retorne o HTML correspondente, utilizando uma
+           biblioteca adequada para a conversão. Organize o projeto seguindo boas
+           práticas de desenvolvimento, separando configurações, schemas, serviços e
+           rotas. Implemente validação dos dados de entrada, tratamento de erros e
+           respostas padronizadas. Todas as configurações devem ser carregadas por
+           variáveis de ambiente utilizando um arquivo .env, fornecendo também um
+           arquivo .env.example com exemplos das variáveis necessárias para configuração
+           do projeto. Inclua todas as dependências necessárias em um arquivo
+           requirements.txt, especificando as bibliotecas utilizadas para execução da
+           aplicação.
+[Analista]: Checklist de Requisitos Técnicos - API de Conversão Markdown para HTML
+
+1. Configuração Inicial do Projeto
+- [ ] Inicializar repositório Git
+- [ ] Criar ambiente virtual (venv, Poetry ou similar)
+- [ ] Estruturar pastas:
+• app/
+• app/config/
+• app/schemas/
+• app/services/
+• app/routes/
+- [ ] Adicionar requirements.txt com dependências:
+• fastapi
+• uvicorn
+• python-dotenv
+• markdown (ou markdown2)
+- [ ] Incluir .env.example com variáveis:
+• APP_NAME
+• DEBUG
+• HOST
+• PORT
+
+2. Configurações (app/config/settings.py)
+- [ ] Carregar .env via python-dotenv
+- [ ] Definir classe Settings com atributos:
+• app_name: str
+• debug: bool
+• host: str
+• port: int
+- [ ] Carregar instância de Settings como singleton
+
+3. Schemas de Dados (app/schemas)
+- [ ] MarkdownInput (Pydantic):
+• content: str (não vazio, tamanho máximo configurável)
+- [ ] HTMLResponse (Pydantic):
+• html: str
+- [ ] ErrorResponse (Pydantic):
+• success: bool = False
+• error: { code: int; message: str }
+
+4. Serviço de Conversão (app/services/markdown_converter.py)
+- [ ] Implementar função convert_markdown_to_html(text: str) -> str
+- [ ] Utilizar biblioteca markdown para conversão
+- [ ] Tratar possíveis exceções de conversão
+
+5. Rotas e Endpoints (app/routes/markdown.py)
+- [ ] Registrar router FastAPI com prefixo: “/convert”
+- [ ] Definir endpoint POST “/”:
+• Recebe MarkdownInput
+• Chama serviço de conversão
+• Retorna HTMLResponse em caso de sucesso
+- [ ] Documentar summary e description para OpenAPI
+
+6. Validação de Dados e Tratamento de Erros
+- [ ] Utilizar validação Pydantic para input
+- [ ] Implementar exception handler genérico para:
+• RequestValidationError (422)
+• Exception genérica (500)
+- [ ] Formatar respostas de erro via ErrorResponse:
+• Código HTTP apropriado (422 ou 500)
+• JSON padronizado: { success: false, error: { code, message } }
+- [ ] Formatar respostas de sucesso:
+• { success: true, data: { html: "..." } }
+
+7. Documentação e Execução
+- [ ] Documentar instruções de setup e execução no README.md:
+• Instalação das dependências
+• Configuração do .env
+• Comando para rodar (uvicorn)
+- [ ] Verificar acesso à documentação interativa (/docs e /redoc)
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

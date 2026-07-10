@@ -1,0 +1,90 @@
+REQUISITOS ENVIADOS PELO USUÁRIO
+================================================================================
+[Usuário]: Crie um backend em FastAPI que disponibilize uma API para converter texto
+           Markdown em HTML. O sistema deve expor um endpoint que receba conteúdo em
+           Markdown via requisição HTTP e retorne o HTML correspondente, utilizando uma
+           biblioteca adequada para a conversão. Organize o projeto seguindo boas
+           práticas de desenvolvimento, separando configurações, schemas, serviços e
+           rotas. Implemente validação dos dados de entrada, tratamento de erros e
+           respostas padronizadas. Todas as configurações devem ser carregadas por
+           variáveis de ambiente utilizando um arquivo .env, fornecendo também um
+           arquivo .env.example com exemplos das variáveis necessárias para configuração
+           do projeto. Inclua todas as dependências necessárias em um arquivo
+           requirements.txt, especificando as bibliotecas utilizadas para execução da
+           aplicação.
+[Analista]: Checklist de Requisitos para API de Conversão de Markdown em HTML (FastAPI):
+
+1. Inicialização do Projeto
+- [ ] Criar ambiente virtual (venv/venv) e ativar.
+- [ ] Gerar arquivo requirements.txt com dependências congeladas.
+- [ ] Incluir .gitignore e adicionar venv, .env.
+
+2. Estrutura de Diretórios
+- [ ] config/
+• config.py       ← Carregamento de .env via Pydantic BaseSettings
+- [ ] schemas/
+• request.py      ← Pydantic model para input Markdown
+• response.py     ← Pydantic model para output HTML e erro padronizado
+- [ ] services/
+• markdown_converter.py ← Função que recebe string Markdown e devolve HTML
+- [ ] routes/
+• markdown.py     ← Definição do endpoint e injeção de dependências
+- [ ] main.py          ← Criação da instância FastAPI, inclusão de routers
+- [ ] .env.example     ← Variáveis de ambiente necessárias (p.ex. APP_NAME, DEBUG, PORT)
+
+3. Configuração via Variáveis de Ambiente
+- [ ] Usar python-dotenv para carregar .env
+- [ ] Configurar Pydantic BaseSettings para validar padrões e obrigatoriedade
+- [ ] Exemplo de variáveis no .env.example: APP_NAME, DEBUG, HOST, PORT
+
+4. Dependências (requirements.txt)
+- fastapi==<versão>
+- uvicorn[standard]==<versão>
+- pydantic==<versão>
+- python-markdown==<versão>  # ou markdown2
+- python-dotenv==<versão>
+- pytest==<versão>           # para testes TDD
+
+5. Schemas e Validação
+- [ ] RequestModel: campo markdown: str (min_length=1)
+- [ ] ResponseModel:
+• html: str
+• message: str (opcional em caso de sucesso)
+- [ ] ErrorModel:
+• detail: str
+• code: int
+
+6. Serviço de Conversão (services/markdown_converter.py)
+- [ ] Função convert(markdown_text: str) -> str
+- [ ] Internamente usa biblioteca markdown com extensões básicas
+
+7. Rotas e Lógicas de Negócio (routes/markdown.py)
+- [ ] Endpoint POST /convert-markdown
+• Entrada: RequestModel
+• Saída: 200 → ResponseModel(html)
+- [ ] Definir tags e descrições para documentação automática (OpenAPI)
+
+8. Tratamento de Erros e Respostas Padronizadas
+- [ ] Exceção para validação de payload → 422 Unprocessable Entity
+- [ ] Exceção genérica interna → 500 Internal Server Error com ErrorModel
+- [ ] Middleware ou exception handlers customizados para unir formatos
+
+9. Execução e Configuração do Servidor
+- [ ] Comando uvicorn main:app --host ${HOST} --port ${PORT} --reload (em DEBUG)
+- [ ] Profile de produção sem --reload e DEBUG=False
+
+10. Testes (TDD)
+- [ ] Testar conversão básica: “# Hello” → “<h1>Hello</h1>”
+- [ ] Testar payload vazio ou inválido → 422
+- [ ] Simular falha na biblioteca de conversão → 500
+- [ ] Testar rota inexistente → 404
+
+11. Documentação e Exemplos
+- [ ] Incluir README.md com:
+• Como rodar projeto
+• Exemplo de .env
+• Exemplos de requisição e resposta
+- [ ] Verificar documentação automática pelo Swagger (/docs)
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

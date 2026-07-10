@@ -1,0 +1,101 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: ConversorRomanosToInt
+
+## 1. Visão Geral do Sistema
+Este módulo fornece uma única função, `roman_to_int(s: str) -> int`, que converte uma string representando um número romano no seu valor inteiro correspondente. A função rejeita entradas inválidas lançando `ValueError` e suporta valores entre 1 e 3999. O processamento é case-insensitive e implementado em Python puro, sem dependências externas além da biblioteca padrão.
+
+## 2. Estruturas de Dados e Interfaces
+
+### 2.1 Assinatura da Função
+- Nome: `roman_to_int`
+- Assinatura:  
+  ```python
+  roman_to_int(s: str) -> int
+  ```
+- Parâmetros:
+  - `s`: string contendo apenas os caracteres romanos válidos (`I`, `V`, `X`, `L`, `C`, `D`, `M`), de qualquer caixa.
+- Retorno:
+  - Inteiro no intervalo `[1, 3999]`.
+- Exceção:
+  - Lança `ValueError` em qualquer situação de entrada inválida (ver seção 3).
+
+### 2.2 Tabela de Mapeamento
+Entidade: dicionário de valores para símbolos romanos:
+- I → 1  
+- V → 5  
+- X → 10  
+- L → 50  
+- C → 100  
+- D → 500  
+- M → 1000  
+
+### 2.3 Regras de Subtração Válidas
+Contratos de par símbolo-seguinte que permitem subtração:
+- I antes de V ou X  
+- X antes de L ou C  
+- C antes de D ou M  
+Todas as outras combinações de valor menor antes de valor maior são inválidas e devem gerar `ValueError`.
+
+### 2.4 Regras de Repetição
+- Símbolos que podem se repetir até 3 vezes consecutivas: `I`, `X`, `C`, `M`.  
+- Símbolos que não podem se repetir consecutivamente: `V`, `L`, `D`.
+
+### 2.5 Fluxo Lógico de Conversão
+1. Normalizar `s` para caixa alta.  
+2. Validar caracteres e padrões (seções 3.1 a 3.4).  
+3. Iterar da esquerda para a direita:
+   - Para cada símbolo, comparar seu valor com o do próximo:
+     - Se valor atual ≥ próximo → somar ao total.
+     - Se valor atual < próximo → verificar se a combinação é permitida; se sim, subtrair do total; se não, lançar erro.
+4. Ao fim, verificar se `1 ≤ total ≤ 3999`; caso contrário, `ValueError`.
+5. Retornar `total`.
+
+## 3. Casos de Borda e Validações (Edge Cases)
+
+3.1 Entrada Vazia  
+- `s == ""` → `ValueError`
+
+3.2 Caracteres Inválidos  
+- Qualquer caractere fora do conjunto `{I, V, X, L, C, D, M}` em qualquer caixa → `ValueError`
+
+3.3 Repetições Ilegais  
+- Mais de 3 repetições consecutivas de `I`, `X`, `C` ou `M` → `ValueError`  
+- Qualquer repetição consecutiva de `V`, `L` ou `D` (>1) → `ValueError`
+
+3.4 Combinações de Subtração Inválidas  
+- Padrões não listados em “Regras de Subtração Válidas” (p.ex. `IC`, `IL`, `VX`, `XM`, etc.) → `ValueError`
+
+3.5 Resultado Fora de Faixa  
+- Total final < 1 ou > 3999 → `ValueError`
+
+3.6 Exemplos de Testes
+
+3.6.1 Casos Válidos  
+- “III” → 3  
+- “IV” → 4  
+- “IX” → 9  
+- “LVIII” → 58  
+- “MCMXCIV” → 1994  
+- “mmmxmxcix” (case-insensitive) → 3999  
+- “I” → 1  
+- “MMMCMXCIX” → 3999  
+
+3.6.2 Casos Inválidos (devem lançar ValueError)  
+- String vazia: `""`  
+- Caracteres não-romanos: `"ABCD"`, `"Z"`  
+- Repetições ilegais: `"XXXX"`, `"VV"`, `"DD"`  
+- Subtrações inválidas: `"IC"`, `"IL"`, `"VX"`, `"XM"`  
+- Valor resultante fora de intervalo: (implícito pela combinação, p.ex. soma superior a 3999)
+
+## 4. Contexto Técnico
+- Linguagem-alvo: Python 3.x  
+- Paradigma: programação imperativa e funcional, sem uso de recursos externos.  
+- Precisão: inteiro exato, sem ponto flutuante.  
+- Tratamento de erros: todas as regras de negócio violadas devem resultar em `ValueError`.  
+- Case-insensitive: normalizar entrada antes de processamento.  
+- Intervalo suportado: 1 a 3999 (inclusive).
+
+## 5. Dependências Base (Core Dependencies)
+- Python 3.x (biblioteca padrão)  
+- pytest (para implementação da suíte de testes TDD)

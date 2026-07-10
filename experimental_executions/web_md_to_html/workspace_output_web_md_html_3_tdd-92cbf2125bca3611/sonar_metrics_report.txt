@@ -1,0 +1,19 @@
+======================================================
+      RELATÓRIO DE MÉTRICAS DE QUALIDADE (SONAR)      
+======================================================
+Projeto: web-md-to-html-3
+Gerado em: 2026-06-24 00:27:29
+Linhas de Código Úteis (NCLOC): 129
+Total de Code Smells:           0
+Sucesso dos Testes Unitários:   100%
+
+Sucesso dos Testes           Valor:     100% | Meta: >= 100%   | PASSED
+Complexidade Cognitiva       Valor:       12 | Meta: <= 15     | PASSED
+Complexidade Ciclomatica     Valor:       17 | Meta: <= 10     | FAILED
+Densidade Code Smells        Valor:        0 | Meta: <= 5      | PASSED
+Duplicacao de Codigo         Valor:       0% | Meta: <= 3%     | PASSED
+Cobertura de Testes          Valor:      97% | Meta: >= 80%    | PASSED
+Debt Ratio                   Valor:       0% | Meta: <= 5%     | PASSED
+
+STATUS GERAL: FAILED
+======================================================

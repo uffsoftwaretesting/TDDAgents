@@ -65,9 +65,20 @@ def _openai_status(exc: Exception) -> int | None:
 
 
 def _openai_error_code(exc: Exception) -> str | None:
-    """Extract the provider-level error code from the response body."""
+    """Extract the provider-level error code from the response body.
+
+    The OpenAI SDK exposes exc.body as the unwrapped error dict
+    (i.e. the value of the "error" key from the JSON response), so
+    "code" is a top-level key. We also handle the wrapped form just
+    in case the SDK behaviour changes.
+    """
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
+        # Unwrapped form: {"code": "...", "message": "...", ...}
+        code = body.get("code")
+        if isinstance(code, str):
+            return code
+        # Wrapped form: {"error": {"code": "...", ...}}
         error = body.get("error")
         if isinstance(error, dict):
             code = error.get("code")
@@ -144,19 +155,22 @@ def handle_llm_exception(exc: Exception, context: str = "") -> Never:
         if isinstance(exc, GraphRecursionError):
             raise FatalInfraError(
                 f"{prefix}LangGraph recursion limit reached. "
-                "Check for infinite loops or increase recursion_limit."
+                "Check for infinite loops or increase recursion_limit.",
+                original_exc=exc,
             ) from exc
 
         if isinstance(exc, InvalidUpdateError):
             raise FatalInfraError(
                 f"{prefix}LangGraph state update is invalid. "
-                "A node returned a value incompatible with the channel schema."
+                "A node returned a value incompatible with the channel schema.",
+                original_exc=exc,
             ) from exc
 
         if isinstance(exc, (EmptyInputError, EmptyChannelError)):
             raise FatalInfraError(
                 f"{prefix}LangGraph received empty input or "
-                "tried to read an uninitialised channel: {exc}"
+                "tried to read an uninitialised channel: {exc}",
+                original_exc=exc,
             ) from exc
 
     # ------------------------------------------------------------------
@@ -175,11 +189,13 @@ def handle_llm_exception(exc: Exception, context: str = "") -> Never:
             if getattr(exc, "send_to_llm", False):
                 raise TransientInfraError(
                     f"{prefix}LLM output could not be parsed; "
-                    "the parser has requested a retry."
+                    "the parser has requested a retry.",
+                    original_exc=exc,
                 ) from exc
             raise FatalInfraError(
                 f"{prefix}LLM output could not be parsed and "
-                "the parser did not supply retry context."
+                "the parser did not supply retry context.",
+                original_exc=exc,
             ) from exc
 
     # ------------------------------------------------------------------
@@ -215,42 +231,50 @@ def handle_llm_exception(exc: Exception, context: str = "") -> Never:
         if isinstance(exc, RateLimitError):
             if _openai_error_code(exc) == "insufficient_quota":
                 raise FatalInfraError(
-                    f"{prefix}OpenAI quota exhausted; top up the account."
+                    f"{prefix}OpenAI quota exhausted; top up the account.",
+                    original_exc=exc,
                 ) from exc
             raise TransientInfraError(
-                f"{prefix}OpenAI rate limit reached; back off and retry."
+                f"{prefix}OpenAI rate limit reached; back off and retry.",
+                original_exc=exc,
             ) from exc
 
         if isinstance(exc, (APITimeoutError, APIConnectionError)):
             raise TransientInfraError(
-                f"{prefix}OpenAI connectivity failure; retry after a moment."
+                f"{prefix}OpenAI connectivity failure; retry after a moment.",
+                original_exc=exc,
             ) from exc
 
         if isinstance(exc, InternalServerError):
             raise TransientInfraError(
-                f"{prefix}OpenAI internal server error; retry after a moment."
+                f"{prefix}OpenAI internal server error; retry after a moment.",
+                original_exc=exc,
             ) from exc
 
         if isinstance(exc, AuthenticationError):
             raise FatalInfraError(
-                f"{prefix}OpenAI authentication failed; check API key."
+                f"{prefix}OpenAI authentication failed; check API key.",
+                original_exc=exc,
             ) from exc
 
         if isinstance(exc, PermissionDeniedError):
             raise FatalInfraError(
-                f"{prefix}OpenAI permission denied; check account access."
+                f"{prefix}OpenAI permission denied; check account access.",
+                original_exc=exc,
             ) from exc
 
         if isinstance(exc, NotFoundError):
             raise FatalInfraError(
                 f"{prefix}OpenAI model or resource not found; "
-                "check model name and availability."
+                "check model name and availability.",
+                original_exc=exc,
             ) from exc
 
         if isinstance(exc, (BadRequestError, UnprocessableEntityError)):
             raise FatalInfraError(
                 f"{prefix}Malformed request sent to OpenAI "
-                "(invalid params, prompt too long, etc.)."
+                "(invalid params, prompt too long, etc.).",
+                original_exc=exc,
             ) from exc
 
         # Generic APIStatusError — covers undocumented or future status codes
@@ -262,10 +286,12 @@ def handle_llm_exception(exc: Exception, context: str = "") -> Never:
                 isinstance(status, int) and 500 <= status <= 599
             ):
                 raise TransientInfraError(
-                    f"{prefix}OpenAI returned transient HTTP {status}; retry."
+                    f"{prefix}OpenAI returned transient HTTP {status}; retry.",
+                    original_exc=exc,
                 ) from exc
             raise FatalInfraError(
-                f"{prefix}OpenAI returned permanent HTTP {status}."
+                f"{prefix}OpenAI returned permanent HTTP {status}.",
+                original_exc=exc,
             ) from exc
 
     # ------------------------------------------------------------------
@@ -274,5 +300,6 @@ def handle_llm_exception(exc: Exception, context: str = "") -> Never:
     # ------------------------------------------------------------------
     raise FatalInfraError(
         f"{prefix}Unclassified LLM failure "
-        f"({type(exc).__qualname__}): {exc}"
+        f"({type(exc).__qualname__}): {exc}",
+        original_exc=exc,
     ) from exc

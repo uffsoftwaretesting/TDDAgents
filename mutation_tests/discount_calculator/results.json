@@ -1,0 +1,88 @@
+{
+    "Workspace 1": {
+        "stats": {
+            "killed": 49,
+            "survived": 5,
+            "total": 54,
+            "no_tests": 0,
+            "skipped": 0,
+            "suspicious": 0,
+            "timeout": 0,
+            "check_was_interrupted_by_user": 0,
+            "segfault": 0
+        },
+        "survived": [
+            "calculate_discount.x_calculate_discount__mutmut_18",
+            "calculate_discount.x_calculate_discount__mutmut_37",
+            "calculate_discount.x_calculate_discount__mutmut_39",
+            "calculate_discount.x_calculate_discount__mutmut_44",
+            "calculate_discount.x_calculate_discount__mutmut_46"
+        ],
+        "timeouts": [],
+        "diffs": {
+            "calculate_discount.x_calculate_discount__mutmut_18": "# calculate_discount.x_calculate_discount__mutmut_18: survived\n--- src/calculate_discount.py\n+++ src/calculate_discount.py\n@@ -13,7 +13,7 @@\n     if price < 0:\n         raise ValueError(\"price must be non-negative\")\n     # Dom\u00ednio: discount_percent entre 0 e 100\n-    if discount_percent < 0 or discount_percent > 100:\n+    if discount_percent < 0 or discount_percent > 101:\n         raise ValueError(\"discount_percent must be between 0 and 100\")\n     # Convers\u00e3o para Decimal para c\u00e1lculo preciso\n     price_dec = Decimal(str(price))\n",
+            "calculate_discount.x_calculate_discount__mutmut_37": "# calculate_discount.x_calculate_discount__mutmut_37: survived\n--- src/calculate_discount.py\n+++ src/calculate_discount.py\n@@ -22,7 +22,7 @@\n     raw_discount = price_dec * (percent_dec / Decimal('100'))\n     raw_final_price = price_dec - raw_discount\n     # Arredondamento usando ROUND_HALF_UP a duas casas decimais\n-    discount_dec = raw_discount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n+    discount_dec = raw_discount.quantize(Decimal('0.01'), rounding=None)\n     final_price_dec = raw_final_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n     # Retorna valores como float\n     return {\n",
+            "calculate_discount.x_calculate_discount__mutmut_39": "# calculate_discount.x_calculate_discount__mutmut_39: survived\n--- src/calculate_discount.py\n+++ src/calculate_discount.py\n@@ -22,7 +22,7 @@\n     raw_discount = price_dec * (percent_dec / Decimal('100'))\n     raw_final_price = price_dec - raw_discount\n     # Arredondamento usando ROUND_HALF_UP a duas casas decimais\n-    discount_dec = raw_discount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n+    discount_dec = raw_discount.quantize(Decimal('0.01'), )\n     final_price_dec = raw_final_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n     # Retorna valores como float\n     return {\n",
+            "calculate_discount.x_calculate_discount__mutmut_44": "# calculate_discount.x_calculate_discount__mutmut_44: survived\n--- src/calculate_discount.py\n+++ src/calculate_discount.py\n@@ -23,7 +23,7 @@\n     raw_final_price = price_dec - raw_discount\n     # Arredondamento usando ROUND_HALF_UP a duas casas decimais\n     discount_dec = raw_discount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n-    final_price_dec = raw_final_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n+    final_price_dec = raw_final_price.quantize(Decimal('0.01'), rounding=None)\n     # Retorna valores como float\n     return {\n         'discount': float(discount_dec),\n",
+            "calculate_discount.x_calculate_discount__mutmut_46": "# calculate_discount.x_calculate_discount__mutmut_46: survived\n--- src/calculate_discount.py\n+++ src/calculate_discount.py\n@@ -23,7 +23,7 @@\n     raw_final_price = price_dec - raw_discount\n     # Arredondamento usando ROUND_HALF_UP a duas casas decimais\n     discount_dec = raw_discount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n-    final_price_dec = raw_final_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n+    final_price_dec = raw_final_price.quantize(Decimal('0.01'), )\n     # Retorna valores como float\n     return {\n         'discount': float(discount_dec),\n"
+        }
+    },
+    "Workspace 2": {
+        "stats": {
+            "killed": 35,
+            "survived": 6,
+            "total": 41,
+            "no_tests": 0,
+            "skipped": 0,
+            "suspicious": 0,
+            "timeout": 0,
+            "check_was_interrupted_by_user": 0,
+            "segfault": 0
+        },
+        "survived": [
+            "discount.x_calculate_discount__mutmut_3",
+            "discount.x_calculate_discount__mutmut_7",
+            "discount.x_calculate_discount__mutmut_12",
+            "discount.x_calculate_discount__mutmut_18",
+            "discount.x_calculate_discount__mutmut_20",
+            "discount.x_calculate_discount__mutmut_37"
+        ],
+        "timeouts": [],
+        "diffs": {
+            "discount.x_calculate_discount__mutmut_3": "# discount.x_calculate_discount__mutmut_3: survived\n--- src/discount.py\n+++ src/discount.py\n@@ -10,7 +10,7 @@\n         dict: com chaves \"discount_amount\" e \"final_price\", ambos floats arredondados em duas casas decimais\n     \"\"\"\n     if not isinstance(price, (int, float)):\n-        raise TypeError(\"price must be an int or float\")\n+        raise TypeError(\"XXprice must be an int or floatXX\")\n     if not isinstance(discount_percentage, (int, float)):\n         raise TypeError(\"discount_percentage must be an int or float\")\n     if price < 0:\n",
+            "discount.x_calculate_discount__mutmut_7": "# discount.x_calculate_discount__mutmut_7: survived\n--- src/discount.py\n+++ src/discount.py\n@@ -12,7 +12,7 @@\n     if not isinstance(price, (int, float)):\n         raise TypeError(\"price must be an int or float\")\n     if not isinstance(discount_percentage, (int, float)):\n-        raise TypeError(\"discount_percentage must be an int or float\")\n+        raise TypeError(\"XXdiscount_percentage must be an int or floatXX\")\n     if price < 0:\n         raise ValueError(\"price must be non-negative\")\n     if discount_percentage < 0 or discount_percentage > 100:\n",
+            "discount.x_calculate_discount__mutmut_12": "# discount.x_calculate_discount__mutmut_12: survived\n--- src/discount.py\n+++ src/discount.py\n@@ -14,7 +14,7 @@\n     if not isinstance(discount_percentage, (int, float)):\n         raise TypeError(\"discount_percentage must be an int or float\")\n     if price < 0:\n-        raise ValueError(\"price must be non-negative\")\n+        raise ValueError(\"XXprice must be non-negativeXX\")\n     if discount_percentage < 0 or discount_percentage > 100:\n         raise ValueError(\"discount_percentage must be between 0 and 100\")\n \n",
+            "discount.x_calculate_discount__mutmut_18": "# discount.x_calculate_discount__mutmut_18: survived\n--- src/discount.py\n+++ src/discount.py\n@@ -15,7 +15,7 @@\n         raise TypeError(\"discount_percentage must be an int or float\")\n     if price < 0:\n         raise ValueError(\"price must be non-negative\")\n-    if discount_percentage < 0 or discount_percentage > 100:\n+    if discount_percentage < 0 or discount_percentage > 101:\n         raise ValueError(\"discount_percentage must be between 0 and 100\")\n \n     discount_amount = round(price * (discount_percentage / 100), 2)\n",
+            "discount.x_calculate_discount__mutmut_20": "# discount.x_calculate_discount__mutmut_20: survived\n--- src/discount.py\n+++ src/discount.py\n@@ -16,7 +16,7 @@\n     if price < 0:\n         raise ValueError(\"price must be non-negative\")\n     if discount_percentage < 0 or discount_percentage > 100:\n-        raise ValueError(\"discount_percentage must be between 0 and 100\")\n+        raise ValueError(\"XXdiscount_percentage must be between 0 and 100XX\")\n \n     discount_amount = round(price * (discount_percentage / 100), 2)\n     final_price = round(price - discount_amount, 2)\n",
+            "discount.x_calculate_discount__mutmut_37": "# discount.x_calculate_discount__mutmut_37: survived\n--- src/discount.py\n+++ src/discount.py\n@@ -19,5 +19,5 @@\n         raise ValueError(\"discount_percentage must be between 0 and 100\")\n \n     discount_amount = round(price * (discount_percentage / 100), 2)\n-    final_price = round(price - discount_amount, 2)\n+    final_price = round(price - discount_amount, 3)\n     return {\"discount_amount\": discount_amount, \"final_price\": final_price}\n"
+        }
+    },
+    "Workspace 3": {
+        "stats": {
+            "killed": 45,
+            "survived": 5,
+            "total": 50,
+            "no_tests": 0,
+            "skipped": 0,
+            "suspicious": 0,
+            "timeout": 0,
+            "check_was_interrupted_by_user": 0,
+            "segfault": 0
+        },
+        "survived": [
+            "desconto.x_calcular_desconto__mutmut_16",
+            "desconto.x_calcular_desconto__mutmut_28",
+            "desconto.x_calcular_desconto__mutmut_30",
+            "desconto.x_calcular_desconto__mutmut_39",
+            "desconto.x_calcular_desconto__mutmut_41"
+        ],
+        "timeouts": [],
+        "diffs": {
+            "desconto.x_calcular_desconto__mutmut_16": "# desconto.x_calcular_desconto__mutmut_16: survived\n--- src/desconto.py\n+++ src/desconto.py\n@@ -22,7 +22,7 @@\n     if preco < 0:\n         raise ValueError(\"preco n\u00e3o pode ser negativo\")\n     # Valida\u00e7\u00e3o de dom\u00ednio do percentual\n-    if percentual < 0 or percentual > 100:\n+    if percentual < 0 or percentual > 101:\n         raise ValueError(\"percentual deve estar entre 0 e 100\")\n     # C\u00e1lculo e arredondamento com Decimal e HALF_UP\n     preco_dec = Decimal(str(preco))\n",
+            "desconto.x_calcular_desconto__mutmut_28": "# desconto.x_calcular_desconto__mutmut_28: survived\n--- src/desconto.py\n+++ src/desconto.py\n@@ -28,7 +28,7 @@\n     preco_dec = Decimal(str(preco))\n     perc_dec = Decimal(str(percentual))\n     desconto_dec = (preco_dec * perc_dec / Decimal('100')).quantize(\n-        Decimal('0.00'), rounding=ROUND_HALF_UP\n+        Decimal('0.00'), rounding=None\n     )\n     preco_final_dec = (preco_dec - desconto_dec).quantize(\n         Decimal('0.00'), rounding=ROUND_HALF_UP\n",
+            "desconto.x_calcular_desconto__mutmut_30": "# desconto.x_calcular_desconto__mutmut_30: survived\n--- src/desconto.py\n+++ src/desconto.py\n@@ -28,8 +28,7 @@\n     preco_dec = Decimal(str(preco))\n     perc_dec = Decimal(str(percentual))\n     desconto_dec = (preco_dec * perc_dec / Decimal('100')).quantize(\n-        Decimal('0.00'), rounding=ROUND_HALF_UP\n-    )\n+        Decimal('0.00'), )\n     preco_final_dec = (preco_dec - desconto_dec).quantize(\n         Decimal('0.00'), rounding=ROUND_HALF_UP\n     )\n",
+            "desconto.x_calcular_desconto__mutmut_39": "# desconto.x_calcular_desconto__mutmut_39: survived\n--- src/desconto.py\n+++ src/desconto.py\n@@ -31,6 +31,6 @@\n         Decimal('0.00'), rounding=ROUND_HALF_UP\n     )\n     preco_final_dec = (preco_dec - desconto_dec).quantize(\n-        Decimal('0.00'), rounding=ROUND_HALF_UP\n+        Decimal('0.00'), rounding=None\n     )\n     return {\"desconto\": float(desconto_dec), \"preco_final\": float(preco_final_dec)}\n",
+            "desconto.x_calcular_desconto__mutmut_41": "# desconto.x_calcular_desconto__mutmut_41: survived\n--- src/desconto.py\n+++ src/desconto.py\n@@ -31,6 +31,5 @@\n         Decimal('0.00'), rounding=ROUND_HALF_UP\n     )\n     preco_final_dec = (preco_dec - desconto_dec).quantize(\n-        Decimal('0.00'), rounding=ROUND_HALF_UP\n-    )\n+        Decimal('0.00'), )\n     return {\"desconto\": float(desconto_dec), \"preco_final\": float(preco_final_dec)}\n"
+        }
+    }
+}

@@ -1,0 +1,70 @@
+{
+    "Workspace 1": {
+        "stats": {
+            "killed": 1,
+            "survived": 4,
+            "total": 5,
+            "no_tests": 0,
+            "skipped": 0,
+            "suspicious": 0,
+            "timeout": 0,
+            "check_was_interrupted_by_user": 0,
+            "segfault": 0
+        },
+        "survived": [
+            "services.markdown_converter.x_convert__mutmut_2",
+            "services.markdown_converter.x_convert__mutmut_3",
+            "services.markdown_converter.x_convert__mutmut_4",
+            "services.markdown_converter.x_convert__mutmut_5"
+        ],
+        "timeouts": [],
+        "diffs": {
+            "services.markdown_converter.x_convert__mutmut_2": "# services.markdown_converter.x_convert__mutmut_2: survived\n--- services/markdown_converter.py\n+++ services/markdown_converter.py\n@@ -8,4 +8,4 @@\n     try:\n         return markdown.markdown(markdown_text)\n     except Exception as e:\n-        raise MarkdownConversionError(\"Internal conversion error\") from e\n+        raise MarkdownConversionError(None) from e\n",
+            "services.markdown_converter.x_convert__mutmut_3": "# services.markdown_converter.x_convert__mutmut_3: survived\n--- services/markdown_converter.py\n+++ services/markdown_converter.py\n@@ -8,4 +8,4 @@\n     try:\n         return markdown.markdown(markdown_text)\n     except Exception as e:\n-        raise MarkdownConversionError(\"Internal conversion error\") from e\n+        raise MarkdownConversionError(\"XXInternal conversion errorXX\") from e\n",
+            "services.markdown_converter.x_convert__mutmut_4": "# services.markdown_converter.x_convert__mutmut_4: survived\n--- services/markdown_converter.py\n+++ services/markdown_converter.py\n@@ -8,4 +8,4 @@\n     try:\n         return markdown.markdown(markdown_text)\n     except Exception as e:\n-        raise MarkdownConversionError(\"Internal conversion error\") from e\n+        raise MarkdownConversionError(\"internal conversion error\") from e\n",
+            "services.markdown_converter.x_convert__mutmut_5": "# services.markdown_converter.x_convert__mutmut_5: survived\n--- services/markdown_converter.py\n+++ services/markdown_converter.py\n@@ -8,4 +8,4 @@\n     try:\n         return markdown.markdown(markdown_text)\n     except Exception as e:\n-        raise MarkdownConversionError(\"Internal conversion error\") from e\n+        raise MarkdownConversionError(\"INTERNAL CONVERSION ERROR\") from e\n"
+        }
+    },
+    "Workspace 2": {
+        "stats": {
+            "killed": 3,
+            "survived": 0,
+            "total": 3,
+            "no_tests": 0,
+            "skipped": 0,
+            "suspicious": 0,
+            "timeout": 0,
+            "check_was_interrupted_by_user": 0,
+            "segfault": 0
+        },
+        "survived": [],
+        "timeouts": [],
+        "diffs": {}
+    },
+    "Workspace 3": {
+        "stats": {
+            "killed": 4,
+            "survived": 4,
+            "total": 8,
+            "no_tests": 0,
+            "skipped": 0,
+            "suspicious": 0,
+            "timeout": 0,
+            "check_was_interrupted_by_user": 0,
+            "segfault": 0
+        },
+        "survived": [
+            "app.services.markdown_converter.x_convert_markdown_to_html__mutmut_2",
+            "app.services.markdown_converter.x_convert_markdown_to_html__mutmut_3",
+            "app.services.markdown_converter.x_convert_markdown_to_html__mutmut_4",
+            "app.services.markdown_converter.x_convert_markdown_to_html__mutmut_5"
+        ],
+        "timeouts": [],
+        "diffs": {
+            "app.services.markdown_converter.x_convert_markdown_to_html__mutmut_2": "# app.services.markdown_converter.x_convert_markdown_to_html__mutmut_2: survived\n--- app/services/markdown_converter.py\n+++ app/services/markdown_converter.py\n@@ -8,7 +8,7 @@\n     :raises MarkdownConversionError: if conversion fails\n     \"\"\"\n     if not isinstance(text, str):\n-        raise TypeError(\"Input must be a string\")\n+        raise TypeError(None)\n \n     try:\n         html = markdown2.markdown(text)\n",
+            "app.services.markdown_converter.x_convert_markdown_to_html__mutmut_3": "# app.services.markdown_converter.x_convert_markdown_to_html__mutmut_3: survived\n--- app/services/markdown_converter.py\n+++ app/services/markdown_converter.py\n@@ -8,7 +8,7 @@\n     :raises MarkdownConversionError: if conversion fails\n     \"\"\"\n     if not isinstance(text, str):\n-        raise TypeError(\"Input must be a string\")\n+        raise TypeError(\"XXInput must be a stringXX\")\n \n     try:\n         html = markdown2.markdown(text)\n",
+            "app.services.markdown_converter.x_convert_markdown_to_html__mutmut_4": "# app.services.markdown_converter.x_convert_markdown_to_html__mutmut_4: survived\n--- app/services/markdown_converter.py\n+++ app/services/markdown_converter.py\n@@ -8,7 +8,7 @@\n     :raises MarkdownConversionError: if conversion fails\n     \"\"\"\n     if not isinstance(text, str):\n-        raise TypeError(\"Input must be a string\")\n+        raise TypeError(\"input must be a string\")\n \n     try:\n         html = markdown2.markdown(text)\n",
+            "app.services.markdown_converter.x_convert_markdown_to_html__mutmut_5": "# app.services.markdown_converter.x_convert_markdown_to_html__mutmut_5: survived\n--- app/services/markdown_converter.py\n+++ app/services/markdown_converter.py\n@@ -8,7 +8,7 @@\n     :raises MarkdownConversionError: if conversion fails\n     \"\"\"\n     if not isinstance(text, str):\n-        raise TypeError(\"Input must be a string\")\n+        raise TypeError(\"INPUT MUST BE A STRING\")\n \n     try:\n         html = markdown2.markdown(text)\n"
+        }
+    }
+}

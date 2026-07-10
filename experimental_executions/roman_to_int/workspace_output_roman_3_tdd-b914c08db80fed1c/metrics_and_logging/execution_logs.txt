@@ -1,0 +1,540 @@
+2026-05-02 20:24:18,265 [INFO] TDDOrchestrator: 📦 Inicializando E2B Cloud Sandbox...
+2026-05-02 20:24:18,838 [INFO] TDDOrchestrator: 
+################################################################################
+2026-05-02 20:24:18,839 [INFO] TDDOrchestrator: 🚀 INICIANDO ORQUESTRADOR TDD (LangGraph + Postgres + E2B Sandbox)
+2026-05-02 20:24:18,839 [INFO] TDDOrchestrator: ☁️  Sandbox ID ativa: ijxqm5k1mw3r87ws1ofzt
+2026-05-02 20:24:18,839 [INFO] TDDOrchestrator: ################################################################################
+
+2026-05-02 20:24:18,849 [INFO] TDDOrchestrator: 🗄️ Checkpointer ativo: PostgresSaver
+2026-05-02 20:24:18,863 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:24:18,863 [INFO] TDDOrchestrator: 📋 PLANEJAMENTO (PLANNER)
+2026-05-02 20:24:18,863 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:24:18,863 [INFO] TDDOrchestrator: 📌 Especificação: # Especificação Técnica: Conversor de Numerais Romanos
+
+## 1. Visão Geral do Sistema
+Implementar uma...
+2026-05-02 20:25:50,278 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:25:50,278 [INFO] TDDOrchestrator: ✅ PLANO GERADO COM 11 SUB-REQUISITOS:
+2026-05-02 20:25:50,278 [INFO] TDDOrchestrator:    1. FASE 0 - SETUP: Criar um virtualenv Python 3.x, instalar pytest (pip install pytest), estruturar diretórios src/ e tests/, criar arquivos vazios src/roman.py e tests/test_roman.py e configurar pytest.ini
+2026-05-02 20:25:50,278 [INFO] TDDOrchestrator:    2. FASE 1 - VALIDAÇÃO DE TIPO: Escrever testes unitários (pytest) em tests/test_roman.py que chamem roman_to_int com inputs não-str (None, 123, []) e esperem TypeError; executar para vermelhar
+2026-05-02 20:25:50,278 [INFO] TDDOrchestrator:    3. FASE 2 - NORMALIZAÇÃO: Adicionar teste para entrada lowercase (ex.: 'mcmxciv' → 1994) esperando sucesso; implementar roman = roman.upper() antes de qualquer validação
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator:    4. FASE 3 - STRING VAZIA: Escrever teste que invoque roman_to_int('') e espera ValueError; implementar verificação len(roman) > 0 e lançar ValueError caso vazio
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator:    5. FASE 4 - VALIDAÇÃO DE CARACTERES: Criar testes para inputs com caracteres inválidos (ex.: 'A', 'B1') esperando ValueError; implementar checagem de cada símbolo estar em ROMAN_VALUES
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator:    6. FASE 5 - REGRAS DE REPETIÇÃO: Escrever testes para repetições ilegais (ex.: 'IIII','XXXX','VV') aguardando ValueError; implementar lógica que conte repetições consecutivas conforme regras do domínio
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator:    7. FASE 6 - REGRAS DE SUBTRAÇÃO: Adicionar testes para pares válidos (IV, IX, XL, XC, CD, CM) e inválidos (IIV, IL, IC); esperar ValueError nos inválidos; implementar validação de pares usando VALID_SUBTRACTIVE_PAIRS
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator:    8. FASE 7 - PARSING E SOMA/SUBTRAÇÃO: Escrever testes para conversão de casos simples ('III'→3,'LVIII'→58) e compostos ('MCMXCIV'→1994); implementar loop de parsing que compara valor atual com o próximo e soma/subtrai conforme regras
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator:    9. FASE 8 - VERIFICAÇÃO DE FAIXA: Criar testes para resultado fora de domínio (ex.: 'MMMM'→4000) esperando ValueError e para borda ('I'→1,'MMMCMXCIX'→3999) retornando o valor correto; implementar checagem do resultado final em [MIN_VALUE,MAX_VALUE]
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator:    10. FASE 9 - INTEGRAÇÃO FINAL: Consolidar testes de todos os exemplos válidos e inválidos da especificação, garantir cobertura completa, e executar pytest para validar fluxo end-to-end
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator:    11. FASE 10 - CI E LINT (OPCIONAL): Configurar lint (flake8/mypy), adicionar comando pytest no pipeline de CI e assegurar qualidade de código antes do merge
+2026-05-02 20:25:50,279 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:25:50,284 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:25:50,284 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 0 - SETUP: Criar um virtualenv Python 3.x, instalar pytest (pip install pytest), estruturar diretórios src/ e tests/, criar arquivos vazios src/roman.py e tests/test_roman.py e configurar pytest.ini'
+2026-05-02 20:25:50,284 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:25:50,284 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:24:46,562 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Para iniciar o projeto no estilo TDD, precisamos estruturar os diretórios fonte e testes, criar o stub da função que será testada (roman_to_int) e um teste inicial que falha (RED). Também configuramos o pytest via pytest.ini.
+
+Estrutura a criar:
+- src/roman.py: stub da função retornando None para falhar o primeiro teste.
+- tests/test_roman.py: teste básico que espera 1 para a entrada "I".
+- pytest.ini: configurações básicas do pytest.
+
+O teste inicial falhará, provando que ainda não implementamos a lógica.
+
+2026-05-02 20:24:46,759 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:24:48,321 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/roman.py
+2026-05-02 20:24:48,726 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman.py
+2026-05-02 20:24:49,124 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: pytest.ini
+2026-05-02 20:24:49,327 [INFO] TDDOrchestrator: 🔧 Executando comando: python3 -m venv venv
+2026-05-02 20:24:51,908 [INFO] TDDOrchestrator: 🔧 Executando comando: source venv/bin/activate
+2026-05-02 20:24:52,122 [INFO] TDDOrchestrator: 🔧 Executando comando: pip install pytest
+2026-05-02 20:24:52,902 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:24:52,903 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:24:52,904 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:24:52,904 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:24:54,167 [INFO] TDDOrchestrator.Runner: 🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).
+2026-05-02 20:24:54,167 [INFO] TDDOrchestrator: ✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.
+2026-05-02 20:24:54,167 [INFO] TDDOrchestrator:    ➡️  Executando análise de confirmação...
+2026-05-02 20:24:57,687 [INFO] TDDOrchestrator: 🧐 Reviewer Thoughts: O teste está chamando a função roman_to_int('I') e esperando 1, mas a função atualmente possui apenas um pass, retornando None. Não há erro no teste: ele está corretamente importando e verificando o comportamento esperado. A falha é consequência da ausência de implementação na função.
+2026-05-02 20:24:57,687 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:24:57,687 [INFO] TDDOrchestrator: 🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)
+2026-05-02 20:24:57,687 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:24:57,687 [INFO] TDDOrchestrator:    [ERRO NA IMPLEMENTAÇÃO] No arquivo src/roman.py, remova o pass em roman_to_int e implemente a lógica completa de conversão de numerais romanos para inteiro conforme a especificação: validar tipo, normalizar para uppercase, checar caracteres e regras de repetição/subtração, calcular o valor e lançar ValueError/TypeError nos casos apropriados.
+2026-05-02 20:24:57,687 [INFO] TDDOrchestrator: ================================================================================
+
+2026-05-02 20:24:57,688 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:24:57,689 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:24:57,690 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:24:57,690 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 0 - SETUP: Criar um virtualenv Python 3.x, instalar pytest (pip install pytest), estruturar diretórios src/ e tests/, criar arquivos vazios src/roman.py e tests/test_roman.py e configurar pytest.ini'
+2026-05-02 20:25:19,269 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: We need to satisfy the single existing test that roman_to_int('I') == 1. Following TDD’s “minimal implementation” rule, we’ll implement a simple lookup-based summation: define the full ROMAN_VALUES dict, uppercase the input string, and sum each character’s value. This satisfies the current test without adding future validation or subtractive logic.
+2026-05-02 20:25:19,472 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/roman.py
+2026-05-02 20:25:19,877 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:25:19,878 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:25:19,879 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:25:19,879 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:25:20,904 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:25:20,905 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:25:20,917 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:25:20,918 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:25:20,918 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:25:20,919 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 0 - SETUP: Criar um virtualenv Python 3.x, instalar pytest (pip install pytest), estruturar diretórios src/ e tests/, criar arquivos vazios src/roman.py e tests/test_roman.py e configurar pytest.ini'
+2026-05-02 20:25:20,919 [INFO] TDDOrchestrator: 📈 Progresso geral: 1/11 (9%)
+2026-05-02 20:25:20,920 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:25:20,920 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 1 - VALIDAÇÃO DE TIPO: Escrever testes unitários (pytest) em tests/test_roman.py que chamem roman_to_int com inputs não-str (None, 123, []) e esperem TypeError; executar para vermelhar'
+2026-05-02 20:25:20,920 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:25:20,928 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:25:26,865 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Precisamos validar que roman_to_int lance TypeError quando receber um parâmetro não-str (None, int, list). Vamos estender o arquivo tests/test_roman.py, importando roman_to_int e usando pytest.raises para cobrir cada caso inválido via parametrização. Os novos testes falharão (Red) pois a checagem de tipo ainda não existe.
+2026-05-02 20:25:27,066 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:25:27,839 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman.py
+2026-05-02 20:25:28,240 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:25:28,240 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:25:28,242 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:25:28,242 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:25:29,330 [INFO] TDDOrchestrator.Runner: 🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).
+2026-05-02 20:25:29,330 [INFO] TDDOrchestrator: ✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.
+2026-05-02 20:25:29,330 [INFO] TDDOrchestrator:    ➡️  Executando análise de confirmação...
+2026-05-02 20:25:33,420 [INFO] TDDOrchestrator: 🧐 Reviewer Thoughts: Ao analisar o stack trace, vemos que para inputs não-`str` (None, 123, []), a função `roman_to_int` tenta executar `roman.upper()`, gerando um `AttributeError` ao invés de um `TypeError` conforme especificado. O teste está correto em esperar um `TypeError`. A implementação não faz a validação de tipo antes de usar `upper()`, portanto faltou checar `isinstance(roman, str)` e lançar `TypeError`.
+2026-05-02 20:25:33,420 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:25:33,420 [INFO] TDDOrchestrator: 🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)
+2026-05-02 20:25:33,420 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:25:33,420 [INFO] TDDOrchestrator:    [ERRO NA IMPLEMENTAÇÃO] No arquivo src/roman.py, acrescente no início da função `roman_to_int` uma validação de tipo: se `roman` não for instância de `str`, lance `TypeError`. Assim os testes de inputs não-`str` passarão conforme esperado.
+2026-05-02 20:25:33,420 [INFO] TDDOrchestrator: ================================================================================
+
+2026-05-02 20:25:33,421 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:25:33,422 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:25:33,422 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:25:33,423 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 1 - VALIDAÇÃO DE TIPO: Escrever testes unitários (pytest) em tests/test_roman.py que chamem roman_to_int com inputs não-str (None, 123, []) e esperem TypeError; executar para vermelhar'
+2026-05-02 20:25:40,041 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: Para fazer os testes passarem, basta adicionar a validação de tipo no início de `roman_to_int`, garantindo que qualquer entrada não-string levante `TypeError`. Não há necessidade de adicionar outras validações neste momento, pois os testes atuais só verificam essa condição e a conversão básica de um dígito.
+2026-05-02 20:25:40,744 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/roman.py
+2026-05-02 20:25:41,158 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:25:41,159 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:25:41,159 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:25:41,160 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:25:42,183 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:25:42,184 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:25:42,196 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:25:42,197 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:25:42,197 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:25:42,198 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 1 - VALIDAÇÃO DE TIPO: Escrever testes unitários (pytest) em tests/test_roman.py que chamem roman_to_int com inputs não-str (None, 123, []) e esperem TypeError; executar para vermelhar'
+2026-05-02 20:25:42,198 [INFO] TDDOrchestrator: 📈 Progresso geral: 2/11 (18%)
+2026-05-02 20:25:42,198 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:25:42,199 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 2 - NORMALIZAÇÃO: Adicionar teste para entrada lowercase (ex.: 'mcmxciv' → 1994) esperando sucesso; implementar roman = roman.upper() antes de qualquer validação'
+2026-05-02 20:25:42,199 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:25:42,205 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:25:55,482 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Quero adicionar um teste para garantir que a função roman_to_int normalize entradas em lowercase (ex.: 'mcmxciv') e converta corretamente para 1994. Este teste deverá falhar inicialmente (RED), pois a implementação atual apenas soma valores sem tratar subtrações. Vou atualizar o arquivo tests/test_roman.py, adicionando uma nova função de teste denominada test_roman_to_int_lowercase.
+2026-05-02 20:25:55,687 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman.py
+2026-05-02 20:25:56,094 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:25:56,094 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:25:56,095 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:25:56,096 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:25:57,335 [INFO] TDDOrchestrator.Runner: 🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).
+2026-05-02 20:25:57,335 [INFO] TDDOrchestrator: ✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.
+2026-05-02 20:25:57,335 [INFO] TDDOrchestrator:    ➡️  Executando análise de confirmação...
+2026-05-02 20:26:02,415 [INFO] TDDOrchestrator: 🧐 Reviewer Thoughts: O erro reportado é um IndentationError no arquivo tests/test_roman.py na definição de test_roman_to_int_lowercase. Isso indica que há um espaço indesejado antes da declaração "def", quebrando o alinhamento de indentação do módulo de testes. Não se trata de falha na lógica da função roman_to_int, mas sim de um teste mal escrito ou formatado.
+2026-05-02 20:26:02,415 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:26:02,415 [INFO] TDDOrchestrator: 🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)
+2026-05-02 20:26:02,415 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:26:02,415 [INFO] TDDOrchestrator:    [ERRO NO TESTE] Corrija a indentação em tests/test_roman.py: remova o espaço antes de def test_roman_to_int_lowercase para que todas as declarações de funções fiquem alinhadas no mesmo nível, sem indentação extra.
+2026-05-02 20:26:02,415 [INFO] TDDOrchestrator: ================================================================================
+
+2026-05-02 20:26:02,415 [WARNING] TDDOrchestrator:    ⚠️ O teste falhou de forma inválida. Devolvendo ao Tester.
+2026-05-02 20:26:02,416 [INFO] TDDOrchestrator: 🔧 TESTER: MODO REVISÃO — corrigindo testes potencialmente incorretos
+2026-05-02 20:27:23,597 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: O feedback indica remoção da indentação extra antes da definição do teste e ajuste do decorator para '@pytest' sem espaço. Vou atualizar todo o arquivo com funções no mesmo nível.
+2026-05-02 20:27:23,794 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman.py
+2026-05-02 20:27:24,192 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:27:24,193 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 2/15
+2026-05-02 20:27:24,194 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:27:24,194 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:27:25,350 [INFO] TDDOrchestrator.Runner: 🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).
+2026-05-02 20:27:25,350 [INFO] TDDOrchestrator: ✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.
+2026-05-02 20:27:25,350 [INFO] TDDOrchestrator:    ➡️  Executando análise de confirmação...
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator: 🧐 Reviewer Thoughts: O teste `test_roman_to_int_lowercase` está correto: ele verifica que a entrada lowercase é normalizada e então interpretada seguindo a lógica de subtração de roman numerals. A implementação atual apenas soma valores individuais, ignorando pares subtrativos (CM, XC, IV), resultando em 2216 em vez de 1994. Logo, a falha está no código de negócio, não no teste.
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator: 🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator:    [ERRO NA IMPLEMENTAÇÃO] No arquivo src/roman.py, substitua a lógica de soma simples por um algoritmo que trate pares subtrativos. Por exemplo:
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator:    1. Defina VALID_SUBTRACTIVE_PAIRS = {"IV","IX","XL","XC","CD","CM"}.
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator:    2. Percorra a string `roman` (já uppercased) com um índice i:
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator:       - Se os caracteres em roman[i:i+2] formarem um par em VALID_SUBTRACTIVE_PAIRS, acumule ROMAN_VALUES[roman[i+1]] - ROMAN_VALUES[roman[i]] e incremente i em 2.
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator:       - Caso contrário, acumule ROMAN_VALUES[roman[i]] e incremente i em 1.
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator:    Implemente essa lógica no src/roman.py antes de retornar o total para que `mcmxciv` resulte em 1994.
+2026-05-02 20:26:15,510 [INFO] TDDOrchestrator: ================================================================================
+
+2026-05-02 20:26:15,511 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:26:15,512 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 2/15
+2026-05-02 20:26:15,512 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:26:15,513 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 2 - NORMALIZAÇÃO: Adicionar teste para entrada lowercase (ex.: 'mcmxciv' → 1994) esperando sucesso; implementar roman = roman.upper() antes de qualquer validação'
+2026-05-02 20:26:28,754 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: The tests require basic conversion with subtractive logic and type validation. I'll update `roman_to_int` to implement the standard subtract-or-add algorithm, uppercasing the input and ensuring only str is accepted. Invalid Roman characters will raise ValueError (even though not yet tested). This minimal change satisfies the existing tests without overengineering.
+2026-05-02 20:26:28,951 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/roman.py
+2026-05-02 20:26:29,370 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:26:29,371 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 2/15
+2026-05-02 20:26:29,371 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:26:29,372 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:26:30,418 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:26:30,419 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:26:30,432 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:26:30,433 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:26:30,434 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:26:30,434 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 2 - NORMALIZAÇÃO: Adicionar teste para entrada lowercase (ex.: 'mcmxciv' → 1994) esperando sucesso; implementar roman = roman.upper() antes de qualquer validação'
+2026-05-02 20:26:30,434 [INFO] TDDOrchestrator: 📈 Progresso geral: 3/11 (27%)
+2026-05-02 20:26:30,435 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:26:30,435 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 3 - STRING VAZIA: Escrever teste que invoque roman_to_int('') e espera ValueError; implementar verificação len(roman) > 0 e lançar ValueError caso vazio'
+2026-05-02 20:26:30,435 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:26:30,442 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:26:35,819 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: I will add a new test case in tests/test_roman.py to cover the empty string sub-requirement. The test will call roman_to_int with '' and expect a ValueError. This aligns with the TDD process: the test should fail initially. I will import pytest and the function, and insert a new test at the end of the existing suite.
+2026-05-02 20:26:36,040 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:26:36,803 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman.py
+2026-05-02 20:26:37,221 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:26:37,222 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:26:37,222 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:26:37,222 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:27:54,511 [INFO] TDDOrchestrator.Runner: 🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).
+2026-05-02 20:27:54,511 [INFO] TDDOrchestrator: ✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.
+2026-05-02 20:27:54,511 [INFO] TDDOrchestrator:    ➡️  Executando análise de confirmação...
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator: 🧐 Reviewer Thoughts: O teste `test_roman_to_int_empty_string` espera que uma chamada a `roman_to_int('')` lance ValueError, mas a implementação atual não trata o caso de string vazia, retornando 0 em vez de levantar exceção. Portanto é um erro na implementação do Developer, não no teste.
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator: 🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator:    [ERRO NA IMPLEMENTAÇÃO] No arquivo src/roman.py, dentro da função roman_to_int, logo após a validação de tipo (isinstance), adicione uma verificação para string vazia. Exemplo:
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator:    
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator:        if len(roman) == 0:
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator:            raise ValueError("Roman numeral string is empty")
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator:    
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator:    Assim garantimos que chamadas com '' lançam ValueError conforme especificação e fazem o teste passar.
+2026-05-02 20:26:43,678 [INFO] TDDOrchestrator: ================================================================================
+
+2026-05-02 20:26:43,679 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:26:43,680 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:26:43,680 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:26:43,681 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 3 - STRING VAZIA: Escrever teste que invoque roman_to_int('') e espera ValueError; implementar verificação len(roman) > 0 e lançar ValueError caso vazio'
+2026-05-02 20:26:53,097 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: Current implementation does not raise on empty string. We need a simple check after normalization to raise ValueError when roman==''. All other tests already pass. We'll update src/roman.py accordingly, without adding unnecessary validations.
+2026-05-02 20:26:53,305 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/roman.py
+2026-05-02 20:26:53,702 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:26:53,703 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:26:53,703 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:26:53,704 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:28:10,444 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:28:10,444 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:28:10,464 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:28:10,464 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:28:10,465 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:28:10,465 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 3 - STRING VAZIA: Escrever teste que invoque roman_to_int('') e espera ValueError; implementar verificação len(roman) > 0 e lançar ValueError caso vazio'
+2026-05-02 20:28:10,465 [INFO] TDDOrchestrator: 📈 Progresso geral: 4/11 (36%)
+2026-05-02 20:28:10,466 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:28:10,466 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 4 - VALIDAÇÃO DE CARACTERES: Criar testes para inputs com caracteres inválidos (ex.: 'A', 'B1') esperando ValueError; implementar checagem de cada símbolo estar em ROMAN_VALUES'
+2026-05-02 20:28:10,466 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:28:10,474 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:27:03,530 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Para validar o sub-requisito de checagem de caracteres, vamos criar testes que passem strings contendo caracteres inválidos (ex.: 'A', 'B1', etc.) e esperamos ValueError. Vamos adicionar um novo caso parametrizado no arquivo de testes existente tests/test_roman.py, sem alterar a implementação da função.
+2026-05-02 20:27:03,726 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:27:04,488 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman.py
+2026-05-02 20:28:20,572 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:28:20,572 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:28:20,573 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:28:20,573 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:27:06,063 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:27:06,063 [WARNING] TDDOrchestrator: ⚠️  ALERTA: O teste PASSOU imediatamente (Green no Red).
+2026-05-02 20:27:06,063 [INFO] TDDOrchestrator:    ℹ️  Avançando — enviando alerta para o Developer inspecionar.
+2026-05-02 20:27:06,064 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:27:06,065 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:27:06,066 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:27:06,066 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 4 - VALIDAÇÃO DE CARACTERES: Criar testes para inputs com caracteres inválidos (ex.: 'A', 'B1') esperando ValueError; implementar checagem de cada símbolo estar em ROMAN_VALUES'
+2026-05-02 20:27:16,699 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: The existing implementation already satisfies all current test cases: type checking, empty string, invalid character validation, lowercase normalization, and basic subtraction logic. No further changes are needed to get the suite green.
+2026-05-02 20:27:16,919 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:27:16,920 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:27:16,921 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:27:16,922 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:27:17,935 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:27:17,935 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:27:17,944 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:27:17,945 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:27:17,945 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:27:17,946 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 4 - VALIDAÇÃO DE CARACTERES: Criar testes para inputs com caracteres inválidos (ex.: 'A', 'B1') esperando ValueError; implementar checagem de cada símbolo estar em ROMAN_VALUES'
+2026-05-02 20:27:17,946 [INFO] TDDOrchestrator: 📈 Progresso geral: 5/11 (45%)
+2026-05-02 20:27:17,946 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:27:17,946 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 5 - REGRAS DE REPETIÇÃO: Escrever testes para repetições ilegais (ex.: 'IIII','XXXX','VV') aguardando ValueError; implementar lógica que conte repetições consecutivas conforme regras do domínio'
+2026-05-02 20:27:17,946 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:27:17,953 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:27:24,236 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: I will add a new test module focusing strictly on repetition rules. This includes invalid repetitions: I, X, C, M repeated more than three times (e.g., 'IIII', 'XXXX') and V, L, D repeated consecutively (e.g., 'VV', 'LL', 'DD'). Each case should raise ValueError. The tests will initially fail since the current implementation lacks repetition checks.
+2026-05-02 20:27:24,455 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:27:25,229 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman_repetition_rules.py
+2026-05-02 20:27:25,670 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:27:25,671 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:27:25,672 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:27:25,672 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:27:26,922 [INFO] TDDOrchestrator.Runner: 🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).
+2026-05-02 20:27:26,922 [INFO] TDDOrchestrator: ✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.
+2026-05-02 20:27:26,922 [INFO] TDDOrchestrator:    ➡️  Executando análise de confirmação...
+2026-05-02 20:27:31,150 [INFO] TDDOrchestrator: 🧐 Reviewer Thoughts: Os testes de repetição ilegal falham porque a implementação atual de roman_to_int não verifica regras de repetição: ela simplesmente soma/subtrai valores sem contar sequências consecutivas. Portanto, entradas como 'IIII' retornam 4 em vez de lançar ValueError. Os arquivos de teste estão corretos e seguem a especificação.
+
+2026-05-02 20:27:31,150 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:27:31,150 [INFO] TDDOrchestrator: 🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)
+2026-05-02 20:27:31,150 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:27:31,150 [INFO] TDDOrchestrator:    [ERRO NA IMPLEMENTAÇÃO] No módulo src/roman.py, antes de somar/subtrair os valores, adicione uma lógica que conte repetições consecutivas de cada caractere. Para os símbolos I, X, C e M, limite máximo de 3 repetições seguidas; para V, L e D, não permita repetições consecutivas. Caso o limite seja excedido, levante ValueError com mensagem apropriada. Ajuste a função roman_to_int para incluir essa validação no início do loop de processamento.
+2026-05-02 20:27:31,150 [INFO] TDDOrchestrator: ================================================================================
+
+2026-05-02 20:27:31,151 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:27:31,152 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:27:31,152 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:27:31,153 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 5 - REGRAS DE REPETIÇÃO: Escrever testes para repetições ilegais (ex.: 'IIII','XXXX','VV') aguardando ValueError; implementar lógica que conte repetições consecutivas conforme regras do domínio'
+2026-05-02 20:27:46,621 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: We need to enforce repetition rules: I, X, C, M max 3 consecutive, V, L, D max 1. We'll track previous character and repeat count before parsing sums. On illegal repetition, raise ValueError. Modify src/roman.py accordingly, integrating repetition checks in the main loop.
+2026-05-02 20:27:46,823 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/roman.py
+2026-05-02 20:27:47,225 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:27:47,226 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:27:47,226 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:27:47,227 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:27:48,458 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:27:48,458 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:27:48,472 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:27:48,473 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:27:48,473 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:27:48,474 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 5 - REGRAS DE REPETIÇÃO: Escrever testes para repetições ilegais (ex.: 'IIII','XXXX','VV') aguardando ValueError; implementar lógica que conte repetições consecutivas conforme regras do domínio'
+2026-05-02 20:27:48,474 [INFO] TDDOrchestrator: 📈 Progresso geral: 6/11 (55%)
+2026-05-02 20:27:48,474 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:27:48,475 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 6 - REGRAS DE SUBTRAÇÃO: Adicionar testes para pares válidos (IV, IX, XL, XC, CD, CM) e inválidos (IIV, IL, IC); esperar ValueError nos inválidos; implementar validação de pares usando VALID_SUBTRACTIVE_PAIRS'
+2026-05-02 20:27:48,475 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:27:48,483 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:27:59,704 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Para cobrir o sub-requisito de regras de subtração, adicionarei uma nova suíte de testes em tests/test_roman_subtraction_rules.py. Vou parametrizar:
+1) Pares válidos (IV, IX, XL, XC, CD, CM) garantindo que retornem os valores corretos.
+2) Pares inválidos (IIV, IL, IC) esperando ValueError.  
+Importo roman_to_int de src.roman e uso pytest.
+2026-05-02 20:29:15,576 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:28:00,671 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman_subtraction_rules.py
+2026-05-02 20:28:01,070 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:28:01,071 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:28:01,072 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:28:01,072 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:28:02,256 [INFO] TDDOrchestrator.Runner: 🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).
+2026-05-02 20:28:02,256 [INFO] TDDOrchestrator: ✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.
+2026-05-02 20:28:02,256 [INFO] TDDOrchestrator:    ➡️  Executando análise de confirmação...
+2026-05-02 20:28:09,112 [INFO] TDDOrchestrator: 🧐 Reviewer Thoughts: Os testes de pares de subtração inválidos (IIV, IL, IC) estão corretos segundo a especificação: qualquer vez que um símbolo de valor menor precede um de valor maior e o par não pertence a VALID_SUBTRACTIVE_PAIRS, deve lançar ValueError. Na implementação atual, o método subtrai sem checar essa regra, aceitando IL e IC como válidos e gerando um número em vez de erro. Portanto a culpa é da implementação (Developer) que não valida pares subtrativos com VALID_SUBTRACTIVE_PAIRS.
+2026-05-02 20:28:09,113 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:28:09,113 [INFO] TDDOrchestrator: 🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)
+2026-05-02 20:28:09,113 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:28:09,113 [INFO] TDDOrchestrator:    [ERRO NA IMPLEMENTAÇÃO] No arquivo src/roman.py inclua o conjunto VALID_SUBTRACTIVE_PAIRS={"IV","IX","XL","XC","CD","CM"} e, na lógica de subtração dentro de roman_to_int, antes de total-=value, verifique se ch+next_ch está em VALID_SUBTRACTIVE_PAIRS. Se não estiver, lance ValueError(f"Invalid subtractive pair: {ch}{next_ch}").
+2026-05-02 20:28:09,113 [INFO] TDDOrchestrator: ================================================================================
+
+2026-05-02 20:28:09,114 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:28:09,114 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:28:09,115 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:28:09,115 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 6 - REGRAS DE SUBTRAÇÃO: Adicionar testes para pares válidos (IV, IX, XL, XC, CD, CM) e inválidos (IIV, IL, IC); esperar ValueError nos inválidos; implementar validação de pares usando VALID_SUBTRACTIVE_PAIRS'
+2026-05-02 20:28:33,827 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: We need to enforce valid subtractive pairs and reject invalid ones, including double subtractive like “IIV”. Define VALID_SUBTRACTIVE_PAIRS and update the loop: when value < next_value, if the pair is not in VALID_SUBTRACTIVE_PAIRS or the current char repeated more than once, raise ValueError; otherwise subtract.
+2026-05-02 20:28:34,025 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/roman.py
+2026-05-02 20:28:34,456 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:28:34,457 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:28:34,458 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:28:34,458 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:28:35,588 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:28:35,589 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:28:35,603 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:28:35,604 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:28:35,605 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:28:35,605 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 6 - REGRAS DE SUBTRAÇÃO: Adicionar testes para pares válidos (IV, IX, XL, XC, CD, CM) e inválidos (IIV, IL, IC); esperar ValueError nos inválidos; implementar validação de pares usando VALID_SUBTRACTIVE_PAIRS'
+2026-05-02 20:28:35,606 [INFO] TDDOrchestrator: 📈 Progresso geral: 7/11 (64%)
+2026-05-02 20:28:35,606 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:28:35,606 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 7 - PARSING E SOMA/SUBTRAÇÃO: Escrever testes para conversão de casos simples ('III'→3,'LVIII'→58) e compostos ('MCMXCIV'→1994); implementar loop de parsing que compara valor atual com o próximo e soma/subtrai conforme regras'
+2026-05-02 20:28:35,606 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:28:35,614 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:28:43,239 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Para validar a lógica de parsing completo (soma e subtração), vamos criar testes que cobrem casos elementares de adição contínua ('III'→3, 'LVIII'→58) e um caso composto que já envolve múltiplas operações de subtração e adição ('MCMXCIV'→1994 e opcionalmente o maior valor 'MMMCMXCIX'→3999).
+Iremos adicionar um novo arquivo de testes em tests/test_roman_parsing_rules.py. Cada teste vai usar assert roman_to_int(roman) == expected.
+2026-05-02 20:28:43,444 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:28:44,246 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman_parsing_rules.py
+2026-05-02 20:28:45,154 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:28:45,154 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:28:45,155 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:28:45,156 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:28:46,319 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:28:46,320 [WARNING] TDDOrchestrator: ⚠️  ALERTA: O teste PASSOU imediatamente (Green no Red).
+2026-05-02 20:28:46,320 [INFO] TDDOrchestrator:    ℹ️  Avançando — enviando alerta para o Developer inspecionar.
+2026-05-02 20:28:46,321 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:28:46,322 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:28:46,323 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:28:46,323 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 7 - PARSING E SOMA/SUBTRAÇÃO: Escrever testes para conversão de casos simples ('III'→3,'LVIII'→58) e compostos ('MCMXCIV'→1994); implementar loop de parsing que compara valor atual com o próximo e soma/subtrai conforme regras'
+2026-05-02 20:29:17,338 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: The implementation in src/roman.py already satisfies the current tests, but pytest won’t recognize src as a package without an __init__.py. Adding an empty __init__.py in src will allow the imports in tests to resolve and make the suite green.
+2026-05-02 20:29:17,535 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/__init__.py
+2026-05-02 20:29:17,953 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:29:17,955 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:29:17,956 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:29:17,956 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:29:19,220 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:29:19,220 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:29:19,233 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:29:19,234 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:29:19,235 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:29:19,235 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 7 - PARSING E SOMA/SUBTRAÇÃO: Escrever testes para conversão de casos simples ('III'→3,'LVIII'→58) e compostos ('MCMXCIV'→1994); implementar loop de parsing que compara valor atual com o próximo e soma/subtrai conforme regras'
+2026-05-02 20:29:19,235 [INFO] TDDOrchestrator: 📈 Progresso geral: 8/11 (73%)
+2026-05-02 20:29:19,235 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:29:19,236 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 8 - VERIFICAÇÃO DE FAIXA: Criar testes para resultado fora de domínio (ex.: 'MMMM'→4000) esperando ValueError e para borda ('I'→1,'MMMCMXCIX'→3999) retornando o valor correto; implementar checagem do resultado final em [MIN_VALUE,MAX_VALUE]'
+2026-05-02 20:29:19,236 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:29:19,243 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:29:31,999 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Para cumprir o sub-requisito de verificação de faixa, vamos criar uma suíte dedicada que teste:
+1. Casos de fronteira com valores mínimos e máximos válidos ("I" → 1, "MMMCMXCIX" → 3999).
+2. Caso de resultado fora do domínio (>3999) gerando ValueError. Usaremos a representação direta “MMMCMXCIXI” (3999+1=4000) e também testaremos “MMMM” (4000) para garantir que qualquer valor acima do limite gere ValueError.
+Importaremos roman_to_int de src.roman e usaremos pytest para asserções.
+2026-05-02 20:29:32,203 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:29:33,111 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman_range_validation.py
+2026-05-02 20:29:33,519 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:29:33,520 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:29:33,520 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:29:33,521 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:29:34,880 [INFO] TDDOrchestrator.Runner: 🔴 RUNNER: Testes falharam (Comportamento esperado no TDD).
+2026-05-02 20:29:34,881 [INFO] TDDOrchestrator: ✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.
+2026-05-02 20:29:34,881 [INFO] TDDOrchestrator:    ➡️  Executando análise de confirmação...
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator: 🧐 Reviewer Thoughts: O teste falha pois o fluxo atual não faz verificação de faixa pós-parsing. Para "MMMCMXCIXI" o método retorna 4000 em vez de lançar ValueError. Segundo a especificação, após o loop de soma/subtração deve haver checagem de intervalo [1,3999]. Aqui não há essa validação.
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator: 🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator:    [ERRO NA IMPLEMENTAÇÃO] No arquivo src/roman.py, adicione após o loop de parsing (antes do return total) uma verificação de faixa. Por exemplo:
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator:    
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator:        if total < 1 or total > 3999:
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator:            raise ValueError("Result out of range")
+2026-05-02 20:29:43,525 [INFO] TDDOrchestrator:    
+2026-05-02 20:29:43,526 [INFO] TDDOrchestrator:    Ou defina constantes MIN_VALUE e MAX_VALUE e use-as nessa checagem. Isso garante que valores fora de domínio (como 4000) gerem ValueError conforme o teste tests/test_roman_range_validation.py.
+2026-05-02 20:29:43,526 [INFO] TDDOrchestrator: ================================================================================
+
+2026-05-02 20:29:43,526 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:29:43,527 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:29:43,527 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:29:43,528 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 8 - VERIFICAÇÃO DE FAIXA: Criar testes para resultado fora de domínio (ex.: 'MMMM'→4000) esperando ValueError e para borda ('I'→1,'MMMCMXCIX'→3999) retornando o valor correto; implementar checagem do resultado final em [MIN_VALUE,MAX_VALUE]'
+2026-05-02 20:30:09,451 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: The only missing piece is post-parsing range validation. I'll add MIN_VALUE and MAX_VALUE constants and a range check before returning the total. This satisfies the out-of-domain test for values >3999 or <1 (although <1 isn't reachable but we cover it). No other tests demand additional logic.
+2026-05-02 20:30:09,648 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: src/roman.py
+2026-05-02 20:31:25,732 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:31:25,733 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:31:25,733 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:31:25,733 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:30:11,270 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:30:11,270 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:30:11,284 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:30:11,285 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:30:11,285 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:30:11,286 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 8 - VERIFICAÇÃO DE FAIXA: Criar testes para resultado fora de domínio (ex.: 'MMMM'→4000) esperando ValueError e para borda ('I'→1,'MMMCMXCIX'→3999) retornando o valor correto; implementar checagem do resultado final em [MIN_VALUE,MAX_VALUE]'
+2026-05-02 20:30:11,286 [INFO] TDDOrchestrator: 📈 Progresso geral: 9/11 (82%)
+2026-05-02 20:30:11,287 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:30:11,287 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 9 - INTEGRAÇÃO FINAL: Consolidar testes de todos os exemplos válidos e inválidos da especificação, garantir cobertura completa, e executar pytest para validar fluxo end-to-end'
+2026-05-02 20:30:11,287 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:30:11,294 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:30:30,367 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Building on the existing subtraction rules tests, we need to cover *all* forbidden subtractive/combinatorial patterns described in the spec (IC, IL, ID, IM, VX, VL, VC, VD, VM, XD, XM, and XXL). By extending the invalid list in the `test_invalid_subtractive_pairs_raise_value_error` parametrization, we will guarantee full coverage of illegal subtraction/combinations and ensure the function raises `ValueError` for each.
+2026-05-02 20:30:30,563 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest
+2026-05-02 20:30:31,377 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: tests/test_roman_subtraction_rules.py
+2026-05-02 20:30:31,774 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:30:31,775 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:30:31,775 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:30:31,776 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:30:33,114 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:30:33,115 [WARNING] TDDOrchestrator: ⚠️  ALERTA: O teste PASSOU imediatamente (Green no Red).
+2026-05-02 20:30:33,115 [INFO] TDDOrchestrator:    ℹ️  Avançando — enviando alerta para o Developer inspecionar.
+2026-05-02 20:30:33,116 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:30:33,116 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:30:33,116 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:30:33,118 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 9 - INTEGRAÇÃO FINAL: Consolidar testes de todos os exemplos válidos e inválidos da especificação, garantir cobertura completa, e executar pytest para validar fluxo end-to-end'
+2026-05-02 20:31:09,871 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: A implementação atual de roman_to_int já cobre todos os cenários exigidos pelos testes existentes (validação de tipo, string vazia, caracteres inválidos, regras de repetição, pares subtrativos, parsing e validação de faixa). Não são necessárias alterações para fazer a suíte de testes passar nesta iteração.
+2026-05-02 20:32:25,742 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:32:25,743 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:32:25,743 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:32:25,744 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:31:11,277 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:31:11,277 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:31:11,290 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:31:11,290 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:31:11,291 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:31:11,291 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 9 - INTEGRAÇÃO FINAL: Consolidar testes de todos os exemplos válidos e inválidos da especificação, garantir cobertura completa, e executar pytest para validar fluxo end-to-end'
+2026-05-02 20:31:11,291 [INFO] TDDOrchestrator: 📈 Progresso geral: 10/11 (91%)
+2026-05-02 20:31:11,291 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:31:11,292 [INFO] TDDOrchestrator: ⏭️  PRÓXIMA TAREFA: 'FASE 10 - CI E LINT (OPCIONAL): Configurar lint (flake8/mypy), adicionar comando pytest no pipeline de CI e assegurar qualidade de código antes do merge'
+2026-05-02 20:31:11,292 [INFO] TDDOrchestrator:    🧹 Resetando históricos de conversa dos agentes para novo contexto...
+2026-05-02 20:31:11,299 [INFO] TDDOrchestrator: ✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual
+2026-05-02 20:31:29,111 [INFO] TDDOrchestrator: 💭 Raciocínio do Tester: Para garantir qualidade de código antes do merge, vamos configurar:
+1. Um arquivo .flake8 com regras básicas de lint.
+2. Um arquivo mypy.ini para habilitar checagem estática de tipos.
+3. Um arquivo requirements-dev.txt para listar dependências de desenvolvimento (pytest, flake8, mypy).
+4. Um workflow GitHub Actions em .github/workflows/ci.yml que instala dependências e roda flake8, mypy e pytest.
+Com isso, no push e em PRs para a branch main, o pipeline fará lint, type check e testes automaticamente.
+2026-05-02 20:31:29,323 [INFO] TDDOrchestrator: 📦 Instalando dependências na Sandbox: pytest flake8 mypy
+2026-05-02 20:31:32,820 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: .flake8
+2026-05-02 20:31:33,015 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: mypy.ini
+2026-05-02 20:31:33,223 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: requirements-dev.txt
+2026-05-02 20:31:33,431 [INFO] TDDOrchestrator: 💾 Escrevendo arquivo: .github/workflows/ci.yml
+2026-05-02 20:31:33,823 [INFO] TDDOrchestrator: 🔧 Executando comando: pip install -r requirements-dev.txt
+2026-05-02 20:31:34,600 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:31:34,601 [INFO] TDDOrchestrator: 🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração 1/15
+2026-05-02 20:31:34,601 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:31:34,602 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:31:35,746 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:31:35,746 [WARNING] TDDOrchestrator: ⚠️  ALERTA: O teste PASSOU imediatamente (Green no Red).
+2026-05-02 20:31:35,746 [INFO] TDDOrchestrator:    ℹ️  Avançando — enviando alerta para o Developer inspecionar.
+2026-05-02 20:31:35,747 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:31:35,749 [INFO] TDDOrchestrator: 💻 ETAPA 3: DEVELOPER (IMPLEMENTAÇÃO) | Iteração 1/15
+2026-05-02 20:31:35,750 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:31:35,750 [INFO] TDDOrchestrator: 🎯 Objetivo: Implementar 'FASE 10 - CI E LINT (OPCIONAL): Configurar lint (flake8/mypy), adicionar comando pytest no pipeline de CI e assegurar qualidade de código antes do merge'
+2026-05-02 20:32:05,819 [INFO] TDDOrchestrator: 💭 Raciocínio do Developer: Após revisar a especificação técnica e a suíte de testes existente, constatei que a implementação atual em src/roman.py já cobre todos os cenários solicitados — tipo, vazio, caracteres inválidos, repetição, pares subtrativos, lógica de parsing e validação de intervalo. Portanto, não são necessárias alterações para tornar os testes verdes.
+2026-05-02 20:32:06,030 [INFO] TDDOrchestrator: 
+--------------------------------------------------------------------------------
+2026-05-02 20:32:06,031 [INFO] TDDOrchestrator: 🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração 1/15
+2026-05-02 20:32:06,031 [INFO] TDDOrchestrator: --------------------------------------------------------------------------------
+2026-05-02 20:32:06,031 [INFO] TDDOrchestrator.Runner: 🏃 RUNNER: Executando testes na Sandbox ijxqm5k1...
+2026-05-02 20:32:07,212 [INFO] TDDOrchestrator.Runner: ✅ RUNNER: Todos os testes passaram.
+2026-05-02 20:32:07,212 [INFO] TDDOrchestrator: ✅ SUCESSO: Todos os testes passaram! 🚀
+2026-05-02 20:32:07,220 [INFO] TDDOrchestrator: 
+================================================================================
+2026-05-02 20:32:07,221 [INFO] TDDOrchestrator: 📊 ETAPA 5: AVALIADOR DE PROGRESSO
+2026-05-02 20:32:07,221 [INFO] TDDOrchestrator: ================================================================================
+2026-05-02 20:32:07,222 [INFO] TDDOrchestrator: ✅ Sub-requisito concluído: 'FASE 10 - CI E LINT (OPCIONAL): Configurar lint (flake8/mypy), adicionar comando pytest no pipeline de CI e assegurar qualidade de código antes do merge'
+2026-05-02 20:32:07,222 [INFO] TDDOrchestrator: 📈 Progresso geral: 11/11 (100%)
+2026-05-02 20:32:07,222 [INFO] TDDOrchestrator: 
+✅ PLANO CONCLUÍDO COM SUCESSO.
+2026-05-02 20:32:07,223 [INFO] TDDOrchestrator: 🧾 Encerrando o fluxo TDD com sucesso.
+2026-05-02 20:32:07,234 [INFO] TDDOrchestrator: 🧹 Encerrando Sandbox ijxqm5k1mw3r87ws1ofzt...
+2026-05-02 20:32:07,502 [INFO] TDDMain: 📊 Token Usage — total: 151571 | prompt: 107571 | completion: 44000 | cached: 22784
+2026-05-02 20:32:07,505 [INFO] root: 📈 Métrica de resiliencia salva em /home/amaro/tdd-agents/workspace_output_tdd-b914c08db80fed1c/metrics_and_logging/resilience_metrics.txt
+2026-05-02 20:32:07,505 [INFO] root: Sub-requirement report saved at /home/amaro/tdd-agents/workspace_output_tdd-b914c08db80fed1c/metrics_and_logging/subreq_results.txt

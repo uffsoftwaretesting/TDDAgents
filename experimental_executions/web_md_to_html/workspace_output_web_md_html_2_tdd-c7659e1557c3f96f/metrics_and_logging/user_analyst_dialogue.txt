@@ -1,0 +1,106 @@
+PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL
+================================================================================
+1. Crie um backend em FastAPI que disponibilize uma API para converter texto Markdown em
+   HTML. O sistema deve expor um endpoint que receba conteúdo em Markdown via requisição
+   HTTP e retorne o HTML correspondente, utilizando uma biblioteca adequada para a
+   conversão. Organize o projeto seguindo boas práticas de desenvolvimento, separando
+   configurações, schemas, serviços e rotas. Implemente validação dos dados de entrada,
+   tratamento de erros e respostas padronizadas. Todas as configurações devem ser
+   carregadas por variáveis de ambiente utilizando um arquivo .env, fornecendo também um
+   arquivo .env.example com exemplos das variáveis necessárias para configuração do
+   projeto. Inclua todas as dependências necessárias em um arquivo requirements.txt,
+   especificando as bibliotecas utilizadas para execução da aplicação.
+2. /sim
+================================================================================
+
+DIALOGO COMPLETO ENTRE USUARIO E ANALISTA
+================================================================================
+[Usuário]: Crie um backend em FastAPI que disponibilize uma API para converter texto
+           Markdown em HTML. O sistema deve expor um endpoint que receba conteúdo em
+           Markdown via requisição HTTP e retorne o HTML correspondente, utilizando uma
+           biblioteca adequada para a conversão. Organize o projeto seguindo boas
+           práticas de desenvolvimento, separando configurações, schemas, serviços e
+           rotas. Implemente validação dos dados de entrada, tratamento de erros e
+           respostas padronizadas. Todas as configurações devem ser carregadas por
+           variáveis de ambiente utilizando um arquivo .env, fornecendo também um
+           arquivo .env.example com exemplos das variáveis necessárias para configuração
+           do projeto. Inclua todas as dependências necessárias em um arquivo
+           requirements.txt, especificando as bibliotecas utilizadas para execução da
+           aplicação.
+[Analista]: Checklist de Requisitos Técnico para o Backend FastAPI de Conversão Markdown
+            → HTML:
+
+1. Projeto e Configuração
+1.1. Inicializar repositório Git.
+1.2. Criar arquivo requirements.txt com, no mínimo, as seguintes dependências:
+• fastapi
+• uvicorn
+• python-dotenv
+• markdown (ou markdown2)
+1.3. Adicionar .env (não versionar) e .env.example contendo as chaves:
+• APP_ENV (ex: development, production)
+• DEBUG (ex: true/false)
+• HOST (ex: 0.0.0.0)
+• PORT (ex: 8000)
+
+2. Estrutura de Pastas (seguindo boas práticas)
+/app
+├─ config/         ← carregamento de variáveis de ambiente
+│     └─ settings.py
+├─ schemas/        ← definição de Pydantic models de entrada/saída
+│     └─ markdown.py
+├─ services/       ← lógica de conversão Markdown → HTML
+│     └─ converter.py
+├─ routes/         ← definição de endpoints
+│     └─ markdown.py
+├─ core/           ← tratamento de erros, respostas padronizadas
+│     ├─ errors.py
+│     └─ responses.py
+└─ main.py         ← criação da instância FastAPI e inclusão de rotas
+
+3. Configurações
+3.1. settings.py deve usar Pydantic BaseSettings para carregar .env.
+3.2. Todas as variáveis de configuração acessíveis via app.settings.
+
+4. Schemas (Pydantic)
+4.1. RequestSchema:
+• campo markdown: str, obrigatório, not blank.
+4.2. ResponseSchema:
+• campo html: str
+• (opcional) data: dict ou meta
+
+5. Serviços
+5.1. converter.py deve expor função convert_markdown_to_html(markdown: str) → str.
+5.2. Utilizar biblioteca adequada (markdown ou markdown2) com configurações padrão.
+
+6. Rotas / API
+6.1. Endpoint POST /convert (ou /markdown/convert):
+• Recebe JSON conforme RequestSchema.
+• Retorna JSON conforme ResponseSchema.
+• HTTP 200 quando sucesso.
+6.2. Documentar rota usando OpenAPI automático do FastAPI.
+
+7. Validação de Dados
+7.1. Pydantic rejeita payloads inválidos → HTTP 422 com detalhamento.
+7.2. Validar string não vazia e tamanho máximo (ex: 10000 caracteres).
+
+8. Tratamento de Erros e Respostas Padronizadas
+8.1. Definir exceções customizadas no errors.py.
+8.2. Interceptar exceções genéricas → retornar HTTP 500 com JSON {"error": "message"}.
+8.3. Todas as respostas devem seguir um formato unificado (e.g. {"data":…, "error":…}).
+
+9. Carregamento de Configurações
+9.1. main.py deve invocar settings antes de incluir as rotas.
+9.2. As variáveis HOST e PORT usadas na inicialização do uvicorn.
+
+10. Testes (unitários / integração)
+10.1. Testar conversão de Markdown básico, listas, links e imagens.
+10.2. Testar endpoint via TestClient do FastAPI.
+10.3. Testar validação de payload inválido.
+
+11. Documentação e Exemplos
+11.1. README.md com instruções de setup, .env.example e execução.
+11.2. Exemplos de requisição e resposta.
+
+Posso prosseguir para a equipe de engenharia?
+================================================================================

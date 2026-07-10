@@ -1,0 +1,25 @@
+SUBREQ RESULTS REPORT
+================================================================================
+EXPLANATION OF METRICS:
+F1 (Clean TDD): The sub-requirement was successfully implemented with a proper TDD cycle (failed tests first, then fixed).
+F2 (Green in Red): The tests passed immediately during the Red phase, but the sub-requirement was still considered successful.
+FAILURE: The sub-requirement failed to meet the criteria, max retries were exceeded or infrastructure issues occurred.
+--------------------------------------------------------------------------------
+Total sub-requirements: 10
+Success: 10
+Failed: 0
+Clean TDD Rate (F1) = 9 / 10 (90.0%)
+Green in Red Rate (F2) = 1 / 10 (10.0%)
+Fail rate = 0 / 10 (0.0%)
+--------------------------------------------------------------------------------
+1. [SUCCESS] [F2] FASE 0 - SETUP: criar virtualenv, instalar dependências core (fastapi, uvicorn, python-dotenv, markdown2, pytest) e ferramentas auxiliares, configurar pytest.ini, coverage e estrutura de diretórios: app/config, app/schemas, app/services, app/routes, app/main.py, tests/unit e tests/integration, adicionar __init__.py em cada pacote, criar .env.example e arquivo .env vazio
+2. [SUCCESS] [F1] FASE 1 - CONFIGURAÇÕES (app/config/settings.py): criar testes unitários em tests/unit/test_settings.py para validar carregamento de variáveis de ambiente via python-dotenv, valores padrão e tipos (app_name, debug, host, port, markdown_max_length) e limites inválidos; implementar classe Settings como singleton com Pydantic BaseSettings
+3. [SUCCESS] [F1] FASE 2 - SCHEMAS (app/schemas): escrever testes unitários em tests/unit/test_schemas.py cobrindo validação de MarkdownInput (não vazio, length<=markdown_max_length), HTMLResponse e ErrorResponse; implementar models Pydantic em app/schemas/markdown.py ou similares
+4. [SUCCESS] [F1] FASE 3 - SERVIÇO DE CONVERSÃO (app/services/markdown_converter.py): criar testes unitários em tests/unit/test_markdown_converter.py que cobrem conversão de Markdown simples e casos de falha (passar objeto não string, mocks lançando exceção); implementar função convert_markdown_to_html com markdown2 e tratamento de exceções específicas
+5. [SUCCESS] [F1] FASE 4 - EXCEPTION HANDLERS GERAIS (app/main.py ou app/exception_handlers.py): criar testes unitários em tests/unit/test_exception_handlers.py simulando RequestValidationError e exceções do serviço, esperando ErrorResponse com código e mensagem padronizados; implementar handlers para 422 e 500 via @app.exception_handler
+6. [SUCCESS] [F1] FASE 5 - ROTAS E ENDPOINT (app/routes/markdown.py): criar testes unitários em tests/unit/test_routes_markdown.py usando TestClient para POST /convert/ validando sucesso (200+HTMLResponse), 422 em payload inválido; implementar Router FastAPI com prefixo /convert, summary, description, injeção de dependências do serviço e retorno formatado
+7. [SUCCESS] [F1] FASE 6 - APP PRINCIPAL E INTEGRAÇÃO DE COMPONENTES (app/main.py): escrever testes de smoke em tests/integration/test_app_startup.py que importam app, verificam rotas registradas e carregamento de config; implementar FastAPI(app_name, debug), incluir router /convert, carregar Settings e exception handlers
+8. [SUCCESS] [F1] FASE 7 - TESTES DE INTEGRAÇÃO FINAIS (tests/integration/test_api_endpoints.py): criar testes end-to-end usando TestClient para cenários válidos e de erro (malformado JSON, conteúdo vazio, muito longo, falha de conversão simulada), garantir conformidade de status codes e schemas de resposta
+9. [SUCCESS] [F1] FASE 8 - DOCUMENTAÇÃO E OPENAPI: escrever testes que verificam se /docs e /openapi.json exibem schemas MarkdownInput, HTMLResponse e ErrorResponse corretamente, garantir descrição e campos no Swagger UI
+10. [SUCCESS] [F1] FASE 9 - OTIMIZAÇÃO E CONSIDERAÇÕES FINAIS: revisar cobertura de testes, ajustar timeouts e parâmetros uvicorn no entrypoint, adicionar lint (flake8/black) e configurar pre-commit para padronização de código
+================================================================================

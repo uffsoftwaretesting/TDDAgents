@@ -1,0 +1,81 @@
+ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO
+================================================================================
+# Especificação Técnica: API Markdown-to-HTML Converter
+
+## 1. Visão Geral do Sistema
+Esta API, desenvolvida em FastAPI, recebe via HTTP um conteúdo em Markdown e retorna seu equivalente em HTML. O projeto segue boas práticas de separação de responsabilidades (configurações, schemas, serviços, rotas), validação de entrada, tratamento padronizado de erros e uso de variáveis de ambiente para configuração.
+
+## 2. Estruturas de Dados e Interfaces
+
+### 2.1 Configurações (app/config/settings.py)
+Classe Settings (singleton) que carrega variáveis de ambiente via python-dotenv:
+- app_name: str  
+- debug: bool  
+- host: str  
+- port: int  
+- markdown_max_length: int  (tamanho máximo permitido para o conteúdo Markdown)
+
+Variáveis esperadas no arquivo `.env` / `.env.example`:
+- APP_NAME  
+- DEBUG  
+- HOST  
+- PORT  
+- MARKDOWN_MAX_LENGTH  
+
+### 2.2 Schemas de Dados (app/schemas)
+Pydantic Models:
+1. MarkdownInput  
+   - content: str  
+     - obrigatória, não vazia  
+     - comprimento mínimo: 1  
+     - comprimento máximo: Settings.markdown_max_length  
+2. HTMLResponse  
+   - success: bool = True  
+   - data:  
+     - html: str  
+3. ErrorResponse  
+   - success: bool = False  
+   - error:  
+     - code: int  
+     - message: str  
+
+### 2.3 Serviço de Conversão (app/services/markdown_converter.py)
+Função pública:
+- convert_markdown_to_html(text: str) -> str  
+  - Recebe string Markdown  
+  - Retorna HTML convertido usando biblioteca `markdown2` (ou `markdown`)  
+  - Lança exceção específica em caso de falha na conversão  
+
+### 2.4 Rotas e Endpoints (app/routes/markdown.py)
+FastAPI Router com prefixo `/convert`:
+- POST `/`  
+  - Request Body: MarkdownInput  
+  - Sucesso (200): HTMLResponse  
+  - Erro de validação (422) ou erro interno (500): ErrorResponse  
+  - Summary e description preenchidos para OpenAPI  
+
+## 3. Casos de Borda e Validações (Edge Cases)
+- JSON malformado ou campos ausentes → RequestValidationError → 422 → ErrorResponse  
+- `content` vazio ou somente espaços → validação Pydantic → 422 → ErrorResponse  
+- `content` maior que `markdown_max_length` → validação Pydantic → 422 → ErrorResponse  
+- Tipos de campo incorretos (ex: content não é string) → 422 → ErrorResponse  
+- Falha na conversão pelo serviço (biblioteca lança exceção) → captura genérica → 500 → ErrorResponse  
+- Comportamento sob carga ou concorrência elevada → FastAPI/Uvicorn gerenciam threads/async, sem modificação adicional  
+- Timeout ou falha de infraestrutura (rede, memória) → tratado pelo servidor de aplicação, retorna 500  
+
+## 4. Contexto Técnico
+- Linguagem: Python 3.9+  
+- Framework Web: FastAPI (asyncio-based)  
+- Servidor ASGI: Uvicorn  
+- Gerenciamento de ambiente: python-dotenv para carregar `.env`  
+- Conversão Markdown: markdown2 (ou markdown se preferido)  
+- Paradigma: modular, separação em configurações, serviços, schemas e rotas  
+- Formato de saída: JSON padronizado  
+- Arquivos de configuração de ambiente: `.env` (real) e `.env.example` (modelo)  
+
+## 5. Dependências Base (Core Dependencies)
+- fastapi  
+- uvicorn  
+- python-dotenv  
+- markdown2  (ou `markdown`)  
+- pytest (para suite de testes)
