@@ -7,7 +7,7 @@
 ![E2B](https://img.shields.io/badge/E2B-Cloud_Sandbox-00C7B7?style=for-the-badge)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-State_Persistence-336791?style=for-the-badge&logo=postgresql&logoColor=white)
 
-**An autonomous, multi-agent system that executes the full Test-Driven Development lifecycle — transforming natural language requirements into validated, production-quality code through an orchestrated Red-Green-Refactor cycle.**
+**An autonomous, multi-agent system that executes the Red-Green phases from Test-Driven Development — transforming natural language requirements into validated, production-quality code through an orchestrated Red-Green cycle coupled with a self-correction loop.**
 
 *Research prototype developed at [Universidade Federal Fluminense (UFF)](https://www.uff.br) and presented at [SBES 2026](https://cbsoft.sbc.org.br/2026/).*
 
@@ -47,7 +47,7 @@
 
 ## Overview
 
-**TDDAgents** is an open-source, multi-agent software engineering pipeline that autonomously executes the full TDD lifecycle. It takes a natural language problem description as input and produces validated, tested Python code as output — without human intervention after the initial requirements are confirmed.
+**TDDAgents** is an open-source, multi-agent software engineering pipeline that autonomously executes the Red-Green phases from Test-Driven Development. It takes a natural language problem description as input and produces validated, tested Python code as output.
 
 The workflow is structured into two well-defined phases:
 
@@ -77,7 +77,7 @@ The Technical Specification is designed to be consumed by AI agents, not humans.
 
 ---
 
-### Phase 2 — Autonomous TDD Cycle
+### Phase 2 — Autonomous Red-Green Cycle
 
 The Technical Specification feeds into the **Planner Agent**, which decomposes it into an ordered list of atomic, testable sub-requirements (`tdd_plan`). The first item is always an environment setup step. Subsequent items represent incremental functional slices ordered by complexity.
 
