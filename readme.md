@@ -52,17 +52,7 @@
 The workflow is structured into two well-defined phases:
 
 1. **Interactive Requirements Gathering** — An AI Analyst collaborates with the user to eliminate ambiguities and produce a structured Technical Specification.
-2. **Autonomous TDD Cycle** — A team of specialized agents executes an adapted Red-Green-Refactor cycle for each decomposed sub-requirement.
-
-```
-  🔴 RED                     🟢 GREEN                  🔵 REFACTOR
-
-  ──────────────             ─────────────────          ──────────────────
-
-  Test Engineer writes  →    Developer writes      →    Reviewer analyzes
-  failing tests              minimum code to            logs, classifies
-  (no implementation)        satisfy the tests          fault, routes fix
-```
+2. **Autonomous Red-Green Cycle** — A team of specialized agents executes an adapted Red-Green cycle for each decomposed sub-requirement.
 
 All agent-generated code runs inside isolated **E2B Linux containers**. Orchestration state is persisted in **PostgreSQL** via LangGraph checkpointing, enabling resumable, fault-tolerant long-running executions.
 
