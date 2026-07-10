@@ -102,7 +102,7 @@ Each sub-requirement is processed by a dedicated **TDD Subgraph** that encapsula
 
 5. **Reviewer:** Acts as external judge throughout the cycle. Receives the full workspace state, the current sub-requirement, and the complete Technical Specification as context. Emits a binary diagnosis: implementation fault vs. test fault. This role separation is an intentional architectural decision to prevent biased self-correction.
 
-The self-healing loop runs for a configurable maximum number of iterations. Resilience metrics (total failures, failures by type, auto-recovery rate) are collected throughout.
+Resilience metrics (total failures, failures by type, auto-recovery rate) are collected throughout.
 
 ---
 
