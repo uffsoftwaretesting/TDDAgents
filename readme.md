@@ -81,7 +81,7 @@ The Technical Specification is designed to be consumed by AI agents, not humans.
 
 The Technical Specification feeds into the **Planner Agent**, which decomposes it into an ordered list of atomic, testable sub-requirements (`tdd_plan`). The first item is always an environment setup step. Subsequent items represent incremental functional slices ordered by complexity.
 
-Each sub-requirement is processed by a dedicated **TDD Subgraph** that encapsulates the full Red-Green-Refactor loop:
+Each sub-requirement is processed by a dedicated **TDD Subgraph** that encapsulates the full Red-Green loop:
 
 <div align="center">
   <img src="assets/subgrafo.png" alt="TDD Subgraph" width="60%"/>
