@@ -9,65 +9,65 @@ logger = logging.getLogger("TDDOrchestrator")
 
 def apply_agent_action_to_sandbox(sandbox_id: str, action: AgentAction, current_file_system: dict) -> tuple[dict, str]:
     """
-    Aplica a ação estruturada (Pydantic) à sandbox.
-    Retorna:
-        updated_fs (dict): O estado atualizado do sistema de arquivos (file system).
-        execution_logs (str): O stdout/stderr de quaisquer bash_commands executados.
-    Levanta:
-        TransientInfraError ou FatalInfraError em caso de falha na comunicação com a Sandbox.
+    Applies the structured (Pydantic) action to the sandbox.
+    Returns:
+        updated_fs (dict): The updated state of the file system.
+        execution_logs (str): The stdout/stderr of any executed bash_commands.
+    Raises:
+        TransientInfraError or FatalInfraError on failure communicating with the Sandbox.
     """
     updated_fs = current_file_system.copy()
     execution_logs = ""
-    
+
     try:
-        # A conexão é iniciada pelo orquestrador e aqui nós apenas nos conectamos à instância ativa
+        # The connection is started by the orchestrator; here we just connect to the active instance
         sandbox = Sandbox.connect(sandbox_id, api_key=Config.E2B_API_KEY)
-        
-        # 1. Instalar Dependências
+
+        # 1. Install Dependencies
         if action.dependencies:
             deps_str = " ".join(action.dependencies)
-            logger.info(f"📦 Instalando dependências na Sandbox: {deps_str}")
+            logger.info(f"📦 Installing dependencies in the Sandbox: {deps_str}")
             sandbox.commands.run(f"pip install {deps_str}", user="root")
 
-        # 2. Escrever Arquivos (Models, Routers, Schemas, etc.)
+        # 2. Write Files (Models, Routers, Schemas, etc.)
         for file_obj in action.files_to_write:
-            logger.info(f"💾 Escrevendo arquivo: {file_obj.filepath}")
-            
-            # Garante que os diretórios existam
+            logger.info(f"💾 Writing file: {file_obj.filepath}")
+
+            # Ensures the directories exist
             if "/" in file_obj.filepath:
                 dir_path = file_obj.filepath.rsplit('/', 1)[0]
                 sandbox.commands.run(f"mkdir -p {dir_path}", user="root")
-                
-            # Escreve o arquivo na Sandbox
+
+            # Writes the file to the Sandbox
             sandbox.files.write(file_obj.filepath, file_obj.content)
-            # Atualiza o rastreador de estado do LangGraph
+            # Updates LangGraph's state tracker
             updated_fs[file_obj.filepath] = file_obj.content
 
-        # 3. Executar Comandos Bash de Configuração (Migrations, variáveis de ambiente, etc.)
+        # 3. Run Setup Bash Commands (Migrations, environment variables, etc.)
         for cmd in action.bash_commands:
-            logger.info(f"🔧 Executando comando: {cmd}")
+            logger.info(f"🔧 Running command: {cmd}")
             result = sandbox.commands.run(cmd, user="root")
             execution_logs += f"\n$ {cmd}\n{result.stdout}"
             if result.stderr:
                 execution_logs += f"\nSTDERR:\n{result.stderr}"
-                
+
         return updated_fs, execution_logs
 
     except SandboxException as exc:
         handle_e2b_exception(exc, context="SandboxUtils")
     except Exception as exc:
-        handle_e2b_exception(exc, context="SandboxUtils Genérico")
+        handle_e2b_exception(exc, context="Generic SandboxUtils")
 
 
 def read_all_files_from_state(file_system: dict) -> str:
     """
-    Formata os arquivos rastreados em uma string legível.
-    Isso injeta o workspace atual inteiro diretamente no prompt do LLM.
+    Formats the tracked files into a readable string.
+    This injects the entire current workspace directly into the LLM prompt.
     """
     if not file_system:
-        return "O workspace está vazio no momento."
-    
+        return "The workspace is currently empty."
+
     return "\n".join(
-        f"--- {filepath} ---\n```python\n{content}\n```\n" 
+        f"--- {filepath} ---\n```python\n{content}\n```\n"
         for filepath, content in file_system.items()
     )

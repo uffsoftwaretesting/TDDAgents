@@ -7,13 +7,13 @@ from langgraph.graph.message import add_messages
 load_dotenv()
 
 if not os.getenv("OPENAI_API_KEY"):
-    raise Exception("Nenhuma chave de API configurada")
+    raise Exception("No API key configured")
 
 if not os.getenv("E2B_API_KEY"):
-    raise Exception("Nenhuma chave de API do E2B configurada")
+    raise Exception("No E2B API key configured")
 
 if not os.getenv("POSTGRES_URL"):
-    raise Exception("Nenhuma POSTGRES_URL configurada")
+    raise Exception("No POSTGRES_URL configured")
 
 
 class Config:
@@ -33,35 +33,35 @@ class Config:
 
 
 class AgentState(TypedDict):
-    # ── Dados principais da tarefa ────────────────────────────────────────────
+    # ── Main task data ────────────────────────────────────────────
     specification: str
     requirements: str
     plan: list[str]
     plan_index: int
     current_sub_req: str
 
-    # ── Cloud Sandbox e Persistência de Arquivos ──────────────────────────────
-    # Em vez de carregar código no LangGraph, os agentes usarão o E2B Code Interpreter.
-    # Estes campos rastreiam o container e a árvore de diretórios atual.
+    # ── Cloud Sandbox and file persistence ──────────────────────────────
+    # Instead of loading code into LangGraph, agents use the E2B Code Interpreter.
+    # These fields track the container and the current directory tree.
     sandbox_id: str
     file_system: dict[str, str]
 
-    # ── Históricos de conversa por agente ─────────────────────────────────────
+    # ── Per-agent conversation histories ─────────────────────────────────────
     tester_messages: Annotated[list[BaseMessage], add_messages]
     developer_messages: Annotated[list[BaseMessage], add_messages]
     reviewer_messages: Annotated[list[BaseMessage], add_messages]
 
-    # ── Log de auditoria compartilhado ────────────────────────────────────────
+    # ── Shared audit log ────────────────────────────────────────
     audit_log: Annotated[list[BaseMessage], add_messages]
 
-    # ── Controle de fluxo ─────────────────────────────────────────────────────
+    # ── Flow control ─────────────────────────────────────────────────────
     iteration: int
     infra_retries: int
     status: str
     max_retries: int
     failed_requirements: list[dict]
 
-    # ── Métricas de Autocorreção ──────────────────────────────────────────────
+    # ── Self-correction metrics ──────────────────────────────────────────────
     total_detected_failures: int
     autonomously_corrected_failures: int
     current_subreq_failures: int
@@ -69,7 +69,7 @@ class AgentState(TypedDict):
     test_faults: int
     implementation_faults: int
 
-    # ── Métricas por sub-requisito ────────────────────────────────────────────
+    # ── Per-sub-requirement metrics ────────────────────────────────────────────
     subreq_success_count: int
     subreq_failure_count: int
     subreq_results: list[dict]

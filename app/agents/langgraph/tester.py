@@ -18,7 +18,7 @@ def generate_test_for_sub_req(
     is_review_mode: bool = False,
 ) -> tuple[AgentAction, list]:
     """
-    Gera a ação estruturada contendo as modificações na suíte de testes (via Pytest).
+    Generates the structured action containing the changes to the test suite (via Pytest).
     """
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(AgentAction)
@@ -36,7 +36,7 @@ def generate_test_for_sub_req(
     )
 
     if not history:
-        # Primeira chamada: envia a spec completa (sem feedback)
+        # First call: sends the full spec (no feedback)
         system_content = load_prompt(template_name=template_sys)
         human_content = load_prompt(
             template_name=template_hum,
@@ -45,13 +45,13 @@ def generate_test_for_sub_req(
             current_codebase=current_codebase,
             feedback=""
         )
-        
+
         history = [
             SystemMessage(content=system_content),
             HumanMessage(content=human_content),
         ]
     else:
-        # Próximas chamadas: usa o mesmo template de human, mas passa o feedback
+        # Later calls: uses the same human template, but passes the feedback
         human_content = load_prompt(
             template_name=template_hum,
             sub_requirement=sub_requirement,
@@ -60,13 +60,13 @@ def generate_test_for_sub_req(
         )
         history.append(HumanMessage(content=human_content))
 
-    # Invoca o LLM forçando a saída estruturada do AgentAction
+    # Invokes the LLM forcing AgentAction's structured output
     try:
         action: AgentAction = structured_llm.invoke(history)
     except Exception as exc:
         handle_llm_exception(exc, context="generate_test_for_sub_req")
-    
-    # Armazena a resposta formatada como JSON no histórico de conversa
+
+    # Stores the response formatted as JSON in the conversation history
     history.append(AIMessage(content=action.model_dump_json(indent=2)))
 
     return action, history

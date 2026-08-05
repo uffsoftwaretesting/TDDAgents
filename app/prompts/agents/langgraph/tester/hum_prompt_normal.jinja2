@@ -1,30 +1,30 @@
 {% if not feedback %}
-🎯 SUB-REQUISITO ATUAL:
+🎯 CURRENT SUB-REQUIREMENT:
 {{ sub_requirement }}
 
-📋 ESPECIFICAÇÃO TÉCNICA (CONTEXTO GERAL):
+📋 TECHNICAL SPECIFICATION (GENERAL CONTEXT):
 """
 {{ specification }}
 """
 
-💻 CÓDIGO ATUAL NO WORKSPACE:
+💻 CURRENT WORKSPACE CODE:
 {{ current_codebase }}
 
-TAREFA:
-Expanda a cobertura de testes para cobrir estritamente o "Sub-requisito Atual".
-Analise o código atual do workspace para saber como fazer o import correto e em qual arquivo adicionar o teste.
-Gere sua resposta usando a estrutura JSON/Action exigida.
+TASK:
+Expand test coverage to strictly cover the "Current Sub-requirement".
+Analyze the current workspace code to determine how to import correctly and which file to add the test to.
+Generate your response using the required JSON/Action structure.
 
 {% else %}
-⚠️ ALERTA DE FLUXO OU FALHA DE EXECUÇÃO:
+⚠️ FLOW OR EXECUTION FAILURE ALERT:
 
-📝 FEEDBACK DA TENTATIVA ANTERIOR:
+📝 FEEDBACK FROM THE PREVIOUS ATTEMPT:
 {{ feedback }}
 
-💻 CÓDIGO ATUAL ATUALIZADO:
+💻 CURRENT UPDATED CODE:
 {{ current_codebase }}
 
-TAREFA DE CORREÇÃO:
-Seus testes falharam em ser gerados corretamente ou o Developer precisou solicitar uma modificação. 
-Com base no feedback, revise a sua atuação. Gere a sua resposta usando a estrutura JSON/Action exigida e retorne o arquivo completo.
+CORRECTION TASK:
+Your tests failed to be generated correctly, or the Developer needed to request a change.
+Based on the feedback, revise your work. Generate your response using the required JSON/Action structure and return the complete file.
 {% endif %}

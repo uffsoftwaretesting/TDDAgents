@@ -18,7 +18,7 @@ from app.errors.exceptions import FatalInfraError, TransientInfraError
 
 def handle_e2b_exception(exc: Exception, context: str = "") -> None:
     """
-    Classifica exceções do E2B SDK.
+    Classifies exceptions from the E2B SDK.
 
     Raises:
         TransientInfraError
@@ -27,49 +27,49 @@ def handle_e2b_exception(exc: Exception, context: str = "") -> None:
     prefix = f"[{context}] " if context else ""
 
     if _E2B_AVAILABLE:
-        # Prevenção extra caso um erro de comando de terminal alcance o handler
+        # Extra safeguard in case a terminal command error reaches the handler
         if type(exc).__name__ == "CommandExitException":
             raise TransientInfraError(
-                f"{prefix}Falha na execução de comando interno na Sandbox: {exc}"
+                f"{prefix}Internal command execution failed in the Sandbox: {exc}"
             ) from exc
 
         if isinstance(exc, TimeoutException):
             raise TransientInfraError(
-                f"{prefix}Timeout atingido no E2B."
+                f"{prefix}E2B timeout reached."
             ) from exc
 
         if isinstance(exc, RateLimitException):
             raise TransientInfraError(
-                f"{prefix}Rate limit do E2B atingido."
+                f"{prefix}E2B rate limit reached."
             ) from exc
 
         if isinstance(exc, AuthenticationException):
             raise FatalInfraError(
-                f"{prefix}Falha de autenticação no E2B."
+                f"{prefix}E2B authentication failed."
             ) from exc
 
         if isinstance(exc, NotFoundException):
             raise FatalInfraError(
-                f"{prefix}Sandbox ou recurso não encontrado no E2B."
+                f"{prefix}Sandbox or resource not found in E2B."
             ) from exc
 
         if isinstance(exc, NotEnoughSpaceException):
             raise FatalInfraError(
-                f"{prefix}Espaço em disco insuficiente na sandbox."
+                f"{prefix}Insufficient disk space in the sandbox."
             ) from exc
 
         if isinstance(exc, TemplateException):
             raise FatalInfraError(
-                f"{prefix}Template da sandbox inválido."
+                f"{prefix}Invalid sandbox template."
             ) from exc
-            
-        # SandboxException atua como base para as exceções acima, então ela
-        # deve vir por último para capturar quaisquer outros erros desconhecidos do E2B
+
+        # SandboxException is the base class for the exceptions above, so it
+        # must come last to catch any other unknown E2B errors
         if isinstance(exc, SandboxException):
             raise TransientInfraError(
                 f"{prefix}Sandbox error: {exc}"
             ) from exc
 
     raise FatalInfraError(
-        f"{prefix}Falha não classificada de infraestrutura: {exc}"
+        f"{prefix}Unclassified infrastructure failure: {exc}"
     ) from exc

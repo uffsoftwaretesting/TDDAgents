@@ -1,14 +1,14 @@
-⚠️ Tentativa {{ attempt }}/3 no RED:
+⚠️ Attempt {{ attempt }}/3 on RED:
 
-O teste passou sem implementação.
-No TDD, o teste DEVE FALHAR antes da implementação.
+The test passed without implementation.
+In TDD, the test MUST FAIL before the implementation exists.
 
-PROBLEMA COMUM:
-O teste pode estar validando um valor padrão (ex: False, None, 0)
-que a função já retorna sem implementação real.
+COMMON PROBLEM:
+The test may be validating a default value (e.g. False, None, 0)
+that the function already returns without any real implementation.
 
-CORREÇÃO NECESSÁRIA:
-Ajuste o teste para validar comportamento ESPECÍFICO que ainda não existe.
-Exemplo: Se espera validação de senha forte, teste casos que exigem lógica real.
+REQUIRED FIX:
+Adjust the test to validate SPECIFIC behavior that doesn't exist yet.
+Example: If expecting strong password validation, test cases that require real logic.
 
-SUB-REQUISITO: {{ sub_requirement }}
+SUB-REQUIREMENT: {{ sub_requirement }}

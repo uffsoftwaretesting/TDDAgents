@@ -11,29 +11,29 @@ logger = logging.getLogger("TDDOrchestrator")
 
 class AnalystResponse(BaseModel):
     response: str = Field(
-        description="A sua resposta em texto para o usuário. Pode ser perguntas de esclarecimento ou o checklist final de requisitos."
+        description="Your text response to the user. Can be clarifying questions or the final requirements checklist."
     )
     needs_clarification: bool = Field(
-        description="True se a solicitação for vaga e você precisar fazer perguntas. False se estiver tudo claro."
+        description="True if the request is vague and you need to ask questions. False if everything is clear."
     )
     has_checklist: bool = Field(
-        description="True APENAS se a sua resposta contiver o checklist estruturado final e a pergunta 'Posso prosseguir?'."
+        description="True ONLY if your response contains the final structured checklist and the question 'Can I proceed?'."
     )
 
 def analyze_requirements(user_input: str, conversation_history: str = "") -> dict:
     """
-    Analista de requisitos que faz perguntas para esclarecer regras de negócio.
+    Requirements analyst that asks questions to clarify business rules.
     """
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(AnalystResponse)
-    
+
     system_prompt = load_prompt(template_name='agents/langgraph/analyst/sys_prompt_1.jinja2')
     human_prompt = load_prompt(
         template_name='agents/langgraph/analyst/hum_prompt_1.jinja2',
         user_input=user_input,
         conversation_history=conversation_history
     )
-    
+
     try:
         result: AnalystResponse = structured_llm.invoke([
             SystemMessage(content=system_prompt),
@@ -41,5 +41,5 @@ def analyze_requirements(user_input: str, conversation_history: str = "") -> dic
         ])
         return result.model_dump()
     except Exception as exc:
-        logger.error("❌ ANALISTA: Falha ao analisar requisitos")
+        logger.error("❌ ANALYST: Failed to analyze requirements")
         handle_llm_exception(exc, context="analyze_requirements")

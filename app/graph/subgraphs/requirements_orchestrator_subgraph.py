@@ -10,7 +10,7 @@ from app.graph.nodes.requirements_engineer import node_engineer
 logger = logging.getLogger("TDDOrchestrator")
 
 class RequirementsOrchestrator:
-    """Orquestrador LangGraph para levantamento de requisitos."""
+    """LangGraph orchestrator for requirements gathering."""
     
     def __init__(self):
         self.graph = self._create_graph()
@@ -56,7 +56,7 @@ class RequirementsOrchestrator:
         return workflow.compile()
     
     def run(self, initial_user_input: str) -> RequirementsState:
-        logger.info("\n🚀 Iniciando Orquestração de Requisitos Interativa...")
+        logger.info("\n🚀 Starting Interactive Requirements Orchestration...")
         
         initial_state: RequirementsState = {
             "user_input": initial_user_input,

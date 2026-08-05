@@ -7,41 +7,41 @@ logger = logging.getLogger("TDDOrchestrator")
 
 
 def node_user_input(state: RequirementsState) -> RequirementsState:
-    """Nó do grafo que interage com o usuário de forma robusta e flexível."""
+    """Graph node that interacts with the user in a robust and flexible way."""
     logger.info("=" * 70)
-    logger.info("👤 USER INPUT - Aguardando feedback do usuário")
+    logger.info("👤 USER INPUT - Awaiting user feedback")
     logger.info("=" * 70)
 
     current_response = state["current_response"]
 
-    # Exibe a resposta do Analista com formatação clara
-    print(f"\n🤖 [Analista de Requisitos]:\n{current_response}\n")
+    # Displays the Analyst's response with clear formatting
+    print(f"\n🤖 [Requirements Analyst]:\n{current_response}\n")
 
     if state.get("has_checklist"):
-        print("💡 DICA: O Analista gerou o Checklist Final.")
-        print("   - Digite '/sim' para prosseguir para a Engenharia.")
-        print("   - Ou digite as alterações que deseja fazer (ex: 'Faltou a validação X').")
+        print("💡 TIP: The Analyst has generated the Final Checklist.")
+        print("   - Type '/yes' to proceed to Engineering.")
+        print("   - Or type the changes you'd like to make (e.g. 'Missing validation X').")
     else:
-        print("💡 DICA: O Analista precisa de mais detalhes.")
-        print("   - Responda à pergunta para ajudar a definir o escopo.")
+        print("💡 TIP: The Analyst needs more details.")
+        print("   - Answer the question to help define the scope.")
 
     try:
-        user_response = input("\n👤 [Sua Resposta] (ou '/sair'): ").strip()
+        user_response = input("\n👤 [Your Response] (or '/exit'): ").strip()
     except (KeyboardInterrupt, EOFError):
-        print("\n👋 Operação cancelada pelo usuário.")
+        print("\n👋 Operation cancelled by the user.")
         sys.exit(0)
 
-    if user_response.lower() in ["/sair", "/exit", "/quit"]:
-        print("\n👋 Saindo do levantamento de requisitos...")
+    if user_response.lower() in ["/exit", "/quit"]:
+        print("\n👋 Exiting requirements gathering...")
         sys.exit(0)
 
-    logger.info(f"📝 Resposta do usuário: {user_response}")
+    logger.info(f"📝 User response: {user_response}")
 
     user_prompts = list(state.get("user_prompts", []))
     user_prompts.append(user_response)
 
-    # Confirmação estática e explícita: apenas '/sim' confirma.
-    is_confirmation = bool(state.get("has_checklist")) and user_response.lower() == "/sim"
+    # Static, explicit confirmation: only '/yes' confirms.
+    is_confirmation = bool(state.get("has_checklist")) and user_response.lower() == "/yes"
 
     new_state: RequirementsState = {
         **state,
@@ -51,9 +51,9 @@ def node_user_input(state: RequirementsState) -> RequirementsState:
         "status": "confirmed" if is_confirmation else "continue_analysis",
     }
 
-    # Se havia checklist e o usuário não confirmou, reabre a análise.
+    # If there was a checklist and the user did not confirm, reopen the analysis.
     if state.get("has_checklist") and not is_confirmation:
-        logger.info("🔄 Usuário solicitou alterações no checklist. Reabrindo análise.")
+        logger.info("🔄 User requested changes to the checklist. Reopening analysis.")
         new_state["has_checklist"] = False
 
     return new_state

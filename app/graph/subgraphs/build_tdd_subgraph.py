@@ -10,7 +10,7 @@ from app.graph.nodes import (
 )
 
 def _increment_failures(state: AgentState, result: dict, fault_type: str = None) -> dict:
-    """Função auxiliar para incrementar falhas, categorizando se necessário."""
+    """Helper function to increment failures, categorizing them if needed."""
     result["total_detected_failures"] = state.get("total_detected_failures", 0) + 1
     result["current_subreq_failures"] = state.get("current_subreq_failures", 0) + 1
     
@@ -97,7 +97,7 @@ def wrapper_developer(state: AgentState) -> dict:
 
 def build_tdd_subgraph():
     """
-    Constrói o ciclo TDD interno:  Tester → RunnerRed → Developer → RunnerGreen
+    Builds the internal TDD cycle:  Tester → RunnerRed → Developer → RunnerGreen
     """
     workflow = StateGraph(AgentState)
 

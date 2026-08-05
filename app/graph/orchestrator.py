@@ -19,46 +19,45 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("TDDOrchestrator")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COMO O CHECKPOINTER FUNCIONA
+# HOW THE CHECKPOINTER WORKS
 # ─────────────────────────────────────────────────────────────────────────────
-# PostgresSaver é o backend de persistência de estado do LangGraph. Você nunca
-# o chama diretamente — o LangGraph o chama automaticamente em torno de cada
-# execução de nó:
+# PostgresSaver is LangGraph's state persistence backend. You never call it
+# directly — LangGraph calls it automatically around every node execution:
 #
-#   1. ANTES de um nó executar:
-#      O LangGraph busca o último snapshot do AgentState armazenado no Postgres
-#      sob a chave (thread_id, checkpoint_id) e o entrega ao nó como argumento
-#      `state`.
+#   1. BEFORE a node runs:
+#      LangGraph fetches the latest AgentState snapshot stored in Postgres
+#      under the key (thread_id, checkpoint_id) and hands it to the node as
+#      the `state` argument.
 #
-#   2. DEPOIS que um nó retorna:
-#      O LangGraph pega o dict parcial retornado pelo nó, mescla com o snapshot
-#      atual usando o reducer de cada campo (add_messages para listas, sobrescrita
-#      simples para todo o resto), e grava o resultado de volta no Postgres como
-#      uma nova linha de checkpoint.
+#   2. AFTER a node returns:
+#      LangGraph takes the partial dict returned by the node, merges it with
+#      the current snapshot using each field's reducer (add_messages for
+#      lists, plain overwrite for everything else), and writes the result
+#      back to Postgres as a new checkpoint row.
 #
-# COMO O thread_id DELIMITA O CONTEXTO
+# HOW thread_id SCOPES CONTEXT
 # ─────────────────────────────────────────────────────────────────────────────
-# Toda chamada graph.invoke / graph.stream recebe um dict `config`:
+# Every graph.invoke / graph.stream call receives a `config` dict:
 #
-#   config={"configurable": {"thread_id": "algum-id-unico"}}
+#   config={"configurable": {"thread_id": "some-unique-id"}}
 #
-# Todas as linhas de checkpoint gravadas durante essa chamada são marcadas com
-# esse thread_id. Na próxima vez que graph.invoke for chamado com o *mesmo*
-# thread_id, o LangGraph lê exatamente essas linhas — retomando de onde parou,
-# com todas as mensagens e estado acumulados intactos.
+# All checkpoint rows written during that call are tagged with that
+# thread_id. The next time graph.invoke is called with the *same* thread_id,
+# LangGraph reads exactly those rows — resuming where it left off, with all
+# accumulated messages and state intact.
 #
-# Usar um thread_id *diferente* dá uma execução completamente independente com
-# seu próprio AgentState em branco — sem contaminação cruzada.
+# Using a *different* thread_id gives a completely independent run with its
+# own blank AgentState — no cross-contamination.
 #
-# O QUE ISSO SIGNIFICA PARA O LLM
+# WHAT THIS MEANS FOR THE LLM
 # ─────────────────────────────────────────────────────────────────────────────
-# O checkpointer NÃO envia nada ao LLM. Ele persiste o AgentState.
-# Cada agente (tester, developer, reviewer) tem sua própria lista `*_messages`
-# no AgentState. O agente lê essa lista do estado, adiciona seus novos turnos
-# de System + Human, chama `llm.invoke(messages)`, recebe a resposta de AI e
-# retorna a lista atualizada. O reducer add_messages do LangGraph garante que
-# cada novo turno seja anexado — nunca perdido — em todas as re-entradas de nós
-# e reinicializações do processo.
+# The checkpointer does NOT send anything to the LLM. It persists the
+# AgentState. Each agent (tester, developer, reviewer) has its own
+# `*_messages` list in the AgentState. The agent reads that list from the
+# state, appends its new System + Human turns, calls `llm.invoke(messages)`,
+# receives the AI response, and returns the updated list. LangGraph's
+# add_messages reducer guarantees each new turn is appended — never lost —
+# across node re-entries and process restarts.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -117,7 +116,7 @@ class TDDOrchestrator:
         return workflow.compile(checkpointer=checkpointer)
 
     def run(self, specification: str, requirements: str) -> AgentState:
-        logger.info("📦 Inicializando E2B Cloud Sandbox...")
+        logger.info("📦 Initializing E2B Cloud Sandbox...")
         sandbox = Sandbox.create(api_key=Config.E2B_API_KEY)
         sandbox_id = sandbox.sandbox_id
 
@@ -151,26 +150,26 @@ class TDDOrchestrator:
         }
 
         logger.info("\n" + "#" * 80)
-        logger.info("🚀 INICIANDO ORQUESTRADOR TDD (LangGraph + Postgres + E2B Sandbox)")
-        logger.info(f"☁️  Sandbox ID ativa: {sandbox_id}")
+        logger.info("🚀 STARTING TDD ORCHESTRATOR (LangGraph + Postgres + E2B Sandbox)")
+        logger.info(f"☁️  Active Sandbox ID: {sandbox_id}")
         logger.info("#" * 80 + "\n")
 
         try:
             try:
                 with PostgresSaver.from_conn_string(Config.POSTGRES_URL) as checkpointer:
                     checkpointer.setup()
-                    logger.info("🗄️ Checkpointer ativo: PostgresSaver")
+                    logger.info("🗄️ Active checkpointer: PostgresSaver")
                     return self._invoke_graph(initial_state, checkpointer)
             except OperationalError as exc:
                 logger.warning(
-                    "⚠️ Não foi possível conectar ao Postgres (%s). "
-                    "Executando com InMemorySaver sem persistência entre reinícios.",
+                    "⚠️ Could not connect to Postgres (%s). "
+                    "Running with InMemorySaver, no persistence across restarts.",
                     exc,
                 )
                 memory_checkpointer = InMemorySaver()
-                logger.info("🧠 Checkpointer ativo: InMemorySaver (fallback)")
+                logger.info("🧠 Active checkpointer: InMemorySaver (fallback)")
                 return self._invoke_graph(initial_state, memory_checkpointer)
         finally:
             if 'sandbox' in locals():
-                logger.info(f"🧹 Encerrando Sandbox {sandbox_id}...")
+                logger.info(f"🧹 Shutting down Sandbox {sandbox_id}...")
                 sandbox.kill()

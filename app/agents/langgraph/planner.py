@@ -11,12 +11,12 @@ logger = logging.getLogger("TDDOrchestrator")
 
 class TDDPlan(BaseModel):
     tdd_plan: list[str] = Field(
-        description="Uma lista ordenada de 'Epics' ou Módulos Arquiteturais. Cada string deve descrever claramente o que deve ser configurado/implementado (ex: arquivos, dependências, rotas) para aquela fatia do sistema."
+        description="An ordered list of 'Epics' or Architectural Modules. Each string must clearly describe what needs to be set up/implemented (e.g. files, dependencies, routes) for that slice of the system."
     )
 
 def generate_plan(specification: str) -> list[str]:
     """
-    Gera um plano de engenharia de software (lista de módulos/arquivos) a partir da especificação.
+    Generates a software engineering plan (list of modules/files) from the specification.
     """
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(TDDPlan)
@@ -36,5 +36,5 @@ def generate_plan(specification: str) -> list[str]:
         ])
         return response.tdd_plan
     except Exception as exc:
-        logger.error(f"❌ Planner falhou ao gerar o plano estruturado: {exc}")
+        logger.error(f"❌ Planner failed to generate the structured plan: {exc}")
         handle_llm_exception(exc, context="generate_plan")

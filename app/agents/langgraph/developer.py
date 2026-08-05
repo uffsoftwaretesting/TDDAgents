@@ -17,7 +17,7 @@ def generate_code_incremental(
     conversation_history: list | None = None,
 ) -> tuple[AgentAction, list]:
     """
-    Gera a ação estruturada (arquivos, dependências, comandos bash) para implementar o código.
+    Generates the structured action (files, dependencies, bash commands) to implement the code.
     """
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(AgentAction)
@@ -26,7 +26,7 @@ def generate_code_incremental(
     current_codebase = read_all_files_from_state(file_system)
 
     if not history:
-        # Primeira chamada: envia a spec completa (sem feedback)
+        # First call: sends the full spec (no feedback)
         system_content = load_prompt(
             template_name='agents/langgraph/developer/sys_prompt_1.jinja2',
         )
@@ -42,7 +42,7 @@ def generate_code_incremental(
             HumanMessage(content=human_content),
         ]
     else:
-        # Próximas chamadas: usa o mesmo template, mas passa o feedback
+        # Later calls: uses the same template, but passes the feedback
         human_content = load_prompt(
             template_name='agents/langgraph/developer/hum_prompt_1.jinja2',
             sub_requisite=sub_req,
@@ -52,12 +52,12 @@ def generate_code_incremental(
         history.append(HumanMessage(content=human_content))
 
     try:
-        # Invoca o LLM forçando a saída estruturada do AgentAction
+        # Invokes the LLM forcing AgentAction's structured output
         action: AgentAction = structured_llm.invoke(history)
     except Exception as exc:
         handle_llm_exception(exc, context="generate_code_incremental")
 
-    # Armazena a resposta formatada como JSON no histórico de conversa (para o LangGraph)
+    # Stores the response formatted as JSON in the conversation history (for LangGraph)
     history.append(AIMessage(content=action.model_dump_json(indent=2)))
 
     return action, history

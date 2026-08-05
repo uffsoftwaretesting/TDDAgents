@@ -19,36 +19,36 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
     is_type_fault = state.get("is_type_fault", "")
 
     logger.info("\n" + "-" * 80)
-    logger.info(f"🟢 ETAPA 4: RUNNER GREEN (Validação) | Iteração {iteration}/{max_retries_state}")
+    logger.info(f"🟢 STEP 4: RUNNER GREEN (Validation) | Iteration {iteration}/{max_retries_state}")
     logger.info("-" * 80)
 
     try:
-        # 1. Executa os testes na E2B Sandbox ativa desempacotando a tupla
+        # 1. Runs the tests in the active E2B Sandbox, unpacking the tuple
         output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"], is_red_phase=False)
 
     except TransientInfraError as exc:
         infra_retries += 1
         if infra_retries >= Config.MAX_INFRA_RETRIES:
-            logger.error(f"❌ RUNNER GREEN: Falha de Infra (Limite Atingido): {exc.original_exc}")
+            logger.error(f"❌ RUNNER GREEN: Infra Failure (Limit Reached): {exc.original_exc}")
             return {**state, "status": "sandbox_failed", "infra_retries": 0}
-        
-        logger.warning(f"⚠️ RUNNER GREEN: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
+
+        logger.warning(f"⚠️ RUNNER GREEN: Transient Error. Attempt {infra_retries}/{Config.MAX_INFRA_RETRIES}. Waiting 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_green", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
-        logger.error(f"❌ RUNNER GREEN: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        logger.error(f"❌ RUNNER GREEN: Fatal Infrastructure Failure: {exc.original_exc}")
         return {**state, "status": "sandbox_failed", "infra_retries": 0}
-    
+
     except Exception as exc:
-        logger.error(f"❌ RUNNER GREEN: Erro inesperado")
+        logger.error(f"❌ RUNNER GREEN: Unexpected error")
         return {**state, "status": "sandbox_failed", "infra_retries": 0}
-    
+
     all_passed = is_success
 
     if all_passed:
-        logger.info("✅ SUCESSO: Todos os testes passaram! 🚀")
-        audit = AIMessage(content=f"[RunnerGreen] Todos os testes passaram para '{sub_req}' na iteração {iteration}.")
+        logger.info("✅ SUCCESS: All tests passed! 🚀")
+        audit = AIMessage(content=f"[RunnerGreen] All tests passed for '{sub_req}' on iteration {iteration}.")
         return {
             **state,
             "status": "green_passed",
@@ -57,12 +57,12 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
             "infra_retries": 0,
         }
 
-    # ── Falha nos testes ──────────────────────────────────────────────────────
-    logger.warning("❌ FALHA: Testes não passaram.")
+    # ── Test failure ──────────────────────────────────────────────────────
+    logger.warning("❌ FAILURE: Tests did not pass.")
 
     existing_reviewer_len = len(state.get("reviewer_messages", []))
-    
-    # Injeta a base de código atual inteira para o Reviewer
+
+    # Injects the entire current codebase for the Reviewer
     current_codebase = read_all_files_from_state(state.get("file_system", {}))
 
     try:
@@ -78,26 +78,26 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
     except TransientInfraError as exc:
         infra_retries += 1
         if infra_retries >= Config.MAX_INFRA_RETRIES:
-            logger.error(f"❌ RUNNER GREEN: Falha de Infra no Reviewer (Limite Atingido): {exc.original_exc}")
+            logger.error(f"❌ RUNNER GREEN: Infra Failure in Reviewer (Limit Reached): {exc.original_exc}")
             return {**state, "status": "sandbox_failed", "infra_retries": 0}
 
         logger.warning(
-            f"⚠️ RUNNER GREEN: Erro transiente no Reviewer. "
-            f"Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})"
+            f"⚠️ RUNNER GREEN: Transient error in Reviewer. "
+            f"Attempt {infra_retries}/{Config.MAX_INFRA_RETRIES}. Waiting 3s... ({exc.original_exc})"
         )
         time.sleep(3)
         return {**state, "status": "infra_error_green", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
-        logger.error(f"❌ RUNNER GREEN: Falha fatal no Reviewer: {exc.original_exc}")
+        logger.error(f"❌ RUNNER GREEN: Fatal failure in Reviewer: {exc.original_exc}")
         return {**state, "status": "sandbox_failed", "infra_retries": 0}
 
     except Exception as exc:
-        logger.error("❌ RUNNER GREEN: Erro inesperado durante análise do Reviewer")
+        logger.error("❌ RUNNER GREEN: Unexpected error during Reviewer analysis")
         return {**state, "status": "sandbox_failed", "infra_retries": 0}
 
     logger.info("\n" + "=" * 80)
-    logger.info(f"🧐 ANÁLISE DO REVIEWER — Iteração {iteration}")
+    logger.info(f"🧐 REVIEWER ANALYSIS — Iteration {iteration}")
     logger.info("=" * 80)
     for line in analysis.split('\n'):
         logger.info(f"   {line}")
@@ -106,32 +106,32 @@ def node_execute_runner_green(state: AgentState) -> AgentState:
     new_reviewer_turns = updated_reviewer_history[existing_reviewer_len:]
     extra_audit: list = []
 
-    if "[ERRO NO TESTE]" in analysis:
+    if "[TEST ERROR]" in analysis:
         if iteration >= max_retries_state:
-            logger.error(f"   ⛔  Limite de tentativas excedido ({max_retries_state}). Abortando.")
+            logger.error(f"   ⛔  Retry limit exceeded ({max_retries_state}). Aborting.")
             status = "max_retries_exceeded"
             is_type_fault = "test_faults"
             next_iteration = iteration
         else:
-            logger.warning(f"   ⚠️  Reviewer identificou falha no teste. Solicitando REVISÃO ao Tester.")
+            logger.warning(f"   ⚠️  Reviewer identified a test failure. Requesting REVIEW from Tester.")
             status = "test_review_needed"
             extra_audit.append(
-                HumanMessage(content=f"[RunnerGreen] Iteração {iteration}: Reviewer apontou erro no código de teste. Escalando para Tester.")
+                HumanMessage(content=f"[RunnerGreen] Iteration {iteration}: Reviewer flagged an error in the test code. Escalating to Tester.")
             )
-            next_iteration = iteration + 1  # Incrementa porque volta pro Tester
-    else: # Falha na implementação
+            next_iteration = iteration + 1  # Increments because it goes back to the Tester
+    else: # Implementation failure
         if iteration >= max_retries_state:
-            logger.error(f"   ⛔  Limite de tentativas excedido ({max_retries_state}). Abortando.")
+            logger.error(f"   ⛔  Retry limit exceeded ({max_retries_state}). Aborting.")
             status = "max_retries_exceeded"
             is_type_fault = "implementation_faults"
             next_iteration = iteration
         else:
-            logger.info("   🔄  Retornando ao Developer para correção da implementação.")
+            logger.info("   🔄  Returning to Developer to fix the implementation.")
             status = "green_failed"
-            next_iteration = iteration + 1  # Incrementa porque volta pro Developer
+            next_iteration = iteration + 1  # Increments because it goes back to the Developer
 
     audit_entry = AIMessage(
-        content=f"[RunnerGreen] Iteração {iteration}: {status}. Análise armazenada."
+        content=f"[RunnerGreen] Iteration {iteration}: {status}. Analysis stored."
     )
 
     return {

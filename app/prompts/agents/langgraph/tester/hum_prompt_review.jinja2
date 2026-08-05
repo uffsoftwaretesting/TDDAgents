@@ -1,26 +1,26 @@
 {% if not feedback %}
-🎯 SUB-REQUISITO ATUAL:
+🎯 CURRENT SUB-REQUIREMENT:
 {{ sub_requirement }}
 
-💻 CÓDIGO ATUAL NO WORKSPACE (Com Erros nos Testes):
+💻 CURRENT WORKSPACE CODE (With Test Errors):
 {{ current_codebase }}
 
-TAREFA DE REVISÃO ESTRUTURAL:
-O orquestrador enviou você para o MODO DE REVISÃO pois o código de teste atual é inválido (erro de execução) ou contraditório.
-Analise o estado da base de código acima e reescreva os arquivos de teste afetados para corrigir o problema, garantindo que rodem com sucesso.
-Gere sua resposta usando a estrutura JSON/Action exigida.
+STRUCTURAL REVIEW TASK:
+The orchestrator sent you to REVIEW MODE because the current test code is invalid (execution error) or contradictory.
+Analyze the state of the codebase above and rewrite the affected test files to fix the problem, ensuring they run successfully.
+Generate your response using the required JSON/Action structure.
 
 {% else %}
-⚠️ O TESTE CONTINUA INVIÁVEL.
+⚠️ THE TEST IS STILL NON-VIABLE.
 
-📝 FEEDBACK DO REVIEWER:
+📝 REVIEWER FEEDBACK:
 {{ feedback }}
 
-💻 CÓDIGO ATUAL ATUALIZADO:
+💻 CURRENT UPDATED CODE:
 {{ current_codebase }}
 
-TAREFA DE CORREÇÃO URGENTE:
-Leia o feedback do Reviewer cuidadosamente. Ele indica exatamente por que os testes estão quebrando de forma inválida (ex: asserção impossível, erro de import).
-Modifique o arquivo de testes fornecendo a versão completa e corrigida.
-Gere sua resposta usando a estrutura JSON/Action exigida.
+URGENT CORRECTION TASK:
+Read the Reviewer's feedback carefully. It indicates exactly why the tests are failing invalidly (e.g. impossible assertion, import error).
+Modify the test file, providing the complete and corrected version.
+Generate your response using the required JSON/Action structure.
 {% endif %}

@@ -7,7 +7,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-# Permite executar este arquivo diretamente sem perder imports absolutos `app.*`.
+# Allows running this file directly without losing absolute `app.*` imports.
 if __package__ in (None, ""):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if project_root not in sys.path:
@@ -25,7 +25,7 @@ logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-# Silencia logs verbosos de bibliotecas base
+# Silences verbose logs from base libraries
 for noisy_logger in ("httpx", "httpcore", "anthropic", "e2b"):
     logging.getLogger(noisy_logger).setLevel(logging.ERROR)
 
@@ -34,88 +34,88 @@ logger.setLevel(logging.INFO)
 
 
 def make_thread_id(specification: str) -> str:
-    """Deriva um thread_id estável puramente a partir do texto da especificação."""
+    """Derives a stable thread_id purely from the specification text."""
     payload = f"sandbox::{specification}"
     return "tdd-" + hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 
 def get_initial_user_prompt() -> str:
     """
-    Exibe o menu de casos de uso lendo os arquivos .txt do diretório specs,
-    mostra o aviso padrão e retorna o prompt escolhido (ou digitado) pelo usuário.
+    Displays the use-case menu by reading the .txt files from the specs directory,
+    shows the standard disclaimer, and returns the prompt chosen (or typed) by the user.
     """
-    mensagem_aviso = (
-        "ATENÇÃO: O agente Analista pode perguntar mais detalhes sobre os requisitos, "
-        "o que irá requerer mais interação e prompts provenientes do usuário. Para fins "
-        "da pesquisa científica realizada, consideramos tentativas onde o agente Analista não "
-        "perguntava nenhum detalhe a mais de implementação e considerava o prompt inicial "
-        "suficiente para elicitar os requisitos. Por isso, recomendamos que, ao acionar "
-        "alguma das opções utilizadas de prompt, descarte quaisquer tentativas "
-        "de pedidos de detalhamento maior. Somente considere aquelas tentatiivas em que o prompt INICIAL é suficiente para elicitação de requisitos.\n"
+    warning_message = (
+        "WARNING: The Analyst agent may ask for more details about the requirements, "
+        "which will require more interaction and prompts from the user. For the purposes "
+        "of the scientific research being conducted, we consider attempts where the Analyst "
+        "agent did not ask for any additional implementation details and considered the initial "
+        "prompt sufficient to elicit the requirements. Therefore, when using any of the prompt "
+        "options provided, we recommend discarding any attempts that request further detail. "
+        "Only consider attempts where the INITIAL prompt is sufficient for requirements elicitation.\n"
     )
-    print(mensagem_aviso)
+    print(warning_message)
 
-    # Resolve o caminho para o diretório de specs
+    # Resolves the path to the specs directory
     specs_dir = Path("app/prompts/specs")
-    
+
     if not specs_dir.exists() or not specs_dir.is_dir():
-        print(f"⚠️ Aviso: Diretório de specs não encontrado em '{specs_dir}'.\n")
+        print(f"⚠️ Warning: Specs directory not found at '{specs_dir}'.\n")
         spec_files = []
     else:
-        # Puxa os arquivos .txt e ordena alfabeticamente
+        # Pulls the .txt files and sorts them alphabetically
         spec_files = sorted([f for f in specs_dir.iterdir() if f.suffix == '.txt'])
 
-    print("MENU DE CASO DE USOS (digite a opção desejada):\n")
+    print("USE CASE MENU (type the desired option):\n")
     for i, file_path in enumerate(spec_files, start=1):
         print(f"{i}. {file_path.name}")
-    
+
     custom_input_option = len(spec_files) + 1
-    print(f"{custom_input_option}. Digite seu próprio prompt\n")
+    print(f"{custom_input_option}. Type your own prompt\n")
 
     while True:
         try:
-            escolha_str = input("Selecione uma opção: ").strip()
-            if not escolha_str:
+            choice_str = input("Select an option: ").strip()
+            if not choice_str:
                 continue
-            
-            escolha = int(escolha_str)
-            
-            # Caso o usuário escolha um dos arquivos .txt
-            if 1 <= escolha <= len(spec_files):
-                selected_file = spec_files[escolha - 1]
+
+            choice = int(choice_str)
+
+            # If the user chose one of the .txt files
+            if 1 <= choice <= len(spec_files):
+                selected_file = spec_files[choice - 1]
                 with open(selected_file, "r", encoding="utf-8") as f:
                     prompt = f.read().strip()
-                print(f"\n✅ [Prompt carregado de '{selected_file.name}']\n")
+                print(f"\n✅ [Prompt loaded from '{selected_file.name}']\n")
                 return prompt
-                
-            # Caso o usuário decida digitar o próprio prompt
-            elif escolha == custom_input_option:
-                prompt = input("\n👤 [Sua Solicitação Inicial]: ").strip()
+
+            # If the user decides to type their own prompt
+            elif choice == custom_input_option:
+                prompt = input("\n👤 [Your Initial Request]: ").strip()
                 return prompt
-                
+
             else:
-                print("❌ Opção inválida. Tente novamente.")
+                print("❌ Invalid option. Try again.")
         except ValueError:
-            print("❌ Entrada inválida. Por favor, digite um número correspondente ao menu.")
+            print("❌ Invalid input. Please type a number corresponding to the menu.")
 
 
 def run_requirements_gathering() -> tuple[str, str, list[str]]:
-    """Fase interativa de levantamento de requisitos."""
+    """Interactive requirements-gathering phase."""
     print("\n" + "=" * 80)
-    print("🤖  FASE 1: LEVANTAMENTO DE REQUISITOS (PRODUCT MANAGER)")
+    print("🤖  PHASE 1: REQUIREMENTS GATHERING (PRODUCT MANAGER)")
     print("=" * 80)
-    print("Descreva a aplicação ou funcionalidade que você deseja construir.")
-    print("O Analista fará perguntas se algo estiver vago.\n")
+    print("Describe the application or feature you want to build.")
+    print("The Analyst will ask questions if something is unclear.\n")
 
     try:
-        # Substituído o input manual pela função com o menu dinâmico
+        # Replaced the manual input with the function backed by the dynamic menu
         initial_input = get_initial_user_prompt()
     except (KeyboardInterrupt, EOFError):
-        print("\n👋 Operação cancelada pelo usuário.")
+        print("\n👋 Operation cancelled by the user.")
         sys.exit(0)
 
     if not initial_input:
-        print("❌ A solicitação inicial não pode estar vazia.")
+        print("❌ The initial request cannot be empty.")
         sys.exit(1)
 
     orchestrator = RequirementsOrchestrator()
@@ -126,19 +126,19 @@ def run_requirements_gathering() -> tuple[str, str, list[str]]:
     user_prompts = final_state.get("user_prompts", [initial_input])
 
     if not spec:
-        print("\n❌ Falha crítica: O Engenheiro não conseguiu gerar a especificação.")
+        print("\n❌ Critical failure: The Engineer failed to generate the specification.")
         sys.exit(1)
 
     return spec, reqs, user_prompts
 
 
 def format_dialogue_text(dialogue: str, width: int = 88) -> str:
-    """Formata o diálogo para leitura em arquivo texto com quebra de linha."""
+    """Formats the dialogue for readability in a text file, with line wrapping."""
     if not dialogue or not dialogue.strip():
-        return "(vazio)"
+        return "(empty)"
 
     formatted_lines: list[str] = []
-    speaker_prefixes = ("[Usuário]:", "[Usuario]:", "[Analista]:")
+    speaker_prefixes = ("[User]:", "[Analyst]:")
 
     for raw_line in dialogue.splitlines():
         line = raw_line.strip()
@@ -178,17 +178,17 @@ def format_dialogue_text(dialogue: str, width: int = 88) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Executa o pipeline de agentes TDD Enterprise (E2B Sandbox Edition).",
+        description="Runs the Enterprise TDD agent pipeline (E2B Sandbox Edition).",
     )
     parser.add_argument(
         "--fresh",
         action="store_true",
-        help="Força uma execução nova gerando um thread_id aleatório.",
+        help="Forces a new run by generating a random thread_id.",
     )
     parser.add_argument(
         "--thread-id",
         default=None,
-        help="Define explicitamente o thread_id.",
+        help="Explicitly sets the thread_id.",
     )
     return parser.parse_args()
 
@@ -226,21 +226,21 @@ def main() -> None:
     load_dotenv()
     args = parse_args()
 
-    # ── Fase 1: Levantamento de Requisitos ────────────────────────────────────
+    # ── Phase 1: Requirements Gathering ────────────────────────────────────
     specification, requirements, user_prompts = run_requirements_gathering()
 
-    # ── Resolução do thread_id ────────────────────────────────────────────────
+    # ── thread_id resolution ────────────────────────────────────────────────
     if args.thread_id:
         thread_id = args.thread_id
-        logger.info(f"🔑 Usando thread_id explícito: {thread_id}")
+        logger.info(f"🔑 Using explicit thread_id: {thread_id}")
     elif args.fresh:
         thread_id = "tdd-" + uuid.uuid4().hex[:16]
-        logger.info(f"🆕 Execução nova — thread_id gerado: {thread_id}")
+        logger.info(f"🆕 New run — generated thread_id: {thread_id}")
     else:
         thread_id = make_thread_id(specification)
-        logger.info(f"🔑 thread_id derivado da especificação: {thread_id}")
+        logger.info(f"🔑 thread_id derived from the specification: {thread_id}")
 
-    # ── Configuração de Workspace e Logs ──────────────────────────────────────
+    # ── Workspace and Logs Setup ──────────────────────────────────────
     workspace_dir_name = f"workspace_output_{thread_id}"
     workspace_dir = os.path.abspath(workspace_dir_name)
     os.makedirs(workspace_dir, exist_ok=True)
@@ -258,7 +258,7 @@ def main() -> None:
 
     prompts_path = os.path.join(artifacts_dir, "user_analyst_dialogue.txt")
     with open(prompts_path, "w", encoding="utf-8") as f:
-        f.write("PROMPTS ENVIADOS PELO USUARIO VIA TERMINAL\n")
+        f.write("PROMPTS SENT BY THE USER VIA TERMINAL\n")
         f.write("=" * 80 + "\n")
         for idx, prompt in enumerate(user_prompts, start=1):
             wrapped_prompt = textwrap.fill(
@@ -271,7 +271,7 @@ def main() -> None:
             )
             f.write(wrapped_prompt + "\n")
         f.write("=" * 80 + "\n\n")
-        f.write("DIALOGO COMPLETO ENTRE USUARIO E ANALISTA\n")
+        f.write("FULL DIALOGUE BETWEEN USER AND ANALYST\n")
         f.write("=" * 80 + "\n")
         f.write(formatted_requirements + "\n")
         f.write("=" * 80 + "\n")
@@ -283,19 +283,19 @@ def main() -> None:
         for line in (initial_prompt.splitlines() or [initial_prompt])
     )
     with open(initial_prompt_path, "w", encoding="utf-8") as f:
-        f.write("PROMPT INICIAL ENVIADO PELO USUARIO\n")
+        f.write("INITIAL PROMPT SENT BY THE USER\n")
         f.write("=" * 80 + "\n")
-        f.write((wrapped_initial_prompt or "(vazio)") + "\n")
+        f.write((wrapped_initial_prompt or "(empty)") + "\n")
         f.write("=" * 80 + "\n")
 
-    # ── Fase 2: Execução TDD ──────────────────────────────────────────────────
+    # ── Phase 2: TDD Execution ──────────────────────────────────────────────
     print("\n" + "=" * 80)
-    print("🚀  FASE 2: ORQUESTRAÇÃO TDD MULTI-AGENTE (SANDBOX E2B)")
+    print("🚀  PHASE 2: MULTI-AGENT TDD ORCHESTRATION (E2B SANDBOX)")
     print("=" * 80)
     print(f"📂 Output Directory: ./{workspace_dir_name}/")
-    print("📜 Prévia da Especificação Técnica que guiará os agentes:")
+    print("📜 Preview of the Technical Specification that will guide the agents:")
     print("-" * 80)
-    print(f"{specification[:500]}...\n\n[VEJA O ARQUIVO engineer_specifications.txt...]\n")
+    print(f"{specification[:500]}...\n\n[SEE THE FILE engineer_specifications.txt...]\n")
     print("-" * 80 + "\n")
 
     orchestrator = TDDOrchestrator(task_key=thread_id)
@@ -303,26 +303,26 @@ def main() -> None:
     try:
         final_state = orchestrator.run(specification=specification, requirements=requirements)
     except KeyboardInterrupt:
-        print("\n🛑 Execução TDD interrompida pelo usuário de forma segura.")
+        print("\n🛑 TDD execution safely interrupted by the user.")
         sys.exit(0)
 
     # ── Token Usage Report ────────────────────────────────────────────────────
     _write_token_report(artifacts_dir, orchestrator)
 
-    # ── Resultado e Extração ──────────────────────────────────────────────────
+    # ── Result and Extraction ──────────────────────────────────────────────
     final_status = final_state.get("status", "unknown")
     failed = final_state.get("failed_requirements", [])
     file_system = final_state.get("file_system", {})
     plan = final_state.get("plan", [])
 
     if final_status in ("plan_complete", "completed_with_review", "completed_successfully"):
-        print("\n✅  PIPELINE CONCLUÍDO COM SUCESSO!")
+        print("\n✅  PIPELINE COMPLETED SUCCESSFULLY!")
     else:
-        print(f"\n⚠️  PIPELINE FINALIZADO COM STATUS: '{final_status}'")
+        print(f"\n⚠️  PIPELINE FINISHED WITH STATUS: '{final_status}'")
 
-    print(f"\n💾 Extraindo artefatos para a máquina local ({workspace_dir}/)...")
+    print(f"\n💾 Extracting artifacts to the local machine ({workspace_dir}/)...")
 
-    # 1. Extrai o código-fonte
+    # 1. Extracts the source code
     if file_system:
         for filepath, content in file_system.items():
             clean_path = filepath.lstrip("/")
@@ -335,53 +335,53 @@ def main() -> None:
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
-    # 2. Extrai o planner.txt
+    # 2. Extracts planner.txt
     if plan:
         plan_path = os.path.join(artifacts_dir, "planner.txt")
         with open(plan_path, "w", encoding="utf-8") as f:
-            f.write("PLANO DE SUB-REQUISITOS TDD\n")
+            f.write("TDD SUB-REQUIREMENTS PLAN\n")
             f.write("=" * 80 + "\n")
             for i, item in enumerate(plan):
                 f.write(f"{i+1}. {item}\n")
             f.write("=" * 80 + "\n")
 
-    # 3. Extrai as especificações do Engenheiro
+    # 3. Extracts the Engineer's specifications
     spec_path = os.path.join(artifacts_dir, "engineer_specifications.txt")
     with open(spec_path, "w", encoding="utf-8") as f:
-        f.write("ESPECIFICAÇÕES TÉCNICAS DO ENGENHEIRO\n")
+        f.write("ENGINEER'S TECHNICAL SPECIFICATIONS\n")
         f.write("=" * 80 + "\n")
         f.write(specification)
 
-    # 4. Extrai o histórico dos requisitos validados
+    # 4. Extracts the validated requirements history
     reqs_path = os.path.join(artifacts_dir, "confirmed_user_requirements.txt")
     with open(reqs_path, "w", encoding="utf-8") as f:
-        f.write("REQUISITOS ENVIADOS PELO USUÁRIO\n")
+        f.write("REQUIREMENTS SUBMITTED BY THE USER\n")
         f.write("=" * 80 + "\n")
         f.write(formatted_requirements + "\n")
         f.write("=" * 80 + "\n")
 
-    # 5. gerar relatório de métricas de resiliência
+    # 5. Generate the resilience metrics report
     total_failures = final_state.get("total_detected_failures", 0)
     corrected_failures = final_state.get("autonomously_corrected_failures", 0)
     test_faults = final_state.get("test_faults", 0)
     implementation_faults = final_state.get("implementation_faults", 0)
     write_resilience_metrics(artifacts_dir, total_failures, corrected_failures, test_faults, implementation_faults)
 
-    # 6. gerar relatório de sucesso/falha por sub-requisito
+    # 6. Generate the per-sub-requirement pass/fail report
     subreq_success = final_state.get("subreq_success_count", 0)
     subreq_failure = final_state.get("subreq_failure_count", 0)
     subreq_results = final_state.get("subreq_results", [])
     write_pass_rate_report(artifacts_dir, plan, subreq_results, subreq_success, subreq_failure, failed)
 
-    print("📁 Todos os artefatos e logs foram salvos com sucesso!")
+    print("📁 All artifacts and logs were saved successfully!")
 
     if failed:
-        print(f"\n⚠️  {len(failed)} requisito(s) não puderam ser satisfeitos:")
+        print(f"\n⚠️  {len(failed)} requirement(s) could not be satisfied:")
         for req in failed:
             print(f"   • {req.get('requirement', req)}")
 
-    print(f"\n🔑 Thread ID desta execução: {thread_id}")
-    print("   (Para inspecionar o estado ou continuar futuramente, use --thread-id)\n")
+    print(f"\n🔑 Thread ID for this run: {thread_id}")
+    print("   (To inspect the state or resume later, use --thread-id)\n")
 
 
 if __name__ == "__main__":

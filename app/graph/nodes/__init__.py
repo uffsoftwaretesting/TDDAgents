@@ -1,4 +1,4 @@
-"""Graph nodes para o workflow TDD."""
+"""Graph nodes for the TDD workflow."""
 
 from .plan_task import node_plan_task
 from .execute_tester import node_execute_tester

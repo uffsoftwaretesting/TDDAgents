@@ -9,16 +9,16 @@ from app.utils.prompt_loader import load_prompt
 
 logger = logging.getLogger("TDDOrchestrator")
 
-# ── Pydantic Schema para o Reviewer ──────────────────────────────────────────
+# ── Pydantic Schema for the Reviewer ──────────────────────────────────────────
 class ReviewAnalysis(BaseModel):
     thoughts: str = Field(
-        description="Seu raciocínio interno lendo o stack trace do erro e comparando com os arquivos existentes no workspace."
+        description="Your internal reasoning reading the error's stack trace and comparing it against the existing files in the workspace."
     )
     is_test_fault: bool = Field(
-        description="True se o erro ocorreu porque o código de teste está mal escrito, tentando importar algo que não deveria, ou testando a coisa errada. False se o teste for válido e a culpa for da implementação do Developer."
+        description="True if the error occurred because the test code is poorly written, is trying to import something it shouldn't, or is testing the wrong thing. False if the test is valid and the fault lies with the Developer's implementation."
     )
     feedback_to_agent: str = Field(
-        description="Uma instrução técnica, direta e clara para o Developer (ou Tester) sobre o que ele precisa alterar no código para os testes passarem. Indique os nomes dos arquivos."
+        description="A technical, direct, and clear instruction for the Developer (or Tester) about what they need to change in the code to make the tests pass. Indicate the file names."
     )
 
 def analyze_failures(
@@ -31,7 +31,7 @@ def analyze_failures(
     conversation_history: list | None = None,
 ) -> tuple[str, list]:
     """
-    Analisa a saída de erro do Pytest contra a base de código atual e fornece feedback estruturado.
+    Analyzes Pytest's error output against the current codebase and provides structured feedback.
     """
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(ReviewAnalysis)
@@ -42,7 +42,7 @@ def analyze_failures(
         sys_prompt = load_prompt(template_name='agents/langgraph/reviewer/sys_prompt_1.jinja2')
         history.append(SystemMessage(content=sys_prompt))
 
-    # Carrega o prompt humano com todo o contexto do erro
+    # Loads the human prompt with the full error context
     human_content = load_prompt(
         template_name='agents/langgraph/reviewer/hum_prompt_1.jinja2',
         sub_requirement=sub_requirement,
@@ -55,18 +55,18 @@ def analyze_failures(
     history.append(HumanMessage(content=human_content))
 
     try:
-        # Invoca o LLM forçando a saída para o modelo Pydantic
+        # Invokes the LLM forcing the output into the Pydantic model
         review: ReviewAnalysis = structured_llm.invoke(history)
-        
+
         logger.info(f"🧐 Reviewer Thoughts: {review.thoughts}")
-        
-        # Adiciona uma tag visual no feedback para guiar o fluxo e o console
-        prefix = "[ERRO NO TESTE]" if review.is_test_fault else "[ERRO NA IMPLEMENTAÇÃO]"
+
+        # Adds a visual tag to the feedback to guide the flow and the console
+        prefix = "[TEST ERROR]" if review.is_test_fault else "[IMPLEMENTATION ERROR]"
         final_feedback = f"{prefix} {review.feedback_to_agent}"
 
         history.append(AIMessage(content=final_feedback))
         return final_feedback, history
-        
+
     except Exception as exc:
-        logger.error(f"❌ Reviewer falhou ao gerar análise")
+        logger.error(f"❌ Reviewer failed to generate the analysis")
         handle_llm_exception(exc, context="analyze_failures")

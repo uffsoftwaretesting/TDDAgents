@@ -12,9 +12,9 @@ logger = logging.getLogger("TDDOrchestrator")
 
 def node_plan_task(state: AgentState) -> AgentState:
     logger.info("\n" + "=" * 80)
-    logger.info("📋 PLANEJAMENTO (PLANNER)")
+    logger.info("📋 PLANNING (PLANNER)")
     logger.info("=" * 80)
-    logger.info(f"📌 Especificação: {state['specification'][:100]}...")
+    logger.info(f"📌 Specification: {state['specification'][:100]}...")
 
     infra_retries = state.get("infra_retries", 0)
 
@@ -24,39 +24,39 @@ def node_plan_task(state: AgentState) -> AgentState:
     except TransientInfraError as exc:
         infra_retries += 1
         if infra_retries >= Config.MAX_INFRA_RETRIES:
-            logger.error(f"❌ PLANNER: Falha de Infra (Limite Atingido): {exc.original_exc}")
+            logger.error(f"❌ PLANNER: Infra Failure (Limit Reached): {exc.original_exc}")
             return {**state, "status": "plan_failed", "plan": [], "infra_retries": 0}
-        
-        logger.warning(f"⚠️ PLANNER: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})")
+
+        logger.warning(f"⚠️ PLANNER: Transient Error. Attempt {infra_retries}/{Config.MAX_INFRA_RETRIES}. Waiting 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_planner", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
-        logger.error(f"❌ PLANNER: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        logger.error(f"❌ PLANNER: Fatal Infrastructure Failure: {exc.original_exc}")
         return {**state, "status": "plan_failed", "plan": [], "infra_retries": 0}
     except Exception as exc:
-        logger.error(f"❌ PLANNER: Falha Fatal de Infraestrutura")
+        logger.error(f"❌ PLANNER: Fatal Infrastructure Failure")
         return {**state, "status": "plan_failed", "plan": [], "infra_retries": 0}
 
     if not plan:
-        logger.error("❌ ERRO: O Planner falhou ao gerar o plano de tarefas.")
+        logger.error("❌ ERROR: The Planner failed to generate the task plan.")
         return {
             **state,
             "status": "plan_failed",
             "plan": [],
             "infra_retries": 0,
-            "audit_log": [AIMessage(content="[Planner] Falha ao gerar o plano de tarefas.")],
+            "audit_log": [AIMessage(content="[Planner] Failed to generate the task plan.")],
         }
 
     logger.info("-" * 80)
-    logger.info(f"✅ PLANO GERADO COM {len(plan)} SUB-REQUISITOS:")
+    logger.info(f"✅ PLAN GENERATED WITH {len(plan)} SUB-REQUIREMENTS:")
     for i, item in enumerate(plan, 1):
         logger.info(f"   {i}. {item}")
     logger.info("-" * 80)
 
     plan_summary = "\n".join(f"{i+1}. {item}" for i, item in enumerate(plan))
     audit_entry = AIMessage(
-        content=f"[Planner] Plano gerado com {len(plan)} sub-requisitos:\n{plan_summary}"
+        content=f"[Planner] Plan generated with {len(plan)} sub-requirements:\n{plan_summary}"
     )
 
     return {
@@ -67,8 +67,8 @@ def node_plan_task(state: AgentState) -> AgentState:
         "iteration": 1,
         "infra_retries": 0,
         "status": "planning_complete",
-        # Os históricos dos agentes começam vazios, nenhuma memória deve ser
-        # carregada para o primeiro sub-requisito. Já são [] no initial_state.
+        # Agent histories start empty; no memory should be
+        # loaded for the first sub-requirement. They're already [] in initial_state.
         "tester_messages": [],
         "developer_messages": [],
         "reviewer_messages": [],

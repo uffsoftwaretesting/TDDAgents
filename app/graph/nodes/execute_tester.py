@@ -17,22 +17,22 @@ def node_execute_tester(state: AgentState) -> AgentState:
     infra_retries = state.get("infra_retries", 0)
 
     if is_review_mode:
-        logger.info("🔧 TESTER: MODO REVISÃO — corrigindo testes potencialmente incorretos")
+        logger.info("🔧 TESTER: REVIEW MODE — fixing potentially incorrect tests")
     else:
         if is_first_sub_req and state.get("iteration", 1) == 1:
             logger.info("\n" + "=" * 80)
-            logger.info(f"⏭️  PRÓXIMA TAREFA: '{sub_req}'")
+            logger.info(f"⏭️  NEXT TASK: '{sub_req}'")
             logger.info("=" * 80)
-        logger.info("✍️ ETAPA 1: TESTER - Escrevendo testes para o sub-requisito atual")
+        logger.info("✍️ STEP 1: TESTER - Writing tests for the current sub-requirement")
 
     reviewer_msgs = state.get("reviewer_messages", [])
     feedback = reviewer_msgs[-1].content if is_review_mode and reviewer_msgs and hasattr(reviewer_msgs[-1], "content") else ""
 
     existing_len = len(state.get("tester_messages", []))
-    iteration = state.get("iteration", 1) 
+    iteration = state.get("iteration", 1)
 
     try:
-        # 1. Tenta gerar os testes via LLM
+        # 1. Try to generate the tests via LLM
         action, updated_history = generate_test_for_sub_req(
             sub_requirement=sub_req,
             specification=state.get("specification", ""),
@@ -41,10 +41,10 @@ def node_execute_tester(state: AgentState) -> AgentState:
             conversation_history=state.get("tester_messages", []),
             is_review_mode=is_review_mode,
         )
-            
-        logger.info(f"💭 Raciocínio do Tester: {action.thoughts}")
-        
-        # 2. Tenta aplicar os testes gerados na Sandbox
+
+        logger.info(f"💭 Tester's reasoning: {action.thoughts}")
+
+        # 2. Try to apply the generated tests to the Sandbox
         updated_fs, logs = apply_agent_action_to_sandbox(
             sandbox_id=state["sandbox_id"],
             action=action,
@@ -54,23 +54,23 @@ def node_execute_tester(state: AgentState) -> AgentState:
     except TransientInfraError as exc:
         infra_retries += 1
         if infra_retries >= Config.MAX_INFRA_RETRIES:
-            logger.error(f"❌ TESTER: Falha de Infra (Limite Atingido): {exc.original_exc}")
+            logger.error(f"❌ TESTER: Infra Failure (Limit Reached): {exc.original_exc}")
             return {**state, "status": "tester_failed", "infra_retries": 0}
-            
-        logger.warning(f"⚠️ TESTER: Erro Transiente. Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Retentando em 3s... ({exc.original_exc})")
+
+        logger.warning(f"⚠️ TESTER: Transient Error. Attempt {infra_retries}/{Config.MAX_INFRA_RETRIES}. Retrying in 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_tester", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
-        logger.error(f"❌ TESTER: Falha Fatal de Infraestrutura: {exc.original_exc}")
+        logger.error(f"❌ TESTER: Fatal Infrastructure Failure: {exc.original_exc}")
         return {**state, "status": "tester_failed", "infra_retries": 0}
     except Exception as exc:
-        logger.error(f"❌ TESTER: Falha Fatal de Infraestrutura")
+        logger.error(f"❌ TESTER: Fatal Infrastructure Failure")
         return {**state, "status": "tester_failed", "infra_retries": 0}
 
-    # === Fluxo de Sucesso ===
+    # === Success Flow ===
     new_turns = updated_history[existing_len:]
-    audit_entry = AIMessage(content=f"[Tester] Testes {'revisados' if is_review_mode else 'escritos'} para '{sub_req}'.")
+    audit_entry = AIMessage(content=f"[Tester] Tests {'revised' if is_review_mode else 'written'} for '{sub_req}'.")
 
     return {
         **state,

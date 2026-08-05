@@ -20,30 +20,30 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
     infra_retries = state.get("infra_retries", 0)
 
     logger.info("\n" + "-" * 80)
-    logger.info(f"🔴 ETAPA 2: RUNNER RED (Verificação de Falha) | Iteração {iteration}/{max_retries_state}")
+    logger.info(f"🔴 STEP 2: RUNNER RED (Failure Verification) | Iteration {iteration}/{max_retries_state}")
     logger.info("-" * 80)
 
-    # 1. Executa os testes na E2B Sandbox ativa
-    
+    # 1. Runs the tests in the active E2B Sandbox
+
     try:
         output, is_success = run_pytest_in_sandbox(sandbox_id=state["sandbox_id"], is_red_phase=True)
 
     except TransientInfraError as exc:
         infra_retries += 1
         if infra_retries >= Config.MAX_INFRA_RETRIES:
-            logger.error(f"❌ Falha de Infra (Limite de Retries Atingido): {exc.original_exc}")
+            logger.error(f"❌ Infra Failure (Retry Limit Reached): {exc.original_exc}")
             return {**state, "status": "sandbox_failed", "infra_retries": 0}
-        
-        logger.warning(f"⚠️ Erro de Infra Transiente. Tentativa {infra_retries}. Aguardando 3s... ({exc.original_exc})")
+
+        logger.warning(f"⚠️ Transient Infra Error. Attempt {infra_retries}. Waiting 3s... ({exc.original_exc})")
         time.sleep(3)
         return {**state, "status": "infra_error_red", "infra_retries": infra_retries}
 
     except FatalInfraError as exc:
-        logger.error(f"❌ Falha Fatal de Infraestrutura: {exc.original_exc}")
+        logger.error(f"❌ Fatal Infrastructure Failure: {exc.original_exc}")
         return {**state, "status": "sandbox_failed", "infra_retries": 0}
-    
+
     except Exception as exc:
-        logger.error(f"❌ RUNNER RED: Erro inesperado")
+        logger.error(f"❌ RUNNER RED: Unexpected error")
         return {**state, "status": "sandbox_failed", "infra_retries": 0}
 
     has_failures = not is_success
@@ -52,17 +52,17 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
     audit_entries: list = []
 
     flow_types = list(state.get("is_flow_type", []))
-    
+
     while len(flow_types) <= plan_index:
         flow_types.append("")
 
     if has_failures:
-        logger.info("✅ SUCESSO (RED CONFIRMADO): O teste falhou como esperado.")
-        logger.info("   ➡️  Executando análise de confirmação...")
+        logger.info("✅ SUCCESS (RED CONFIRMED): The test failed as expected.")
+        logger.info("   ➡️  Running confirmation analysis...")
 
         flow_types[plan_index] = "F1"
 
-        # Puxa o código atual do file_system para contexto do Reviewer
+        # Pulls the current code from file_system for the Reviewer's context
         current_codebase = read_all_files_from_state(state.get("file_system", {}))
 
         try:
@@ -78,26 +78,26 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
         except TransientInfraError as exc:
             infra_retries += 1
             if infra_retries >= Config.MAX_INFRA_RETRIES:
-                logger.error(f"❌ RUNNER RED: Falha de Infra no Reviewer (Limite Atingido): {exc.original_exc}")
+                logger.error(f"❌ RUNNER RED: Infra Failure in Reviewer (Limit Reached): {exc.original_exc}")
                 return {**state, "status": "sandbox_failed", "infra_retries": 0}
 
             logger.warning(
-                f"⚠️ RUNNER RED: Erro transiente no Reviewer. "
-                f"Tentativa {infra_retries}/{Config.MAX_INFRA_RETRIES}. Aguardando 3s... ({exc.original_exc})"
+                f"⚠️ RUNNER RED: Transient error in Reviewer. "
+                f"Attempt {infra_retries}/{Config.MAX_INFRA_RETRIES}. Waiting 3s... ({exc.original_exc})"
             )
             time.sleep(3)
             return {**state, "status": "infra_error_red", "infra_retries": infra_retries}
 
         except FatalInfraError as exc:
-            logger.error(f"❌ RUNNER RED: Falha fatal no Reviewer: {exc.original_exc}")
+            logger.error(f"❌ RUNNER RED: Fatal failure in Reviewer: {exc.original_exc}")
             return {**state, "status": "sandbox_failed", "infra_retries": 0}
 
         except Exception as exc:
-            logger.error("❌ RUNNER RED: Erro inesperado durante análise do Reviewer")
+            logger.error("❌ RUNNER RED: Unexpected error during Reviewer analysis")
             return {**state, "status": "sandbox_failed", "infra_retries": 0}
 
         logger.info("\n" + "=" * 80)
-        logger.info("🧐 ANÁLISE DO REVIEWER (CONFIRMAÇÃO RED)")
+        logger.info("🧐 REVIEWER ANALYSIS (RED CONFIRMATION)")
         logger.info("=" * 80)
         for line in analysis.split('\n'):
             logger.info(f"   {line}")
@@ -105,21 +105,21 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
 
         new_reviewer_turns = updated_reviewer_history[existing_reviewer_len:]
 
-        if "[ERRO NO TESTE]" in analysis:
+        if "[TEST ERROR]" in analysis:
             if iteration >= max_retries_state:
-                logger.error(f"   ⛔ Limite de tentativas excedido no Tester ({max_retries_state}). Abortando.")
+                logger.error(f"   ⛔ Retry limit exceeded on Tester ({max_retries_state}). Aborting.")
                 status = "max_retries_exceeded"
                 next_iteration = iteration
             else:
                 status = "test_review_needed"
-                logger.warning("   ⚠️ O teste falhou de forma inválida. Devolvendo ao Tester.")
+                logger.warning("   ⚠️ The test failed invalidly. Returning to Tester.")
                 next_iteration = iteration + 1
         else:
             status = "red_confirmed"
             next_iteration = iteration
 
         audit_entries.append(
-            AIMessage(content=f"[RunnerRed] Red confirmado para '{sub_req}'. Status: {status}.")
+            AIMessage(content=f"[RunnerRed] Red confirmed for '{sub_req}'. Status: {status}.")
         )
 
         return {
@@ -133,11 +133,11 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
         }
 
     else:
-        # ── GREEN NO RED: Forçamos a ida ao Developer para garantir o ciclo ───
-        logger.warning("⚠️  ALERTA: O teste PASSOU imediatamente (Green no Red).")
-        logger.info("   ℹ️  Avançando — enviando alerta para o Developer inspecionar.")
+        # ── GREEN IN RED: We force the flow to the Developer to guarantee the cycle ───
+        logger.warning("⚠️  ALERT: The test PASSED immediately (Green in Red).")
+        logger.info("   ℹ️  Proceeding — sending an alert for the Developer to inspect.")
 
-        # Carrega o template de alerta
+        # Loads the alert template
         feedback_text = load_prompt(
             'agents/langgraph/orchestrator/feedback_existing_implementation.jinja2',
             attempt=1,
@@ -145,18 +145,18 @@ def node_execute_runner_red(state: AgentState) -> AgentState:
 
         audit_entries.append(
             AIMessage(
-                content=f"[RunnerRed] Teste passou imediatamente para '{sub_req}'. Alerta enviado ao Developer."
+                content=f"[RunnerRed] Test passed immediately for '{sub_req}'. Alert sent to Developer."
             )
         )
 
-        # O LangGraph fará o append automático nessa lista e o Developer a lerá como o `feedback` atual.
+        # LangGraph will automatically append to this list and the Developer will read it as the current `feedback`.
         alert_message = HumanMessage(content=feedback_text)
 
         flow_types[plan_index] = "F2"
 
         return {
             **state,
-            "status": "red_confirmed", 
+            "status": "red_confirmed",
             "iteration": iteration,
             "infra_retries": 0,
             "reviewer_messages": [alert_message],

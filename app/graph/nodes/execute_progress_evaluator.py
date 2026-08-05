@@ -6,17 +6,17 @@ from app.config.config import AgentState
 logger = logging.getLogger("TDDOrchestrator")
 
 _FAILURE_STATUSES = {
-    "max_retries_exceeded", 
-    "tester_failed", 
+    "max_retries_exceeded",
+    "tester_failed",
     "developer_failed",
     "sandbox_failed"
 }
 
 _FAILURE_REASONS = {
-    "max_retries_exceeded": "Excedeu o número máximo de tentativas do ciclo TDD.",
-    "tester_failed":        "O Tester falhou catastroficamente (erro de execução ou API).",
-    "developer_failed":     "O Developer falhou catastroficamente (erro de execução ou API).",
-    "sandbox_failed":       "A execução falhou por erro fatal ou instabilidade contínua na E2B/API."
+    "max_retries_exceeded": "Exceeded the maximum number of attempts in the TDD cycle.",
+    "tester_failed":        "The Tester failed catastrophically (execution or API error).",
+    "developer_failed":     "The Developer failed catastrophically (execution or API error).",
+    "sandbox_failed":       "Execution failed due to a fatal error or continuous instability in E2B/API."
 }
 
 
@@ -36,7 +36,7 @@ def _clear_agent_histories(state: AgentState) -> dict:
 
 def node_execute_progress_evaluator(state: AgentState) -> AgentState:
     logger.info("\n" + "=" * 80)
-    logger.info("📊 ETAPA 5: AVALIADOR DE PROGRESSO")
+    logger.info("📊 STEP 5: PROGRESS EVALUATOR")
     logger.info("=" * 80)
 
     current_index = state.get("plan_index", 0)
@@ -52,9 +52,9 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
 
     audit_entries: list = []
 
-    # 1. Verifica se falhou (incluindo falha de sandbox/infra)
+    # 1. Checks whether it failed (including sandbox/infra failure)
     if status in _FAILURE_STATUSES:
-        reason = _FAILURE_REASONS.get(status, f"Status de falha desconhecido: '{status}'")
+        reason = _FAILURE_REASONS.get(status, f"Unknown failure status: '{status}'")
         failure_info = {
             "requirement": current_req,
             "index": current_index,
@@ -75,21 +75,21 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
         )
         subreq_failure_count += 1
 
-        logger.error(f"❌ Sub-requisito FALHOU: '{current_req}'")
-        logger.error(f"   Motivo : {reason}")
+        logger.error(f"❌ Sub-requirement FAILED: '{current_req}'")
+        logger.error(f"   Reason : {reason}")
         logger.error(f"   Status : {status}")
 
         audit_entries.append(
             AIMessage(
-                content=f"[Evaluator] FALHOU '{current_req}' (status={status}): {reason}"
+                content=f"[Evaluator] FAILED '{current_req}' (status={status}): {reason}"
             )
         )
 
         if status == "sandbox_failed":
-            logger.warning("🛑 Erro fatal de infraestrutura. Abortando o fluxo TDD.")
+            logger.warning("🛑 Fatal infrastructure error. Aborting the TDD flow.")
             return {
                 **state,
-                "status": "sandbox_failed", 
+                "status": "sandbox_failed",
                 "failed_requirements": failed_requirements,
                 "subreq_results": subreq_results,
                 "subreq_success_count": subreq_success_count,
@@ -97,10 +97,10 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 "audit_log": audit_entries,
             }
         elif status == "developer_failed":
-            logger.warning("🛑 Erro fatal de infraestrutura ao chamar o Developer. Abortando o fluxo TDD.")
+            logger.warning("🛑 Fatal infrastructure error calling the Developer. Aborting the TDD flow.")
             return {
                 **state,
-                "status": "developer_failed", 
+                "status": "developer_failed",
                 "failed_requirements": failed_requirements,
                 "subreq_results": subreq_results,
                 "subreq_success_count": subreq_success_count,
@@ -108,10 +108,10 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 "audit_log": audit_entries,
             }
         elif status == "tester_failed":
-            logger.warning("🛑 Erro fatal de infraestrutura ao chamar o Tester. Abortando o fluxo TDD.")
+            logger.warning("🛑 Fatal infrastructure error calling the Tester. Aborting the TDD flow.")
             return {
                 **state,
-                "status": "tester_failed", 
+                "status": "tester_failed",
                 "failed_requirements": failed_requirements,
                 "subreq_results": subreq_results,
                 "subreq_success_count": subreq_success_count,
@@ -119,12 +119,12 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
                 "audit_log": audit_entries,
             }
         elif status == "max_retries_exceeded":
-            logger.warning("Excedeu o número máximo de tentativas para este sub-requisito. Abortando o fluxo TDD.")
+            logger.warning("Exceeded the maximum number of attempts for this sub-requirement. Aborting the TDD flow.")
 
     else:
-        logger.info(f"✅ Sub-requisito concluído: '{current_req}'")
+        logger.info(f"✅ Sub-requirement completed: '{current_req}'")
         audit_entries.append(
-            AIMessage(content=f"[Evaluator] Concluído '{current_req}'.")
+            AIMessage(content=f"[Evaluator] Completed '{current_req}'.")
         )
         flow_type = ""
         if "F2" in flow_types:
@@ -144,7 +144,7 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
         subreq_success_count += 1
 
     logger.info(
-        f"📈 Progresso geral: {current_index + 1}/{total} "
+        f"📈 Overall progress: {current_index + 1}/{total} "
         f"({(current_index + 1) / total * 100:.0f}%)"
     )
 
@@ -154,14 +154,14 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
         next_req = plan[next_index]
 
         logger.info("-" * 80)
-        logger.info(f"⏭️  PRÓXIMA TAREFA: '{next_req}'")
-        logger.info("   🧹 Resetando históricos de conversa dos agentes para novo contexto...")
+        logger.info(f"⏭️  NEXT TASK: '{next_req}'")
+        logger.info("   🧹 Resetting agent conversation histories for the new context...")
 
         history_resets = _clear_agent_histories(state)
 
         audit_entries.append(
             AIMessage(
-                content=f"[Evaluator] Avançando para o sub-requisito {next_index + 1}/{total}: '{next_req}'. Históricos limpos."
+                content=f"[Evaluator] Advancing to sub-requirement {next_index + 1}/{total}: '{next_req}'. Histories cleared."
             )
         )
 
@@ -183,17 +183,17 @@ def node_execute_progress_evaluator(state: AgentState) -> AgentState:
     else:
         if failed_requirements:
             n = len(failed_requirements)
-            logger.warning(f"\n⚠️  PLANO CONCLUÍDO COM {n} FALHA(S).")
-            logger.warning("🧾 Encerrando o fluxo TDD com falhas registradas.")
+            logger.warning(f"\n⚠️  PLAN COMPLETED WITH {n} FAILURE(S).")
+            logger.warning("🧾 Ending the TDD flow with recorded failures.")
             final_status = "plan_complete_with_failures"
         else:
-            logger.info("\n✅ PLANO CONCLUÍDO COM SUCESSO.")
-            logger.info("🧾 Encerrando o fluxo TDD com sucesso.")
+            logger.info("\n✅ PLAN COMPLETED SUCCESSFULLY.")
+            logger.info("🧾 Ending the TDD flow successfully.")
             final_status = "plan_complete"
 
         audit_entries.append(
             AIMessage(
-                content=f"[Evaluator] Plano finalizado. Status: {final_status}. Requisitos com falha: {len(failed_requirements)}/{total}."
+                content=f"[Evaluator] Plan finalized. Status: {final_status}. Failed requirements: {len(failed_requirements)}/{total}."
             )
         )
 
