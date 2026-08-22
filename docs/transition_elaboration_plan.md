@@ -12,7 +12,7 @@ Three structural consequences follow:
 
 The target is to port claude-code's agent/tool/skill architecture onto TDDAgents: declarative agent definitions, a real tool protocol with per-agent scoping, delegation as a scoped tool, three-level skills, layered context injection, and explicit agent lifecycles — while the Red→Green invariant the research measures stays structurally guaranteed rather than prompt-guaranteed.
 
-**Decisions locked with the user across six rounds:**
+**Decisions locked with the user** — rounds 1–6 settled the architecture as a whole; round 7 elaborated Phase 1 and is marked ⁽⁷⁾ below.
 
 | | |
 |---|---|
@@ -27,12 +27,25 @@ The target is to port claude-code's agent/tool/skill architecture onto TDDAgents
 | Validation | No separate agent — tester + runners are the validation phase |
 | Requirements | Folded into one checkpointed graph via `interrupt()` |
 | Model | `model:` field honored, every definition defaults to `Config.MODEL` |
-| `permissionMode` | Sandbox write scope: `read_only` \| `workspace_write` \| `full` |
+| `permission_mode` | Gates *what*: `read_only` \| `workspace_write` \| `full` |
 | Skills | 7 skills; model-invoked `Skill` tool + path-conditional activation + supervisor selection |
 | Skill depth | `SKILL.md` + `references/` + `scripts/`; 2 authored, 5 scaffolded |
 | Extensions in | Frontmatter hooks, run-scoped agent memory, context forking |
 | Extensions out | MCP servers, async/background agents (sequential delegation only) |
 | Language | English everywhere — prompts, logs, docstrings, comments, CLI, benchmark specs |
+| Execution targets ⁽⁷⁾ | Two: the E2B sandbox **and** the local host. Generated code still runs only in the sandbox |
+| `workspace` ⁽⁷⁾ | Gates *where*: `sandbox` \| `local` \| `both`, declared per agent definition, inherited by its tools, no per-call override. Orthogonal to `permission_mode` |
+| Local execution ⁽⁷⁾ | `LocalWorkspace` reaches full parity including `execute()`, unrestricted — see the risk note below |
+| Sync ⁽⁷⁾ | Bidirectional local↔sandbox at deterministic checkpoints; no watchers, no background threads |
+| Conflicts ⁽⁷⁾ | Sandbox wins during a run (timestamped local backup + logged event); local wins outside a run |
+| Tool roster ⁽⁷⁾ | 18 tools; `Tool` protocol is the source of truth, `to_langchain_tool()` adapts it for `bind_tools` |
+| E2B client ⁽⁷⁾ | `e2b_code_interpreter.Sandbox` everywhere; `run_code` exposed as `RunCode` |
+
+⁽⁷⁾ **Accepted risk, recorded deliberately.** Unrestricted local `execute()` with no per-call override
+means the only thing between an agent and an arbitrary host command is the `workspace:` value in its
+definition file — a Phase 2 frontmatter typo becomes a host-execution event. The user chose this after
+the trade-off was raised. The mitigation is structural, not procedural: `tester`, `developer`, and
+`refactorer` are pinned to `sandbox`, and the phase-filtered registry is what enforces it.
 
 `experimental_executions/` and `mutation_tests/` stay on disk untouched as frozen paper artifacts; they will no longer be re-runnable from the new code, which the user accepted.
 
@@ -44,8 +57,9 @@ The target is to port claude-code's agent/tool/skill architecture onto TDDAgents
 |---|---|---|---|
 | Agent definition | Markdown + YAML frontmatter → `AgentDefinition` (`loadAgentsDir.ts`): `tools`, `disallowedTools`, `model`, `maxTurns`, `permissionMode`, `skills` | Implicit: a node function + a Jinja2 prompt pair | `app/agents/definitions/<name>.md` — same field set, English body |
 | Delegation | `AgentTool` — LLM emits `subagent_type` + `prompt`; `runAgent.ts` builds an isolated context | None | `Agent` tool in the registry, granted per agent with allowed targets |
-| Tools | `Tool` protocol (`Tool.ts:362`): `call`, `inputSchema`, `isReadOnly`, `isConcurrencySafe`, `maxResultSizeChars` | Three fields on one Pydantic model, applied by the node | `app/tools/base.py::Tool` — same protocol |
-| Tool scoping | `resolveAgentTools()` — allowlist ∩ available, minus denylist, `*` wildcard | None; every agent has identical powers | Same resolution, plus `permissionMode` as an enforcement floor |
+| Tools | `Tool` protocol (`Tool.ts:362`): `call`, `inputSchema`, `description`/`prompt`, per-input `isReadOnly`/`isConcurrencySafe`, per-tool `maxResultSizeChars`; ~40 tools | Three fields on one Pydantic model, applied by the node; 0 tools | `app/tools/base.py::Tool` — same protocol, 18 tools |
+| Tool scoping | `resolveAgentTools()` — allowlist ∩ available, minus denylist, `*` wildcard | None; every agent has identical powers | Same resolution, plus `permission_mode` and `workspace` as two orthogonal enforcement floors |
+| Execution environment | The host, directly | E2B sandbox only, reached ad hoc from three modules | `Workspace` abstraction over `E2BWorkspace` + `LocalWorkspace`, one adapter, checkpointed sync between them |
 | Context isolation | Own message list per subagent; only a final report returns | Three `add_messages` channels shared for the whole sub-requirement | Self-contained `run_agent`; summary-only return + forking at 3 sites |
 | Environment injection | `computeEnvInfo()` → `<env>`, appended by `enhanceSystemPromptWithEnvDetails()`; plus `getSystemContext()` / `getUserContext()` | The rendered file mirror, nothing else | `<env>` + spec + `CONVENTIONS.md` + workspace state summary |
 | Lifecycle | `runAgent`'s `finally`: hook clearing, file-state release, task kill, registry eviction | None | `AgentRunResult` + explicit teardown |
@@ -54,7 +68,7 @@ The target is to port claude-code's agent/tool/skill architecture onto TDDAgents
 
 Two patterns are imported in spirit, not just in shape:
 
-- **Capability as structure, not instruction.** The Developer's prompt currently says *"never invoke the test runner yourself."* Under tool scoping, `RunTests` simply is not in the Developer's tool list — the same way Explore's read-only guarantee comes from `disallowedTools` ([exploreAgent.ts:67](/home/pedroamaro/claude-code/src/tools/AgentTool/built-in/exploreAgent.ts#L67)) while its prompt merely explains it. Every prompt rule that can become a tool boundary should.
+- **Capability as structure, not instruction.** The Developer's prompt currently says *"never invoke the test runner yourself."* Under tool scoping, `RunTests` simply is not in the Developer's tool list — the same way Explore's read-only guarantee comes from `disallowedTools` ([exploreAgent.ts:67](/home/amaro/claude-code/src/tools/AgentTool/built-in/exploreAgent.ts#L67)) while its prompt merely explains it. Every prompt rule that can become a tool boundary should.
 - **Pay for knowledge only when used.** The skill listing costs ~7 lines; a full `SKILL.md` costs real tokens and loads only on invoke; `references/` load only if the body says to. This is what makes 7 domain skills affordable in a 15-iteration loop.
 
 ---
@@ -79,14 +93,30 @@ app/
     memory.py                # run-scoped agent memory
     definitions/*.md         # analyst, engineer, planner, supervisor, tester,
                              # developer, reviewer, researcher, refactorer
+  sandbox/
+    adapter.py               # E2BAdapter — the ONLY module that imports e2b*
+  workspace/
+    base.py                  # Workspace protocol, CommandResult, WorkspaceError
+    e2b.py                   # E2BWorkspace  → E2BAdapter
+    local.py                 # LocalWorkspace → pathlib + subprocess
+    router.py                # sandbox | local | both → a Workspace instance
+  sync/
+    engine.py                # checkpointed bidirectional sync + ledger reconciliation
+    baseline.py              # {path: sha256} snapshot; conflict detection
   tools/
-    base.py                  # Tool protocol, ToolContext, ToolResult, result persistence
+    base.py                  # Tool protocol, build_tool/TOOL_DEFAULTS, ToolContext,
+                             # ToolResult, result persistence
     registry.py              # name → Tool; resolve_tools(definition)
-    agent_tool.py            # delegation
-    skill_tool.py            # skill invocation
-    read_file.py list_dir.py grep.py write_file.py bash.py run_tests.py
-    host_read.py             # read-only, allowlisted host access (researcher)
+    langchain.py             # to_langchain_tool() shim for llm.bind_tools()
+    agent_tool.py            # delegation (Phase 5)
+    skill_tool.py            # skill invocation (Phase 4)
+    fs.py                    # ReadFile ListDir Glob Grep WriteFile Edit MultiEdit
+                             # Delete Move
+    exec.py                  # Bash BashOutput KillShell RunCode
+    run_tests.py             # RunTests — sandbox-pinned, bypasses the router
+    host_read.py             # HostRead — read-only host access (researcher)
     web.py                   # WebSearch / WebFetch (researcher)
+    todo.py                  # TodoWrite — in-process scratchpad
   skills/
     backend/SKILL.md + references/ + scripts/        # fully authored
     testing-patterns/SKILL.md + references/ + scripts/  # fully authored
@@ -125,39 +155,90 @@ You are a senior software engineer improving code that already passes its tests.
 
 `phase` is the delegation guard: each hook passes the phases legal there, and the registry filters candidates — the port of `allowedAgentTypes`. `model` is honored but unset everywhere, so runs stay single-model and comparable.
 
-### 2.3 Tool protocol, scoping, and `permissionMode`
+### 2.3 Tool protocol, scoping, `permission_mode`, and `workspace`
 
 ```python
 class Tool(Protocol):
     name: str
-    description: str
-    args_schema: type[BaseModel]
-    is_read_only: bool
-    is_concurrency_safe: bool
-    max_result_chars: int
+    args_schema: type[BaseModel]                       # Pydantic ≙ Zod inputSchema
+    max_result_chars: int                              # per tool, NOT one global number
+    def description(self, args: BaseModel) -> str: ... # short, input-aware
+    def prompt(self) -> str: ...                       # the long model-facing text
     def call(self, args: BaseModel, ctx: ToolContext) -> ToolResult: ...
+    def is_read_only(self, args: BaseModel) -> bool: ...        # per INPUT, not per tool
+    def is_concurrency_safe(self, args: BaseModel) -> bool: ...
+    def is_destructive(self, args: BaseModel) -> bool: ...
+    def validate_input(self, args: BaseModel, ctx: ToolContext) -> ValidationResult: ...
+    def check_permissions(self, args: BaseModel, ctx: ToolContext) -> PermissionResult: ...
 ```
 
-`ToolContext` carries `sandbox_id`, the ledger, `agent_id`, `permission_mode`, workdir, and remaining budget. `resolve_tools(definition)` mirrors `resolveAgentTools`: allowlist ∩ registry, minus denylist, `*` for wildcard.
+Three details are taken from the real `Tool.ts` rather than from a paraphrase, because each one
+changes an implementation decision:
 
-**`permission_mode` is the enforcement floor, not a duplicate of the allowlist.** `read_only` rejects any tool whose `is_read_only` is False at `ToolContext` level, even if a definition mistakenly lists `WriteFile`. This makes "the Researcher is read-only" auditable rather than declarative — defense in depth exactly where a prompt-level rule would silently fail.
+- **`is_read_only` takes the input.** `BashTool.isReadOnly(input)` parses the command and returns
+  whether it satisfies read-only constraints ([BashTool.ts:437](/home/amaro/claude-code/src/tools/BashTool/BashTool.tsx#L437));
+  `isConcurrencySafe` then just delegates to it ([:434](/home/amaro/claude-code/src/tools/BashTool/BashTool.tsx#L434)).
+  So `Bash` is not "never read-only" — `Bash("ls")` is read-only and parallelizable while
+  `Bash("rm -rf")` is neither, and only a per-input predicate can express that.
+- **`max_result_chars` is per tool.** Read `Infinity`, Grep `20_000`, Bash `30_000`, everything else
+  `100_000`. Read is unbounded on purpose: persisting its output would create a circular
+  Read→file→Read loop, and the tool already self-bounds ([Tool.ts:466](/home/amaro/claude-code/src/Tool.ts#L466)).
+- **`description` and `prompt` are two different things** — a short input-aware line for display and
+  logging, and the long text the model actually reads. Collapsing them into one string field loses
+  the ability to log a call compactly.
 
-**Result governance.** A result exceeding `max_result_chars` is written to a sandbox file; the agent receives a head/tail preview plus the path, which it can `ReadFile` selectively. This matters most for `RunTests`: `-vv --tb=long --showlocals` output is both the largest and the most important thing an agent reads. Tools with `is_concurrency_safe = True` (all read tools) execute in parallel within one turn.
+`build_tool()` fills the commonly-stubbed methods with **fail-closed** defaults, so a tool definition
+can omit them and still be safe: `is_enabled → True`, `is_concurrency_safe → False`,
+`is_read_only → False`, `is_destructive → False`, `check_permissions → allow`,
+`user_facing_name → name` ([Tool.ts:757](/home/amaro/claude-code/src/Tool.ts#L757)).
 
-**Ledger sync fixes the lost-files bug.** Any write-capable tool triggers reconciliation (`find . -type f -newer <marker>` + read back) into `file_system`, so files created by `Bash` finally land in the ledger and therefore in `workspace_output_*`.
+`ToolContext` carries the resolved `workspace`, `sandbox_id`, the ledger, `agent_id`,
+`permission_mode`, workdir, and remaining budget. `resolve_tools(definition)` mirrors
+`resolveAgentTools`: denylist first, wildcard short-circuit, then allowlist ∩ registry — and
+**unknown tool names are collected, not fatal** (`ResolvedTools(has_wildcard, valid, invalid, resolved)`).
+
+**Two orthogonal enforcement axes.** `permission_mode` gates *what*; `workspace` gates *where*.
+Neither is a duplicate of the tool allowlist, and both are checked at `ToolContext` level so a
+mistaken frontmatter entry cannot grant capability:
+
+|  | `read_only` | `workspace_write` | `full` |
+|---|---|---|---|
+| **`sandbox`** | read sandbox | + write sandbox | + execute in sandbox |
+| **`local`** | read host | + write host | + **execute on host** |
+| **`both`** | read either | + write either | + execute either |
+
+A `read_only` + `local` agent reads host files and can do nothing else with them. `full` + `local` is
+the one cell that runs unrestricted commands on the developer's machine; it is granted to no agent in
+the roster below. This makes "the Researcher is read-only" auditable rather than declarative — defense
+in depth exactly where a prompt-level rule would silently fail.
+
+**Result governance.** A result exceeding that tool's `max_result_chars` is written to a sandbox file;
+the agent receives a head/tail preview plus the path, which it can `ReadFile` selectively. This matters
+most for `RunTests`: `-vv --tb=long --showlocals` output is both the largest and the most important
+thing an agent reads. Tools whose `is_concurrency_safe(input)` is True execute in parallel within one turn.
+
+**Ledger reconciliation fixes the lost-files bug** — but it belongs to the sync engine (§Phase 1A),
+not to each tool. A write-capable tool call is one of the four sync checkpoints, so files created by
+`Bash` land in `file_system` and therefore in `workspace_output_*`.
 
 Per-agent scoping:
 
-| Agent | Tools | permission_mode |
-|---|---|---|
-| supervisor | `Agent(researcher,refactorer)`, ReadFile, ListDir | read_only |
-| researcher | ReadFile, ListDir, Grep, Bash, HostRead, WebSearch, WebFetch, Skill | read_only |
-| tester | ReadFile, ListDir, Grep, WriteFile, Skill — **no RunTests** | workspace_write |
-| developer | ReadFile, ListDir, Grep, WriteFile, Bash, Skill — **no RunTests** | full |
-| refactorer | ReadFile, ListDir, Grep, WriteFile, RunTests, Skill | workspace_write |
-| reviewer | ReadFile, ListDir, Grep | read_only |
+| Agent | Tools | permission_mode | workspace |
+|---|---|---|---|
+| supervisor | `Agent(researcher,refactorer)`, ReadFile, ListDir | read_only | sandbox |
+| researcher | ReadFile, ListDir, Glob, Grep, Bash, HostRead, WebSearch, WebFetch, Skill | read_only | both |
+| tester | ReadFile, ListDir, Glob, Grep, WriteFile, Edit, Skill — **no RunTests** | workspace_write | **sandbox** |
+| developer | ReadFile, ListDir, Glob, Grep, WriteFile, Edit, MultiEdit, Bash, RunCode, Skill — **no RunTests** | full | **sandbox** |
+| refactorer | ReadFile, ListDir, Glob, Grep, WriteFile, Edit, MultiEdit, RunTests, Skill | workspace_write | **sandbox** |
+| reviewer | ReadFile, ListDir, Glob, Grep | read_only | sandbox |
 
-`HostRead` is read-only and path-allowlisted to the project root plus configured doc directories; it must reject paths outside the allowlist and never write.
+The three bolded `sandbox` pins are load-bearing: they are what keeps generated code executing only in
+the sandbox now that a local execution target exists. `RunTests` bypasses the router entirely and is
+sandbox-pinned at the tool level, so it stays sandbox-only even if an agent is granted `both`.
+
+`HostRead` is read-only and never writes. It carries **no path allowlist** — an allowlist would be
+theatre next to an unrestricted `Bash` on the same host, and pretending otherwise would misrepresent
+the actual boundary. The boundary is the `workspace` field, and nothing else.
 
 ### 2.4 Delegation
 
@@ -297,30 +378,211 @@ No claude-code reference applies — this phase is a pure-text migration interna
 
 ### Phase 1 — Tool layer
 
-`tools/base.py` (protocol, `ToolContext`, `ToolResult`, result persistence), `tools/registry.py` (`resolve_tools`, permission-mode enforcement, parallel dispatch), then `ReadFile`, `ListDir`, `Grep`, `WriteFile`, `Bash`, `RunTests`, `HostRead`, `WebSearch`, `WebFetch`. Independently testable with no graph changes.
+Phase 1 has two execution environments to serve, not one: agent-authored code still runs only in the
+E2B sandbox, but agents and their tools may also operate against the local host. That makes the phase
+substantially larger than its neighbours, so it splits at its real dependency seam — tools sit on top
+of a workspace, so the workspace lands first:
+
+- **Phase 1A — execution substrate.** E2B adapter, sandbox lifecycle, the `Workspace` abstraction and
+  its two implementations, the sync engine.
+- **Phase 1B — agent-facing tools.** `Tool` protocol, registry and `resolve_tools`, the 18 tools.
+
+Both are independently runnable and verifiable with no graph changes.
+
+#### Phase 1 audit — the tool inventory
+
+*This is the pre-implementation inventory. It records what exists, what each tool will be backed by,
+and which capabilities the E2B SDK does not cover.*
+
+**There is no prior tool layer to migrate.** No `app/tools/` exists. The entire agent capability
+surface today is five latent operations, reachable only through the fields of one Pydantic model and
+applied by one function — never as tools the model can call:
+
+| # | Capability today | Site | E2B call | Becomes |
+|---|---|---|---|---|
+| 1 | `dependencies` → `pip install` | [sandbox_utils.py:27-30](app/utils/sandbox_utils.py#L27-L30) | `commands.run` | `Bash` |
+| 2 | `files_to_write` → `mkdir -p` + write | [sandbox_utils.py:33-44](app/utils/sandbox_utils.py#L33-L44) | `files.write` | `WriteFile` (keeps the auto-`mkdir -p`) |
+| 3 | `bash_commands` — **output discarded** at both call sites | [sandbox_utils.py:47-52](app/utils/sandbox_utils.py#L47-L52) | `commands.run` | `Bash`, with the result actually returned |
+| 4 | `run_pytest_in_sandbox` — node-invoked, never agent-invoked | [runner.py:17](app/agents/langgraph/runner.py#L17) | `commands.run` | `RunTests`, sandbox-pinned |
+| 5 | `read_all_files_from_state` — force-rendered into every prompt | [sandbox_utils.py:62](app/utils/sandbox_utils.py#L62) | none | `ReadFile` / `Grep` — pull, not push (Phase 3) |
+
+There is no duplicated functionality to consolidate; the surface is too small for that. The one
+consolidation available runs the other way — capabilities 1 and 3 are the same operation and collapse
+into a single `Bash`.
+
+**Roster categorization**, verified against the installed SDK (`e2b==2.13.3`,
+`e2b-code-interpreter==2.4.1`) rather than against the TypeScript example that prompted this work:
+
+*Native E2B — one SDK call, the adapter is a thin wrapper*
+`ReadFile` (`files.read`) · `WriteFile` (`files.write`, `files.write_files` for batches) ·
+`ListDir` (`files.list(path, depth)`) · `Delete` (`files.remove`) · `Move` (`files.rename`) ·
+`Bash` (`commands.run`) · `BashOutput` (`commands.connect`) · `KillShell` (`commands.kill`) ·
+`RunCode` (`run_code` — the stateful Jupyter-style REPL that `e2b_code_interpreter` adds over `e2b`)
+
+*E2B-backed but composed — no SDK primitive exists*
+`Grep` and `Glob` (over `commands.run` with `grep -rn` / `find`; the SDK has no content search) ·
+`Edit` and `MultiEdit` (read → string-replace → write, because `files.write` is full-overwrite only) ·
+`RunTests` (`commands.run` plus `_PYTEST_FLAGS`, reusing [runner.py](app/agents/langgraph/runner.py) verbatim)
+
+*Local-only — no sandbox equivalent, or on the wrong side of the boundary*
+`HostRead` · `WebSearch` · `WebFetch` · `TodoWrite` (in-process)
+
+*Hybrid — one tool, both `Workspace` implementations*
+Every tool in the first two groups, once an agent declares `workspace: both`. `RunTests` is the single
+exception: it is hard-pinned to the sandbox regardless of the agent's `workspace`, because what it
+measures is the research result.
+
+**Three gaps the SDK does not cover**, each of which shapes a design decision below:
+
+1. **No content search.** Grep and Glob shell out; they are not adapter wrappers, and their results
+   need their own size discipline (Grep's `max_result_chars` is the tightest in the roster at 20 000).
+2. **No partial write.** Every `Edit` is a read-modify-write round trip. This is what makes the
+   conflict rule load-bearing rather than theoretical — an edit is not atomic against a concurrent
+   change on the other side.
+3. **No local↔sandbox transfer primitive.** The sync engine composes `files.read` / `files.write_files`
+   for deltas and tar-over-`commands.run` for bulk moves.
+
+#### Phase 1A — execution substrate
+
+`app/sandbox/adapter.py`, `app/workspace/`, `app/sync/`. Nothing here is agent-facing; the deliverable
+is that a `Workspace` can be handed a path or a command and behave identically whichever side it is.
 
 **Steps:**
-1. Define the `Tool` protocol in `app/tools/base.py`: `name`, `description`, `args_schema` (Pydantic — the analogue of claude-code's Zod `inputSchema`), `call(args, ctx) -> ToolResult`, `is_read_only(input)`, `is_concurrency_safe(input)`, `is_destructive(input)`, `max_result_chars`, `check_permissions(input, ctx)`.
-2. Port claude-code's `buildTool()` default-filling pattern as a Python factory: every tool definition can omit the commonly-stubbed methods and get safe, fail-closed defaults (`is_concurrency_safe → False`, `is_read_only → False`, `check_permissions → allow`).
-3. Define `ToolContext` — a trimmed `ToolUseContext`: `sandbox_id`, the ledger (`file_system` equivalent), `agent_id`, `permission_mode`, workdir, remaining turn budget.
-4. Define `ToolResult` and implement result persistence exactly as documented for `maxResultSizeChars`: a result exceeding the limit is written to a sandbox file, the caller gets a head/tail preview plus the path. Set this to effectively unbounded for tools where persisting would create a circular read loop.
-5. Build `tools/registry.py::resolve_tools(definition)`: allowlist ∩ registry, minus denylist, `*` wildcard, dedup by name, stable ordering.
-6. Enforce `permission_mode` as a floor at the `ToolContext` level, independent of the per-tool allowlist — `read_only` must reject any tool whose `is_read_only` is `False` even if a definition mistakenly lists it.
-7. Implement `ReadFile`, `ListDir`, `Grep` as read-only + concurrency-safe; `WriteFile`, `Bash` as neither — matching how claude-code's own read tools (file read, grep, glob) vs. write/exec tools are classified.
-8. `RunTests` reuses `run_pytest_in_sandbox` from `agents/langgraph/runner.py` verbatim as its body — its `_PYTEST_FLAGS` and `CommandExitException` interception are already correct.
-9. Add ledger sync (`find . -type f -newer <marker>` + read-back) triggered by any write-capable tool call, so files created by `Bash` land in `file_system` too.
+1. `app/sandbox/adapter.py::E2BAdapter` — the **only** module in the codebase that imports `e2b*`.
+   Standardize on `e2b_code_interpreter.Sandbox` (a superset of `e2b.Sandbox`), retiring the split
+   import between [runner.py:5](app/agents/langgraph/runner.py#L5) and
+   [orchestrator.py:7](app/graph/orchestrator.py#L7). Surface: `create`, `connect`,
+   `reuse_or_create`, `execute`, `read`, `write`, `write_many`, `list`, `remove`, `rename`, `exists`,
+   `info`, `kill`. Agents and tools never see an E2B type; swapping the sandbox provider later means
+   rewriting this file and nothing above it.
+2. Own the sandbox lifecycle, fixing two live defects. **(a)** `Sandbox.create()` at
+   [orchestrator.py:120](app/graph/orchestrator.py#L120) passes no `timeout`, so it takes the SDK
+   default of 5 minutes while real runs last far longer — add `Config.SANDBOX_TIMEOUT` and refresh it
+   with `set_timeout` at every sync checkpoint. **(b)** Resuming with `--thread-id` reconnects to a
+   `sandbox_id` that the previous run's `finally` block already killed — `reuse_or_create` probes
+   `Sandbox.list()` / `is_running()` and, when the old sandbox is gone, provisions a fresh one and
+   rehydrates it from the ledger plus the local directory.
+3. `app/workspace/base.py::Workspace` — `read_file`, `write_file`, `delete_file`, `list_files`,
+   `exists`, `move`, `execute`. One signature per operation, one result type, one exception family,
+   and identical path semantics (workspace-relative, POSIX separators) and encoding (UTF-8) on both
+   sides. This is Requirement 8's compatibility guarantee expressed as a type.
+4. `E2BWorkspace` delegating to `E2BAdapter`, and `LocalWorkspace` over `pathlib` + `subprocess.run`
+   at full parity **including `execute()`**. Both return the same
+   `CommandResult(stdout, stderr, exit_code, duration, workspace)`. The `workspace` field is what
+   lets execution output from either environment travel back to the agent through a single channel,
+   labelled with where it came from.
+5. `app/workspace/router.py` — resolves `sandbox | local | both` to a concrete `Workspace`.
+   **Forward dependency, recorded deliberately:** the mechanism lands here, but the value comes from
+   `AgentDefinition.workspace`, which does not exist until Phase 2. Until then every resolution
+   returns `sandbox`, which is exactly today's behavior — so Phase 1 changes no execution target on
+   its own. `RunTests` never consults the router.
+6. `app/sync/engine.py` — bidirectional sync at four **deterministic checkpoints** and nowhere else:
+   run start (local → sandbox seed), after every write-capable tool call (sandbox → ledger
+   reconciliation), each sub-requirement boundary (sandbox → local flush), and run end (full flush).
+   No filesystem watchers and no background threads: a run's sync behavior has to be replayable from
+   the event log, or the three-runs-per-task design stops comparing like with like.
+7. `app/sync/baseline.py` — a `{path: sha256}` snapshot taken at the last successful sync, and the
+   conflict rule built on it. One side changed since baseline → propagate. **Both changed → the
+   sandbox wins for the duration of a run**: the local file is first copied to
+   `<path>.local.<timestamp>`, the overwrite is logged, and a `SyncConflict` event is emitted for
+   Phase 8 to collect. Outside a run, local wins. A deletion propagates only when the baseline proves
+   the file was untouched on the other side. A sync that fails halfway leaves the baseline unadvanced,
+   so the next checkpoint retries the same delta — the operation is idempotent rather than
+   transactional, which is the achievable guarantee here.
+8. Move ledger reconciliation (`find . -type f -newer <marker>` + read-back) into the sync engine
+   rather than into each write-capable tool. This is what finally fixes the lost-files bug documented
+   in CLAUDE.md: files an agent creates via `Bash` reach `file_system`, and therefore
+   `workspace_output_*`, instead of vanishing with the sandbox.
+
+**claude-code reference:** none applies. claude-code executes directly on the host and has no sandbox
+adapter, workspace abstraction, or sync layer to port — this substrate is specific to TDDAgents.
+The reference to read before implementing is the E2B Python SDK surface itself: `Sandbox.create`
+(`timeout`, `envs`, `metadata`), `Sandbox.list` / `connect` / `is_running` / `set_timeout` /
+`get_info`, `files.*`, and `commands.run(background=…)`.
+
+#### Phase 1B — tool protocol, registry, and the 18 tools
+
+**Steps:**
+1. `app/tools/base.py::Tool` — port the field set from
+   [Tool.ts:362](/home/amaro/claude-code/src/Tool.ts#L362), keeping the shape §2.3 lays out: the
+   `description(input)` / `prompt()` split, and `is_read_only` / `is_concurrency_safe` /
+   `is_destructive` as **per-input predicates**, not per-tool booleans.
+2. Port `buildTool()` + `TOOL_DEFAULTS` ([Tool.ts:757](/home/amaro/claude-code/src/Tool.ts#L757)) as a
+   Python factory with the same fail-closed defaults, so an omitted method is always the safe answer.
+3. Define `ToolContext` — a trimmed `ToolUseContext`: the resolved `workspace`, `sandbox_id`, the
+   ledger, `agent_id`, `permission_mode`, workdir, remaining turn budget.
+4. Define `ToolResult` and implement result persistence with the **real per-tool limits** (Read
+   unbounded, Grep 20 000, Bash 30 000, others 100 000), not one global number. Over-limit results are
+   written to a sandbox file and returned as head/tail plus the path.
+5. `app/tools/registry.py::resolve_tools(definition)` — port
+   [agentToolUtils.ts:122](/home/amaro/claude-code/src/tools/AgentTool/agentToolUtils.ts#L122):
+   build the denylist set first, short-circuit on `*` or an absent list, then intersect the allowlist
+   with the registry. Return `ResolvedTools(has_wildcard, valid, invalid, resolved)` — unknown names
+   are **collected and reported, not fatal**, so one typo cannot empty an agent's toolbelt silently.
+   Dedup and sort as `assembleToolPool` does ([tools.ts:345](/home/amaro/claude-code/src/tools.ts#L345)):
+   partitioned sort then `uniqBy`, for prompt-cache stability.
+6. Enforce the two orthogonal axes of §2.3 at `ToolContext` level, independent of the allowlist:
+   `permission_mode` rejects a tool whose `is_read_only(input)` is False under `read_only`;
+   `workspace` rejects a target the agent was not granted.
+7. `app/tools/langchain.py::to_langchain_tool()` — the shim `run_agent` feeds to `llm.bind_tools()`
+   in Phase 2. The custom protocol stays the source of truth because LangChain has nowhere to put
+   `max_result_chars`, `is_concurrency_safe`, or `check_permissions`.
+8. Implement the 18 tools against `Workspace`, never against `E2BAdapter` directly. Classification
+   follows the audit above: the read tools (`ReadFile`, `ListDir`, `Glob`, `Grep`, `HostRead`) are
+   read-only and concurrency-safe; the write tools are neither; and **`Bash` decides per input** —
+   parse the command and return whether it satisfies read-only constraints, exactly as
+   [BashTool.ts:437](/home/amaro/claude-code/src/tools/BashTool/BashTool.tsx#L437) does, with
+   `is_concurrency_safe` delegating to that result.
+9. `RunTests` reuses `run_pytest_in_sandbox` from [runner.py](app/agents/langgraph/runner.py) as its
+   body — `_PYTEST_FLAGS` and the `CommandExitException` interception are already correct — with one
+   change: it calls the adapter rather than `Sandbox.connect` directly, and bypasses the router so it
+   is sandbox-pinned.
+10. Reclassify `CommandExitException`. A non-zero exit from an **agent-authored** command is a tool
+    result carrying `exit_code`, returned to the agent to reason about — not infrastructure failure.
+    Today [errors/sandbox/handler.py:31](app/errors/sandbox/handler.py#L31) raises
+    `TransientInfraError` for it, burning three full LLM retries before hard-failing the pipeline.
+    §2.9 promises this fix; Phase 1B is where it lands, because Phase 1B is where tool errors first
+    have somewhere to go.
 
 **claude-code reference:**
-- `~/claude-code/src/Tool.ts` — the `Tool` type (search for `call`, `checkPermissions`, `isReadOnly`, `isConcurrencySafe`, `maxResultSizeChars`) and the `buildTool()`/`TOOL_DEFAULTS` factory near the end of the file.
-- `~/claude-code/src/tools.ts` — `getAllBaseTools()`, `filterToolsByDenyRules()`, `getTools(permissionContext)`, `assembleToolPool()` (dedup + cache-stable sort) — the direct model for `resolve_tools`.
-- `~/claude-code/src/tools/FileReadTool/`, `GrepTool/`, `BashTool/` — concrete `isReadOnly`/`isConcurrencySafe` classifications to mirror.
+- `~/claude-code/src/Tool.ts` — the `Tool` type (`call`, `checkPermissions`, `isReadOnly`,
+  `isConcurrencySafe`, `maxResultSizeChars`, and the `description`/`prompt` split) plus the
+  `buildTool()` / `TOOL_DEFAULTS` factory at the end of the file.
+- `~/claude-code/src/tools.ts` — `getAllBaseTools()`, `filterToolsByDenyRules()`,
+  `getTools(permissionContext)`, `assembleToolPool()` (dedup + cache-stable sort) — the direct model
+  for `resolve_tools`.
+- `~/claude-code/src/tools/AgentTool/agentToolUtils.ts` — `resolveAgentTools()`, the resolution order
+  and the `ResolvedAgentTools` return shape to mirror.
+- `~/claude-code/src/tools/{FileReadTool,GrepTool,GlobTool,BashTool}/` — the concrete
+  `isReadOnly` / `isConcurrencySafe` / `maxResultSizeChars` values, and `BashTool`'s per-input
+  read-only parse.
+
+#### Phase 1 verification
+
+Phase 1 is the only phase provable in full before anything downstream exists — no graph, no LLM, no
+agent definitions. A standalone harness should assert:
+
+- **Tool surface.** Drive all 18 tools against one sandbox through `E2BAdapter`; assert input schema
+  validation, result shape, error shape, exit-code handling, and path/encoding semantics.
+- **Cross-environment compatibility.** Run the same assertions against `LocalWorkspace` in a temp
+  directory and diff the outcomes. Requirement 8's guarantee is only real if this diff is empty.
+- **Sync.** Seed local → sandbox, modify in the sandbox, flush, assert the local tree matches. Then
+  modify the same file on both sides and assert the sandbox-wins rule, the `.local.<timestamp>`
+  backup, and the emitted `SyncConflict`. Kill the process mid-flush and assert the next checkpoint
+  retries the same delta rather than skipping it.
+- **Lifecycle.** Assert a sandbox survives past the 5-minute default, and that `reuse_or_create`
+  recovers when handed a killed `sandbox_id`.
+- **Result governance.** Assert a >30 000-char `Bash` result is persisted and previewed, and that
+  `ReadFile` output is never persisted.
+- **Routing.** With no `AgentDefinition` present, assert every tool resolves to `sandbox` — Phase 1
+  must not change any execution target on its own.
 
 ### Phase 2 — Agent registry + runtime
 
 `definition.py`, `registry.py`, `runtime.py::run_agent` (loop + teardown; hooks/memory/forking stubbed). Port tester/developer/reviewer to `definitions/*.md` and the tool loop. Delete `AgentAction`, `apply_agent_action_to_sandbox`, and the three message channels from `AgentState`. **Routing stays byte-identical here** — this isolates "agents became tool-loop agents" from "topology changed" so a regression is attributable.
 
 **Steps:**
-1. `agents/definition.py::AgentDefinition` — a dataclass with `tools`, `model`, `permission_mode`, `max_turns`, `skills`, `memory`, `hooks`, plus TDDAgents-specific `phase`, `fork_from`, `revert_on_red`.
+1. `agents/definition.py::AgentDefinition` — a dataclass with `tools`, `model`, `permission_mode`, `max_turns`, `skills`, `memory`, `hooks`, plus TDDAgents-specific `phase`, `fork_from`, `revert_on_red`, and `workspace` (`sandbox` | `local` | `both`, defaulting to `sandbox`). `workspace` is the field Phase 1A's router has been waiting for; wiring it is what first makes local execution reachable, so land it together with the `sandbox` pins on tester, developer, and refactorer rather than after them.
 2. Write the Markdown+YAML frontmatter parser: read frontmatter, validate required fields (`name`, `description`), and skip-with-log on a malformed file rather than crashing the whole registry — co-located reference docs or typos in one agent file must not take down agent discovery for the rest.
 3. `agents/registry.py::discover()` — memoized load of all `definitions/*.md`, then `resolve_tools(definition)` (Phase 1's function) including the special-case handling needed for `Agent(researcher,refactorer)` target scoping (see Phase 5).
 4. `runtime.py::run_agent()` — resolve model, build initial messages (system + env + project context — stub these for now, real content lands in Phase 3), tool-call loop bound by `max_turns`, a teardown block.
@@ -420,7 +682,7 @@ This phase is primarily LangGraph plumbing rather than a claude-code port, so no
 Event bus, collector, report writers; delete the wrappers and `is_flow_type`.
 
 **Steps:**
-1. `metrics/events.py` — typed event dataclasses (`AgentStarted`, `ToolCalled`, `ToolResultTruncated`, `SkillInvoked`, `SkillActivatedByPath`, `AgentFinished`, `DelegationDecided`, `RedConfirmed`, `GreenPassed`, `RefactorReverted`, `SubReqCompleted`), each a single typed emission point rather than an ad hoc print/log statement.
+1. `metrics/events.py` — typed event dataclasses (`AgentStarted`, `ToolCalled`, `ToolResultTruncated`, `SkillInvoked`, `SkillActivatedByPath`, `AgentFinished`, `DelegationDecided`, `RedConfirmed`, `GreenPassed`, `RefactorReverted`, `SubReqCompleted`, plus `SyncCheckpoint` and `SyncConflict` from Phase 1A), each a single typed emission point rather than an ad hoc print/log statement.
 2. Emit events from nodes, `run_agent()`, and every tool call at the relevant lifecycle transition.
 3. `metrics/collector.py` — aggregation that accumulates typed events and derives a summary object on demand: delegation tree per sub-requirement, turns/tool-calls/tokens per agent, skill-invocation frequency, tool failure rates, refactor accept-vs-revert rate.
 4. Delete the four `wrapper_*` functions and the `is_flow_type` list; flow classification (F1/F2) becomes a derivation over the event log instead of being computed and threaded through state inline.
@@ -438,6 +700,8 @@ Remove dead modules and config constants; confirm CLAUDE.md matches the shipped 
 1. Remove dead modules: `app/utils/workspace.py`, `app/utils/spec_loader.py` (confirmed unused since Phase 0; deletion deliberately deferred to here).
 2. Remove dead config constants: `Config.WORKSPACE_PATH`, `Config.PLAN_KEY`.
 3. Grep for any remaining references to symbols deleted across earlier phases (`AgentAction`, `apply_agent_action_to_sandbox`, `RequirementsState`, the `wrapper_*` functions) to confirm nothing dangling survived the incremental rollout.
-4. Rewrite CLAUDE.md's Architecture section to match the shipped code — the first point since the refactor started where the document and the source are back in sync.
+4. Confirm no module outside `app/sandbox/adapter.py` imports `e2b*` — the adapter's whole value is that it is the single seam to the provider, and a stray direct import silently voids it.
+5. Retract CLAUDE.md's claim that agent code is executed "inside a remote E2B cloud sandbox, never on the host." Phase 1A retired it: generated code still runs only in the sandbox, but agents and tools reach the host through `LocalWorkspace`, unrestricted, gated solely by each definition's `workspace` field. State the new boundary plainly rather than deleting the old sentence — a reader who remembers the guarantee needs to be told it is gone.
+6. Rewrite CLAUDE.md's Architecture section to match the shipped code — the first point since the refactor started where the document and the source are back in sync.
 
 No claude-code reference applies — this is a TDDAgents-internal cleanup pass.
