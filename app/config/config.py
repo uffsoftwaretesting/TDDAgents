@@ -31,6 +31,45 @@ class Config:
     WORKSPACE_PATH = "workspace"
     PLAN_KEY = "tdd_plan_queue"
 
+    # ── Sandbox lifecycle ────────────────────────────────────────────────────
+    # The E2B SDK defaults to a 300s sandbox lifetime, which is far shorter than a
+    # real run. The adapter creates with SANDBOX_TIMEOUT and slides the window
+    # forward with set_timeout() whenever SANDBOX_REFRESH_INTERVAL has elapsed, so a
+    # run's total length is unbounded while the sandbox still dies promptly if the
+    # process crashes. 3600 is the cap on an E2B Hobby account.
+    SANDBOX_TIMEOUT = 3600
+    SANDBOX_REFRESH_INTERVAL = 600
+
+    # ── Command execution ────────────────────────────────────────────────────
+    # E2B's commands.run() defaults to timeout=60, which silently truncates long
+    # pip installs and test suites. Both values below are adapter defaults and can
+    # be overridden per call.
+    COMMAND_TIMEOUT = 300
+    TEST_TIMEOUT = 600
+
+    # ── Workspace roots ──────────────────────────────────────────────────────
+    # Every workspace-relative path resolves against these. Pinning the sandbox root
+    # explicitly is what makes the path contract in app/workspace/base.py a
+    # guarantee rather than an accident of the E2B default working directory.
+    SANDBOX_WORKSPACE_ROOT = "/home/user"
+    LOCAL_WORKSPACE_ROOT = ".tddagents/runs"
+
+    # ── Sync ─────────────────────────────────────────────────────────────────
+    # The sync engine prefers a .gitignore found inside the generated workspace and
+    # falls back to this list when there is none. ".git" is excluded unconditionally
+    # in either case — mirroring a repository into itself is never intended.
+    SYNC_EXCLUDE_FALLBACK = [
+        "__pycache__/",
+        "*.pyc",
+        ".pytest_cache/",
+        ".mypy_cache/",
+        ".venv/",
+        "venv/",
+        "node_modules/",
+        ".coverage",
+        "htmlcov/",
+    ]
+
 
 class AgentState(TypedDict):
     # ── Main task data ────────────────────────────────────────────

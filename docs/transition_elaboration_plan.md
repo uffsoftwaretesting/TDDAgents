@@ -40,6 +40,16 @@ The target is to port claude-code's agent/tool/skill architecture onto TDDAgents
 | Conflicts ⁽⁷⁾ | Sandbox wins during a run (timestamped local backup + logged event); local wins outside a run |
 | Tool roster ⁽⁷⁾ | 18 tools; `Tool` protocol is the source of truth, `to_langchain_tool()` adapts it for `bind_tools` |
 | E2B client ⁽⁷⁾ | `e2b_code_interpreter.Sandbox` everywhere; `run_code` exposed as `RunCode` |
+| 1A scope ⁽⁸⁾ | Additive **+ repoint**: `orchestrator.py`, `runner.py`, `sandbox_utils.py`, `errors/sandbox/handler.py` move onto the adapter, so the single-seam invariant holds from 1A rather than from Phase 9 |
+| Local root ⁽⁸⁾ | `.tddagents/runs/<thread_id>/workspace` is the live local mirror; `workspace_output_<thread_id>/` stays exactly what it is today, the end-of-run export |
+| Sync wiring ⁽⁸⁾ | 1A ships the engine as a **library**; no checkpoint is called from the running pipeline until its consumer exists (tool calls in 1B, the rest in Phase 2) |
+| Sandbox TTL ⁽⁸⁾ | `SANDBOX_TIMEOUT = 3600` (the E2B Hobby cap), slid forward by a lazy `refresh_timeout()` inside the adapter every `SANDBOX_REFRESH_INTERVAL = 600`s — no threads, so the cadence stays replayable |
+| Command timeout ⁽⁸⁾ | `COMMAND_TIMEOUT = 300` adapter default with a per-call override; `TEST_TIMEOUT = 600` for pytest |
+| Path semantics ⁽⁸⁾ | `SANDBOX_WORKSPACE_ROOT = "/home/user"` pinned and `cwd` passed explicitly; `user="root"` kept, since that is what every recorded run relied on |
+| Sync exclusions ⁽⁸⁾ | A `.gitignore` inside the generated workspace when present, `Config.SYNC_EXCLUDE_FALLBACK` otherwise; `.git` excluded unconditionally |
+| Verification ⁽⁸⁾ | An offline `pytest` suite under `tests/` — the repo's first tests. No credentials, no sandbox cost |
+
+⁽⁸⁾ Settled in the Phase 1A implementation interview, after rounds 1–7.
 
 ⁽⁷⁾ **Accepted risk, recorded deliberately.** Unrestricted local `execute()` with no per-call override
 means the only thing between an agent and an arbitrary host command is the `workspace:` value in its
@@ -455,13 +465,20 @@ is that a `Workspace` can be handed a path or a command and behave identically w
    `reuse_or_create`, `execute`, `read`, `write`, `write_many`, `list`, `remove`, `rename`, `exists`,
    `info`, `kill`. Agents and tools never see an E2B type; swapping the sandbox provider later means
    rewriting this file and nothing above it.
-2. Own the sandbox lifecycle, fixing two live defects. **(a)** `Sandbox.create()` at
+2. Own the sandbox lifecycle, fixing three live defects. **(a)** `Sandbox.create()` at
    [orchestrator.py:120](app/graph/orchestrator.py#L120) passes no `timeout`, so it takes the SDK
    default of 5 minutes while real runs last far longer — add `Config.SANDBOX_TIMEOUT` and refresh it
-   with `set_timeout` at every sync checkpoint. **(b)** Resuming with `--thread-id` reconnects to a
-   `sandbox_id` that the previous run's `finally` block already killed — `reuse_or_create` probes
-   `Sandbox.list()` / `is_running()` and, when the old sandbox is gone, provisions a fresh one and
-   rehydrates it from the ledger plus the local directory.
+   with `set_timeout`. **(b)** `commands.run()` defaults to `timeout=60` in the installed SDK
+   (`e2b/sandbox_sync/commands/command.py`) and **no call site overrides it**, so a ten-package
+   `pip install` or a long test suite can be truncated at 60 seconds today — add
+   `Config.COMMAND_TIMEOUT` and `Config.TEST_TIMEOUT`. **(c)** `reuse_or_create` probes
+   `Sandbox.list()` / `is_running()` and, when the old sandbox is gone, provisions a fresh one;
+   rehydrating it from the ledger plus the local directory needs the sync engine and is deferred
+   with it.
+
+   *Correction to an earlier draft:* defect (c) was recorded as "resuming with `--thread-id`
+   reconnects to a `sandbox_id` the previous run already killed." It does not — see the Phase 2
+   note below for what actually happens.
 3. `app/workspace/base.py::Workspace` — `read_file`, `write_file`, `delete_file`, `list_files`,
    `exists`, `move`, `execute`. One signature per operation, one result type, one exception family,
    and identical path semantics (workspace-relative, POSIX separators) and encoding (UTF-8) on both
@@ -590,6 +607,16 @@ agent definitions. A standalone harness should assert:
 6. Port tester/developer/reviewer to `definitions/*.md` + the tool loop, using a single-purpose, explicitly-scoped built-in agent as the concrete template: a short disallow list plus a banner-style prompt section that states capability boundaries in plain language (defense in depth alongside the tool-scoping itself).
 7. Delete `AgentAction`, `apply_agent_action_to_sandbox`, and the three message-channel fields from `AgentState`.
 8. Keep routing byte-identical — same status literals, same router functions — so a regression is attributable to "agents became tool-loop agents," not "topology changed."
+9. **Fix `--thread-id` resume, found during Phase 1A.** [orchestrator.py:123-150](app/graph/orchestrator.py#L123-L150)
+   passes a fully-populated `initial_state` into `graph.invoke()` on *every* run, including
+   `"file_system": {}`, `"plan": []`, `"plan_index": 0`, and `"status": "starting"`. LangGraph applies
+   input keys as an update over the restored checkpoint, and none of those fields has a reducer — so a
+   resume overwrites the checkpointed plan and file mirror with empties and keeps only the
+   `add_messages` channels. `sandbox_id` is likewise replaced with a freshly created id, which is why
+   the "reconnects to a killed sandbox" framing was wrong: the damage is upstream of the sandbox.
+   The fix belongs here rather than in Phase 1A because it is a state-shape problem, and `AgentState`
+   is being rewritten in this phase anyway: seed the full dict only when no checkpoint exists for the
+   `thread_id`, and pass only what a resume genuinely needs otherwise.
 
 **claude-code reference:**
 - `~/claude-code/src/tools/AgentTool/loadAgentsDir.ts` — `BaseAgentDefinition` (frontmatter field set), `parseAgentFromMarkdown()` (frontmatter → typed definition, graceful skip on parse failure), `getAgentDefinitionsWithOverrides()` (memoized discovery, later sources override earlier by agent-type key via `getActiveAgentsFromList()`).

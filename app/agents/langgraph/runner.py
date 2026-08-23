@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import logging
 
-from e2b import (
-    Sandbox,
-    SandboxException,
-)
-
 from app.config.config import Config
-from app.errors.sandbox.handler import handle_e2b_exception
+from app.errors.sandbox.handler import handle_workspace_exception
+from app.sandbox.adapter import E2BAdapter
+from app.workspace.base import WorkspaceError
 
 logger = logging.getLogger("TDDOrchestrator.Runner")
 
@@ -25,27 +22,22 @@ def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".", is_red_phase: b
     logger.info(f"🏃 RUNNER: Running tests in Sandbox {sandbox_id[:8]}...")
 
     try:
-        sandbox = Sandbox.connect(sandbox_id, api_key=Config.E2B_API_KEY)
+        adapter = E2BAdapter.connect(sandbox_id)
 
         # Ensures pytest is available
-        sandbox.commands.run(
+        adapter.execute(
             "python -c 'import pytest' 2>/dev/null || pip install pytest -q",
-            user="root",
         )
 
         cmd = f'PYTHONPATH=. python -m pytest "{test_path}" {_PYTEST_FLAGS}'
-        result = sandbox.commands.run(
-            cmd,
-            user="root"
-        )
+        # A test run is the largest and slowest command in the pipeline, so it gets its
+        # own budget rather than the general command timeout.
+        result = adapter.execute(cmd, timeout=Config.TEST_TIMEOUT)
 
-        logger.info("✅ RUNNER: All tests passed.")
-        return result.stdout or "Tests passed with no output", True
-
-    except SandboxException as exc:
-        # 1. Check whether this is the expected TDD error (exit_code != 0)
-        if type(exc).__name__ == "CommandExitException":
-            output = f"--- STDOUT ---\n{getattr(exc, 'stdout', '')}\n--- STDERR ---\n{getattr(exc, 'stderr', '')}"
+        # A non-zero exit is the expected TDD observation, not an infrastructure
+        # failure — the adapter returns it as a result and the branch below reads it.
+        if result.exit_code != 0:
+            output = f"--- STDOUT ---\n{result.stdout}\n--- STDERR ---\n{result.stderr}"
 
             if is_red_phase:
                 logger.info("🔴 RUNNER: Tests failed (expected TDD behavior).")
@@ -54,8 +46,11 @@ def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".", is_red_phase: b
 
             return output, False
 
-        # 2. For any other sandbox error, forward it to the mapper to classify and raise
-        handle_e2b_exception(exc, context="Runner")
+        logger.info("✅ RUNNER: All tests passed.")
+        return result.stdout or "Tests passed with no output", True
+
+    except WorkspaceError as exc:
+        handle_workspace_exception(exc, context="Runner")
 
     except Exception as exc:
-        handle_e2b_exception(exc, context="Generic Runner")
+        handle_workspace_exception(exc, context="Generic Runner")

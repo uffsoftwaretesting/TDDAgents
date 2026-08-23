@@ -1,75 +1,48 @@
+"""
+Classifies workspace failures into the pipeline's retry taxonomy.
+
+This module used to import six E2B exception types directly. It no longer imports the
+SDK at all: `app/sandbox/adapter.py` translates provider exceptions into the
+WorkspaceError family at the boundary, and each of those declares whether it is
+retryable. That keeps the adapter as the single seam to the execution provider, which
+is the whole point of having one.
+
+The classification is unchanged from the E2B-typed version:
+
+    TimeoutException        -> WorkspaceTimeout          -> TransientInfraError
+    RateLimitException      -> WorkspaceRateLimited      -> TransientInfraError
+    SandboxException (base) -> WorkspaceTransportError   -> TransientInfraError
+    AuthenticationException -> WorkspaceAuthError        -> FatalInfraError
+    NotFoundException       -> WorkspaceNotFound         -> FatalInfraError
+    NotEnoughSpaceException -> WorkspaceCapacityError    -> FatalInfraError
+    TemplateException       -> WorkspaceTemplateError    -> FatalInfraError
+    anything else           -> WorkspaceProviderError    -> FatalInfraError
+"""
+
 from __future__ import annotations
 
-try:
-    from e2b import (
-        AuthenticationException,
-        NotFoundException,
-        NotEnoughSpaceException,
-        SandboxException,
-        TemplateException,
-        TimeoutException,
-    )
-    from e2b.exceptions import RateLimitException
-    _E2B_AVAILABLE = True
-except ImportError:
-    _E2B_AVAILABLE = False
-
 from app.errors.exceptions import FatalInfraError, TransientInfraError
+from app.workspace.base import WorkspaceError
 
-def handle_e2b_exception(exc: Exception, context: str = "") -> None:
+
+def handle_workspace_exception(exc: Exception, context: str = "") -> None:
     """
-    Classifies exceptions from the E2B SDK.
+    Always raises. Call it from inside an `except` block and never expect a return.
 
     Raises:
-        TransientInfraError
-        FatalInfraError
+        TransientInfraError: The failure is worth retrying.
+        FatalInfraError: The failure is terminal.
     """
     prefix = f"[{context}] " if context else ""
 
-    if _E2B_AVAILABLE:
-        # Extra safeguard in case a terminal command error reaches the handler
-        if type(exc).__name__ == "CommandExitException":
-            raise TransientInfraError(
-                f"{prefix}Internal command execution failed in the Sandbox: {exc}"
-            ) from exc
+    if isinstance(exc, WorkspaceError) and exc.retryable:
+        raise TransientInfraError(f"{prefix}{exc}", original_exc=exc) from exc
 
-        if isinstance(exc, TimeoutException):
-            raise TransientInfraError(
-                f"{prefix}E2B timeout reached."
-            ) from exc
+    if isinstance(exc, WorkspaceError):
+        raise FatalInfraError(f"{prefix}{exc}", original_exc=exc) from exc
 
-        if isinstance(exc, RateLimitException):
-            raise TransientInfraError(
-                f"{prefix}E2B rate limit reached."
-            ) from exc
-
-        if isinstance(exc, AuthenticationException):
-            raise FatalInfraError(
-                f"{prefix}E2B authentication failed."
-            ) from exc
-
-        if isinstance(exc, NotFoundException):
-            raise FatalInfraError(
-                f"{prefix}Sandbox or resource not found in E2B."
-            ) from exc
-
-        if isinstance(exc, NotEnoughSpaceException):
-            raise FatalInfraError(
-                f"{prefix}Insufficient disk space in the sandbox."
-            ) from exc
-
-        if isinstance(exc, TemplateException):
-            raise FatalInfraError(
-                f"{prefix}Invalid sandbox template."
-            ) from exc
-
-        # SandboxException is the base class for the exceptions above, so it
-        # must come last to catch any other unknown E2B errors
-        if isinstance(exc, SandboxException):
-            raise TransientInfraError(
-                f"{prefix}Sandbox error: {exc}"
-            ) from exc
-
+    # Fail closed: anything that never passed through the adapter's translation is
+    # unclassified, and unclassified is terminal.
     raise FatalInfraError(
-        f"{prefix}Unclassified infrastructure failure: {exc}"
+        f"{prefix}Unclassified infrastructure failure: {exc}", original_exc=exc
     ) from exc

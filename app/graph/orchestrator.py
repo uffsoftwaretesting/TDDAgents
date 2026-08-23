@@ -4,10 +4,10 @@ from typing import Literal
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.memory import InMemorySaver
-from e2b_code_interpreter import Sandbox
 from psycopg import OperationalError
 
 from app.config.config import AgentState, Config
+from app.sandbox.adapter import E2BAdapter
 from app.graph.nodes import (
     node_plan_task,
     node_execute_progress_evaluator,
@@ -117,8 +117,10 @@ class TDDOrchestrator:
 
     def run(self, specification: str, requirements: str) -> AgentState:
         logger.info("📦 Initializing E2B Cloud Sandbox...")
-        sandbox = Sandbox.create(api_key=Config.E2B_API_KEY)
-        sandbox_id = sandbox.sandbox_id
+        # Created with an explicit lifetime: the SDK default is 300s, far shorter than a
+        # real run. The adapter slides that window forward as it works.
+        adapter = E2BAdapter.create(timeout=Config.SANDBOX_TIMEOUT)
+        sandbox_id = adapter.sandbox_id
 
         initial_state: AgentState = {
             "specification": specification,
@@ -170,6 +172,6 @@ class TDDOrchestrator:
                 logger.info("🧠 Active checkpointer: InMemorySaver (fallback)")
                 return self._invoke_graph(initial_state, memory_checkpointer)
         finally:
-            if 'sandbox' in locals():
+            if 'adapter' in locals():
                 logger.info(f"🧹 Shutting down Sandbox {sandbox_id}...")
-                sandbox.kill()
+                adapter.kill()
