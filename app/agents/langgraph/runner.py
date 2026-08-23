@@ -1,3 +1,16 @@
+"""
+Runs pytest inside the sandbox. Despite living under `agents/`, this module calls no
+LLM — it is the Red/Green measurement itself.
+
+**Exempt from the CLAUDE.md quality gate's unit- and mutation-testing requirement**, but
+for the sandbox reason rather than the LLM one: what it measures is a real pytest process
+in a real E2B sandbox, and a faked one would measure nothing. It is verified by an
+end-to-end pipeline run.
+
+Phase 1B turns this into the sandbox-pinned `RunTests` tool, reusing `_PYTEST_FLAGS` and
+the exit-code handling below verbatim.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -9,7 +22,11 @@ from app.workspace.base import WorkspaceError
 
 logger = logging.getLogger("TDDOrchestrator.Runner")
 
-_PYTEST_FLAGS = "-vv -rA --tb=long --showlocals -W default -o asyncio_default_fixture_loop_scope=function -o asyncio_mode=auto"
+_PYTEST_FLAGS = (
+    "-vv -rA --tb=long --showlocals -W default "
+    "-o asyncio_default_fixture_loop_scope=function -o asyncio_mode=auto"
+)
+
 
 def run_pytest_in_sandbox(sandbox_id: str, test_path: str = ".", is_red_phase: bool = False) -> tuple[str, bool]:
     """

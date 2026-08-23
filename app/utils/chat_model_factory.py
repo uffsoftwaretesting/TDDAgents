@@ -1,9 +1,20 @@
+"""
+The seam to the LLM providers.
+
+**Exempt from the CLAUDE.md quality gate's unit- and mutation-testing requirement.**
+This module is the boundary itself: every branch below returns a live provider client,
+so an offline test could only assert that a constructor was called with the arguments it
+was just handed. It is verified by an end-to-end pipeline run instead. Callers that sit
+above it are not exempt.
+"""
+
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_together import ChatTogether
 
 from app.config.config import Config
+
 
 def get_chat_model(provider: str, **kwargs):
     """

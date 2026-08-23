@@ -1,5 +1,5 @@
 import os
-from typing import TypedDict, Annotated
+from typing import Annotated, Any, TypedDict
 from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -22,7 +22,7 @@ class Config:
     E2B_API_KEY = os.getenv("E2B_API_KEY")
     PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts")
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
-    
+
     CHAT_MODEL = "openai"
     MODEL = "o4-mini"
     TEMPERATURE = 1.0
@@ -98,7 +98,7 @@ class AgentState(TypedDict):
     infra_retries: int
     status: str
     max_retries: int
-    failed_requirements: list[dict]
+    failed_requirements: list[dict[str, Any]]
 
     # ── Self-correction metrics ──────────────────────────────────────────────
     total_detected_failures: int
@@ -111,9 +111,8 @@ class AgentState(TypedDict):
     # ── Per-sub-requirement metrics ────────────────────────────────────────────
     subreq_success_count: int
     subreq_failure_count: int
-    subreq_results: list[dict]
+    subreq_results: list[dict[str, Any]]
     is_flow_type: list[str]
-    
 
 
 class RequirementsState(TypedDict):

@@ -1,3 +1,13 @@
+"""
+An LLM-facing agent: the seam to the model.
+
+**Exempt from the CLAUDE.md quality gate's unit- and mutation-testing requirement.**
+Everything in this module resolves to a live model call; there is no seam beneath it to
+fake. It is verified by an end-to-end pipeline run. Phase 2 replaces these modules with
+declarative definitions plus a tool loop, at which point the loop itself becomes
+testable and stops being exempt.
+"""
+
 import logging
 from app.errors.agents.handler import handle_llm_exception
 from app.utils.chat_model_factory import get_chat_model
@@ -8,6 +18,7 @@ from app.schema.schema import AgentAction
 from app.utils.sandbox_utils import read_all_files_from_state
 
 logger = logging.getLogger("TDDOrchestrator")
+
 
 def generate_test_for_sub_req(
     sub_requirement: str,

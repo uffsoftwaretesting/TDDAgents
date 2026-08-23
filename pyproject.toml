@@ -1,0 +1,53 @@
+# Tooling configuration for the TDDAgents source tree itself (`app/` and `tests/`).
+#
+# This file deliberately declares no [project] and no [build-system] table: the repo is
+# run with `python -m app.main`, never installed, and adding those would change how pip
+# treats the directory. Only [tool.*] sections belong here.
+#
+# flake8 cannot read pyproject.toml, so its configuration lives in setup.cfg.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+# The repo uses implicit namespace packages (no __init__.py outside graph/nodes), so
+# mypy needs to be told how to map file paths to module names.
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "."
+
+# Strict is achievable here and already holds for every module listed in the quality
+# gate. Legacy modules are excluded until the phase that rewrites them brings them up.
+strict = true
+
+files = ["app/workspace", "app/sync", "app/sandbox", "tests"]
+
+[[tool.mypy.overrides]]
+# The E2B SDK ships no py.typed marker. app/sandbox/adapter.py casts at the boundary so
+# the untyped surface cannot leak past it.
+module = ["e2b.*", "e2b_code_interpreter.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Tests are type-checked for real type errors, but not required to annotate every test
+# function and fixture. Under full strict that is 152 "missing annotation" reports and
+# essentially no signal — the ceremony would crowd out the findings worth having.
+module = ["tests.*", "conftest"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+
+[tool.mutmut]
+# Only modules that carry offline unit tests. Mutating untested code produces a wall of
+# survivors that says nothing about test quality. This list grows as later phases add
+# tested modules — that growth is part of the quality gate, not an afterthought.
+paths_to_mutate = ["app/workspace/", "app/sync/"]
+
+# Required, and easy to get wrong: mutmut copies the project into mutants/ and runs the
+# suite there, but copy_src_dir() walks ONLY paths_to_mutate. Without this, app/config/
+# is never copied, every mutant dies of ImportError instead of of a real assertion, and
+# the run reports a meaningless 100%.
+also_copy = ["app/"]
+
+tests_dir = ["tests/"]

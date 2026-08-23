@@ -45,10 +45,12 @@ class SyncConflict:
     timestamp: float = field(default_factory=time.time)
 
 
-_SINK: list = []
+SyncEvent = SyncCheckpoint | SyncConflict
+
+_SINK: list[SyncEvent] = []
 
 
-def emit(event) -> None:
+def emit(event: SyncEvent) -> None:
     """Records an event. Phase 8 swaps this for the real collector."""
     _SINK.append(event)
 
@@ -70,7 +72,7 @@ def emit(event) -> None:
         )
 
 
-def drain() -> list:
+def drain() -> list[SyncEvent]:
     """Returns and clears the recorded events. Used by tests and, later, by reports."""
     events = list(_SINK)
     _SINK.clear()

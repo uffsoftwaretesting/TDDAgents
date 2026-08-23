@@ -25,6 +25,7 @@ from app.workspace.base import (
     FileEntry,
     WorkspaceNotFound,
     WorkspacePathError,
+    WorkspaceKind,
     WorkspaceProviderError,
     WorkspaceTimeout,
     normalize_path,
@@ -36,9 +37,9 @@ logger = logging.getLogger("TDDOrchestrator.LocalWorkspace")
 class LocalWorkspace:
     """A Workspace rooted at a single directory on the host."""
 
-    kind = "local"
+    kind: WorkspaceKind = "local"
 
-    def __init__(self, root: str | os.PathLike) -> None:
+    def __init__(self, root: str | os.PathLike[str]) -> None:
         self._root = Path(root).expanduser().resolve()
         self._root.mkdir(parents=True, exist_ok=True)
 

@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from app.workspace.base import Workspace
+
 # Mirroring a repository into itself is never intended, so .git is excluded even when a
 # generated .gitignore does not mention it.
 ALWAYS_EXCLUDED = (".git",)
@@ -81,7 +83,7 @@ class IgnoreRules:
         )
 
     @classmethod
-    def from_workspace(cls, workspace, fallback: list[str]) -> "IgnoreRules":
+    def from_workspace(cls, workspace: Workspace, fallback: list[str]) -> "IgnoreRules":
         """Reads `.gitignore` from the workspace root, falling back when absent."""
         try:
             if workspace.exists(".gitignore"):
@@ -169,7 +171,7 @@ class Decision:
     reason: str
 
 
-def snapshot(workspace, ignore: IgnoreRules) -> dict[str, str]:
+def snapshot(workspace: Workspace, ignore: IgnoreRules) -> dict[str, str]:
     """Hashes every non-ignored text file in a workspace."""
     digests: dict[str, str] = {}
 
@@ -219,14 +221,13 @@ def classify(
         # on the other side. Otherwise the "deletion" is really a one-sided create.
         if sandbox is None or local is None:
             deleted_side_had_it = base is not None
-            surviving = local if sandbox is None else sandbox
             surviving_changed = local_changed if sandbox is None else sandbox_changed
 
             if not deleted_side_had_it:
                 decisions.append(
                     Decision(path, Action.PROPAGATE, "new file on one side")
                 )
-            elif surviving == base and not surviving_changed:
+            elif not surviving_changed:
                 decisions.append(
                     Decision(path, Action.DELETE, "deleted on one side, untouched on the other")
                 )

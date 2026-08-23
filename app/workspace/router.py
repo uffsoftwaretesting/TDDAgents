@@ -16,7 +16,13 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from app.workspace.base import CommandResult, FileEntry, WorkspaceError
+from app.workspace.base import (
+    CommandResult,
+    FileEntry,
+    Workspace,
+    WorkspaceError,
+    WorkspaceKind,
+)
 
 logger = logging.getLogger("TDDOrchestrator.WorkspaceRouter")
 
@@ -36,18 +42,19 @@ class DualWorkspace:
     re-confirm the semantics there, when they first have a caller.
     """
 
-    kind = "sandbox"  # reads and execution resolve here, so results are labelled honestly
+    # Reads and execution resolve to the sandbox, so results are labelled honestly.
+    kind: WorkspaceKind = "sandbox"
 
-    def __init__(self, sandbox, local) -> None:
+    def __init__(self, sandbox: Workspace, local: Workspace) -> None:
         self._sandbox = sandbox
         self._local = local
 
     @property
-    def sandbox(self):
+    def sandbox(self) -> Workspace:
         return self._sandbox
 
     @property
-    def local(self):
+    def local(self) -> Workspace:
         return self._local
 
     def read_file(self, path: str) -> str:
@@ -87,7 +94,11 @@ class DualWorkspace:
             logger.debug("Local move of '%s' skipped: %s", old, exc)
 
 
-def resolve_workspace(spec: str | None, sandbox, local=None):
+def resolve_workspace(
+    spec: str | None,
+    sandbox: Workspace,
+    local: Workspace | None = None,
+) -> Workspace:
     """
     Maps a declared target onto a Workspace instance.
 

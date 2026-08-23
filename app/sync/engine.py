@@ -43,7 +43,7 @@ from app.sync.baseline import (
     snapshot,
 )
 from app.sync.events import CheckpointKind, SyncCheckpoint, SyncConflict, emit
-from app.workspace.base import WorkspaceError
+from app.workspace.base import Workspace, WorkspaceError
 
 logger = logging.getLogger("TDDOrchestrator.Sync")
 
@@ -57,8 +57,8 @@ class SyncEngine:
 
     def __init__(
         self,
-        sandbox,
-        local,
+        sandbox: Workspace,
+        local: Workspace,
         baseline_path: str | Path,
         exclude_fallback: list[str] | None = None,
     ) -> None:
@@ -71,7 +71,11 @@ class SyncEngine:
 
     # ── Checkpoints ──────────────────────────────────────────────────────────
 
-    def sync_at_checkpoint(self, kind: CheckpointKind, ledger: dict | None = None):
+    def sync_at_checkpoint(
+        self,
+        kind: CheckpointKind,
+        ledger: dict[str, str] | None = None,
+    ) -> SyncCheckpoint | tuple[dict[str, str], SyncCheckpoint]:
         """
         Single entry point. Dispatches to the right operation for `kind` and refreshes
         the sandbox lifetime, so a long run cannot expire between checkpoints.
@@ -233,12 +237,12 @@ class SyncEngine:
         rules.add(SYNC_MARKER)
         return rules
 
-    def _copy(self, source, destination, path: str) -> str:
+    def _copy(self, source: Workspace, destination: Workspace, path: str) -> str:
         content = source.read_file(path)
         destination.write_file(path, content)
         return content
 
-    def _delete(self, workspace, path: str) -> None:
+    def _delete(self, workspace: Workspace, path: str) -> None:
         try:
             workspace.delete_file(path)
         except WorkspaceError as exc:

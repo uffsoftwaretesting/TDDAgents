@@ -30,6 +30,7 @@ import pytest  # noqa: E402
 from app.workspace.base import (  # noqa: E402
     CommandResult,
     FileEntry,
+    WorkspaceKind,
     WorkspaceNotFound,
     normalize_path,
 )
@@ -45,8 +46,10 @@ class FakeWorkspace:
     failing one on demand, which is how the mid-flush abort case is exercised.
     """
 
-    def __init__(self, kind: str = "sandbox", files: dict[str, str] | None = None) -> None:
-        self.kind = kind
+    def __init__(
+        self, kind: WorkspaceKind = "sandbox", files: dict[str, str] | None = None
+    ) -> None:
+        self.kind: WorkspaceKind = kind
         self.files: dict[str, str] = dict(files or {})
         self.command_log: list[str] = []
         self.command_results: dict[str, CommandResult] = {}
@@ -107,19 +110,21 @@ def make_fake_workspace():
     LocalWorkspace has no way to fail a write on command.
     """
 
-    def _make(kind: str = "sandbox", files: dict[str, str] | None = None) -> FakeWorkspace:
+    def _make(
+        kind: WorkspaceKind = "sandbox", files: dict[str, str] | None = None
+    ) -> FakeWorkspace:
         return FakeWorkspace(kind=kind, files=files)
 
     return _make
 
 
 @pytest.fixture
-def local_ws(tmp_path) -> LocalWorkspace:
+def local_ws(tmp_path: Path) -> LocalWorkspace:
     return LocalWorkspace(tmp_path / "workspace")
 
 
 @pytest.fixture
-def baseline_path(tmp_path) -> Path:
+def baseline_path(tmp_path: Path) -> Path:
     return tmp_path / "baseline.json"
 
 

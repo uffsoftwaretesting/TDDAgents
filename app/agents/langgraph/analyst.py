@@ -1,3 +1,13 @@
+"""
+An LLM-facing agent: the seam to the model.
+
+**Exempt from the CLAUDE.md quality gate's unit- and mutation-testing requirement.**
+Everything in this module resolves to a live model call; there is no seam beneath it to
+fake. It is verified by an end-to-end pipeline run. Phase 2 replaces these modules with
+declarative definitions plus a tool loop, at which point the loop itself becomes
+testable and stops being exempt.
+"""
+
 import logging
 from app.utils.chat_model_factory import get_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -9,6 +19,7 @@ from app.utils.prompt_loader import load_prompt
 
 logger = logging.getLogger("TDDOrchestrator")
 
+
 class AnalystResponse(BaseModel):
     response: str = Field(
         description="Your text response to the user. Can be clarifying questions or the final requirements checklist."
@@ -17,8 +28,10 @@ class AnalystResponse(BaseModel):
         description="True if the request is vague and you need to ask questions. False if everything is clear."
     )
     has_checklist: bool = Field(
-        description="True ONLY if your response contains the final structured checklist and the question 'Can I proceed?'."
+        description="True ONLY if your response contains the final structured checklist "
+                    "and the question 'Can I proceed?'."
     )
+
 
 def analyze_requirements(user_input: str, conversation_history: str = "") -> dict:
     """

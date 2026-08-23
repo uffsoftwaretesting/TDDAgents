@@ -8,6 +8,8 @@ distinction.
 
 from __future__ import annotations
 
+import pytest
+
 from app.sync.baseline import (
     Action,
     Baseline,
@@ -98,6 +100,47 @@ def test_add_parses_the_same_way_as_the_constructor():
     assert rules.matches("src/build/out.js") is False
 
 
+def test_a_directory_pattern_does_not_match_a_file_of_that_name():
+    """
+    `build/` names a directory. Matching a *file* called `build` would be wrong, and it
+    is the difference between scanning the path's directory components and scanning all
+    of them.
+    """
+    rules = IgnoreRules(["build/"])
+    assert rules.matches("build/out.js") is True
+    assert rules.matches("src/build/out.js") is True
+    assert rules.matches("build") is False
+
+
+def test_a_bare_file_pattern_matches_the_final_segment():
+    rules = IgnoreRules([".coverage"])
+    assert rules.matches(".coverage") is True
+    assert rules.matches("sub/.coverage") is True
+
+
+def test_pattern_stripping_does_not_eat_other_characters():
+    """The slash strips are character sets; a pattern starting with another character
+    must not be silently truncated."""
+    rules = IgnoreRules(["Xbuild"])
+    assert rules.matches("Xbuild") is True
+    assert rules.matches("build") is False
+
+
+def test_source_defaults_to_fallback():
+    assert IgnoreRules([]).source == "fallback"
+    assert IgnoreRules([], source=".gitignore").source == ".gitignore"
+
+
+def test_an_empty_pattern_list_matches_nothing_but_git():
+    rules = IgnoreRules([])
+    assert rules.matches("src/main.py") is False
+    assert rules.matches(".git/HEAD") is True
+
+
+def test_a_slash_only_pattern_is_discarded():
+    assert IgnoreRules(["/"]).patterns == []
+
+
 def test_comments_blanks_and_negations_are_dropped():
     rules = IgnoreRules(["# a comment", "", "   ", "!keepme.py"])
     assert rules.patterns == []
@@ -156,6 +199,60 @@ def test_both_sides_changed_is_a_conflict():
     decision = only(decisions, "a.py")
     assert decision.action is Action.CONFLICT
     assert "sandbox wins" in decision.reason
+
+
+def test_the_sandbox_wins_by_default():
+    """Sync runs during a run far more often than outside one, so that is the default."""
+    base = Baseline(entries={"a.py": h("v1")})
+    decisions = classify(base, {"a.py": h("sandbox")}, {"a.py": h("local")})
+    assert "sandbox wins" in only(decisions, "a.py").reason
+
+
+@pytest.mark.parametrize(
+    "base,sandbox,local,action,reason",
+    [
+        ({"a.py": h("v1")}, {"a.py": h("v1")}, {"a.py": h("v1")},
+         Action.NOOP, "both sides agree"),
+        ({"a.py": h("v1")}, {"a.py": h("v2")}, {"a.py": h("v1")},
+         Action.PROPAGATE, "changed on one side only"),
+        ({}, {"a.py": h("v1")}, {},
+         Action.PROPAGATE, "new file on one side"),
+        ({"a.py": h("v1")}, {}, {"a.py": h("v1")},
+         Action.DELETE, "deleted on one side, untouched on the other"),
+        ({"a.py": h("v1")}, {}, {"a.py": h("edited")},
+         Action.SKIP_DELETE, "deleted on one side, modified on the other"),
+        ({"a.py": h("v1")}, {"a.py": h("s")}, {"a.py": h("l")},
+         Action.CONFLICT, "both sides changed; sandbox wins"),
+    ],
+)
+def test_each_decision_reports_its_exact_reason(base, sandbox, local, action, reason):
+    """
+    The reason is what a SyncConflict report and the run log show a human. It is part of
+    the decision, not decoration, so it is pinned exactly.
+    """
+    decision = only(classify(Baseline(entries=base), sandbox, local), "a.py")
+    assert decision.action is action
+    assert decision.reason == reason
+
+
+def test_the_conflict_reason_names_the_local_winner_outside_a_run():
+    decisions = classify(
+        Baseline(entries={"a.py": h("v1")}),
+        {"a.py": h("s")},
+        {"a.py": h("l")},
+        sandbox_wins=False,
+    )
+    assert only(decisions, "a.py").reason == "both sides changed; local wins"
+
+
+def test_every_decision_carries_a_reason():
+    base = Baseline(entries={"gone.py": h("v1"), "same.py": h("v1")})
+    decisions = classify(
+        base,
+        {"same.py": h("v1"), "new.py": h("n")},
+        {"same.py": h("v1"), "gone.py": h("v1")},
+    )
+    assert all(d.reason for d in decisions)
 
 
 def test_conflict_winner_flips_outside_a_run():

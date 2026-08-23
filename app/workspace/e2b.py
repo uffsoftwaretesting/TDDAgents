@@ -10,13 +10,13 @@ than a special case.
 from __future__ import annotations
 
 from app.sandbox.adapter import E2BAdapter
-from app.workspace.base import CommandResult, FileEntry
+from app.workspace.base import CommandResult, FileEntry, WorkspaceKind
 
 
 class E2BWorkspace:
     """A Workspace over one E2B sandbox."""
 
-    kind = "sandbox"
+    kind: WorkspaceKind = "sandbox"
 
     def __init__(self, adapter: E2BAdapter) -> None:
         self._adapter = adapter

@@ -1,3 +1,13 @@
+"""
+An LLM-facing agent: the seam to the model.
+
+**Exempt from the CLAUDE.md quality gate's unit- and mutation-testing requirement.**
+Everything in this module resolves to a live model call; there is no seam beneath it to
+fake. It is verified by an end-to-end pipeline run. Phase 2 replaces these modules with
+declarative definitions plus a tool loop, at which point the loop itself becomes
+testable and stops being exempt.
+"""
+
 import logging
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pydantic import BaseModel, Field
@@ -9,17 +19,25 @@ from app.utils.prompt_loader import load_prompt
 
 logger = logging.getLogger("TDDOrchestrator")
 
+
 # ── Pydantic Schema for the Reviewer ──────────────────────────────────────────
 class ReviewAnalysis(BaseModel):
     thoughts: str = Field(
-        description="Your internal reasoning reading the error's stack trace and comparing it against the existing files in the workspace."
+        description="Your internal reasoning reading the error's stack trace and comparing "
+                    "it against the existing files in the workspace."
     )
     is_test_fault: bool = Field(
-        description="True if the error occurred because the test code is poorly written, is trying to import something it shouldn't, or is testing the wrong thing. False if the test is valid and the fault lies with the Developer's implementation."
+        description="True if the error occurred because the test code is poorly written, is "
+                    "trying to import something it shouldn't, or is testing the wrong thing. "
+                    "False if the test is valid and the fault lies with the Developer's "
+                    "implementation."
     )
     feedback_to_agent: str = Field(
-        description="A technical, direct, and clear instruction for the Developer (or Tester) about what they need to change in the code to make the tests pass. Indicate the file names."
+        description="A technical, direct, and clear instruction for the Developer (or Tester) "
+                    "about what they need to change in the code to make the tests pass. "
+                    "Indicate the file names."
     )
+
 
 def analyze_failures(
     test_output: str,
@@ -68,5 +86,5 @@ def analyze_failures(
         return final_feedback, history
 
     except Exception as exc:
-        logger.error(f"❌ Reviewer failed to generate the analysis")
+        logger.error("❌ Reviewer failed to generate the analysis")
         handle_llm_exception(exc, context="analyze_failures")

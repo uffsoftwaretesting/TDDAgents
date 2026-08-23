@@ -9,14 +9,104 @@ A massive refactor of TDDAgents is under way. Before doing **any** work in this 
 1. **Read this entire `CLAUDE.md`.** It is the map of the current architecture and of the gotchas the refactor has to preserve or deliberately break.
 2. **Read the relevant source code before changing it.** Never edit or reason about `app/` from memory or from this document alone; open the actual files. This file describes intent, the source is the truth, and during the refactor the two will drift.
 3. **Consult the `claude-code-explorer` MCP server** (`node /home/pedroamaro/claude-code/mcp-server/dist/src/index.js`) to read Claude Code's own source and files. Use its tools — `list_directory`, `read_source_file`, `search_source`, `get_architecture`, `list_tools` / `get_tool_source`, `list_commands` / `get_command_source` — whenever the task touches Claude Code behavior, agent/tool design, or patterns worth mirroring in the refactor. Do not answer questions about Claude Code internals from memory when this server can show the real code.
+4. **Run the [Quality gate](#quality-gate-mandatory) before any code you create or refactor is considered done.** It is not optional and not a final polish step: the tests are written *with* the change, not after it.
 
 Only after these steps should you propose a plan or start editing.
+
+## Quality gate (mandatory)
+
+Every piece of code created or refactored in `app/` passes this gate before it is done.
+Run the steps **in this order** — each one is cheap only because the previous one passed.
+
+```bash
+P=/home/amaro/tdd-agents/.venv/bin      # this repo has no venv of its own; see Commands
+
+# 1. Unit tests — written alongside the change, never bolted on afterwards
+$P/pytest tests/ -q
+
+# 2. Lint — zero findings on the files you touched
+$P/flake8 <touched files>
+
+# 3. Types — zero errors on the files you touched
+$P/mypy
+
+# 4. Mutation testing — do the tests actually assert anything?
+$P/mutmut run          # NOT `python -m mutmut`; see the note below
+$P/mutmut results
+```
+
+**Step 1 — write the tests with the code.** A module that sits behind a protocol seam is
+tested against a fake, never against a live LLM or sandbox. `tests/conftest.py` already
+provides `FakeWorkspace` and the `make_fake_workspace` factory; reuse them instead of
+writing new doubles.
+
+**Steps 2 and 3 — touched files only.** Legacy modules carry ~250 pre-existing flake8
+findings and are excluded from `[tool.mypy] files`. Clean them up when a phase rewrites
+them, not before. Config lives in `setup.cfg` (flake8, `max-line-length = 120`) and
+`pyproject.toml` (mypy `strict = true`, pytest, mutmut).
+
+**Step 4 — the gate is ≥ 90% killed**, computed as `killed / (total − timeout)`. Then
+**triage every survivor**: kill it with a test, or write down why it is equivalent or
+unreachable. A survivor left unexamined is the one case this whole gate exists to catch.
+
+### Exempt: the seam modules
+
+Three places genuinely cannot be unit tested offline, because they *are* the boundary to
+an external service rather than something sitting behind one:
+
+| Module | Boundary |
+|---|---|
+| `app/sandbox/adapter.py` | the E2B SDK |
+| `app/utils/chat_model_factory.py` | the LLM provider |
+| `app/agents/langgraph/*` | the LLM itself |
+
+Each names its exemption in its own docstring. In place of unit and mutation testing they
+require **a static surface check** — assert every SDK method and kwarg they call still
+exists on the installed package — **and an end-to-end pipeline run**. Everything layered
+*above* them is fully testable and is not exempt: `app/workspace/e2b.py` delegates to the
+adapter and is tested against a fake adapter, which is the pattern to copy.
+
+### Recorded baseline
+
+Measured against `app/workspace/` and `app/sync/` (Phase 1A), 197 tests:
+
+| | |
+|---|---|
+| Mutants | 831 |
+| Killed | 751 |
+| Survived | 80 |
+| **Mutation score** | **90.4%** |
+| flake8 / mypy | 0 findings, 0 errors (mypy `--strict`) |
+
+The 80 survivors are dominated by mutations with no behavioral effect: codec aliases
+(`"utf-8"` → `"UTF-8"`), log-message wording, and case-flips of string literals no
+contract depends on. Anything behavioral that survived a mutation run has been either
+killed or written down — treat that as the standard to hold, not 90% as a ceiling.
+
+### Gotchas
+
+- **Invoke mutmut as `mutmut run`, never `python -m mutmut`.** Under `-m` the module is
+  `__main__`, so `mutmut.__main__` is absent from `sys.modules`; the mutation trampoline
+  re-imports it in each forked child, re-runs `set_start_method('fork')`, and the whole
+  run dies with `RuntimeError: context has already been set`.
+- **`also_copy = ["app/"]` in `pyproject.toml` is load-bearing.** mutmut copies the
+  project into `mutants/` and runs the suite there, but it walks only `paths_to_mutate`.
+  Without `also_copy`, `app/config/` is never copied, every mutant dies of `ImportError`
+  rather than of a real assertion, and the run reports a meaningless 100%.
+- **Growing `paths_to_mutate` is part of the gate.** New tested modules must be added to
+  it, or they are silently never mutated.
+- `tests/conftest.py` seeds `OPENAI_API_KEY` / `E2B_API_KEY` / `POSTGRES_URL` before any
+  `app.*` import, because `config.py` raises at import time without them.
 
 ## What this is
 
 TDDAgents is a research prototype (UFF / SBES 2026): a LangGraph multi-agent pipeline that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed inside a remote **E2B cloud sandbox**, never on the host. Graph state is checkpointed to PostgreSQL.
 
-There is **no test suite, linter config, or build step for this repository itself** — `pytest`/`flake8`/`mypy` in `requirements.txt` are for the *generated* workspaces, not for `app/`. Verification is done by running the pipeline end to end.
+`pytest`, `flake8`, `mypy` and `mutmut` apply to **`app/` itself**, not only to the generated workspaces. `tests/` holds an offline suite for `app/` that needs no API keys, no sandbox and no database, and runs in under a second; `setup.cfg` and `pyproject.toml` configure the four tools. See [Quality gate](#quality-gate-mandatory) for the mandatory procedure and the current baseline.
+
+*(This reverses what this file used to say. Until Phase 1A the repository had no tests of its own and verification was purely end-to-end. That is no longer true, and treating it as true is how untested code lands.)*
+
+Coverage is deliberately partial. The suite covers the modules that can be exercised offline; the three seam modules that talk to E2B and to the LLM are exempt and are still verified by **running the pipeline end to end**, which remains the only way to check the system as a whole. There is no build step.
 
 ## Commands
 
@@ -36,6 +126,24 @@ python -m app.main --thread-id "tdd-<hash>"
 # Force a brand-new run instead of the spec-derived thread_id
 python -m app.main --fresh
 ```
+
+### Quality tooling
+
+**This repository has no venv of its own.** Use `/home/amaro/tdd-agents/.venv`, which has
+the full dependency set. (`/home/amaro/tdd-agents/venv` also exists but is missing
+`langchain_together`, which `app/utils/chat_model_factory.py` imports at module scope, so
+importing anything under `app/graph/` fails there.)
+
+```bash
+P=/home/amaro/tdd-agents/.venv/bin
+
+$P/pytest tests/ -q                                     # offline suite, no credentials
+$P/flake8 app/workspace app/sync app/sandbox tests      # touched files; config in setup.cfg
+$P/mypy                                                 # strict; config in pyproject.toml
+$P/mutmut run && $P/mutmut results                      # mutation testing; see the gotchas
+```
+
+The full procedure and its pass criteria are in [Quality gate](#quality-gate-mandatory).
 
 `app.main` is interactive: it prints a menu built from `app/prompts/specs/*.txt`, then the Analyst loop reads from stdin. Type `/yes` to approve the requirements checklist and advance to the Engineer; `/exit` (or `/quit`) exits. Because the menu resolves `Path("app/prompts/specs")` relatively, the CWD must be the repo root.
 

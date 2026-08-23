@@ -1,3 +1,13 @@
+"""
+An LLM-facing agent: the seam to the model.
+
+**Exempt from the CLAUDE.md quality gate's unit- and mutation-testing requirement.**
+Everything in this module resolves to a live model call; there is no seam beneath it to
+fake. It is verified by an end-to-end pipeline run. Phase 2 replaces these modules with
+declarative definitions plus a tool loop, at which point the loop itself becomes
+testable and stops being exempt.
+"""
+
 import logging
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
@@ -9,10 +19,14 @@ from app.utils.prompt_loader import load_prompt
 
 logger = logging.getLogger("TDDOrchestrator")
 
+
 class TDDPlan(BaseModel):
     tdd_plan: list[str] = Field(
-        description="An ordered list of 'Epics' or Architectural Modules. Each string must clearly describe what needs to be set up/implemented (e.g. files, dependencies, routes) for that slice of the system."
+        description="An ordered list of 'Epics' or Architectural Modules. Each string must "
+                    "clearly describe what needs to be set up/implemented (e.g. files, "
+                    "dependencies, routes) for that slice of the system."
     )
+
 
 def generate_plan(specification: str) -> list[str]:
     """

@@ -4,3 +4,14 @@ venv
 
 **/__pycache__/**/*
 .tool-versions
+
+# Quality-gate tooling artifacts
+mutants/
+.mutmut-cache
+.pytest_cache/
+.mypy_cache/
+.coverage
+
+# Live local workspace mirror written by the sync engine (app/sync/engine.py).
+# The exported artifact is workspace_output_<thread_id>/, which is NOT ignored.
+.tddagents/
