@@ -20,7 +20,7 @@ mypy_path = "."
 # gate. Legacy modules are excluded until the phase that rewrites them brings them up.
 strict = true
 
-files = ["app/workspace", "app/sync", "app/sandbox", "tests"]
+files = ["app/workspace", "app/sync", "app/sandbox", "app/errors", "tests"]
 
 [[tool.mypy.overrides]]
 # The E2B SDK ships no py.typed marker. app/sandbox/adapter.py casts at the boundary so
@@ -42,7 +42,7 @@ disallow_any_generics = false
 # Only modules that carry offline unit tests. Mutating untested code produces a wall of
 # survivors that says nothing about test quality. This list grows as later phases add
 # tested modules — that growth is part of the quality gate, not an afterthought.
-paths_to_mutate = ["app/workspace/", "app/sync/"]
+paths_to_mutate = ["app/workspace/", "app/sync/", "app/errors/"]
 
 # Required, and easy to get wrong: mutmut copies the project into mutants/ and runs the
 # suite there, but copy_src_dir() walks ONLY paths_to_mutate. Without this, app/config/

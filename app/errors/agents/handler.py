@@ -51,17 +51,27 @@ except ImportError:
 
 from app.errors.exceptions import FatalInfraError, TransientInfraError
 
+# HTTP statuses worth retrying: 408 Request Timeout, 409 Conflict, 425 Too Early,
+# 429 Too Many Requests. The whole 5xx range is handled separately as a range.
+_TRANSIENT_STATUS_CODES = frozenset({408, 409, 425, 429})
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
 
 
 def _openai_status(exc: Exception) -> int | None:
-    """Extract the HTTP status code from an OpenAI SDK exception."""
-    status = getattr(exc, "status_code", None)
-    if status is not None:
-        return status
-    return getattr(exc, "http_status", None)
+    """Extract the HTTP status code from an OpenAI SDK exception.
+
+    The SDK is untyped from mypy's perspective, so both lookups come back as `Any`.
+    Narrowing to `int` here is what stops that `Any` leaking into the status comparison
+    below, where a non-int would silently fall through to the Fatal branch.
+    """
+    for attribute in ("status_code", "http_status"):
+        status = getattr(exc, attribute, None)
+        if isinstance(status, int):
+            return status
+    return None
 
 
 def _openai_error_code(exc: Exception) -> str | None:
@@ -169,7 +179,7 @@ def handle_llm_exception(exc: Exception, context: str = "") -> Never:
         if isinstance(exc, (EmptyInputError, EmptyChannelError)):
             raise FatalInfraError(
                 f"{prefix}LangGraph received empty input or "
-                "tried to read an uninitialised channel: {exc}",
+                f"tried to read an uninitialised channel: {exc}",
                 original_exc=exc,
             ) from exc
 
@@ -281,7 +291,6 @@ def handle_llm_exception(exc: Exception, context: str = "") -> Never:
         # that were not matched by the more specific classes above.
         if isinstance(exc, APIStatusError):
             status = _openai_status(exc)
-            _TRANSIENT_STATUS_CODES = {408, 409, 425, 429}
             if status in _TRANSIENT_STATUS_CODES or (
                 isinstance(status, int) and 500 <= status <= 599
             ):

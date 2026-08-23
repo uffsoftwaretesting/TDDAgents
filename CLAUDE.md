@@ -68,17 +68,26 @@ adapter and is tested against a fake adapter, which is the pattern to copy.
 
 ### Recorded baseline
 
-Measured against `app/workspace/` and `app/sync/` (Phase 1A), 197 tests:
+Measured against `app/workspace/`, `app/sync/` and `app/errors/`, 323 tests:
 
 | | |
 |---|---|
-| Mutants | 831 |
-| Killed | 751 |
-| Survived | 80 |
-| **Mutation score** | **90.4%** |
+| Mutants | 983 |
+| Killed | 895 |
+| Survived | 88 |
+| **Mutation score** | **91.0%** |
 | flake8 / mypy | 0 findings, 0 errors (mypy `--strict`) |
 
-The 80 survivors are dominated by mutations with no behavioral effect: codec aliases
+`app/errors/` was brought under the gate after the fact and is worth reading as a worked
+example of why the gate exists. Both classifiers decide whether each infrastructure
+failure is retried or aborts the run, and both had **zero tests**. Bringing them in
+surfaced a live bug: the `EmptyInputError` / `EmptyChannelError` branch of
+`handle_llm_exception` rendered the literal text `{exc}` in its message, because the
+continuation line of an implicit string concatenation had lost its `f` prefix — the same
+silent-interpolation failure class as the Jinja2 gotcha below. It also removed a
+duplicated `__init__` from both `TDDWorkflowError` subclasses.
+
+The 88 survivors are dominated by mutations with no behavioral effect: codec aliases
 (`"utf-8"` → `"UTF-8"`), log-message wording, and case-flips of string literals no
 contract depends on. Anything behavioral that survived a mutation run has been either
 killed or written down — treat that as the standard to hold, not 90% as a ceiling.
