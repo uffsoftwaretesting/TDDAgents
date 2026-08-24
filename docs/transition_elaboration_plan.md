@@ -52,13 +52,24 @@ The target is to port claude-code's agent/tool/skill architecture onto TDDAgents
 | Web tools ⁽⁹⁾ | Tavily via a thin `httpx` client; `WebFetch` via `httpx` + beautifulsoup4 + markdownify. Both self-disable without a key |
 | `permission_mode` ⁽⁹⁾ | Tri-level capability `read` \| `write` \| `execute`, per-input for `Bash`. `RunTests` exempt, so the refactorer stays `workspace_write` |
 | `HostRead` ⁽⁹⁾ | Unrestricted host reads, no path allowlist — the `workspace` field is the only boundary |
-| Executor ⁽⁹⁾ | `partitionToolCalls` ported verbatim; concurrent batches capped at 10; **no sibling abort**; results re-sorted into the model's call order |
+| Executor ⁽⁹⁾ | `partitionToolCalls` ported verbatim; concurrent batches capped at 10; **no sibling abort**; results re-sorted into the model's call order. Phase 1B ships no streaming; Phase 2 adds a streaming executor **beside** this one, not in place of it |
 | Tool hooks ⁽⁹⁾ | Shell-based PreToolUse/PostToolUse dispatcher — **supersedes the Phase 6 "on_start only" scope**, see ⁽⁹⁾ there |
 | Verification ⁽⁹⁾ | Offline suite is the gate; `scripts/verify_tools_e2b.py` is a separate opt-in live harness |
+| Streaming ⁽¹⁰⁾ | `run_agent` becomes a **sync event-yielding generator** over `llm.stream()`; tools dispatch eagerly onto the existing ThreadPoolExecutor. Not async — Phase 1A's sync E2B/subprocess seam is not reopened |
+| Dispatch signal ⁽¹⁰⁾ | `tool_call_chunk` **index advance** + end-of-stream, then strict `json.loads`. Never `.tool_calls`, which partial-parses and makes a truncated call look valid |
+| Sibling abort ⁽¹⁰⁾ | Ported **exactly**: Bash errors only, cancelled siblings get synthetic results. Revises the Phase 1B "no sibling abort" decision, which rested on a misreading of the source |
+| Event transport ⁽¹⁰⁾ | `get_stream_writer()` inside a graph, `ToolContext` sink callable outside one. Transient events never enter node state |
+| Streaming fallback ⁽¹⁰⁾ | On stream failure: `discard()` → synthetic markers → retry the turn on the batch executor. Both executors share `execute_tool`, the partition predicates and the permission gate |
 
 ⁽⁸⁾ Settled in the Phase 1A implementation interview, after rounds 1–7.
 
 ⁽⁹⁾ Settled in the Phase 1B implementation interview.
+
+⁽¹⁰⁾ Settled in the Phase 2 streaming interview, after Phase 1B shipped. Two of these rows
+revise earlier decisions: the "no sibling abort" and "no streaming" positions were both
+taken on the belief that claude-code had neither, which came from reading
+`toolOrchestration.ts` and missing `StreamingToolExecutor.ts`. The source was re-read and
+the decisions retaken on what it actually does.
 
 ⁽⁷⁾ **Accepted risk, recorded deliberately.** Unrestricted local `execute()` with no per-call override
 means the only thing between an agent and an arbitrary host command is the `workspace:` value in its
@@ -78,6 +89,7 @@ the trade-off was raised. The mitigation is structural, not procedural: `tester`
 | Delegation | `AgentTool` — LLM emits `subagent_type` + `prompt`; `runAgent.ts` builds an isolated context | None | `Agent` tool in the registry, granted per agent with allowed targets |
 | Tools | `Tool` protocol (`Tool.ts:362`): `call`, `inputSchema`, `description`/`prompt`, per-input `isReadOnly`/`isConcurrencySafe`, per-tool `maxResultSizeChars`; ~40 tools | Three fields on one Pydantic model, applied by the node; 0 tools | `app/tools/base.py::Tool` — same protocol, 18 tools |
 | Tool scoping | `resolveAgentTools()` — allowlist ∩ available, minus denylist, `*` wildcard | None; every agent has identical powers | Same resolution, plus `permission_mode` and `workspace` as two orthogonal enforcement floors |
+| Turn execution | Streamed; each `tool_use` dispatched at its `content_block_stop`, so tool *n* runs while tool *n+1* is still arriving (`StreamingToolExecutor`) | One blocking `.with_structured_output()` call per node; nothing runs until the whole response lands | `llm.stream()` + eager dispatch on `tool_call_chunk` index advance, results buffered in receipt order |
 | Execution environment | The host, directly | E2B sandbox only, reached ad hoc from three modules | `Workspace` abstraction over `E2BWorkspace` + `LocalWorkspace`, one adapter, checkpointed sync between them |
 | Context isolation | Own message list per subagent; only a final report returns | Three `add_messages` channels shared for the whole sub-requirement | Self-contained `run_agent`; summary-only return + forking at 3 sites |
 | Environment injection | `computeEnvInfo()` → `<env>`, appended by `enhanceSystemPromptWithEnvDetails()`; plus `getSystemContext()` / `getUserContext()` | The rendered file mirror, nothing else | `<env>` + spec + `CONVENTIONS.md` + workspace state summary |
@@ -265,8 +277,13 @@ the actual boundary. The boundary is the `workspace` field, and nothing else.
 
 ### 2.5 `run_agent` — lifecycle
 
+`run_agent` is a **generator**: it yields transient `StreamEvent`s while a turn is in
+flight and returns an `AgentRunResult` when the loop ends. Streaming is not decoration —
+it is what lets a tool start executing while the *next* tool call's arguments are still
+arriving on the wire. See §Phase 2 for the mechanism and its hazards.
+
 ```python
-def run_agent(definition, task_prompt, ctx) -> AgentRunResult:
+def run_agent(definition, task_prompt, ctx) -> Iterator[StreamEvent]:
     tools = resolve_tools(definition)
     messages = build_initial_messages(definition, ctx)   # system + env + project context
     messages += run_start_hooks(definition, ctx)         # injected context
@@ -275,12 +292,22 @@ def run_agent(definition, task_prompt, ctx) -> AgentRunResult:
     if definition.memory:
         messages[0] += load_memory(definition.name, ctx.thread_id)
     llm = get_chat_model(Config.CHAT_MODEL, model=definition.model or Config.MODEL).bind_tools(tools)
+    executor = StreamingToolExecutor(registry, ctx)
     try:
         for turn in range(definition.max_turns):
-            ai = llm.invoke(messages); messages.append(ai)
-            if not ai.tool_calls:
+            acc, dispatched = None, 0
+            for chunk in llm.stream(messages):            # sync generator, not async
+                acc = chunk if acc is None else acc + chunk
+                yield TextDelta(chunk.content)
+                # Dispatch on index-advance ONLY — never on `.tool_calls`, which
+                # partial-parses. See the hazard note in §Phase 2.
+                dispatched += executor.add_newly_complete(acc, after=dispatched)
+            executor.flush_final(acc)                     # the last index has no successor
+            messages.append(acc)
+            yield from executor.drain_completed()         # receipt order, not completion order
+            messages += executor.results_in_receipt_order()
+            if not acc.tool_calls:
                 break
-            messages += execute_tools(ai.tool_calls, tools, ctx)   # parallel if all concurrency-safe
         return AgentRunResult(summary=..., turns=..., tool_calls=..., files_touched=...)
     finally:
         clear_agent_hooks(definition, ctx)
@@ -290,7 +317,10 @@ def run_agent(definition, task_prompt, ctx) -> AgentRunResult:
         evict_result_cache(ctx)
 ```
 
-Only `AgentRunResult` crosses back into `AgentState`. The three `add_messages` channels are removed from state entirely — cross-iteration continuity is carried by explicit `feedback` fields and `agent_summaries`. This eliminates the quadratic growth and makes `_clear_agent_histories` / `RemoveMessage` unnecessary.
+**Transient events and durable state are separate channels.** `StreamEvent`s go out through
+`langgraph.config.get_stream_writer()` — or a `ToolContext` sink callable when there is no
+graph, as in tests — and never enter node state. Only `AgentRunResult` crosses back into
+`AgentState`. The three `add_messages` channels are removed from state entirely — cross-iteration continuity is carried by explicit `feedback` fields and `agent_summaries`. This eliminates the quadratic growth and makes `_clear_agent_histories` / `RemoveMessage` unnecessary.
 
 **Forking is the deliberate exception** to the firewall, at exactly three sites: the recovery researcher forks the failing cycle (it exists because the Developer already failed — the dead ends are the point), the refactorer forks the Developer (to tell deliberate constraints from accidental shape), and the reviewer forks the runner (better fault attribution). Forked messages are filtered for incomplete tool calls, exactly as `filterIncompleteToolCalls` does.
 
@@ -372,7 +402,12 @@ START → analyst ⇄ user_input (interrupt) → engineer
 
 Event-sourced in `app/metrics/`. Nodes, `run_agent`, and every tool emit typed events: `AgentStarted`, `ToolCalled`, `ToolResultTruncated`, `SkillInvoked`, `SkillActivatedByPath`, `AgentFinished`, `DelegationDecided`, `RedConfirmed`, `GreenPassed`, `RefactorReverted`, `SubReqCompleted`. A collector derives reports at the end.
 
-The four `wrapper_*` functions and the sparse `is_flow_type` list indexed by `plan_index` are deleted; flow classification becomes a derivation over the event log. New dimensions: delegation tree per sub-requirement; turns/tool-calls/tokens per agent; skill invocation frequency and which skills correlate with green-on-first-try; tool failure rates; refactor accept-vs-revert rate.
+Phase 2's streaming loop contributes five more, and they arrive free because the runtime is
+already emitting `StreamEvent`s for the console: `StreamStarted`, `FirstTokenReceived`,
+`ToolDispatchedEarly`, `SiblingCancelled`, `StreamingFallback`. Token counts come from stream
+metadata (`stream_usage=True`) rather than a separate accounting pass.
+
+The four `wrapper_*` functions and the sparse `is_flow_type` list indexed by `plan_index` are deleted; flow classification becomes a derivation over the event log. New dimensions: delegation tree per sub-requirement; turns/tool-calls/tokens per agent; skill invocation frequency and which skills correlate with green-on-first-try; tool failure rates; refactor accept-vs-revert rate. Streaming adds two more that speak to responsiveness rather than correctness: time-to-first-token per agent, and how often eager dispatch actually overlapped a tool with the generation of the next one.
 
 ---
 
@@ -611,7 +646,7 @@ agent definitions. A standalone harness should assert:
 1. `agents/definition.py::AgentDefinition` — a dataclass with `tools`, `model`, `permission_mode`, `max_turns`, `skills`, `memory`, `hooks`, plus TDDAgents-specific `phase`, `fork_from`, `revert_on_red`, and `workspace` (`sandbox` | `local` | `both`, defaulting to `sandbox`). `workspace` is the field Phase 1A's router has been waiting for; wiring it is what first makes local execution reachable, so land it together with the `sandbox` pins on tester, developer, and refactorer rather than after them.
 2. Write the Markdown+YAML frontmatter parser: read frontmatter, validate required fields (`name`, `description`), and skip-with-log on a malformed file rather than crashing the whole registry — co-located reference docs or typos in one agent file must not take down agent discovery for the rest.
 3. `agents/registry.py::discover()` — memoized load of all `definitions/*.md`, then `resolve_tools(definition)` (Phase 1's function) including the special-case handling needed for `Agent(researcher,refactorer)` target scoping (see Phase 5).
-4. `runtime.py::run_agent()` — resolve model, build initial messages (system + env + project context — stub these for now, real content lands in Phase 3), tool-call loop bound by `max_turns`, a teardown block.
+4. `runtime.py::run_agent()` — resolve model, build initial messages (system + env + project context — stub these for now, real content lands in Phase 3), **streaming** tool-call loop bound by `max_turns`, a teardown block. The loop is a generator over `llm.stream()`, not a `.invoke()` call; steps 10–14 below specify it.
 5. Mirror the teardown shape exactly: kill any lingering sandbox process the agent spawned, clear any per-agent caches — this is the direct analogue of killing background shell tasks and clearing invoked-skill tracking when an agent finishes.
 6. Port tester/developer/reviewer to `definitions/*.md` + the tool loop, using a single-purpose, explicitly-scoped built-in agent as the concrete template: a short disallow list plus a banner-style prompt section that states capability boundaries in plain language (defense in depth alongside the tool-scoping itself).
 7. Delete `AgentAction`, `apply_agent_action_to_sandbox`, and the three message-channel fields from `AgentState`.
@@ -627,11 +662,103 @@ agent definitions. A standalone harness should assert:
    is being rewritten in this phase anyway: seed the full dict only when no checkpoint exists for the
    `thread_id`, and pass only what a resume genuinely needs otherwise.
 
+#### Streaming — steps 10 to 14 ⁽¹⁰⁾
+
+Phase 1B shipped the batch executor and explicitly no streaming. Phase 2 adds the streaming
+path beside it, because streaming is where the tool layer stops being a request/response
+loop: upstream, a tool begins executing while the *next* tool call's arguments are still
+being generated.
+
+**How claude-code actually does it** — read these three before implementing, because the
+mechanism is not where you would first look for it:
+
+- `src/services/api/claude.ts:2171` — the API stream yields **one `AssistantMessage` per
+  `content_block_stop`**. Each `tool_use` block becomes its own message the moment *that
+  block* closes, long before the turn ends.
+- `src/query.ts:842` — `streamingToolExecutor.addTool(block, message)` fires per block as it
+  arrives, gated by `config.gates.streamingToolExecution`.
+- `src/services/tools/StreamingToolExecutor.ts` — the scheduler itself.
+
+10. **`app/tools/streaming_executor.py::StreamingToolExecutor`.** Same admission rule as
+    upstream `canExecuteTool`: a tool starts if nothing is executing, or if it is
+    concurrency-safe and everything currently executing is too. `process_queue` walks queued
+    tools in order and **stops at the first exclusive tool it cannot start yet**, so ordering
+    is preserved for anything that must run alone. Surface: `add()`, `flush_final()`,
+    `drain_completed()`, `remaining_results()`, `discard()`.
+
+    Results are buffered and emitted in **receipt order, never completion order**
+    (`getCompletedResults` yields in `this.tools` order and breaks at an executing exclusive
+    tool). This is what protects the context window from out-of-order execution and keeps the
+    message list identical across replays even though wall-clock overlap is not.
+
+11. **Bash-scoped sibling abort.** A tool returning an error trips the sibling abort
+    controller **only when it is `Bash`** (`StreamingToolExecutor.ts:359`). The rationale is
+    upstream's and it transfers directly: shell commands chain implicitly — a failed `mkdir`
+    makes everything after it pointless — while a failed `Grep` says nothing about a
+    concurrent `ReadFile`. Cancelled siblings receive a **synthetic** result
+    (`Cancelled: parallel tool call Bash(...) errored`); they are never dropped, because a
+    message list with a `tool_use` and no matching `tool_result` is rejected by the provider
+    outright. Three abort reasons, each with its own synthetic message: `sibling_error`,
+    `user_interrupted`, `streaming_fallback`.
+
+    *Correcting the record:* the Phase 1B interview settled on "no sibling abort", and
+    `app/tools/executor.py` was built that way. That decision rested on an incorrect claim
+    that no such mechanism existed upstream — only `toolOrchestration.ts` had been read, and
+    `StreamingToolExecutor.ts` was missed. It was revisited once the source was read properly.
+    The **batch** executor keeps its no-abort behavior; abort belongs to the streaming path.
+
+12. **Dispatch signal — the one place this port cannot follow claude-code.** Upstream gets
+    `content_block_stop` from the wire and knows precisely when a tool call is complete.
+    LangChain gives no such event, and the obvious substitute is a trap:
+
+    > **`AIMessageChunk.tool_calls` partial-parses.** It runs accumulated arguments through
+    > `parse_partial_json`
+    > ([langchain_core/messages/ai.py:543](/home/amaro/tdd-agents/.venv/lib/python3.12/site-packages/langchain_core/messages/ai.py#L543)).
+    > A half-streamed `Grep(pattern="x", pa…` therefore presents as a **valid**
+    > `Grep(pattern="x")` — no exception, nothing in `invalid_tool_calls`. Dispatching on
+    > that signal would run write tools with silently truncated arguments: `WriteFile` with
+    > half a file body, `Edit` with half an `old_string`.
+
+    The completeness signal is therefore **`index` advance plus end-of-stream**: a
+    `tool_call_chunk` arriving with index *n+1* proves index *n* is finished, and
+    `flush_final()` releases the last index when the stream closes. Before dispatch, parse
+    the accumulated argument string with **strict `json.loads`**, never the partial parser;
+    a strict-parse failure is a malformed call and becomes an error result rather than an
+    execution with guessed arguments.
+
+13. **Typed `StreamEvent`s, on their own channel.** `TextDelta`, `ToolDispatched`,
+    `ToolCompleted`, `ToolCancelled`, `TurnFinished`. Transport is
+    `langgraph.config.get_stream_writer()` from inside a node — so `graph.stream(...,
+    stream_mode="custom")` surfaces them in `main.py` without any node changing its return
+    value — falling back to an optional sink callable on `ToolContext` when there is no graph,
+    as in tests and `scripts/verify_tools_e2b.py`. Transient events never enter node state;
+    state carries only completed, durable turn results. Token counts come from stream
+    metadata (`stream_usage=True`).
+
+14. **Streaming fallback.** `o4-mini` is a reasoning model and streaming is restricted on
+    unverified OpenAI organizations — a failure mode invisible from the code. On a stream
+    error or refusal: fire `on_streaming_fallback`, `discard()` the executor so every
+    in-flight tool gets a synthetic `streaming_fallback` result (no dangling `tool_use_id`),
+    then retry the turn on the **batch** executor from Phase 1B. The run degrades to today's
+    behavior instead of dying, and the transcript stays append-only and consistent.
+
+    Both executors stay: they share `execute_tool`, the partition predicates and the
+    permission gate, and differ only in scheduling. The batch path is the fallback target and
+    the strictly deterministic path for tests over the multi-agent state machine — which is
+    why it is worth keeping rather than replacing.
+
+**Routing is still byte-identical.** Streaming changes how a turn is *executed and observed*,
+not the graph: same status literals, same router functions. Step 8's isolation property
+holds.
+
 **claude-code reference:**
 - `~/claude-code/src/tools/AgentTool/loadAgentsDir.ts` — `BaseAgentDefinition` (frontmatter field set), `parseAgentFromMarkdown()` (frontmatter → typed definition, graceful skip on parse failure), `getAgentDefinitionsWithOverrides()` (memoized discovery, later sources override earlier by agent-type key via `getActiveAgentsFromList()`).
 - `~/claude-code/src/tools/AgentTool/agentToolUtils.ts` — `resolveAgentTools()` (wildcard expansion, disallow set, the `Agent`-tool special case that carries `allowedAgentTypes`).
 - `~/claude-code/src/tools/AgentTool/runAgent.ts` — the lifecycle shape (model resolution, message assembly, teardown block that kills spawned shell tasks and clears per-agent skill/cache state).
 - `~/claude-code/src/tools/AgentTool/built-in/exploreAgent.ts` — a fully worked example of a narrowly-scoped built-in agent: explicit `disallowedTools`, and a system prompt with an explicit "READ-ONLY MODE" capability banner backing up the tool-level restriction.
+- `~/claude-code/src/services/tools/StreamingToolExecutor.ts` — the whole streaming scheduler: `addTool()`, `canExecuteTool()`, `processQueue()`, the Bash-only `siblingAbortController.abort()` at :359, `createSyntheticErrorMessage()` for the three abort reasons, and `getCompletedResults()` emitting in receipt order.
+- `~/claude-code/src/query.ts:555-600, 820-860, 1010-1030` — where the executor is constructed behind its gate, where `addTool` is called per streamed block, and where `getRemainingResults()` is drained so nothing is left unemitted.
+- `~/claude-code/src/services/api/claude.ts:2171` — `content_block_stop` yielding one assistant message per finished block, which is the upstream signal this port has to reconstruct from `tool_call_chunk` indices.
 
 ### Phase 3 — Context layers
 
@@ -686,19 +813,58 @@ agent definitions. A standalone harness should assert:
 
 ### Phase 6 — Lifecycle extensions
 
-Frontmatter hooks with `on_start` context injection; run-scoped `agents/memory.py`; context forking at the three sites with incomplete-tool-call filtering.
+Run-scoped `agents/memory.py`; context forking at the three sites with incomplete-tool-call
+filtering; and the one remaining piece of the hook system — the agent-level `on_start`
+callback.
+
+**⁽⁹⁾ The tool-level hooks moved to Phase 1B and are already built.** This section
+originally scoped hooks to a single `on_start` Python callable and ruled the
+pre/post-tool-use events out entirely, on the reasoning that "TDDAgents' hooks are Python
+callables, not shell commands". The user reversed that during the Phase 1B implementation
+interview, after the conflict with this section was raised explicitly. Read this section as
+what is *left* to do, not as the whole hook design.
+
+What `app/hooks/` already ships, and what Phase 6 must therefore not re-specify:
+
+- **Two events**, `PreToolUse` and `PostToolUse`, wrapping every call in `execute_tool`.
+- **Shell commands, not Python callables.** A hook is any executable. The dispatcher writes
+  a JSON description of the event to its **stdin** and reads the verdict from the process
+  **exit code**: `0` proceed, `2` veto (PreToolUse) or flag (PostToolUse), anything else
+  logged and ignored so a broken hook cannot break the pipeline.
+- **Three merged settings scopes** — `~/.tddagents/settings.json` → `.tddagents/settings.json`
+  → `.tddagents/settings.local.json`. Later scopes **append**, so a personal file can add a
+  veto but never silence a project one.
+- **A typed JSON document on stdout** refines the exit code: `permissionDecision`
+  (allow/deny — no `ask`, there is no interactive prompt), `permissionDecisionReason`,
+  `updatedInput` on PreToolUse, `additionalContext`, and `continue: false` on PostToolUse.
+  Unparseable stdout degrades to a log line rather than an error.
+- **PostToolUse cannot un-run a tool.** The side effect already landed, so the output stands
+  as ground truth, the hook's stderr rides along as feedback, and the step is marked
+  `hook_stopped_continuation` for the agent runtime to halt on.
+- Hooks run **on the host, outside the `workspace` boundary** — they are operator
+  configuration, like the shell that launched the pipeline. The merged config is snapshotted
+  at construction so a run's event log can say which hooks were live.
+
+Fields supported: `type: "command"`, `matcher`, `command`, `timeout`, `if`, `statusMessage`.
+Deliberately absent: `once` (hidden dispatcher state breaks replay) and `prompt` / `http`
+(an LLM call and a network dependency inside the synchronous tool path).
+
+See CLAUDE.md § "The tool layer (Phase 1B)" for the shipped description.
 
 **Steps:**
-1. Add a `hooks:` frontmatter field supporting only `on_start`.
-2. Hook shape: a named callback invoked at agent start that returns text to inject into the initial message list.
-
-> **⁽⁹⁾ Superseded in part by Phase 1B.** Steps 1 and 2 above originally read "TDDAgents' hooks are Python callables, not shell commands" and ruled the pre/post-tool-use events out of scope. The user reversed that during the Phase 1B implementation interview, after the conflict with this row was raised explicitly. `app/hooks/` now ships a **shell-based PreToolUse/PostToolUse dispatcher**: three merged settings scopes (user → project → local, appending so a personal file can add a veto but never silence a project one), a JSON payload on the hook's stdin, exit 0 / exit 2 / other as the baseline contract, and a typed JSON document on stdout for finer control. Only the agent-level `on_start` callback remains for this phase, and it is still a Python callable. See CLAUDE.md § "The tool layer (Phase 1B)".
+1. Add a `hooks:` frontmatter field supporting only `on_start` — the **agent**-level hook,
+   which stays a Python callable and is deliberately *not* a shell hook. It is a different
+   thing from the tool-level dispatcher above: it runs once when an agent starts, inside the
+   process, and its only job is to return text for the initial message list.
+2. Hook shape: a named callback invoked at agent start that returns text to inject into the
+   initial message list. No `if`-condition filtering and no command execution — that
+   machinery exists already in `app/hooks/dispatcher.py` and is not duplicated here.
 3. `agents/memory.py` — run-scoped only: a single memory directory per run (`thread_id`), holding one file per agent type, loaded at agent start and discarded at run end. This deliberately drops the persistent user/project/local scope split that exists elsewhere — TDDAgents' 3-runs-per-task research design requires every run to start uncontaminated, so persistent scopes are explicitly out.
 4. Context forking at the three sites (recovery researcher, refactorer, reviewer): build the forked message list by keeping the parent's full context and appending a directive for the fork target — cache-stable placeholder content for anything not meant to vary between forks, with the per-fork instruction appended last.
-5. Filter incomplete tool calls before forking: drop any assistant message whose tool-use blocks don't all have a matching tool-result, so a fork is never handed a dangling tool call that would be rejected by the API. Port this filter function directly rather than reimplementing it — it's a small, easy-to-get-subtly-wrong piece of message-list surgery.
+5. Filter incomplete tool calls before forking: drop any assistant message whose tool-use blocks don't all have a matching tool-result, so a fork is never handed a dangling tool call that would be rejected by the API. Port this filter function directly rather than reimplementing it — it's a small, easy-to-get-subtly-wrong piece of message-list surgery. Phase 2's streaming loop makes this sharper, not softer: a turn abandoned mid-stream can leave exactly such an orphan, which is why the streaming executor emits a synthetic result for every dispatched tool rather than dropping any.
 
 **claude-code reference:**
-- `~/claude-code/src/schemas/hooks.ts` and `~/claude-code/src/entrypoints/sdk/coreSchemas.ts` (`HOOK_EVENTS`) — the full hook-event vocabulary and hook-command shape (`type: 'command'`, `if`, `timeout`, `once`, `async`); read these to confirm `on_start`'s closest analogue (subagent-start-time injection) and deliberately leave the rest unported.
+- `~/claude-code/src/schemas/hooks.ts` and `~/claude-code/src/entrypoints/sdk/coreSchemas.ts` (`HOOK_EVENTS`) — the full hook-event vocabulary and hook-command shape (`type: 'command'`, `if`, `timeout`, `once`, `async`). Phase 1B ported the two tool-level events from here; what remains unported is the rest of the vocabulary (session lifecycle, subagent lifecycle) and the `once` / `async` modifiers.
 - `~/claude-code/src/tools/AgentTool/agentMemory.ts` — `getAgentMemoryDir()` / `loadAgentMemoryPrompt()`, the direct structural model for `agents/memory.py`, collapsed from three persistent scopes down to one run-scoped one.
 - `~/claude-code/src/tools/AgentTool/forkSubagent.ts` — `buildForkedMessages()`, the cache-stable fork-message-construction pattern (placeholder content + per-child directive appended last).
 - `~/claude-code/src/tools/AgentTool/runAgent.ts` — `filterIncompleteToolCalls()`, ported directly: drops assistant messages with orphaned tool-use blocks before they're used as fork context.
