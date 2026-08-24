@@ -54,11 +54,32 @@ class Config:
     SANDBOX_WORKSPACE_ROOT = "/home/user"
     LOCAL_WORKSPACE_ROOT = ".tddagents/runs"
 
+    # ── Tool layer ───────────────────────────────────────────────────────────
+    # A tool result larger than that tool's max_result_chars is written here inside the
+    # sandbox and returned as a head/tail preview plus the path. It is a workspace-relative
+    # path so ReadFile reaches it with no special case, and it lives under .tddagents/ so
+    # the sync exclusion below keeps tooling scratch out of workspace_output_*.
+    TOOL_RESULTS_DIR = ".tddagents/tool_results"
+
+    # Concurrency cap for a batch of concurrency-safe tool calls, matching claude-code's
+    # own default. Results are re-sorted into the model's original call order afterwards,
+    # so parallelism never makes a run's message list or event log unreproducible.
+    MAX_TOOL_CONCURRENCY = 10
+
+    # Default wall-clock budget for one hook process. Overridable per hook via `timeout`.
+    HOOK_TIMEOUT = 60.0
+
+    # ── Web tools ────────────────────────────────────────────────────────────
+    # WebSearch and WebFetch self-disable when this is unset, so the offline suite and
+    # anyone without a key simply never sees them in a resolved toolbelt.
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
     # ── Sync ─────────────────────────────────────────────────────────────────
     # The sync engine prefers a .gitignore found inside the generated workspace and
     # falls back to this list when there is none. ".git" is excluded unconditionally
     # in either case — mirroring a repository into itself is never intended.
     SYNC_EXCLUDE_FALLBACK = [
+        ".tddagents/",
         "__pycache__/",
         "*.pyc",
         ".pytest_cache/",

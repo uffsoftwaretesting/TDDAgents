@@ -21,11 +21,13 @@ The classification is unchanged from the E2B-typed version:
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 from app.errors.exceptions import FatalInfraError, TransientInfraError
 from app.workspace.base import WorkspaceError
 
 
-def handle_workspace_exception(exc: Exception, context: str = "") -> None:
+def handle_workspace_exception(exc: Exception, context: str = "") -> NoReturn:
     """
     Always raises. Call it from inside an `except` block and never expect a return.
 

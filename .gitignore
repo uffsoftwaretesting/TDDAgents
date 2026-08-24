@@ -12,6 +12,11 @@ mutants/
 .mypy_cache/
 .coverage
 
-# Live local workspace mirror written by the sync engine (app/sync/engine.py).
-# The exported artifact is workspace_output_<thread_id>/, which is NOT ignored.
+# Live local workspace mirror written by the sync engine (app/sync/engine.py), plus
+# persisted oversized tool results. The exported artifact is
+# workspace_output_<thread_id>/, which is NOT ignored.
 .tddagents/
+
+# ...except the shared, version-controlled hook configuration. The user scope
+# (~/.tddagents/settings.json) and the local scope (settings.local.json) stay ignored.
+!.tddagents/settings.json

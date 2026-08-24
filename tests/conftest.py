@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("E2B_API_KEY", "test-e2b-key")
@@ -102,6 +103,97 @@ def fake_sandbox() -> FakeWorkspace:
     return FakeWorkspace(kind="sandbox")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 1B — tool-layer fixtures
+# ─────────────────────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel  # noqa: E402
+
+from app.tools.base import (  # noqa: E402
+    Capability,
+    ToolContext,
+    ToolResult,
+    build_tool,
+)
+
+
+class EchoArgs(BaseModel):
+    """The stand-in input schema for tool-layer tests that do not care about the schema."""
+
+    text: str = "hello"
+
+
+class CommandArgs(BaseModel):
+    """Carries a `command` field, which is what a hook's `if:` condition matches against."""
+
+    command: str
+
+
+def make_tool(
+    name: str = "Echo",
+    *,
+    call: Any = None,
+    args_schema: type[BaseModel] = EchoArgs,
+    **overrides: Any,
+):
+    """
+    A minimal real tool, built through `build_tool` so the fail-closed defaults are
+    exercised rather than bypassed.
+    """
+    def _default_call(args, ctx) -> ToolResult:
+        return ToolResult(tool_name=name, content=getattr(args, "text", ""))
+
+    description = overrides.pop("description", None)
+
+    return build_tool(
+        name=name,
+        args_schema=args_schema,
+        prompt=f"The {name} tool.",
+        call=call if call is not None else _default_call,
+        description=description if description is not None else (lambda args: name),
+        **overrides,
+    )
+
+
+def make_read_tool(name: str = "Reader", **overrides: Any):
+    """A read-only, concurrency-safe tool — the shape every read tool in the roster has."""
+    defaults: dict[str, Any] = {
+        "is_read_only": lambda args: True,
+        "is_concurrency_safe": lambda args: True,
+        "required_capability": lambda args: Capability.READ,
+    }
+    defaults.update(overrides)
+    return make_tool(name, **defaults)
+
+
+@pytest.fixture
+def tool_ctx(fake_sandbox: FakeWorkspace) -> ToolContext:
+    """A permissive context, so a test opts into restrictions rather than out of them."""
+    return ToolContext(
+        workspace=fake_sandbox,
+        workspace_spec="sandbox",
+        permission_mode="full",
+        session_id="test-session",
+        agent_id="agent-1",
+        agent_type="tester",
+    )
+
+
+@pytest.fixture
+def make_tool_ctx(fake_sandbox: FakeWorkspace):
+    def _make(**overrides: Any) -> ToolContext:
+        fields: dict[str, Any] = {
+            "workspace": fake_sandbox,
+            "workspace_spec": "sandbox",
+            "permission_mode": "full",
+            "session_id": "test-session",
+        }
+        fields.update(overrides)
+        return ToolContext(**fields)
+
+    return _make
+
+
 @pytest.fixture
 def make_fake_workspace():
     """
@@ -136,3 +228,20 @@ def clear_sync_events():
     events.drain()
     yield
     events.drain()
+
+
+@pytest.fixture
+def local_tool_ctx(local_ws: LocalWorkspace) -> ToolContext:
+    """
+    A context backed by a real LocalWorkspace in tmp_path.
+
+    Grep and Glob shell out to `grep` and `find`, so they need a workspace whose
+    `execute` runs an actual process — FakeWorkspace returns canned results and would
+    only prove the tools build a command string.
+    """
+    return ToolContext(
+        workspace=local_ws,
+        workspace_spec="local",
+        permission_mode="full",
+        session_id="test-session",
+    )

@@ -48,8 +48,17 @@ The target is to port claude-code's agent/tool/skill architecture onto TDDAgents
 | Path semantics ⁽⁸⁾ | `SANDBOX_WORKSPACE_ROOT = "/home/user"` pinned and `cwd` passed explicitly; `user="root"` kept, since that is what every recorded run relied on |
 | Sync exclusions ⁽⁸⁾ | A `.gitignore` inside the generated workspace when present, `Config.SYNC_EXCLUDE_FALLBACK` otherwise; `.git` excluded unconditionally |
 | Verification ⁽⁸⁾ | An offline `pytest` suite under `tests/` — the repo's first tests. No credentials, no sandbox cost |
+| Background cmds ⁽⁹⁾ | `BashOutput` / `KillShell` sandbox-pinned like `RunTests`; `Workspace` unchanged, `LocalWorkspace` stays foreground-only |
+| Web tools ⁽⁹⁾ | Tavily via a thin `httpx` client; `WebFetch` via `httpx` + beautifulsoup4 + markdownify. Both self-disable without a key |
+| `permission_mode` ⁽⁹⁾ | Tri-level capability `read` \| `write` \| `execute`, per-input for `Bash`. `RunTests` exempt, so the refactorer stays `workspace_write` |
+| `HostRead` ⁽⁹⁾ | Unrestricted host reads, no path allowlist — the `workspace` field is the only boundary |
+| Executor ⁽⁹⁾ | `partitionToolCalls` ported verbatim; concurrent batches capped at 10; **no sibling abort**; results re-sorted into the model's call order |
+| Tool hooks ⁽⁹⁾ | Shell-based PreToolUse/PostToolUse dispatcher — **supersedes the Phase 6 "on_start only" scope**, see ⁽⁹⁾ there |
+| Verification ⁽⁹⁾ | Offline suite is the gate; `scripts/verify_tools_e2b.py` is a separate opt-in live harness |
 
 ⁽⁸⁾ Settled in the Phase 1A implementation interview, after rounds 1–7.
+
+⁽⁹⁾ Settled in the Phase 1B implementation interview.
 
 ⁽⁷⁾ **Accepted risk, recorded deliberately.** Unrestricted local `execute()` with no per-call override
 means the only thing between an agent and an arbitrary host command is the `workspace:` value in its
@@ -680,8 +689,10 @@ agent definitions. A standalone harness should assert:
 Frontmatter hooks with `on_start` context injection; run-scoped `agents/memory.py`; context forking at the three sites with incomplete-tool-call filtering.
 
 **Steps:**
-1. Add a `hooks:` frontmatter field supporting only `on_start` — a deliberately narrow slice of a much larger hook-event vocabulary that exists elsewhere (pre/post-tool-use, session lifecycle, subagent lifecycle, etc.); TDDAgents needs exactly one of those events, so only port that one.
-2. Hook shape: a named callback invoked at agent start that returns text to inject into the initial message list — skip the command-execution/`if`-condition-filter machinery entirely, since TDDAgents' hooks are Python callables, not shell commands.
+1. Add a `hooks:` frontmatter field supporting only `on_start`.
+2. Hook shape: a named callback invoked at agent start that returns text to inject into the initial message list.
+
+> **⁽⁹⁾ Superseded in part by Phase 1B.** Steps 1 and 2 above originally read "TDDAgents' hooks are Python callables, not shell commands" and ruled the pre/post-tool-use events out of scope. The user reversed that during the Phase 1B implementation interview, after the conflict with this row was raised explicitly. `app/hooks/` now ships a **shell-based PreToolUse/PostToolUse dispatcher**: three merged settings scopes (user → project → local, appending so a personal file can add a veto but never silence a project one), a JSON payload on the hook's stdin, exit 0 / exit 2 / other as the baseline contract, and a typed JSON document on stdout for finer control. Only the agent-level `on_start` callback remains for this phase, and it is still a Python callable. See CLAUDE.md § "The tool layer (Phase 1B)".
 3. `agents/memory.py` — run-scoped only: a single memory directory per run (`thread_id`), holding one file per agent type, loaded at agent start and discarded at run end. This deliberately drops the persistent user/project/local scope split that exists elsewhere — TDDAgents' 3-runs-per-task research design requires every run to start uncontaminated, so persistent scopes are explicitly out.
 4. Context forking at the three sites (recovery researcher, refactorer, reviewer): build the forked message list by keeping the parent's full context and appending a directive for the fork target — cache-stable placeholder content for anything not meant to vary between forks, with the per-fork instruction appended last.
 5. Filter incomplete tool calls before forking: drop any assistant message whose tool-use blocks don't all have a matching tool-result, so a fork is never handed a dangling tool call that would be rejected by the API. Port this filter function directly rather than reimplementing it — it's a small, easy-to-get-subtly-wrong piece of message-list surgery.

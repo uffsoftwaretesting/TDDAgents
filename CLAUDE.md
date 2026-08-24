@@ -68,15 +68,44 @@ adapter and is tested against a fake adapter, which is the pattern to copy.
 
 ### Recorded baseline
 
-Measured against `app/workspace/`, `app/sync/` and `app/errors/`, 323 tests:
+Measured against `app/workspace/`, `app/sync/`, `app/errors/`, `app/tools/` and
+`app/hooks/`, 942 tests:
 
 | | |
 |---|---|
-| Mutants | 983 |
-| Killed | 895 |
-| Survived | 88 |
-| **Mutation score** | **91.0%** |
+| Mutants | 2868 (6 timeout) |
+| Killed | 2524 |
+| Survived | 338 |
+| **Mutation score** | **88.2%** (2524 / 2862) |
 | flake8 / mypy | 0 findings, 0 errors (mypy `--strict`) |
+
+**This is below the 90% bar, and the shortfall is recorded rather than rounded away.**
+Every *behavioral* survivor found across five triage rounds has been killed. The 338 that
+remain classify as: 93 log-call wordings, 63 case-flips of string literals inside messages
+no contract reads, 17 codec aliases, 3 default-argument mutations (equivalent by
+construction — see Gotchas), and the rest verified individually, several with
+`MUTANT_UNDER_TEST=…` directly. Exactly 88 are the pre-existing
+`workspace`/`sync`/`errors` survivors, unchanged, so Phase 1B regressed nothing.
+
+The gap is concentrated where the code is most defensive. `app/hooks/` alone accounts for
+109 survivors: both modules parse untrusted configuration and untrusted subprocess output,
+so nearly every branch logs and continues, and each `logger.warning(msg, a, b)` generates
+five or six mutants no assertion can reach without asserting on log text — which this
+repository has always treated as an accepted equivalent class rather than something to
+pin.
+
+Triage was worth far more than the number suggests, and the number understates it because
+two rounds *removed* mutants by deleting redundancy rather than by adding tests:
+
+- `app/tools/base.py` went from 87 survivors to 4.
+- 56 hand-copied `tool_name="X"` literals were deleted: `execute_tool` now stamps the name,
+  so a tool physically cannot mislabel its own output. That removed 387 mutants and a real
+  class of copy-paste bug.
+- Mutation testing caught a **false-positive assertion in this suite itself** — see the
+  Gotcha below — and a real defect in `WebSearch`, where skipping a malformed result left
+  a hole in the numbering the model would then have to puzzle over.
+
+The prior baseline, before Phase 1B, was 983 mutants / 895 killed / 88 survived / 91.0%.
 
 `app/errors/` was brought under the gate after the fact and is worth reading as a worked
 example of why the gate exists. Both classifiers decide whether each infrastructure
@@ -87,10 +116,11 @@ continuation line of an implicit string concatenation had lost its `f` prefix �
 silent-interpolation failure class as the Jinja2 gotcha below. It also removed a
 duplicated `__init__` from both `TDDWorkflowError` subclasses.
 
-The 88 survivors are dominated by mutations with no behavioral effect: codec aliases
-(`"utf-8"` → `"UTF-8"`), log-message wording, and case-flips of string literals no
-contract depends on. Anything behavioral that survived a mutation run has been either
-killed or written down — treat that as the standard to hold, not 90% as a ceiling.
+Survivors in every phase so far have been dominated by mutations with no behavioral
+effect: codec aliases (`"utf-8"` → `"UTF-8"`), log-message wording, and case-flips of
+string literals no contract depends on. Anything behavioral that survives a mutation run
+must be either killed or written down — treat that as the standard to hold, and treat 90%
+as the floor it usually implies rather than as a number to reach by any route.
 
 ### Gotchas
 
@@ -104,6 +134,19 @@ killed or written down — treat that as the standard to hold, not 90% as a ceil
   rather than of a real assertion, and the run reports a meaningless 100%.
 - **Growing `paths_to_mutate` is part of the gate.** New tested modules must be added to
   it, or they are silently never mutated.
+- **Default-argument mutations are equivalent by construction — do not chase them.**
+  mutmut keeps the *original* signature on the public wrapper, resolves the defaults
+  there, and passes every argument positionally into the mutant
+  (`args = [tool, raw_args, ctx, call_index, call_id]`, visible in any generated
+  `mutants/**/*.py`). A mutated default in the mutant's own signature is therefore never
+  reached, and no test can kill it. Verified directly with `MUTANT_UNDER_TEST=…`; there
+  are 3 such survivors today.
+- **Watch for assertions that pass for the wrong reason.** A blocked-hook message embeds
+  the hook's own command, so `assert "no pip installs" in reason` held even when the
+  dispatcher dropped stderr entirely — the probe string was in the command. Mutation
+  testing is what surfaced it. Where output and input can share text, make them differ:
+  `tests/test_hook_dispatcher.py::script_hook` puts the hook body in a file so its command
+  and its output have nothing in common.
 - `tests/conftest.py` seeds `OPENAI_API_KEY` / `E2B_API_KEY` / `POSTGRES_URL` before any
   `app.*` import, because `config.py` raises at import time without them.
 
@@ -147,7 +190,7 @@ importing anything under `app/graph/` fails there.)
 P=/home/amaro/tdd-agents/.venv/bin
 
 $P/pytest tests/ -q                                     # offline suite, no credentials
-$P/flake8 app/workspace app/sync app/sandbox tests      # touched files; config in setup.cfg
+$P/flake8 app/workspace app/sync app/sandbox app/tools app/hooks tests   # touched files
 $P/mypy                                                 # strict; config in pyproject.toml
 $P/mutmut run && $P/mutmut results                      # mutation testing; see the gotchas
 ```
@@ -199,6 +242,56 @@ Agents return the **full** conversation history; the node slices `updated_histor
 `AgentState["file_system"]` is a `dict[filepath, content]` mirror of the sandbox. `apply_agent_action_to_sandbox` writes files to E2B *and* updates the mirror; `read_all_files_from_state` renders the whole mirror into every agent prompt (this is the agents' only view of the codebase). `main.py` extracts the mirror to `workspace_output_<thread_id>/` at the end — nothing is pulled back off the sandbox, so anything an agent creates via `bash_commands` rather than `files_to_write` is lost.
 
 The sandbox is created once in `TDDOrchestrator.run` and killed in its `finally`; nodes only `Sandbox.connect(sandbox_id)`.
+
+### The tool layer (Phase 1B) — built, not yet wired
+
+`app/tools/` and `app/hooks/` are complete and fully tested, and **nothing in the running
+graph calls them**. `run_agent` (Phase 2) is the first consumer. Until then the legacy
+`AgentAction` path is still what executes, so this layer changes no pipeline behavior.
+
+- **`tools/base.py`** — the `Tool` protocol, ported from claude-code's `Tool.ts`. Per-input
+  predicates (`is_read_only`, `is_concurrency_safe`, `is_destructive`,
+  `required_capability`), per-tool `max_result_chars`, and a `description(input)`/`prompt()`
+  split. `build_tool()` + `TOOL_DEFAULTS` fill omitted members with fail-closed defaults.
+- **`execute_tool()` is the only supported way to call a tool.** It owns the whole pipeline:
+  parse → `validate_input` → PreToolUse hook → `check_permissions` → capability gate →
+  workspace gate → `call` → result governance → PostToolUse hook → sync checkpoint.
+  Calling `tool.call` directly bypasses all of it.
+- **Two orthogonal enforcement axes**, checked at `ToolContext` level rather than during
+  tool resolution, so a mistaken frontmatter entry cannot grant capability.
+  `permission_mode` gates *what* on a three-level ladder (`read` < `write` < `execute`);
+  `workspace` gates *where*. `Bash` reports its capability **per input**, which is what
+  lets the `read_only` researcher hold it: `Bash("ls")` is a read, `Bash("pip install")`
+  is refused. `RunTests` is exempt from the ladder (it runs no agent-authored command),
+  which is what keeps the refactorer at `workspace_write`.
+- **Three sandbox pins**: `RunTests`, `BashOutput` and `KillShell` bypass the router and
+  talk to `E2BAdapter` directly. `HostRead` is the only tool pinned to `local`, and it
+  carries no path allowlist — the `workspace` field is the boundary, deliberately.
+- **Result governance**: a result over its tool's limit is written to
+  `.tddagents/tool_results/` in the sandbox and returned as head/tail plus a path the agent
+  can `ReadFile`. `.tddagents/` is in `SYNC_EXCLUDE_FALLBACK`, so tooling scratch never
+  reaches `workspace_output_*`. `ReadFile` alone is unbounded — persisting it would create
+  a ReadFile → file → ReadFile loop.
+- **`tools/executor.py`** partitions a turn's calls exactly as `toolOrchestration.ts` does:
+  consecutive concurrency-safe calls run together on a thread pool capped at
+  `Config.MAX_TOOL_CONCURRENCY`, everything else runs alone. Results are re-sorted into the
+  model's original call order, so the message list and event log are replayable even though
+  wall-clock interleaving is not. A failing tool does **not** abort its siblings.
+- **`app/hooks/`** — PreToolUse/PostToolUse as ordinary shell commands, configured in three
+  merged scopes (`~/.tddagents/settings.json` → `.tddagents/settings.json` →
+  `.tddagents/settings.local.json`; later scopes append, so a personal file can add a veto
+  but never silence a project one). JSON payload on stdin; exit 0 proceeds, exit 2 vetoes a
+  PreToolUse call or flags a PostToolUse result, anything else is logged and ignored. A
+  typed JSON document on stdout refines the verdict. **This supersedes the plan document's
+  Phase 6 "on_start only" scope**, at the user's explicit direction.
+  - PostToolUse cannot un-run a tool: the output stands as ground truth, the hook's stderr
+    rides along as feedback, and `hook_stopped_continuation` is set for Phase 2 to halt on.
+  - Hooks run on the host, outside the `workspace` boundary. They are operator
+    configuration, like the shell that launched the pipeline.
+
+`CommandExitException` is reclassified **on the tool path only**: a non-zero exit is a
+`ToolResult` carrying `exit_code`. `utils/sandbox_utils.py::_run_or_raise` still escalates
+it to `TransientInfraError` for the legacy nodes, and goes away with them in Phase 2.
 
 ### Error taxonomy
 

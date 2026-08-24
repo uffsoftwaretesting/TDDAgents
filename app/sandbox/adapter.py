@@ -28,8 +28,11 @@ from __future__ import annotations
 
 import logging
 import posixpath
+import threading
 import time
-from typing import Any
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, List
 
 from e2b_code_interpreter import Sandbox
 from e2b import (
@@ -62,6 +65,52 @@ logger = logging.getLogger("TDDOrchestrator.Sandbox")
 
 # Commands run as root, matching the behavior every recorded experimental run relied on.
 _SANDBOX_USER = "root"
+
+
+@dataclass
+class BackgroundCommand:
+    """
+    A command started with `background=True`, plus the output accumulated so far.
+
+    The SDK streams output through callbacks that run on its own thread, so every buffer
+    access is locked. `drain()` returns what has arrived since the last call, which is the
+    shape `BashOutput` needs: an agent polls repeatedly and should not re-read what it has
+    already seen.
+    """
+
+    id: str
+    cmd: str
+    handle: Any = None
+    finished: bool = False
+    exit_code: int | None = None
+    _stdout: list[str] = field(default_factory=list)
+    _stderr: list[str] = field(default_factory=list)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @property
+    def pid(self) -> int | None:
+        return getattr(self.handle, "pid", None)
+
+    def append_stdout(self, chunk: str) -> None:
+        with self._lock:
+            self._stdout.append(chunk)
+
+    def append_stderr(self, chunk: str) -> None:
+        with self._lock:
+            self._stderr.append(chunk)
+
+    def drain(self) -> tuple[str, str]:
+        """Returns (stdout, stderr) received since the previous drain, and clears both."""
+        with self._lock:
+            out, err = "".join(self._stdout), "".join(self._stderr)
+            self._stdout.clear()
+            self._stderr.clear()
+        return out, err
+
+    def peek(self) -> tuple[str, str]:
+        """Same as `drain` but leaves the buffers in place."""
+        with self._lock:
+            return "".join(self._stdout), "".join(self._stderr)
 
 
 def _translate(exc: Exception, operation: str) -> WorkspaceError:
@@ -105,6 +154,7 @@ class E2BAdapter:
     def __init__(self, sandbox: Sandbox) -> None:
         self._sandbox = sandbox
         self._last_refresh = time.monotonic()
+        self._background: dict[str, BackgroundCommand] = {}
 
     # ── Construction ─────────────────────────────────────────────────────────
 
@@ -375,6 +425,75 @@ class E2BAdapter:
 
         except Exception as exc:
             raise _translate(exc, "execute") from exc
+
+    # ── Background commands ──────────────────────────────────────────────────
+
+    def start_background(self, cmd: str, cwd: str | None = None) -> "BackgroundCommand":
+        """
+        Starts a command without waiting for it, and returns a handle to poll.
+
+        The SDK has no "read whatever has accumulated so far" call, so output is captured
+        through the `on_stdout` / `on_stderr` callbacks into a buffer the handle owns.
+        Those callbacks fire on the SDK's own thread, which is why BackgroundCommand locks
+        around its buffers.
+
+        Sandbox-only by design: `BashOutput` and `KillShell` are pinned to the sandbox at
+        the tool level, so there is no local counterpart to keep in step.
+        """
+        self.refresh_timeout()
+        working_dir = self.resolve(cwd) if cwd else Config.SANDBOX_WORKSPACE_ROOT
+        command = BackgroundCommand(id=f"bash_{uuid.uuid4().hex[:8]}", cmd=cmd)
+
+        try:
+            command.handle = self._sandbox.commands.run(
+                cmd,
+                background=True,
+                user=_SANDBOX_USER,
+                cwd=working_dir,
+                on_stdout=command.append_stdout,
+                on_stderr=command.append_stderr,
+            )
+        except Exception as exc:
+            raise _translate(exc, f"start_background {cmd}") from exc
+
+        self._background[command.id] = command
+        logger.info("▶️  Background command %s started (pid %s).", command.id, command.pid)
+        return command
+
+    def get_background(self, command_id: str) -> "BackgroundCommand | None":
+        return self._background.get(command_id)
+
+    def list_background(self) -> List["BackgroundCommand"]:
+        return list(self._background.values())
+
+    def kill_command(self, command_id: str) -> bool:
+        """
+        Kills one background command. Returns False when the id is unknown.
+
+        A command that has already exited is not an error to kill — the caller usually
+        cannot know which happened, and treating it as one would make teardown noisy.
+        """
+        command = self._background.get(command_id)
+        if command is None:
+            return False
+
+        try:
+            if command.handle is not None:
+                command.handle.kill()
+        except Exception as exc:
+            logger.debug("Killing %s reported: %s", command_id, exc)
+
+        command.finished = True
+        self._background.pop(command_id, None)
+        return True
+
+    def kill_all_background(self) -> int:
+        """Teardown helper: kills every background command this adapter started."""
+        killed = 0
+        for command_id in list(self._background):
+            if self.kill_command(command_id):
+                killed += 1
+        return killed
 
     def run_code(self, code: str, language: str | None = None) -> Any:
         """
