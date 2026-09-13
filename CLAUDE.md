@@ -8,7 +8,7 @@ A massive refactor of TDDAgents is under way. Before doing **any** work in this 
 
 1. **Read this entire `CLAUDE.md`.** It is the map of the current architecture and of the gotchas the refactor has to preserve or deliberately break.
 2. **Read the relevant source code before changing it.** Never edit or reason about `app/` from memory or from this document alone; open the actual files. This file describes intent, the source is the truth, and during the refactor the two will drift.
-3. **Consult the `claude-code-explorer` MCP server** (`node /home/pedroamaro/claude-code/mcp-server/dist/src/index.js`) to read Claude Code's own source and files. Use its tools — `list_directory`, `read_source_file`, `search_source`, `get_architecture`, `list_tools` / `get_tool_source`, `list_commands` / `get_command_source` — whenever the task touches Claude Code behavior, agent/tool design, or patterns worth mirroring in the refactor. Do not answer questions about Claude Code internals from memory when this server can show the real code.
+3. **Start from `reference/claude-code-map.md`** whenever the task touches Claude Code behavior, agent/tool design, or a pattern worth mirroring in the refactor. The map is short, covers every subsystem, and routes you to the analysis and the code. Follow both routes — see [Claude Code reference](#claude-code-reference). Never answer a question about Claude Code internals from memory when the source is sitting in `reference/claude-code/`.
 4. **Run the [Quality gate](#quality-gate-mandatory) before any code you create or refactor is considered done.** It is not optional and not a final polish step: the tests are written *with* the change, not after it.
 
 Only after these steps should you propose a plan or start editing.
@@ -208,6 +208,69 @@ python mutation_tests/<task>/run_mutation_tests.py   # mutmut over the 3 recorde
 These scripts contain **hardcoded absolute paths** (`VENV_BIN`, `PROJECT_ROOT` pointing at `/home/amaro/...`) and must be edited before they run anywhere else.
 
 SonarQube analysis of a generated workspace: `docker compose -f docker-compose.sonarqube.yaml up -d`, copy `backup/analyze.sh` + `backup/sonar-project.properties` into the workspace dir, set `SONAR_TOKEN`, then `./analyze.sh`. Thresholds live in `backup/restrictions.txt` and are re-implemented inline in `analyze.sh`.
+
+## Claude Code reference
+
+This repository keeps a local, verified copy of Claude Code's own source alongside four
+analyses of it, because the refactor mirrors its architecture. Everything here is in
+English and lives under `reference/`.
+
+```
+reference/
+├── claude-code-map.md      # the index — always read first
+├── claude-code/            # source snapshot, gitignored (~35MB)
+└── analysis/
+    ├── 01-dive-into-claude-code.md            # arXiv paper — the main reference
+    ├── 02-inside-claude-code-leaked-source.md # O-mega article
+    ├── 03-architecture-deep-dive-hasan.md     # Zain Hasan deep dive
+    ├── decode/00.md … 11.md                   # 12-part code-level teardown
+    └── assets/                                # figures from the paper
+```
+
+### How to use it — the rule
+
+**Read `reference/claude-code-map.md` before grepping `reference/claude-code/`.** It is
+short, it covers every subsystem, and it gives the path plus the symbol name.
+
+The map is a **router, not an answer**. Every entry names an analysis section and a code
+path, and a lookup is only finished when you have used both:
+
+1. **Read the cited analysis section** — the *why*, and the design pattern.
+2. **Open and analyze the cited code** — the *how*, and the current truth.
+
+Stopping at the map is an incomplete lookup. The map deliberately carries one or two
+sentences per subsystem and never the mechanism.
+
+**Where an analysis and the code disagree, the code wins.** Check the map's
+"Known divergences" section before concluding anything: several published claims about this
+codebase point at the wrong file, and one subsystem all four analyses describe in detail
+is absent from the shipped build.
+
+### Which analysis to open
+
+| Question | Start with |
+|---|---|
+| "How does subsystem X actually work?" | `analysis/decode/NN.md` — function-level mechanics, state machines, exact constants |
+| "Why is X designed this way?" | `analysis/01-dive-into-claude-code.md` — the design-space paper, and the main reference |
+| "What does the whole system look like?" | `analysis/03-architecture-deep-dive-hasan.md` — diagrams, startup sequence, end-to-end walkthrough |
+| "What is surprising or hidden in here?" | `analysis/02-inside-claude-code-leaked-source.md` |
+
+### Provenance and maintenance
+
+- The source snapshot is **v2.1.88**, extracted from the published npm package's source
+  map: 1,884 `.ts`/`.tsx` files, ~512K lines. It is **gitignored** and reproducible with
+  `rsync -a ~/claude-code-2.1.88/source/src reference/claude-code/` (plus `vendor/` and the
+  provenance files). `cli.js` and the 57MB `cli.js.map` stay outside the copy.
+- **All four analyses target v2.1.88**, the same version as the snapshot. The O-mega article
+  frames itself around an earlier leak, but its content matches this build — do not discard
+  it as out-of-version.
+- `analysis/03-` was **transcribed by reading a rasterized PDF** (no text layer, no OCR
+  available), so it is the one analysis where a transcription error is possible. Verify any
+  specific figure or symbol from it against the code.
+- The original PDFs stay in `docs/` as provenance.
+- The old `~/claude-code` mirror and the `claude-code-explorer` MCP server are **gone**. Any
+  reference to either, anywhere in this repository, is dead — including in
+  `docs/transition_elaboration_plan.md`.
 
 ## Architecture
 

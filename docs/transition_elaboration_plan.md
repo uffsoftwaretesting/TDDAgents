@@ -413,7 +413,7 @@ The four `wrapper_*` functions and the sparse `is_flow_type` list indexed by `pl
 
 ## 3. Implementation Roadmap
 
-Ordered so the system is runnable at every checkpoint. Each phase below cites the actual claude-code source (`~/claude-code/src/...`, readable via the `claude-code-explorer` MCP server) behind the mechanism being ported — read the cited file before implementing rather than working from the paraphrase here.
+Ordered so the system is runnable at every checkpoint. Each phase below cites the actual claude-code source behind the mechanism being ported. Those citations were written against the old `~/claude-code` mirror, which no longer exists; read them against `reference/claude-code/src/...` (v2.1.88), and use `reference/claude-code-map.md` to locate a subsystem whose path has moved — read the cited file before implementing rather than working from the paraphrase here.
 
 ### Phase 0 — English migration + conventions *(completed)*
 
