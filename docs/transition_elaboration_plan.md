@@ -43,7 +43,7 @@ from running, while tool-pool scoping prevents the model from **naming** the for
 at all, and the runtime gate denies it even if the model hallucinates the name.
 
 But the argument the paper makes changes, and reviewers will press on it. §3.3 is written to
-be that argument, and §5 names the two property tests that carry it.
+be that argument, and §6 names the two property tests that carry it.
 
 ### 1.3 What is not in scope
 
@@ -321,9 +321,324 @@ list indexed by plan position.
 
 ---
 
-## 4. Implementation roadmap
+## 4. Prompts and definitions as Markdown
 
-Twelve parts, 64 sub-phases. Each ends runnable and offline-testable. The order builds the
+### 4.1 Jinja2 is removed
+
+All agent prompts today are Jinja2 templates under `app/prompts/agents/langgraph/<agent>/`.
+They go. The replacement is plain Markdown in English, following claude-code's own
+conventions.
+
+The reason is not stylistic. The Jinja2 `Environment` in `prompt_loader.py` uses
+non-strict undefined, so a misspelled kwarg **renders as an empty string with no error**.
+The repository already carries one live instance of this: `developer.py` passes
+`sub_requsite=` while the template expects `sub_requisite`, so the Developer's first prompt
+has had a blank sub-requirement block for as long as that code has existed. A templating
+engine that fails silently is the wrong substrate for the thing that defines agent behaviour.
+
+Markdown with explicit placeholder substitution fails differently: an unresolved placeholder
+survives into the text **visibly**, as `{{LIKE_THIS}}`, where it is obvious in a transcript.
+
+- Code: `claude-code/src/skills/bundled/claudeApi.ts` → `SKILL_MODEL_VARS`
+
+### 4.2 The file layout, taken from claude-code
+
+claude-code authors every prompt-bearing unit as a **directory with a Markdown entry file and
+optional reference files**, and inlines them at build time. The build comment states it
+plainly: *"Each .md file is inlined as a string at build time via Bun's text loader."*
+
+- Code: `claude-code/src/skills/bundled/verifyContent.ts` → `SKILL_MD`, `SKILL_FILES`
+- Code: `claude-code/src/skills/bundled/claudeApiContent.ts` → `SKILL_FILES`
+
+TDDAgents mirrors the structure without the bundler — files are read from disk:
+
+```
+app/prompts/
+├── system/                       # composed into the system prompt (§4.3)
+│   ├── identity.md
+│   ├── tdd-contract.md
+│   ├── tools.md
+│   └── tone.md
+├── agents/
+│   └── refactorer/
+│       ├── AGENT.md              # frontmatter + body
+│       └── references/
+│           └── refactoring-catalogue.md
+└── skills/
+    └── testing-patterns/
+        ├── SKILL.md
+        └── references/
+            └── fixtures.md
+```
+
+Two contracts come with that layout:
+
+**Reference files load on demand, not up front.** When a unit has reference files, its prompt
+is prefixed with a base-directory line so the model can read them itself. The source
+describes this as the *"same contract as disk-based skills"* — the entry file costs tokens
+every time, the references cost tokens only when the body points at them.
+
+- Code: `claude-code/src/skills/bundledSkills.ts` → `registerBundledSkill`, `BundledSkillDefinition`
+
+**HTML comments are stripped before the model sees the text**, iteratively until stable. That
+is what makes `<!-- ... -->` usable for authoring notes, maintenance markers and provenance
+without paying for them in context.
+
+- Code: `claude-code/src/utils/claudemd.ts` → `stripHtmlComments`
+
+### 4.3 What belongs in a prompt file, and what does not
+
+The system prompt is **composed from sections**, not rendered from one template. Sections are
+registered with a name and a compute function, resolved once and memoised, and ordered
+deliberately: everything before a boundary marker is stable and cacheable, everything after is
+session-specific.
+
+- Analysis: `analysis/decode/02.md#6-section-caching-mechanism-systempromptsectionsts`
+- Code: `claude-code/src/constants/systemPromptSections.ts` → `systemPromptSection`, `resolveSystemPromptSections`
+- Code: `claude-code/src/constants/prompts.ts` → `getSystemPrompt`, `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`
+
+This is the §2.8 cache rule applied to prose: a section whose text varies per run must sit
+*after* the boundary, or it fragments the cacheable prefix. So:
+
+| Goes in a `.md` file | Does not |
+|---|---|
+| role, contract, worked examples, rules of engagement | anything that varies per run |
+| stable prose that is identical across every run | model ids, paths, token counts, thresholds |
+| `{{PLACEHOLDER}}` markers where a value belongs | the value itself |
+
+### 4.4 Values are substituted, never written into prose
+
+Placeholders are substituted at render time by a single regex pass; an unknown key is **left
+as-is** rather than replaced with empty text, so a typo is visible instead of silent.
+
+- Code: `claude-code/src/skills/bundled/claudeApi.ts` → `SKILL_MODEL_VARS`
+
+claude-code treats literal values in prose as a maintenance liability even where it has them,
+and marks each site so it gets updated at release time:
+
+> `@[MODEL LAUNCH]: Update the model IDs/names below. These are substituted into {{VAR}}`
+> `placeholders in the .md files at runtime before the skill prompt is sent.`
+> `After updating these constants, manually update the two files that still hardcode models…`
+
+Those two files are called out precisely *because* hardcoding them was a mistake that now
+needs manual upkeep. TDDAgents takes the lesson rather than the exception: **no model id, no
+path, no threshold, and no count is written into Markdown prose.** Each has one resolution
+point in code and reaches the prompt as a placeholder.
+
+### 4.5 The agent definition format
+
+Frontmatter carries configuration; the body is the prompt. The parser's discipline is what
+matters, and it is the direct answer to arbitrary values in the format.
+
+- Code: `claude-code/src/tools/AgentTool/loadAgentsDir.ts` → `parseAgentFromMarkdown`
+- Code: `claude-code/src/utils/frontmatterParser.ts` → `parseFrontmatter`, `parsePositiveIntFromFrontmatter`
+
+**Four rules, all taken from the parser:**
+
+1. **Omission means unset, never a default.** Every optional field parses to `undefined` when
+   absent. No value is substituted at parse time.
+2. **An invalid value is logged and ignored — never silently defaulted.** The parser records
+   what was wrong and which values were valid, then proceeds as if the field were absent.
+3. **Enumerations validate against an explicit list**, and the list appears in the error
+   message.
+4. **`inherit` is a sentinel, not a config lookup.** The definition never names a constant
+   from the codebase.
+
+**On `maxTurns` specifically.** It is `number | undefined` end to end, and the loop tests it as
+`if (maxTurns && nextTurnCount > maxTurns)` — **falsy means unbounded**. No default is
+substituted anywhere in the agent path. The single numeric literal in the whole path is one
+named call site for one specific mode, not a format default.
+
+- Code: `claude-code/src/query.ts` → `maxTurns`
+
+So a definition carrying `max_turns: 8` states a number nobody chose, that no experiment
+justified, and that silently becomes the thing future readers treat as tuned. Omit the field.
+Where TDDAgents genuinely needs a ceiling — the unattended research run does — it is one named
+policy constant with a recorded rationale, resolved in code, not a number copied into every
+definition file.
+
+#### The format
+
+```markdown
+---
+name: refactorer
+description: Improves structure without changing behaviour. Runs only after green.
+phase: post_green
+tools: [ReadFile, ListDir, Grep, WriteFile, RunTests, Skill]
+permissionMode: workspace_write
+memory: run
+forkFrom: developer
+revertOnRed: true
+hooks:
+  PreToolUse:
+    - matcher: WriteFile
+      hooks: [{ type: command, command: "scripts/hooks/snapshot_before_write.sh" }]
+---
+
+You are a senior engineer improving code that already passes its tests.
+
+...
+```
+
+Every field absent from that block is absent on purpose:
+
+| Field | Why it is not there |
+|---|---|
+| `max_turns` | omission means unbounded; a ceiling is one named policy, not a per-file number |
+| `model` | omitted inherits; write `model: inherit` to say so explicitly, never a code constant |
+| trailing `# unset → …` comments | the parser's behaviour is the contract, not a comment that drifts from it |
+
+Fields that are TDDAgents-specific rather than ported — `phase`, `forkFrom`, `revertOnRed` —
+follow the same four rules: validated against an explicit list, logged and ignored when
+invalid, `undefined` when absent.
+
+`phase` is the one field with teeth: it is what the phase-derived deny rules of §3.3 read, so
+an invalid value must **fail the definition load loudly** rather than be ignored. That is the
+one deliberate divergence from rule 2 in this format, and it exists because a silently ignored
+`phase` would silently disable the TDD invariant.
+
+### 4.6 Skills use the same shape
+
+`SKILL.md` with frontmatter and a body, plus `references/` loaded on demand. Only name,
+description and when-to-use reach the system prompt; the body loads on invocation; references
+load only if the body points at them.
+
+- Analysis: `analysis/01-dive-into-claude-code.md#61-four-extension-mechanisms`
+- Code: `claude-code/src/skills/loadSkillsDir.ts` → `parseSkillFrontmatterFields`, `estimateSkillFrontmatterTokens`
+
+### 4.7 Output styles replace a section, not the prompt
+
+An output style is a named block that substitutes the response-formatting section while
+leaving the rest of the system prompt intact — including, optionally, the coding instructions.
+It is the mechanism for changing how an agent writes without rewriting what it knows.
+
+- Code: `claude-code/src/constants/outputStyles.ts` → `OutputStyleConfig`, `OUTPUT_STYLE_CONFIG`
+
+### 4.8 The system prompt is composed, not rendered
+
+§4.1–4.7 cover prompts as *files*. This covers the architecture that turns those files into a
+system prompt, which is where the sharpest recorded failure mode in the reference base lives.
+
+- Analysis: `analysis/decode/02.md#6-section-caching-mechanism-systempromptsectionsts`
+- Code: `claude-code/src/constants/systemPromptSections.ts` → `systemPromptSection`, `DANGEROUS_uncachedSystemPromptSection`, `resolveSystemPromptSections`
+
+#### The registry
+
+The prompt is not one template. It is an ordered list of **named sections**, each a name plus
+a compute function plus one behavioural flag, resolved into strings at assembly time. The
+whole registry is 68 lines.
+
+Two constructors, and the difference between them is the entire design:
+
+| Constructor | Behaviour |
+|---|---|
+| `systemPromptSection(name, compute)` | memoized — computed once, reused until the cache is cleared |
+| `DANGEROUS_uncachedSystemPromptSection(name, compute, reason)` | recomputed every turn, breaking the cache when the value changes |
+
+The second one **takes a mandatory `reason` argument that is never read at runtime**. It exists
+so the cost has to be written down at the call site and argued with in review. A quietly
+volatile section is invisible until someone measures cache-creation tokens and works backwards
+to it; a section that must state its reason cannot hide.
+
+In the whole of claude-code exactly one section is volatile — MCP instructions, because servers
+connect and disconnect between turns.
+
+#### The boundary, and why 2^N is the number that matters
+
+A sentinel element sits in the section list. Everything before it is identical on every run for
+every user and is sent with a global cache scope; everything after is session-specific and is
+not cached at all.
+
+- Code: `claude-code/src/constants/prompts.ts` → `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`, `getSystemPrompt`
+
+It is a **sentinel array element, not a delimiter inside a string** — the splitter tests for it
+by position in the list, and its doc comment warns against removing or reordering it without
+updating the two functions downstream that consume the split.
+
+The reason it exists is recorded on the section that would otherwise violate it:
+
+> "Session-variant guidance that would fragment the `cacheScope:'global'` prefix if placed
+> before `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`. Each conditional here is a runtime bit that would
+> otherwise multiply the Blake2b prefix hash variants (2^N)."
+
+That is the rule to internalise, and it is not intuitive: **a single boolean in the static
+prefix does not cost a little, it doubles the number of distinct cache entries.** Ten
+independent booleans produce a thousand. The placement rule follows mechanically — anything
+whose text varies per run, per project, per permission mode or per tool pool goes *after* the
+boundary, no exceptions.
+
+Downstream, the split becomes text blocks carrying `cache_control`, under a hard constraint the
+source states in capitals: the API caps total cache breakpoints at four. The boundary is not a
+nicety; it is how a prompt fits inside that budget.
+
+- Code: `claude-code/src/services/api/claude.ts` → `buildSystemPromptBlocks`, `getCacheControl`
+
+#### Composition order for TDDAgents
+
+| Position | Section | Why there |
+|---|---|---|
+| static | identity | never varies |
+| static | system — how output, tools and reminders work | never varies |
+| static | doing tasks — engineering conduct | never varies |
+| static | **TDD contract** — Red before Green, what each phase permits | the invariant's prose; identical every run |
+| static | using your tools | varies only with the tool roster, which is a release-time fact |
+| static | executing actions with care | never varies |
+| static | tone and output efficiency | never varies |
+| — | **boundary** | |
+| dynamic | `<env>` — cwd, python, pytest, installed packages | per run |
+| dynamic | the specification under test | per run |
+| dynamic | `CONVENTIONS.md` | per run, and mutates during the run |
+| dynamic | workspace state — tree, test status | per turn |
+| dynamic | phase ledger position | per turn |
+
+The TDD contract sitting in the **static** half is the point worth noticing. The rules of the
+cycle are prose that never changes; only the *position* in the cycle changes. Putting the
+contract before the boundary and the ledger after it is what keeps the expensive half cacheable
+across every run of every task.
+
+#### Four details that are easy to get wrong
+
+**`None` is a cached decision, not a cache miss.** A section that computes to "omit me" records
+that result. Re-asking a section every turn whether it has anything to say is the same cost as
+a volatile section, without the reason string that would have made it visible.
+
+**Prefer an unconditional section phrased as a no-op over a conditional section.** claude-code's
+token-budget section is cached unconditionally and worded so it is inert when no budget is
+active. It used to be conditional, and the comment records the bill: *"busting ~20K tokens per
+budget flip."* Wording your way out of a conditional is cheaper than branching.
+
+**Cache invalidation has named points**, and it clears more than the sections — the same call
+also resets the beta-header latches so a fresh conversation re-evaluates them. For TDDAgents the
+equivalent points are conversation reset and post-compaction.
+
+- Code: `claude-code/src/constants/systemPromptSections.ts` → `clearSystemPromptSections`
+
+**Subagent prompts have no boundary.** A delegated agent's prompt is assembled by appending
+environment details to its body, and the whole thing is one block. Main session and subagent
+even render the environment differently — Markdown bullets for the main loop, an XML `<env>`
+block for subagents.
+
+- Code: `claude-code/src/constants/prompts.ts` → `enhanceSystemPromptWithEnvDetails`, `computeEnvInfo`, `computeSimpleEnvInfo`
+
+The consequence for TDDAgents: delegated agents (§3.5) do not get the static/dynamic split, so
+their prompts should stay short. A subagent prompt is paid for in full on every delegation.
+
+#### One deliberate divergence
+
+claude-code's section cache is **process-global**, living in bootstrap state. That is why its
+post-compaction cleanup has to distinguish main thread from fork before resetting anything — a
+subagent compacting would otherwise corrupt the parent's cached sections.
+
+TDDAgents scopes the section cache **per run** instead, passed in rather than reached for. The
+same isolation falls out of the structure rather than out of a conditional, and a delegated
+agent cannot evict its parent's entries because it never had a reference to them. Recorded here
+as a divergence so nobody later "fixes" it back toward the source.
+
+---
+
+## 5. Implementation roadmap
+
+Twelve parts, 65 sub-phases. Each ends runnable and offline-testable. The order builds the
 centre first so every later part has something to attach to.
 
 Every sub-phase is gated by the repository quality gate in `CLAUDE.md` — tests written *with*
@@ -381,20 +696,21 @@ path, including bypass mode.
 | D5 | `tdd_phase_incomplete` Stop hook + bounded `tdd_block_count` |
 | D6 | the two invariant property tests |
 
-D6 **is** the paper's structural claim, so it is named here rather than left to §5:
+D6 **is** the paper's structural claim, so it is named here rather than left to §6:
 
 1. No reachable tool pool in RED contains an implementation-writing tool, for any ledger state
    the loop can produce.
 2. No sequence of model outputs reaches `completed` without the ledger showing Red-then-Green.
 
-### Part E — Context systems (8)
+### Part E — Context systems (9)
 
 | # | Ships | Why it is ordered here |
 |---|---|---|
 | E1 | token counting | everything downstream consumes it |
 | E2 | API-invariant slicing | pure functions, highest test value |
 | E3 | instruction-file loading | |
-| E4 | system prompt sections + static/dynamic boundary | |
+| E4 | Markdown prompt loader: frontmatter, `{{VAR}}` substitution, comment stripping | the §4 substrate; replaces Jinja2 |
+| E4b | section registry, memoized/volatile split, boundary + cache-block mapping | §4.8; composes the §4.3 files |
 | E5 | cache breakpoints and the latch rule | |
 | E6 | attachments and the delta pattern | |
 | E7 | compaction: summarise + head truncation | |
@@ -406,6 +722,11 @@ never orphan a thinking block, never leave an assistant message first after head
 
 E5's rule: anything feeding the cache key must be **latched for the session**. A value that
 flips mid-run silently busts the cache.
+
+E4 is where Jinja2 is deleted. It ships before anything that authors a prompt, so no new
+template is ever written against the old engine. Its acceptance test is the failure mode that
+motivated the change (§4.1): an unresolved placeholder must survive visibly into the rendered
+text, never render as empty.
 
 E8 carries a two-layer cache trap worth stating in the code: clearing an inner memoised cache
 without clearing the outer one that wraps it is a no-op from the caller's side.
@@ -439,14 +760,15 @@ deletes the user's own settings.
 
 ### Part I — Agents and delegation (5)
 
-`I1` agent definitions as frontmatter · `I2` per-agent tool resolution · `I3` the `Agent` tool
+`I1` agent definitions in the §4.5 format — parser discipline first: omission means unset,
+invalid is logged and ignored, `phase` fails loudly · `I2` per-agent tool resolution · `I3` the `Agent` tool
 with an independently assembled worker pool · `I4` context forking with incomplete-call
 filtering · `I5` run-scoped agent memory, discarded at run end so each run stays an
 independent sample.
 
 ### Part J — Skills (4)
 
-`J1` loader and frontmatter · `J2` progressive disclosure budget · `J3` path-conditional
+`J1` `SKILL.md` loader on the §4.6 shape · `J2` progressive disclosure budget · `J3` path-conditional
 activation · `J4` the TDD skill roster.
 
 ### Part K — Session shell (3)
@@ -461,13 +783,13 @@ dissolved graph modules listed in §3.4.
 
 ---
 
-## 5. Verification
+## 6. Verification
 
-### 5.1 Per sub-phase
+### 6.1 Per sub-phase
 The `CLAUDE.md` quality gate, in order: unit tests written with the change, flake8 and mypy
 clean on touched files, mutation testing with every survivor either killed or written down.
 
-### 5.2 The structural claim
+### 6.2 The structural claim
 Parts A7 and D6 are the two gates that matter beyond ordinary correctness:
 
 - **A7** — one test per continue site asserting which fields reset and which persist. Without
@@ -476,12 +798,12 @@ Parts A7 and D6 are the two gates that matter beyond ordinary correctness:
   executable form. If they cannot be written, the architecture does not support the claim and
   that must be discovered in Part D, not at writing-up time.
 
-### 5.3 End to end
+### 6.3 End to end
 The seam modules named in `CLAUDE.md` — the sandbox adapter, the model factory, the agent
 runtime — stay exempt from unit and mutation testing and are verified by running the pipeline
 end to end. That remains the only check of the system as a whole.
 
-### 5.4 Against the reference
+### 6.4 Against the reference
 Any claude-code claim added to this document must cite a path and symbol that exist in
 `reference/claude-code/`. Check with:
 

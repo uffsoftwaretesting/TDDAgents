@@ -13,6 +13,61 @@ A massive refactor of TDDAgents is under way. Before doing **any** work in this 
 
 Only after these steps should you propose a plan or start editing.
 
+## Upcoming refactor — read before extending anything
+
+**The architecture has pivoted.** TDDAgents is being rebuilt on claude-code's *loop
+engineering architecture*: one `while True` loop as the system centre, with permissions,
+hooks, context assembly, compaction, recovery and tool orchestration as systems arranged
+around it. The plan is `docs/transition_elaboration_plan.md` — **read it before designing
+anything new in `app/`.**
+
+This supersedes the previous plan, which ported claude-code's *features* onto a LangGraph
+pipeline while the graph stayed the enforcement mechanism.
+
+### What this means for work in `app/` right now
+
+| | |
+|---|---|
+| The graph below still runs | The [Architecture](#architecture) section describes the code as it exists today. It is accurate. Do not break it. |
+| But do not invest in it | `execute_tester`, `execute_developer`, both runners, `build_tdd_subgraph`, the `wrapper_*` functions, `is_flow_type` and both router functions **dissolve into the loop**. Extending them is wasted work. |
+| Shipped layers are being replaced | **At the user's explicit direction, `app/tools/`, `app/hooks/`, `app/workspace/` and `app/sync/` will be dropped** and rebuilt against the loop. They are not a foundation to build on. |
+| Jinja2 is going | Prompts become Markdown (see [Prompt conventions](#prompt-conventions-incoming)). Do not author new `.jinja2` templates. |
+| The quality gate does not change | It still applies to everything you write, including throwaway work. |
+
+If a task asks you to extend something on that list, say so and propose the loop-shaped
+alternative from the plan rather than quietly adding to code that is scheduled for deletion.
+
+### The three things that change most
+
+1. **Routing by `status` string literals is replaced** by a closed vocabulary of seven
+   continue reasons and ten terminal reasons, ported from `src/query.ts`. No more router
+   functions comparing strings.
+2. **Red→Green stops being enforced by graph topology.** It becomes a phase ledger plus
+   phase-derived deny rules plus a Stop hook that refuses to let the loop terminate — three
+   independent barriers, none reachable by a model decision. This is §3.3 of the plan and it
+   is the part a thesis reviewer will press on.
+3. **Prompts stop being templates and become composed Markdown**, following claude-code's own
+   file conventions.
+
+### Prompt conventions (incoming)
+
+Detailed in §4 of the plan. The short version, because it changes how you write every prompt:
+
+- **No templating engine.** Markdown in English, with `{{PLACEHOLDER}}` substitution. An
+  unknown placeholder is left visible rather than rendered empty — the opposite of the Jinja2
+  failure mode documented under [Conventions and gotchas](#conventions-and-gotchas).
+- **Directory per unit**: `AGENT.md` / `SKILL.md` entry file plus `references/` loaded on
+  demand, mirroring `reference/claude-code/src/skills/bundled/`.
+- **No values in prose.** No model id, path, threshold or count is written into a prompt file.
+  Each has one resolution point in code and reaches the prompt as a placeholder.
+- **No invented defaults in frontmatter.** Omission means unset, not a number someone picked.
+  `max_turns: 8` is exactly the anti-pattern: claude-code's `maxTurns` is `number | undefined`
+  and falsy means *unbounded*. Where a ceiling is genuinely needed it is one named policy
+  constant with a recorded rationale, not a literal copied into every definition.
+- **Invalid frontmatter is logged and ignored, never silently defaulted** — with one
+  deliberate exception: an invalid `phase` must fail the load loudly, because silently
+  dropping it silently disables the TDD invariant.
+
 ## Quality gate (mandatory)
 
 Every piece of code created or refactored in `app/` passes this gate before it is done.
@@ -152,7 +207,9 @@ as the floor it usually implies rather than as a number to reach by any route.
 
 ## What this is
 
-TDDAgents is a research prototype (UFF / SBES 2026): a LangGraph multi-agent pipeline that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed inside a remote **E2B cloud sandbox**, never on the host. Graph state is checkpointed to PostgreSQL.
+TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed inside a remote **E2B cloud sandbox**, never on the host. State is checkpointed to PostgreSQL.
+
+It is **a LangGraph pipeline today and a loop tomorrow** — the refactor rebuilds it on claude-code's loop architecture, and LangGraph is reduced to a session shell (checkpointing, `interrupt()`, plan iteration). See [Upcoming refactor](#upcoming-refactor--read-before-extending-anything).
 
 `pytest`, `flake8`, `mypy` and `mutmut` apply to **`app/` itself**, not only to the generated workspaces. `tests/` holds an offline suite for `app/` that needs no API keys, no sandbox and no database, and runs in under a second; `setup.cfg` and `pyproject.toml` configure the four tools. See [Quality gate](#quality-gate-mandatory) for the mandatory procedure and the current baseline.
 
@@ -268,11 +325,29 @@ is absent from the shipped build.
   available), so it is the one analysis where a transcription error is possible. Verify any
   specific figure or symbol from it against the code.
 - The original PDFs stay in `docs/` as provenance.
+- **Verify before you cite.** Any claude-code claim added to a repository document must name a
+  path and symbol that exist. Two scripts check this and both must pass:
+  ```bash
+  python3 scripts/reference-checks/verify_paths.py   <doc.md>...   # paths + symbols resolve
+  python3 scripts/reference-checks/verify_anchors.py <doc.md>...   # analysis anchors resolve
+  ```
+- **A missing file does not mean a missing symbol.** Three mechanisms hide code from this
+  extraction, and the map's "Before you trust an analysis" section tells them apart. The one
+  that catches people: a module exporting **only types** is erased by the compiler and never
+  reaches the source map — 37 modules are absent that way, including `src/query/transitions.ts`,
+  which declares the loop's entire termination vocabulary. If the import that points at a
+  missing file reads `import type`, the symbol is real.
 - The old `~/claude-code` mirror and the `claude-code-explorer` MCP server are **gone**. Any
   reference to either, anywhere in this repository, is dead — including in
   `docs/transition_elaboration_plan.md`.
 
 ## Architecture
+
+> **This section describes the code as it runs today, and it is accurate.** Much of it is
+> scheduled to dissolve into the loop — the graph topology, the `status` routing vocabulary,
+> the node wrappers and the tool layer. Read
+> [Upcoming refactor](#upcoming-refactor--read-before-extending-anything) first so you know
+> which parts to preserve and which not to build on.
 
 ### Two graphs, run sequentially by `app/main.py`
 
@@ -288,6 +363,9 @@ Two success flows are recorded per sub-requirement:
 - **F2** — "green in red": the test passed immediately; `runner_red` still routes to the Developer with an injected warning prompt so the cycle is never skipped.
 
 ### Routing is entirely by `state["status"]` string
+
+*(Replaced by the refactor with a closed continue/terminal vocabulary — §3.1 and §5 Part A2 of
+the plan. Accurate for the current code.)*
 
 There is no shared enum. Router functions read `status` and branch on literals. The vocabulary spans three families and **must be kept consistent between the node that sets it and the router that reads it**:
 - flow: `red_confirmed`, `green_passed`, `green_failed`, `test_review_needed`, `tests_written`, `code_written`, `next_req`, `plan_complete`, `plan_complete_with_failures`
@@ -306,11 +384,17 @@ Agents return the **full** conversation history; the node slices `updated_histor
 
 The sandbox is created once in `TDDOrchestrator.run` and killed in its `finally`; nodes only `Sandbox.connect(sandbox_id)`.
 
-### The tool layer (Phase 1B) — built, not yet wired
+### The tool layer (Phase 1B) — built, never wired, now scheduled for replacement
+
+> **Superseded.** This layer is one of the four the user has decided to drop and rebuild
+> against the loop — see [Upcoming refactor](#upcoming-refactor--read-before-extending-anything).
+> It is documented here because it still exists on disk and its design notes are the clearest
+> record of what was learned porting `Tool.ts`; several of its decisions carry over to the
+> rebuild. **Do not extend it.**
 
 `app/tools/` and `app/hooks/` are complete and fully tested, and **nothing in the running
-graph calls them**. `run_agent` (Phase 2) is the first consumer. Until then the legacy
-`AgentAction` path is still what executes, so this layer changes no pipeline behavior.
+graph calls them**. The legacy `AgentAction` path is still what executes, so this layer
+changes no pipeline behavior.
 
 - **`tools/base.py`** — the `Tool` protocol, ported from claude-code's `Tool.ts`. Per-input
   predicates (`is_read_only`, `is_concurrency_safe`, `is_destructive`,
@@ -371,8 +455,8 @@ Postgres is not required: `TDDOrchestrator.run` falls back to `InMemorySaver` on
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)
-- **Prompt templates are the behavior.** Agent role definitions live in `app/prompts/agents/langgraph/<agent>/{sys,hum}_prompt_*.jinja2`, not in Python. The Tester has separate `normal` and `review` variants; the orchestrator has standalone `feedback_*.jinja2` templates that are injected into `reviewer_messages` as synthetic feedback.
-- The Jinja2 `Environment` in `prompt_loader.py` uses default (non-strict) undefined, so a misspelled kwarg **silently renders as an empty string**. There is already one such live bug: `agents/langgraph/developer.py:35` passes `sub_requsite=` while `developer/hum_prompt_1.jinja2` expects `sub_requisite`, so the Developer's first prompt has a blank sub-requirement block. Verify kwarg names against the template when touching either side.
+- **Prompt templates are the behavior.** Agent role definitions live in `app/prompts/agents/langgraph/<agent>/{sys,hum}_prompt_*.jinja2`, not in Python. The Tester has separate `normal` and `review` variants; the orchestrator has standalone `feedback_*.jinja2` templates that are injected into `reviewer_messages` as synthetic feedback. **This is the current state, not the target** — Jinja2 is removed by the refactor and prompts become Markdown. Do not author new `.jinja2` templates; see [Prompt conventions](#prompt-conventions-incoming).
+- The Jinja2 `Environment` in `prompt_loader.py` uses default (non-strict) undefined, so a misspelled kwarg **silently renders as an empty string**. There is already one such live bug: `agents/langgraph/developer.py:35` passes `sub_requsite=` while `developer/hum_prompt_1.jinja2` expects `sub_requisite`, so the Developer's first prompt has a blank sub-requirement block. Verify kwarg names against the template when touching either side. **This bug is the reason the refactor drops Jinja2** — §4.1 of the plan cites it as the motivating failure mode.
 - The Reviewer signals fault attribution by prefixing its feedback with the literal strings `[TEST ERROR]` / `[IMPLEMENTATION ERROR]`, and the runner nodes route on `"[TEST ERROR]" in analysis`. These strings are load-bearing across `agents/langgraph/reviewer.py` and both runner nodes.
 - `utils/workspace.py` is dead code — it references `Config.TEST_FILE` and `Config.IMPLEMENTATION_MODULE`, which no longer exist. Nothing imports it.
 - `experimental_executions/` and `mutation_tests/` are **frozen research artifacts** backing the paper's results. Do not regenerate or reformat them.
