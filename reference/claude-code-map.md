@@ -56,7 +56,7 @@ are still wrong in places that matter.** Every correction below was checked agai
 most likely outcome is that you open the wrong file and reason confidently about code that
 is not the code that runs.
 
-There are three reasons the analyses drift, and telling them apart is most of the skill:
+There are four reasons the analyses drift, and telling them apart is most of the skill:
 
 1. **Wrong altitude.** The analysis names a real file that really does the work it
    describes — but that file is a subroutine, not the decision point. The fix is to go up
@@ -68,6 +68,18 @@ There are three reasons the analyses drift, and telling them apart is most of th
    `bun:bundle` is a compile-time macro: a flag that is off deletes the branch, so the
    module never enters the bundle or the source map. The design is real; the code is absent.
    This is normal dead-code elimination, not a damaged extraction.
+4. **Type erasure.** A module that exports *only types* contributes no runtime code, so it
+   never reaches the bundle or the source map either — even though nothing about it is
+   disabled. `src/query/transitions.ts` is the important case: `src/query.ts` imports the
+   loop's whole `Terminal`/`Continue` vocabulary from it with `import type`. **37 modules are
+   absent this way**, against 7 from elimination.
+
+**Telling 3 and 4 apart is mechanical.** Find the import that points at the missing file:
+
+| the import reads | meaning | what to do |
+|---|---|---|
+| `import { x } from './missing.js'` inside a `feature('FLAG')` branch | eliminated at build time | `grep -rn "feature('FLAG')" src/` shows the call sites; the design is real, the code is not here |
+| `import type { X } from './missing.js'` | erased by the compiler | the symbol is **real and in use** — reconstruct it from its construction sites |
 
 Note what is *not* on that list: the code is not deprecated, not broken, and not partial.
 It is Anthropic's shipped v2.1.88.
@@ -122,7 +134,7 @@ Each of these is a path an analysis will send you to that does not hold what you
 | `src/coordinator/` for a scheduler | prompt and persona policy only | `src/services/tools/toolOrchestration.ts` |
 | `history.ts` for conversation transcripts | the shell-style `↑` prompt input history | `src/utils/sessionStorage.ts` |
 | `src/memdir/` for CLAUDE.md loading | the separate `MEMORY.md` auto-memory subsystem | `src/utils/claudemd.ts` |
-| `src/query/transitions.ts` for stop reasons | nothing — the file does not exist | inline in `src/query.ts` |
+| `src/query/transitions.ts` for stop reasons | nothing — types-only, erased (reason 4) | constructed inline in `src/query.ts` |
 | `src/services/mcp/transports/` | nothing — no such directory | transports inlined in `src/services/mcp/client.ts` |
 | `queryLoop()` as the public entry point | it is module-private (no `export`) | `query()` in `src/query.ts` |
 | `QueryEngine.ts` as the agent loop | a per-session wrapper that calls `query()` | `src/query.ts` |
@@ -174,8 +186,10 @@ continue sites.
 - Consult when: you need to know the order of operations inside a turn, where a turn can exit, or where to hook new per-turn behavior.
 
 ### Loop termination and continue vocabulary
-The named reasons a turn ends or iterates again. Defined inline in the loop file — there is
-no separate transitions module in this version.
+The named reasons a turn ends or iterates again. The `Terminal` and `Continue` unions are
+declared in `src/query/transitions.ts`, which is **types-only and therefore absent from this
+extraction** (see [Known divergences](#known-divergences) #5); the reasons below were
+reconstructed from their construction sites in `src/query.ts` and are complete.
 
 - Analysis: `analysis/01-dive-into-claude-code.md#45-stop-conditions`, `analysis/decode/01.md#i-queryloop-complete-state-machine-reconstruction`
 - Code: `claude-code/src/query.ts` → `'completed'`, `'max_turns'`, `'blocking_limit'`, `'model_error'`, `'prompt_too_long'`, `'aborted_streaming'`, `'aborted_tools'`, `'stop_hook_prevented'`, `'hook_stopped'`, `'image_error'`
@@ -1807,11 +1821,25 @@ It is 83 React UI hooks. The hook-event system is `src/utils/hooks.ts` plus
 conflate and `analysis/01-...#34-queryengine-a-clarification` exists specifically to
 separate them.
 
-### 5. `src/query/transitions.ts` does not exist
-The loop's termination and continue vocabulary is inline in `src/query.ts`. The ten terminal
-reasons are listed in the [Loop termination](#loop-termination-and-continue-vocabulary)
-entry above. Likewise **`src/shims/` does not exist** — `bun:bundle` is imported directly in
-197 files.
+### 5. `src/query/transitions.ts` is absent through *type erasure*, not deletion
+`src/query.ts` contains `import type { Terminal, Continue } from './query/transitions.js'`.
+The module exists upstream and is imported — it is invisible here because it is **types-only**,
+and TypeScript erases type-only imports at compile time, so such a module contributes no
+runtime code and never reaches the source map.
+
+So the `Terminal` and `Continue` unions are **declared** in that file and only *constructed*
+inline in `src/query.ts`. The ten terminal reasons and seven continue reasons reconstructed
+from those construction sites are listed in the
+[Loop termination](#loop-termination-and-continue-vocabulary) entry above; they are complete
+and correct as data, only the declaration text is missing.
+
+**This is a general mechanism, not a one-off: 37 modules are absent this way** — including
+`src/constants/querySource`, `src/cli/transports/Transport`, and most component `types`
+modules — versus 7 absent through feature-flag elimination. See
+[reason 4](#before-you-trust-an-analysis--read-this).
+
+Separately and for the DCE reason: **`src/shims/` does not exist** — `bun:bundle` is imported
+directly in 197 files.
 
 ### 6. Tool orchestration is under `src/services/tools/`
 Not `src/tools/` (which holds implementations) and not `src/coordinator/` (which is prompt
