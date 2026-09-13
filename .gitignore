@@ -20,8 +20,3 @@ mutants/
 # ...except the shared, version-controlled hook configuration. The user scope
 # (~/.tddagents/settings.json) and the local scope (settings.local.json) stay ignored.
 !.tddagents/settings.json
-
-# Claude Code v2.1.88 source snapshot used as architectural reference.
-# ~35MB, reproducible from ~/claude-code-2.1.88/source. The map and the
-# converted analyses are versioned; the source code is not.
-reference/claude-code/
