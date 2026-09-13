@@ -153,14 +153,29 @@ where config is plain data."*
 messages                          conversation so far
 tool_context                      ambient context
 phase_ledger                      TDD phase state  (§3.3 — TDDAgents-specific)
-tdd_block_count                   bounded stop-hook retries (§3.3)
-compaction_tracking               turn id, counter, consecutive failures
-output_limit_recovery_count       bounded at 3
+compaction_tracking               whether this turn compacted, turn id, turn counter
 has_attempted_reactive_compact    single-shot guard
 stop_hook_active                  whether hooks already blocked this turn
 turn_count                        advances only at next_turn
 transition                        why the previous iteration continued
 ```
+
+**The record holds no counter, because it enforces no ceiling.** Upstream's
+`maxOutputTokensRecoveryCount` and the `consecutiveFailures` member of its compaction
+tracking exist to be compared against a maximum, and each is read in exactly one place: the
+recovery guard in `query.ts` and the circuit breaker in `autoCompactIfNeeded`. This loop is
+unbounded by decision, so neither comparison exists, and a counter with no comparison is a
+bound waiting to be re-added by whoever finds the field and wonders what it is for. What a
+run actually did is read off the transition history (§3.6), which is where the metrics look
+anyway.
+
+The distinction that matters: `stop_hook_active` and `has_attempted_reactive_compact` stay.
+They are not counters. They are latches recording that something has already been tried on
+*this* context, which is a fact about state rather than a budget, and removing them is how
+the infinite loop below comes back.
+
+- Code: `claude-code/src/query.ts` → `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT`
+- Code: `claude-code/src/services/compact/autoCompact.ts` → `autoCompactIfNeeded`, `AutoCompactTrackingState`
 
 **The reset/preserve discipline is the load-bearing part.** A recovery-attempt flag may be
 cleared only by an event that *changed the context*, never by one that merely re-entered the
@@ -169,9 +184,11 @@ loop. The in-source comment records the bug that established this:
 > "Resetting to false here caused an infinite loop: compact → still too long → error → stop
 > hook blocking → compact → … burning thousands of API calls."
 
-Consequences to port verbatim: `turn_count` advances only at `next_turn`, so recovery
-iterations are free against `max_turns`; `has_attempted_reactive_compact` survives the
-stop-hook continue; recovery counters reset only where real model output was appended.
+Consequences to port verbatim: `turn_count` advances only at `next_turn`, so a recovery
+iteration costs nothing against anything that later reads it; `has_attempted_reactive_compact`
+survives the stop-hook continue and is cleared only by an iteration that appended real model
+output; `stop_hook_active` is set at the stop-hook continue, preserved across `next_turn`, and
+cleared at every other continue site.
 
 ### 3.2 Systems around the loop, in execution order
 
@@ -264,13 +281,28 @@ false, so the Stop hook blocks and tells the model the test never failed. The cy
 skipped, and the F1/F2 distinction is read off the transition history (§3.6) rather than
 recorded by wrapper functions.
 
-#### The bounded-retry gap
+#### Why there is no retry counter
 
-Upstream has **no counter** bounding stop-hook retries; the only protection is the hook
-honouring `stop_hook_active`. That is acceptable for an interactive tool with a human present
-and unacceptable for an unattended research run. TDDAgents adds `tdd_block_count` to
-`LoopState`, bounded, and reset exactly where `output_limit_recovery_count` is reset — per the
-§3.1 discipline. Exhausting it is a terminal reason, not an infinite loop.
+Upstream bounds stop-hook retries with **no counter at all**. The protection is a single
+boolean: the loop sets `stop_hook_active` when it continues on blocking errors, and that flag
+is threaded into the hook's own input payload as `stop_hook_active`, so a hook that already
+blocked once can see that it did and decline to block again. The budget lives in the hook, not
+in the loop.
+
+- Code: `claude-code/src/query/stopHooks.ts` → `handleStopHooks`
+- Code: `claude-code/src/utils/hooks.ts` → `executeStopHooks`, `stop_hook_active`
+
+TDDAgents keeps that mechanism unchanged and adds nothing to it. An earlier draft of this
+document proposed a bounded `tdd_block_count` on `LoopState`, on the argument that an
+unattended research run cannot rely on a hook behaving. That is dropped: this is loop
+engineering, the loop runs without limitation, and a ceiling that exists to catch a
+misbehaving hook is a ceiling that also truncates a legitimately long run — which is the
+experiment, not a failure mode.
+
+The cost is stated rather than hidden. A `tdd_phase_incomplete` hook that ignores
+`stop_hook_active` and blocks unconditionally will keep the loop alive forever. Honouring the
+flag is therefore part of that hook's contract rather than an optimisation, and Part D5 is
+where it is written and tested.
 
 ### 3.4 What LangGraph retains
 
@@ -453,9 +485,10 @@ named call site for one specific mode, not a format default.
 
 So a definition carrying `max_turns: 8` states a number nobody chose, that no experiment
 justified, and that silently becomes the thing future readers treat as tuned. Omit the field.
-Where TDDAgents genuinely needs a ceiling — the unattended research run does — it is one named
-policy constant with a recorded rationale, resolved in code, not a number copied into every
-definition file.
+TDDAgents goes past omission: it sets no ceiling anywhere, in a definition file or in code.
+`max_turns` survives only as the entry parameter it is upstream, typed so that absent is
+representable, and nothing supplies it — the falsy branch upstream already takes is the only
+branch this system uses.
 
 #### The format
 
@@ -484,7 +517,7 @@ Every field absent from that block is absent on purpose:
 
 | Field | Why it is not there |
 |---|---|
-| `max_turns` | omission means unbounded; a ceiling is one named policy, not a per-file number |
+| `max_turns` | omission means unbounded, and nothing anywhere supplies a value |
 | `model` | omitted inherits; write `model: inherit` to say so explicitly, never a code constant |
 | trailing `# unset → …` comments | the parser's behaviour is the contract, not a comment that drifts from it |
 
@@ -653,7 +686,7 @@ the code, then flake8, mypy, and mutation testing on what was touched.
 | A3 | `while True` skeleton, `next_turn` only | driven by a fake model; no sandbox, no network |
 | A4 | DI seam | `call_model`, `compact`, `uuid`, `now`, `run_tools`, `stop_hooks`, event sink |
 | A5 | the ten terminal returns | each with its own test |
-| A6 | `max_turns` and the turn-count asymmetry | recovery iterations must be free |
+| A6 | the turn-count asymmetry, with `max_turns` as an entry parameter nothing supplies | recovery iterations must be free; falsy means unbounded |
 | A7 | reset/preserve matrix | one executable test per continue site, asserting `transition.reason` |
 
 A7 is the gate for the whole part: it is what stops a future edit from silently reintroducing
@@ -693,7 +726,7 @@ path, including bypass mode.
 | D2 | `RunTests` writes the ledger — the only component that observes ground truth |
 | D3 | phase-derived deny rules feeding pool assembly |
 | D4 | the same rules at the runtime gate |
-| D5 | `tdd_phase_incomplete` Stop hook + bounded `tdd_block_count` |
+| D5 | `tdd_phase_incomplete` Stop hook, and the `stop_hook_active` contract that keeps it terminable |
 | D6 | the two invariant property tests |
 
 D6 **is** the paper's structural claim, so it is named here rather than left to §6:
