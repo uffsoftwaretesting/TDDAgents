@@ -17,7 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.context import AppStateStore, tool_context_for
 from app.loop.ledger import PhaseLedger
-from app.loop.state import CompactionTracking, LoopState, Transition, initial_loop_state
+from app.loop.state import CompactionTracking, LoopState, initial_loop_state
 
 
 def make_state(**overrides: Any) -> LoopState:
@@ -129,19 +129,6 @@ class TestInitialState:
         state = initial_loop_state(messages, context)
         assert state.messages == messages
         assert state.tool_context is context
-
-
-class TestTransition:
-    def test_it_records_why_the_previous_iteration_continued(self):
-        assert Transition(reason="next_turn").reason == "next_turn"
-
-    def test_it_is_frozen(self):
-        transition = Transition(reason="next_turn")
-        with pytest.raises(FrozenInstanceError):
-            transition.reason = "stop_hook_blocking"  # type: ignore[misc]
-
-    def test_two_reasons_compare_unequal(self):
-        assert Transition(reason="next_turn") != Transition(reason="stop_hook_blocking")
 
 
 class TestCompactionTracking:

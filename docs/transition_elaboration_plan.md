@@ -75,11 +75,31 @@ iteration continued, so tests assert a recovery path fired without reading messa
 - Code: `claude-code/src/query.ts` → `State`, `Continue`
 
 ### 2.3 Named termination vocabulary, not string-literal routing
-Seven reasons to continue, ten to stop — a closed vocabulary, not ad-hoc status strings
-compared in router functions.
+A closed set of named reasons — seven to continue and ten to stop upstream — rather than
+ad-hoc status strings compared in router functions. A reason that does not exist cannot be
+constructed, so a misspelling fails at the site that made it instead of producing a run that
+silently fails to route.
 
 - Analysis: `analysis/01-dive-into-claude-code.md#45-stop-conditions`
 - Code: `claude-code/src/query.ts` → `'completed'`, `'max_turns'`, `'stop_hook_prevented'`
+
+TDDAgents carries the subset its own subsystems produce, keeping upstream's exact spellings:
+
+```
+Continue   next_turn · stop_hook_blocking · reactive_compact_retry
+           max_output_tokens_recovery
+
+Terminal   completed · blocking_limit · model_error · prompt_too_long
+           aborted_streaming · aborted_tools · stop_hook_prevented · hook_stopped
+```
+
+Six of upstream's reasons are left out because nothing here produces them: the
+context-collapse drain and the token-budget continuation belong to subsystems this
+architecture does not have, `max_output_tokens_escalate` needs an output cap to escalate
+away from, `max_turns` needs a turn ceiling, and `image_error` needs image inputs. A member
+no site can set is a member no test can cover — the same objection that retired the recovery
+counters (§3.1). Each spelling is recorded above and added when the part that produces it
+lands.
 
 ### 2.4 Capability as structure, not instruction
 A tool the model must not use is **absent from its pool**, not forbidden in its prompt. The
@@ -486,9 +506,9 @@ named call site for one specific mode, not a format default.
 So a definition carrying `max_turns: 8` states a number nobody chose, that no experiment
 justified, and that silently becomes the thing future readers treat as tuned. Omit the field.
 TDDAgents goes past omission: it sets no ceiling anywhere, in a definition file or in code.
-`max_turns` survives only as the entry parameter it is upstream, typed so that absent is
-representable, and nothing supplies it — the falsy branch upstream already takes is the only
-branch this system uses.
+There is no turn limit to write down, so `max_turns` is not a field of this format and
+`max_turns` is not a terminal reason in its vocabulary (§2.3) — the falsy branch upstream
+already takes is the only behaviour this system has.
 
 #### The format
 
@@ -517,7 +537,7 @@ Every field absent from that block is absent on purpose:
 
 | Field | Why it is not there |
 |---|---|
-| `max_turns` | omission means unbounded, and nothing anywhere supplies a value |
+| `max_turns` | no ceiling exists in this architecture, so there is no value to omit |
 | `model` | omitted inherits; write `model: inherit` to say so explicitly, never a code constant |
 | trailing `# unset → …` comments | the parser's behaviour is the contract, not a comment that drifts from it |
 
@@ -685,8 +705,8 @@ the code, then flake8, mypy, and mutation testing on what was touched.
 | A2 | `Continue` and `Terminal` as two `StrEnum`s | closed vocabulary, replaces `status` literals |
 | A3 | `while True` skeleton, `next_turn` only | driven by a fake model; no sandbox, no network |
 | A4 | DI seam | `call_model`, `compact`, `uuid`, `now`, `run_tools`, `stop_hooks`, event sink |
-| A5 | the ten terminal returns | each with its own test |
-| A6 | the turn-count asymmetry, with `max_turns` as an entry parameter nothing supplies | recovery iterations must be free; falsy means unbounded |
+| A5 | the remaining terminal returns | each with its own test |
+| A6 | the turn-count asymmetry | `turn_count` advances only at `next_turn`, so recovery iterations are free |
 | A7 | reset/preserve matrix | one executable test per continue site, asserting `transition.reason` |
 
 A7 is the gate for the whole part: it is what stops a future edit from silently reintroducing

@@ -37,6 +37,36 @@ pipeline while the graph stayed the enforcement mechanism.
 If a task asks you to extend something on that list, say so and propose the loop-shaped
 alternative from the plan rather than quietly adding to code that is scheduled for deletion.
 
+### What the loop core already is — `app/loop/`
+
+Parts A1–A3 of the plan are built and under the quality gate. Nothing in the running graph
+calls them yet; the package stands on its own and is driven entirely by fakes.
+
+| File | Ships |
+|---|---|
+| `config.py` | `RunConfig` + `Gates`, snapshotted once at entry by `build_run_config()` |
+| `state.py` | `LoopState` (frozen, tuples, **no field has a default**), `CompactionTracking`, `initial_loop_state()` |
+| `context.py` | `ToolContext`, `AppState`, `AppStateStore`, `CancelToken`, `discard_app_state_update` |
+| `transitions.py` | `Continue` / `Terminal` `StrEnum`s, `Transition`, `Terminated` |
+| `deps.py` | `LoopDeps` — the injected `call_model` / `run_tools` seam, widened in A4 |
+| `engine.py` | `run_loop`, an async generator, plus `drain` |
+| `ledger.py`, `messages.py` | `PhaseLedger` (inert until Part D); the `Message` alias and `tool_calls_in` |
+
+Three things about it are load-bearing and easy to undo by accident:
+
+- **`LoopState` has no defaults, on purpose.** Every continue site must name every field, so
+  the reset-or-preserve decision is visible in the diff. A default would let a future site
+  stay silent about a field, which is the silence that produced upstream's
+  `compact → error → stop hook → compact` spiral.
+- **There are no ceilings anywhere**, at the user's explicit direction: no turn limit, no
+  retry cap, no counters that exist to be compared against one. `stop_hook_active` and
+  `has_attempted_reactive_compact` are latches, not budgets, and must not be mistaken for
+  removable.
+- **`run_loop` yields `Terminated` as its last event** rather than returning it. That is the
+  single forced divergence from the reference: PEP 525 forbids a value in an async
+  generator's `return`, so JS's `yield*`-returns-`Terminal` has no Python equivalent. `drain`
+  is the stand-in.
+
 ### The three things that change most
 
 1. **Routing by `status` string literals is replaced** by a closed vocabulary of seven
@@ -162,6 +192,32 @@ two rounds *removed* mutants by deleting redundancy rather than by adding tests:
 
 The prior baseline, before Phase 1B, was 983 mutants / 895 killed / 88 survived / 91.0%.
 
+**`app/loop/` (Parts A1–A3) is measured separately and clears the bar**, at 1037 tests:
+
+| | |
+|---|---|
+| Mutants | 106 (0 timeout) |
+| Killed | 105 |
+| Survived | 1 |
+| **Mutation score** | **99.1%** (105 / 106) |
+
+The single survivor is written down rather than left unexamined: in `run_loop`,
+`needs_follow_up = False` → `None`. Both are falsy, the variable's only other assignment is
+`True`, and its only read is `if not needs_follow_up`, so no input can distinguish them —
+equivalent by construction, confirmed with `MUTANT_UNDER_TEST=…` directly. The flag is kept
+rather than folded into `if not tool_calls` because upstream resets it independently of the
+collected calls on the orphaned-message recovery paths that arrive in Part F.
+
+Two earlier rounds on this package are worth repeating as method. Four survivors were
+removed by deleting a `typing.cast` whose string argument is a runtime no-op — the mutants
+went away with the redundancy rather than being covered by a test. Three more were genuine
+gaps the fakes were hiding: the loop passes `state` and `config` into both injected
+dependencies, and nothing noticed when a mutant passed `None` instead, because a fake that
+ignores its arguments cannot fail when they are wrong. A fourth found a real defect —
+`getattr(message, "tool_calls")` without its default raises `AttributeError` on any message
+type that has none, inside the streaming branch, which would abort the turn instead of
+answering "not asking".
+
 `app/errors/` was brought under the gate after the fact and is worth reading as a worked
 example of why the gate exists. Both classifiers decide whether each infrastructure
 failure is retried or aborts the run, and both had **zero tests**. Bringing them in
@@ -247,7 +303,7 @@ importing anything under `app/graph/` fails there.)
 P=/home/amaro/tdd-agents/.venv/bin
 
 $P/pytest tests/ -q                                     # offline suite, no credentials
-$P/flake8 app/workspace app/sync app/sandbox app/tools app/hooks tests   # touched files
+$P/flake8 app/loop app/workspace app/sync app/sandbox app/tools app/hooks tests   # touched files
 $P/mypy                                                 # strict; config in pyproject.toml
 $P/mutmut run && $P/mutmut results                      # mutation testing; see the gotchas
 ```

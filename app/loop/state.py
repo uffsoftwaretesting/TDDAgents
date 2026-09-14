@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from app.loop.context import ToolContext
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
+from app.loop.transitions import Transition
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,26 +61,6 @@ class CompactionTracking:
     compacted: bool
     turn_id: str
     turn_counter: int
-
-
-@dataclass(frozen=True, slots=True)
-class Transition:
-    """
-    Why the previous iteration continued.
-
-    Carried on the state record purely so a test can assert that a recovery path fired,
-    without reading message contents to infer it — upstream added it for the same reason
-    and says so in-source. Part L2 then gets its flow classification for free: F1 and F2
-    are shapes of transition history, not something a wrapper function has to record.
-
-    `reason` is a plain string only until Part A2 replaces it with the closed `Continue`
-    vocabulary; the whole point of that part is that this stops being a string. It is a
-    record rather than a bare field so the shape stays open to a continue site that has
-    something to say beyond its name — but nothing is declared here before a site sets it,
-    which is why the record has exactly one member today.
-    """
-
-    reason: str
 
 
 @dataclass(frozen=True, slots=True)
