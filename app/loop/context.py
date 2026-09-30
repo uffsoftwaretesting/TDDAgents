@@ -24,7 +24,7 @@ anywhere in the tool path.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
@@ -118,9 +118,17 @@ class ToolContext:
     set_app_state: Callable[[Callable[[AppState], AppState]], None]
     messages: tuple[Message, ...] = ()
     in_flight_tool_ids: set[str] = field(default_factory=set)
+    tools: tuple[Any, ...] = ()
+    permission_context: Any = None
 
 
-def tool_context_for(store: AppStateStore, *, messages: tuple[Message, ...] = ()) -> ToolContext:
+def tool_context_for(
+    store: AppStateStore,
+    *,
+    messages: tuple[Message, ...] = (),
+    tools: tuple[Any, ...] = (),
+    permission_context: Any = None,
+) -> ToolContext:
     """
     Build a context wired to a store, which is what the main loop wants.
 
@@ -133,4 +141,6 @@ def tool_context_for(store: AppStateStore, *, messages: tuple[Message, ...] = ()
         get_app_state=store.get,
         set_app_state=store.update,
         messages=messages,
+        tools=tools,
+        permission_context=permission_context,
     )

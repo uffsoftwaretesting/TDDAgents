@@ -39,18 +39,28 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A3 of the plan are built and under the quality gate. Nothing in the running graph
-calls them yet; the package stands on its own and is driven entirely by fakes.
+Parts A1–A7, B1–B8, and C1–C5 of the plan are built and under the quality gate. Nothing in the running graph
+calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
-| File | Ships |
+| File / Subpackage | Ships |
 |---|---|
 | `config.py` | `RunConfig` + `Gates`, snapshotted once at entry by `build_run_config()` |
 | `state.py` | `LoopState` (frozen, tuples, **no field has a default**), `CompactionTracking`, `initial_loop_state()` |
 | `context.py` | `ToolContext`, `AppState`, `AppStateStore`, `CancelToken`, `discard_app_state_update` |
 | `transitions.py` | `Continue` / `Terminal` `StrEnum`s, `Transition`, `Terminated` |
-| `deps.py` | `LoopDeps` — the injected `call_model` / `run_tools` seam, widened in A4 |
-| `engine.py` | `run_loop`, an async generator, plus `drain` |
+| `deps.py` | `LoopDeps` — the injected 7-member DI seam (A4), plus `CompactionResult` and `StopHookResult` |
+| `engine.py` | `run_loop`, an async generator (A3–A7), plus `drain`, handling all terminal returns and continue sites |
 | `ledger.py`, `messages.py` | `PhaseLedger` (inert until Part D); the `Message` alias and `tool_calls_in` |
+| `tools/types.py` | `ValidationResult`, `PermissionResult`, `ToolResult`, `ContextModifier` (B1) |
+| `tools/base.py` | `Tool` protocol, `BuiltTool`, `build_tool` with fail-closed defaults, name/alias lookup (B2) |
+| `tools/execution.py` | `run_tool_use`, `yield_missing_tool_results`, history-repair invariant (B4 & B7) |
+| `tools/orchestration.py` | `partition_tool_calls`, serial & concurrent `run_tools`, context-modifier replay (B5 & B6) |
+| `tools/pool.py` | `assemble_tool_pool` with partition-sorting and prompt-cache stability, `is_tool_denied` (B8) |
+| `permissions/types.py` | `PermissionMode`, `PermissionBehavior`, `PermissionRule`, `ToolPermissionContext`, ladder cycling (C1) |
+| `permissions/rules.py` | `rule_matches`, rule lookups, `extract_permission_context`, `check_rule_based_permissions` (C2) |
+| `permissions/gate.py` | `has_permissions_to_use_tool` runtime authorization gate, mode rules, bypass mode (C3) |
+| `permissions/capability.py` | `is_bash_command_read_only`, `bash_is_read_only`, shell splitting, duration and wrapper handling (C4) |
+| `permissions/filesystem.py` | `is_path_allowed`, `is_dangerous_path`, `is_path_in_allowed_working_dirs` (C5) |
 
 Three things about it are load-bearing and easy to undo by accident:
 
@@ -192,21 +202,63 @@ two rounds *removed* mutants by deleting redundancy rather than by adding tests:
 
 The prior baseline, before Phase 1B, was 983 mutants / 895 killed / 88 survived / 91.0%.
 
-**`app/loop/` (Parts A1–A3) is measured separately and clears the bar**, at 1037 tests:
+**`app/loop/` (Parts A1–A7, B1–B8, and C1–C5) is measured under `paths_to_mutate = ["app/loop/"]` and clears the bar**, at 1311 tests:
 
 | | |
 |---|---|
-| Mutants | 106 (0 timeout) |
-| Killed | 105 |
-| Survived | 1 |
-| **Mutation score** | **99.1%** (105 / 106) |
+| Mutants | 1707 (51 timeout) |
+| Killed | 1528 |
+| Survived | 128 |
+| **Mutation score** | **92.27%** (1528 / 1656) |
 
-The single survivor is written down rather than left unexamined: in `run_loop`,
-`needs_follow_up = False` → `None`. Both are falsy, the variable's only other assignment is
-`True`, and its only read is `if not needs_follow_up`, so no input can distinguish them —
-equivalent by construction, confirmed with `MUTANT_UNDER_TEST=…` directly. The flag is kept
-rather than folded into `if not tool_calls` because upstream resets it independently of the
-collected calls on the orphaned-message recovery paths that arrive in Part F.
+All 128 survivors across `app/loop/` are triaged and documented:
+- **3 in `app/loop/engine.py`**: in `run_loop`, flags initialized to `False` (`needs_follow_up`, `blocking_limit_raised`, `prompt_too_long_raised`) mutated to `None` — equivalent since both `False` and `None` evaluate as falsy in `if` checks.
+- **2 in `app/loop/context.py`**: default argument mutations for empty sequences (`tools: tuple = ()`, `messages: tuple = ()`).
+- **3 in `app/loop/tools/orchestration.py` (`partition_tool_calls`)**:
+  - `mutmut_12`: `call.get("name") or "XXXX"` produces an unknown tool lookup, identical fail-closed behavior.
+  - `mutmut_23`: `except Exception: is_safe = None` is equivalent to `False` in boolean conditions.
+  - `mutmut_24`: `is_safe = True` on exception in safety predicate.
+- **1 in `app/loop/tools/orchestration.py` (`apply_context_modifier`)**:
+  - `mutmut_9`: `and` changed to `or` when checking `hasattr(..., "tools")`.
+- **26 in `app/loop/tools/orchestration.py` (`run_tools`)**:
+  - `mutmut_6, 9`: `getattr(context, "tools", None)` vs `()` — context always has `tools` attribute.
+  - `mutmut_12, 16`: `assistant_message` fallback to `None` or `AIMessage(content="XXXX")` — test tools do not read message content.
+  - `mutmut_23, 111, 112`: `is_generator_exit` flag mutated to `None/False`.
+  - `mutmut_25, 86`: `if context.cancel.cancelled: break` → `return` — equivalent mutant: in an async generator both `break` and `return` execute the `finally` block to repair history via `yield_missing_tool_results`.
+  - `mutmut_32, 41, 63, 77, 93`: `cid = str(call.get("id") or "XXXX")` — empty id fallback string.
+  - `mutmut_43, 97`: `run_tool_use(call, None, ...)` — tools in tests do not read the assistant message.
+  - `mutmut_121, 122`: `completed_tool_ids.add(None / str(None))` in `finally` loop — runs after yielding the missing message; `completed_tool_ids` is local and never read afterwards (equivalent mutant).
+- **2 in `app/loop/tools/pool.py` (`assemble_tool_pool`)**:
+  - `mutmut_18`: `getattr(tool, "is_mcp", None)` — equivalent to `False` in boolean condition.
+  - `mutmut_24`: fallback default `True` when `is_mcp` attribute is absent.
+- **6 in `app/loop/tools/execution.py` (`run_tool_use`)**:
+  - `mutmut_14`: `tool_name = str(tool_call.get("name") or "XXXX")`.
+  - `mutmut_57, 58, 83`: `validate_input(None, context)` / `check_permissions(tool_args, None)` — default callback stubs ignore args/context and return valid/allow.
+  - `mutmut_120, 123`: `tool_use_id = None` in `ToolResult` construction.
+- **10 in `app/loop/tools/base.py` (`build_tool`)**:
+  - `mutmut_1`: `is_mcp: bool = True` (default argument mutation).
+  - optional default assignments (`None`, empty schema, default mapper).
+  - `(lambda args: None)` instead of `(lambda args: False)` (equivalent in boolean contexts), and `is None` vs `is not None` guards.
+- **3 in `app/loop/permissions/types.py`**:
+  - default parameter `is_bypass_available: bool = True` in `get_next_permission_mode`.
+  - `elif mode == PermissionMode.BYPASS_PERMISSIONS` and `elif mode == PermissionMode.DONT_ASK` mutated to `!=`, where both branch and `else:` fallback return `PermissionMode.DEFAULT` (equivalent mutant).
+- **4 in `app/loop/permissions/rules.py`**:
+  - `isinstance(app_state.tool_permission_context, ToolPermissionContext)` type check mutation.
+  - `tool_perm_res = res` mutated to `None` in exception/assignment path.
+  - `getattr(tool, "requires_user_interaction", None)` fallback default.
+  - `req = requires_interaction_fn()` mutated to `req = None`.
+- **7 in `app/loop/permissions/filesystem.py`**:
+  - default parameter in `is_path_allowed`: `operation: Literal["read", "write"] = "write"`.
+  - `is_dangerous_path`: empty message return fallback `return False, ""`.
+  - `is_path_in_working_dir`: `except Exception: return False`.
+  - string mutation on `path_str = str(path)` and dictionary key variations in `decision_reason={"type": "mode", "mode": context.mode}`.
+- **19 in `app/loop/permissions/gate.py`**:
+  - string literal mutations inside informational `message` and `decision_reason` dictionaries (e.g. `{"type": "userInteraction"}` or `{"type": "other", "reason": "passthrough"}`).
+  - fallback defaults and boolean short-circuits on non-contractual branches.
+- **42 in `app/loop/permissions/capability.py`**:
+  - parser state initializers in `split_shell_commands` (`in_single = False` / `in_double = False` mutated to `None`, evaluating identically in boolean checks).
+  - `split_shell_commands` list appends and loop step increments.
+  - duration pattern regex matching variations and command wrapper argument skipping fallbacks.
 
 Two earlier rounds on this package are worth repeating as method. Four survivors were
 removed by deleting a `typing.cast` whose string argument is a runtime no-op — the mutants

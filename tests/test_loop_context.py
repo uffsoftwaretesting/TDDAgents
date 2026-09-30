@@ -139,3 +139,11 @@ class TestToolContextWiring:
         successor = replace(context, messages=(HumanMessage(content="next"),))
         assert context.messages == ()
         assert successor.messages != ()
+
+    def test_tools_default_to_empty_tuple(self):
+        assert tool_context_for(AppStateStore()).tools == ()
+
+    def test_tools_can_be_passed_in_factory(self):
+        fake_tools = ("fake_tool_1", "fake_tool_2")
+        context = tool_context_for(AppStateStore(), tools=fake_tools)
+        assert context.tools == fake_tools
