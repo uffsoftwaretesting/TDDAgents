@@ -20,7 +20,7 @@ mypy_path = "."
 # gate. Legacy modules are excluded until the phase that rewrites them brings them up.
 strict = true
 
-files = ["app/loop", "app/workspace", "app/sync", "app/sandbox", "app/errors", "app/tools", "app/hooks", "app/session", "tests"]
+files = ["app/loop", "app/workspace", "app/sync", "app/sandbox", "app/errors", "app/tools", "app/hooks", "app/session", "app/metrics", "tests"]
 
 [[tool.mypy.overrides]]
 # The E2B SDK ships no py.typed marker. app/sandbox/adapter.py casts at the boundary so
@@ -55,6 +55,7 @@ paths_to_mutate = [
     "app/tools/",
     "app/hooks/",
     "app/session/",
+    "app/metrics/",
 ]
 tests_dir = ["tests/"]
 

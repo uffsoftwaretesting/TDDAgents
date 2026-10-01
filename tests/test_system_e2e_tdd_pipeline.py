@@ -553,3 +553,78 @@ def test_e2e_live_openai_session_shell_interrupt_and_iteration() -> None:
     assert result2["user_confirmed"] is True
     assert len(result2.get("plan", [])) >= 1
     assert result2.get("success_count", 0) >= 1
+
+
+def test_e2e_live_openai_metrics_artifact_export_roundtrip(tmp_path: Path) -> None:
+    """
+    Live OpenAI E2E integration test for Part L:
+    Validates that real session execution history produces an EventLog that
+    correctly classifies flows, computes resilience metrics, and exports
+    events.jsonl, subreq_results.txt, and resilience_metrics.txt.
+    """
+    api_key = _get_live_openai_key()
+    if not api_key:
+        pytest.skip("No valid OPENAI_API_KEY configured in environment or .env")
+
+    os.environ["OPENAI_API_KEY"] = api_key
+    from app.config.config import Config
+    Config.OPENAI_API_KEY = api_key
+
+    from app.session.shell import SessionShell
+    from app.session.state import SessionStatus
+    from app.metrics.event_log import EventLog, EventType
+    from app.metrics.report import export_full_metrics_artifacts
+
+    shell = SessionShell()
+    thread_id = "live-test-shell-session-l"
+
+    # Step 1: Run through analyst interrupt
+    shell.run("Implement a palindrome checking utility.", thread_id)
+    # Step 2: Resume to execute plan
+    final_result = shell.resume(thread_id, "/yes")
+    assert final_result["status"] in (SessionStatus.COMPLETED, SessionStatus.ITEM_COMPLETE)
+
+    plan = final_result.get("plan", ["Implement palindrome checker"])
+    assert len(plan) >= 1
+
+    # Step 3: Record live session events into EventLog
+    log = EventLog(session_id=thread_id)
+    log.record(
+        EventType.SESSION,
+        payload={"task": "Implement palindrome checker", "status": str(final_result["status"])},
+    )
+    for idx, item in enumerate(plan):
+        log.record_transition(
+            turn_count=idx * 2 + 1,
+            phase="red",
+            reason="next_turn",
+            red_confirmed=True,
+            green_passed=False,
+            payload={"plan_index": idx, "item": item},
+        )
+        log.record_transition(
+            turn_count=idx * 2 + 2,
+            phase="green",
+            reason="completed",
+            red_confirmed=True,
+            green_passed=True,
+            payload={"plan_index": idx, "item": item},
+        )
+
+    # Step 4: Export full metrics artifacts to disk
+    artifacts = export_full_metrics_artifacts(log, plan, tmp_path)
+    assert artifacts["events_jsonl"].is_file()
+    assert artifacts["subreq_results"].is_file()
+    assert artifacts["resilience_metrics"].is_file()
+
+    # Step 5: Validate file contents
+    jsonl_lines = artifacts["events_jsonl"].read_text(encoding="utf-8").strip().splitlines()
+    assert len(jsonl_lines) == 1 + 2 * len(plan)
+
+    subreq_content = artifacts["subreq_results"].read_text(encoding="utf-8")
+    assert "SUBREQ RESULTS REPORT" in subreq_content
+    assert "F1 (Clean TDD):" in subreq_content
+
+    resilience_content = artifacts["resilience_metrics"].read_text(encoding="utf-8")
+    assert "RESILIENCE METRICS REPORT (TDD)" in resilience_content
+    assert "Self-Correction Success Rate:              100.00%" in resilience_content
