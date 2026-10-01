@@ -27,7 +27,21 @@ ledger state, not an edge.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import StrEnum
+
+
+class TddPhase(StrEnum):
+    """
+    Closed vocabulary of the three TDD phases (§3.3 and §4.5).
+
+    `phase` is the one agent definition field that must fail a load loudly rather
+    than default (§4.5), because silently ignoring it would silently disable the TDD invariant.
+    """
+
+    RED = "RED"
+    GREEN = "GREEN"
+    REFACTOR = "REFACTOR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,17 +49,67 @@ class PhaseLedger:
     """
     Where the run stands in the Red->Green->Refactor cycle.
 
-    `phase` is typed `str` only until the phase vocabulary lands with the rest of the TDD
-    enforcement in Part D; it is a closed set of three values, and it is the one
-    definition field that must fail a load loudly rather than default (§4.5), so it gets a
-    real type there rather than a validated string here.
+    `phase` is typed `TddPhase` and validates against the explicit list of phases,
+    failing loudly on any unexpected string value.
 
     `red_confirmed` and `green_passed` are observations, not intentions: each records that
     a test run was seen to fail, and that the same test was later seen to pass. They are
-    monotonic within one sub-requirement and are reset by whatever advances the run to the
-    next one.
+    monotonic within one cycle and are updated by `RunTests` (Part D2), the only writer.
     """
 
-    phase: str = "RED"
+    phase: TddPhase | str = TddPhase.RED
     red_confirmed: bool = False
     green_passed: bool = False
+
+    def __post_init__(self) -> None:
+        if isinstance(self.phase, str) and not isinstance(self.phase, TddPhase):
+            try:
+                object.__setattr__(self, "phase", TddPhase(self.phase))
+            except ValueError:
+                raise ValueError(
+                    f"Invalid TDD phase: {self.phase!r}. Must be one of: "
+                    f"{', '.join(p.value for p in TddPhase)}"
+                )
+
+    def with_test_result(self, exit_code: int) -> PhaseLedger:
+        """
+        Derive the successor ledger state after RunTests observes an exit code (Part D2).
+
+        Exit code == 0: tests passed.
+        Exit code != 0: tests failed.
+        """
+        if exit_code != 0:
+            if self.phase == TddPhase.RED:
+                # Failing test observed in RED: red_confirmed becomes True and phase advances to GREEN
+                return replace(self, phase=TddPhase.GREEN, red_confirmed=True, green_passed=False)
+            elif self.phase == TddPhase.GREEN:
+                # Tests still failing in GREEN
+                return replace(self, green_passed=False)
+            else:
+                # REFACTOR phase: behaviour was broken by refactor!
+                return replace(self, green_passed=False)
+
+        # exit_code == 0
+        if self.red_confirmed:
+            # Previously confirmed red test is now passing
+            return replace(self, green_passed=True)
+
+        # F2 "green in red" case: test passed on first run without prior failure.
+        # red_confirmed stays False, green_passed becomes True, phase stays RED.
+        return replace(self, green_passed=True, red_confirmed=False, phase=TddPhase.RED)
+
+    def transition_to(self, new_phase: TddPhase | str) -> PhaseLedger:
+        """
+        Explicitly transition to a new phase (e.g. from GREEN to REFACTOR).
+        """
+        target = TddPhase(new_phase) if isinstance(new_phase, str) else new_phase
+        if target == TddPhase.REFACTOR and not self.is_cycle_complete:
+            raise ValueError("Cannot transition to REFACTOR before cycle has passed GREEN (red-then-green).")
+        return replace(self, phase=target)
+
+    @property
+    def is_cycle_complete(self) -> bool:
+        """
+        True when a failing test has been confirmed and the test suite has subsequently passed.
+        """
+        return self.red_confirmed and self.green_passed

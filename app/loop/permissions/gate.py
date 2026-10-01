@@ -66,6 +66,25 @@ async def has_permissions_to_use_tool(
             decision_reason={"type": "other", "reason": "cancelled"},
         )
 
+    # 1b. TDD phase authorization check (Part D4)
+    # Sits above all allow paths (including bypass mode), enforcing Red->Green invariants.
+    if hasattr(context, "get_app_state"):
+        try:
+            app_state = context.get_app_state()
+            ledger = getattr(app_state, "phase_ledger", None)
+            if ledger is not None:
+                from app.loop.permissions.tdd import check_tdd_phase_permission
+
+                permitted, reason = check_tdd_phase_permission(tool, input_args, ledger)
+                if not permitted:
+                    return PermissionResult(
+                        behavior=PermissionBehavior.DENY,
+                        message=reason,
+                        decision_reason={"type": "phase_rule", "phase": ledger.phase, "reason": reason},
+                    )
+        except Exception:
+            pass
+
     perm_ctx = extract_permission_context(context)
 
     # 2a. Blanket deny rule

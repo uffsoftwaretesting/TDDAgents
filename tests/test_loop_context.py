@@ -147,3 +147,8 @@ class TestToolContextWiring:
         fake_tools = ("fake_tool_1", "fake_tool_2")
         context = tool_context_for(AppStateStore(), tools=fake_tools)
         assert context.tools == fake_tools
+
+    def test_permission_context_can_be_passed_in_factory(self):
+        pc = object()
+        context = tool_context_for(AppStateStore(), permission_context=pc)
+        assert context.permission_context is pc

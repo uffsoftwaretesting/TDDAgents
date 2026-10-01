@@ -48,6 +48,7 @@ class ToolResult:
     system_reminder: str | None = None
     hook_stopped_continuation: bool = False
     context_modifier: Callable[[ToolContext], ToolContext] | None = None
+    exit_code: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

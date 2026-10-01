@@ -144,3 +144,93 @@ def tool_context_for(
         tools=tools,
         permission_context=permission_context,
     )
+
+
+# Re-exports for Part E Context Systems
+from app.loop.context.attachments import (  # noqa: E402
+    AgentListingDelta,
+    DeltaManager,
+    McpInstructionsDelta,
+)
+from app.loop.context.cache import (  # noqa: E402
+    CacheBlock,
+    CacheLatchError,
+    MAX_CACHE_BREAKPOINTS,
+    SessionLatches,
+    build_system_prompt_blocks,
+    validate_cache_breakpoints_budget,
+)
+from app.loop.context.cleanup import (  # noqa: E402
+    invalidate_context_caches,
+    notify_compaction,
+)
+from app.loop.context.compact import (  # noqa: E402
+    apply_tool_result_budget,
+    compact_conversation,
+    microcompact_tool_results,
+    try_reactive_compact,
+)
+from app.loop.context.instructions import (  # noqa: E402
+    InstructionFile,
+    find_and_load_claude_rules,
+    find_and_load_project_instructions,
+    load_instruction_file,
+    strip_html_comments,
+)
+from app.loop.context.slicing import (  # noqa: E402
+    find_safe_truncation_index,
+    is_assistant_message,
+    is_user_message,
+    slice_messages_head,
+    validate_api_invariants,
+)
+from app.loop.context.tokens import (  # noqa: E402
+    TokenCounter,
+    TokenWarningState,
+    calculate_token_warning_state,
+    count_messages_tokens,
+    estimate_block_tokens,
+    estimate_message_tokens,
+    estimate_string_tokens,
+)
+
+__all__ = [
+    "CancelToken",
+    "AppState",
+    "AppStateStore",
+    "discard_app_state_update",
+    "ToolContext",
+    "tool_context_for",
+    "TokenCounter",
+    "TokenWarningState",
+    "estimate_string_tokens",
+    "estimate_block_tokens",
+    "estimate_message_tokens",
+    "count_messages_tokens",
+    "calculate_token_warning_state",
+    "find_safe_truncation_index",
+    "slice_messages_head",
+    "validate_api_invariants",
+    "is_user_message",
+    "is_assistant_message",
+    "InstructionFile",
+    "load_instruction_file",
+    "find_and_load_project_instructions",
+    "find_and_load_claude_rules",
+    "strip_html_comments",
+    "CacheBlock",
+    "CacheLatchError",
+    "MAX_CACHE_BREAKPOINTS",
+    "SessionLatches",
+    "build_system_prompt_blocks",
+    "validate_cache_breakpoints_budget",
+    "AgentListingDelta",
+    "McpInstructionsDelta",
+    "DeltaManager",
+    "apply_tool_result_budget",
+    "microcompact_tool_results",
+    "compact_conversation",
+    "try_reactive_compact",
+    "invalidate_context_caches",
+    "notify_compaction",
+]

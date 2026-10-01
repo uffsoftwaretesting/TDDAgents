@@ -39,28 +39,44 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, and C1–C5 of the plan are built and under the quality gate. Nothing in the running graph
+Parts A1–A7, B1–B8, C1–C5, D1–D6, and E1–E8 of the plan are built and under the quality gate. Nothing in the running graph
 calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
 | File / Subpackage | Ships |
 |---|---|
 | `config.py` | `RunConfig` + `Gates`, snapshotted once at entry by `build_run_config()` |
 | `state.py` | `LoopState` (frozen, tuples, **no field has a default**), `CompactionTracking`, `initial_loop_state()` |
-| `context.py` | `ToolContext`, `AppState`, `AppStateStore`, `CancelToken`, `discard_app_state_update` |
+| `context/` | Subpackage providing `AppState`, `AppStateStore`, `CancelToken`, `ToolContext`, `discard_app_state_update` |
+| `context/tokens.py` | Fast heuristic token counter (`(len+3)//4`), block/message/sequence token estimators, `TokenWarningState`, `TokenCounter` (E1) |
+| `context/slicing.py` | Head-slicing enforcing all 3 hard invariants (user-first, unbroken tool pairs, non-orphaned thinking), `find_safe_truncation_index`, `slice_messages_head` (E2) |
+| `context/instructions.py` | HTML comment cleaner (`strip_html_comments`), `load_instruction_file`, `find_and_load_project_instructions`, `find_and_load_claude_rules` (E3) |
+| `prompts/loader.py` | Markdown frontmatter parser, visible placeholder rendering (`{{VAR}}`), agent loader enforcing 4-rule discipline and loud phase validation (E4) |
+| `prompts/sections.py` | `systemPromptSection` (memoized), `DANGEROUS_uncachedSystemPromptSection` (volatile with required reason), `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`, run-scoped `PromptSectionCache` (E4b) |
+| `context/cache.py` | `SessionLatches` (`CacheLatchError` on mid-session flip), `build_system_prompt_blocks` with ephemeral `cache_control` on static Block 3, `validate_cache_breakpoints_budget` (E5) |
+| `context/attachments.py` | `AgentListingDelta`, `McpInstructionsDelta`, `DeltaManager` for dynamic roster diffing as message attachments (E6) |
+| `context/compact.py` | Graduated context management: `apply_tool_result_budget`, `microcompact_tool_results`, `compact_conversation`, `try_reactive_compact` (E7) |
+| `context/cleanup.py` | `invalidate_context_caches` clearing run cache and latches without two-layer trap, `notify_compaction` (E8) |
+| `app/prompts/` | Complete composition roster: 7 static system instructions + dynamic, 7 core tools, and 6 TDD agents (`tester`, `developer`, `refactorer` + catalogue, `verification`, `explore`, `plan`) |
 | `transitions.py` | `Continue` / `Terminal` `StrEnum`s, `Transition`, `Terminated` |
 | `deps.py` | `LoopDeps` — the injected 7-member DI seam (A4), plus `CompactionResult` and `StopHookResult` |
-| `engine.py` | `run_loop`, an async generator (A3–A7), plus `drain`, handling all terminal returns and continue sites |
-| `ledger.py`, `messages.py` | `PhaseLedger` (inert until Part D); the `Message` alias and `tool_calls_in` |
+| `engine.py` | `run_loop`, an async generator (A3–A7), plus `drain`, handling all terminal returns, continue sites, and ledger reconciliation |
+| `ledger.py` | `TddPhase` (`RED`, `GREEN`, `REFACTOR`), `PhaseLedger`, `with_test_result()`, `transition_to()`, `is_cycle_complete` (D1) |
+| `messages.py` | The `Message` alias and `tool_calls_in` |
 | `tools/types.py` | `ValidationResult`, `PermissionResult`, `ToolResult`, `ContextModifier` (B1) |
-| `tools/base.py` | `Tool` protocol, `BuiltTool`, `build_tool` with fail-closed defaults, name/alias lookup (B2) |
+| `tools/base.py` | `Tool` protocol, `BuiltTool`, `build_tool` with fail-closed defaults, name/alias lookup, classification hooks (B2 & D3) |
 | `tools/execution.py` | `run_tool_use`, `yield_missing_tool_results`, history-repair invariant (B4 & B7) |
 | `tools/orchestration.py` | `partition_tool_calls`, serial & concurrent `run_tools`, context-modifier replay (B5 & B6) |
-| `tools/pool.py` | `assemble_tool_pool` with partition-sorting and prompt-cache stability, `is_tool_denied` (B8) |
+| `tools/pool.py` | `assemble_tool_pool` with partition-sorting, prompt-cache stability, and phase-derived deny rules (B8 & D3) |
+| `tools/run_tests.py` | `RunTests` loop tool, ground truth test execution, `SuiteExecutionResult`, updating authoritative ledger (D2) |
 | `permissions/types.py` | `PermissionMode`, `PermissionBehavior`, `PermissionRule`, `ToolPermissionContext`, ladder cycling (C1) |
 | `permissions/rules.py` | `rule_matches`, rule lookups, `extract_permission_context`, `check_rule_based_permissions` (C2) |
-| `permissions/gate.py` | `has_permissions_to_use_tool` runtime authorization gate, mode rules, bypass mode (C3) |
+| `permissions/gate.py` | `has_permissions_to_use_tool` runtime authorization gate, mode rules, bypass mode, TDD phase rules (C3 & D4) |
 | `permissions/capability.py` | `is_bash_command_read_only`, `bash_is_read_only`, shell splitting, duration and wrapper handling (C4) |
 | `permissions/filesystem.py` | `is_path_allowed`, `is_dangerous_path`, `is_path_in_allowed_working_dirs` (C5) |
+| `permissions/tdd.py` | `get_phase_deny_rules`, tool classification (`is_implementation_writing_tool`, `is_test_writing_tool`, `is_test_path`), `check_tdd_phase_permission` (D3 & D4) |
+| `tdd/hooks.py` | `tdd_phase_incomplete_hook`, stop hook honoring `stop_hook_active` without infinite loops (D5) |
+
+
 
 Three things about it are load-bearing and easy to undo by accident:
 

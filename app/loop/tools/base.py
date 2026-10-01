@@ -32,6 +32,8 @@ def default_map_result(result: ToolResult, tool_use_id: str) -> ToolMessage:
         additional_kwargs["system_reminder"] = result.system_reminder
     if result.is_error:
         additional_kwargs["is_error"] = True
+    if result.exit_code is not None:
+        additional_kwargs["exit_code"] = result.exit_code
 
     return ToolMessage(
         content=result.content,
@@ -67,6 +69,8 @@ class Tool(Protocol):
     def is_concurrency_safe(self, input: dict[str, Any]) -> bool: ...
     def is_read_only(self, input: dict[str, Any]) -> bool: ...
     def is_destructive(self, input: dict[str, Any]) -> bool: ...
+    def is_implementation_writer(self) -> bool: ...
+    def is_test_writer(self) -> bool: ...
     def validate_input(self, input: dict[str, Any], context: ToolContext) -> ValidationResult: ...
 
     def check_permissions(
@@ -93,6 +97,8 @@ class BuiltTool:
     _is_concurrency_safe: Callable[[dict[str, Any]], bool] = field(default_factory=lambda: (lambda args: False))
     _is_read_only: Callable[[dict[str, Any]], bool] = field(default_factory=lambda: (lambda args: False))
     _is_destructive: Callable[[dict[str, Any]], bool] = field(default_factory=lambda: (lambda args: False))
+    _is_implementation_writer: Callable[[], bool] = field(default_factory=lambda: (lambda: False))
+    _is_test_writer: Callable[[], bool] = field(default_factory=lambda: (lambda: False))
     _requires_user_interaction: Callable[[dict[str, Any]], bool] | Callable[[], bool] = field(
         default_factory=lambda: (lambda args: False)
     )
@@ -134,6 +140,18 @@ class BuiltTool:
     def is_destructive(self, input: dict[str, Any]) -> bool:
         try:
             return bool(self._is_destructive(input))
+        except Exception:
+            return False
+
+    def is_implementation_writer(self) -> bool:
+        try:
+            return bool(self._is_implementation_writer())
+        except Exception:
+            return False
+
+    def is_test_writer(self) -> bool:
+        try:
+            return bool(self._is_test_writer())
         except Exception:
             return False
 
@@ -182,6 +200,8 @@ def build_tool(
     is_concurrency_safe: Callable[[dict[str, Any]], bool] | None = None,
     is_read_only: Callable[[dict[str, Any]], bool] | None = None,
     is_destructive: Callable[[dict[str, Any]], bool] | None = None,
+    is_implementation_writer: Callable[[], bool] | bool = False,
+    is_test_writer: Callable[[], bool] | bool = False,
     requires_user_interaction: (
         Callable[[dict[str, Any]], bool] | Callable[[], bool] | None
     ) = None,
@@ -195,6 +215,16 @@ def build_tool(
     """
     Builds a Tool with fail-closed defaults for omitted members.
     """
+    if isinstance(is_implementation_writer, bool):
+        impl_fn: Callable[[], bool] = (lambda: is_implementation_writer)
+    else:
+        impl_fn = is_implementation_writer
+
+    if isinstance(is_test_writer, bool):
+        test_fn: Callable[[], bool] = (lambda: is_test_writer)
+    else:
+        test_fn = is_test_writer
+
     return BuiltTool(
         name=name,
         prompt=prompt,
@@ -207,6 +237,9 @@ def build_tool(
         _is_concurrency_safe=is_concurrency_safe if is_concurrency_safe is not None else (lambda args: False),
         _is_read_only=is_read_only if is_read_only is not None else (lambda args: False),
         _is_destructive=is_destructive if is_destructive is not None else (lambda args: False),
+        _is_implementation_writer=impl_fn,
+        _is_test_writer=test_fn,
+
         _requires_user_interaction=(
             requires_user_interaction if requires_user_interaction is not None else (lambda args: False)
         ),

@@ -86,6 +86,9 @@ async def run_loop(
 
         messages_for_query = state.messages
 
+        if state.transition is None and state.phase_ledger != state.tool_context.get_app_state().phase_ledger:
+            state.tool_context.set_app_state(lambda s: replace(s, phase_ledger=state.phase_ledger))
+
         state = replace(
             state, tool_context=replace(state.tool_context, messages=messages_for_query)
         )
@@ -132,7 +135,7 @@ async def run_loop(
                     state = LoopState(
                         messages=compact_res.messages,
                         tool_context=state.tool_context,
-                        phase_ledger=state.phase_ledger,
+                        phase_ledger=state.tool_context.get_app_state().phase_ledger,
                         compaction_tracking=tracking,
                         has_attempted_reactive_compact=True,
                         stop_hook_active=None,
@@ -151,7 +154,7 @@ async def run_loop(
             state = LoopState(
                 messages=(*messages_for_query, *assistant_messages, resume_msg),
                 tool_context=state.tool_context,
-                phase_ledger=state.phase_ledger,
+                phase_ledger=state.tool_context.get_app_state().phase_ledger,
                 compaction_tracking=state.compaction_tracking,
                 has_attempted_reactive_compact=state.has_attempted_reactive_compact,
                 stop_hook_active=None,
@@ -178,7 +181,7 @@ async def run_loop(
                 state = LoopState(
                     messages=(*messages_for_query, *assistant_messages, *stop_hook_res.blocking_errors),
                     tool_context=state.tool_context,
-                    phase_ledger=state.phase_ledger,
+                    phase_ledger=state.tool_context.get_app_state().phase_ledger,
                     compaction_tracking=state.compaction_tracking,
                     has_attempted_reactive_compact=state.has_attempted_reactive_compact,
                     stop_hook_active=True,
@@ -215,7 +218,7 @@ async def run_loop(
         state = LoopState(
             messages=(*messages_for_query, *assistant_messages, *tool_results),
             tool_context=state.tool_context,
-            phase_ledger=state.phase_ledger,
+            phase_ledger=state.tool_context.get_app_state().phase_ledger,
             compaction_tracking=state.compaction_tracking,
             has_attempted_reactive_compact=False,
             stop_hook_active=state.stop_hook_active,

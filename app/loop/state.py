@@ -32,7 +32,7 @@ recoverable from the transition history, which is where Part L2 reads it from an
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.loop.context import ToolContext
 from app.loop.ledger import PhaseLedger
@@ -83,7 +83,11 @@ class LoopState:
     transition: Transition | None
 
 
-def initial_loop_state(messages: tuple[Message, ...], tool_context: ToolContext) -> LoopState:
+def initial_loop_state(
+    messages: tuple[Message, ...],
+    tool_context: ToolContext,
+    phase_ledger: PhaseLedger | None = None,
+) -> LoopState:
     """
     The record a run starts from.
 
@@ -94,11 +98,17 @@ def initial_loop_state(messages: tuple[Message, ...], tool_context: ToolContext)
 
     `transition` is `None` on the first iteration and only there, which is what makes it a
     reliable "is this the first pass" test for code that needs one.
+
+    `phase_ledger` is reconciled with `tool_context.get_app_state().phase_ledger` (Part D1).
     """
+    ledger = phase_ledger if phase_ledger is not None else tool_context.get_app_state().phase_ledger
+    if phase_ledger is not None and tool_context.get_app_state().phase_ledger != phase_ledger:
+        tool_context.set_app_state(lambda s: replace(s, phase_ledger=ledger))
+
     return LoopState(
         messages=messages,
         tool_context=tool_context,
-        phase_ledger=PhaseLedger(),
+        phase_ledger=ledger,
         compaction_tracking=None,
         has_attempted_reactive_compact=False,
         stop_hook_active=None,
