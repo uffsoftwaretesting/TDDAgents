@@ -6,5 +6,6 @@
   - Use `Grep` for searching file contents by regular expressions.
   - Use `Glob` for finding files by path patterns.
   - Use `RunTests` to execute tests and update the authoritative TDD phase ledger.
+  - Use `Agent` (alias `Task`) to delegate focused sub-tasks to specialized subagents or forks.
   - Use `Bash` for environment operations, package installs, and builds.
 - Independent tool calls can and should be invoked in parallel in a single response to minimize round-trip latency.

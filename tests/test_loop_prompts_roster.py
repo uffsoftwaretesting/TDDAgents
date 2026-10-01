@@ -40,6 +40,7 @@ def test_tool_prompt_files_exist_and_load() -> None:
         "glob.md",
         "bash.md",
         "run_tests.md",
+        "agent.md",
     ]
     for filename in expected_tools:
         p = tools_dir / filename
