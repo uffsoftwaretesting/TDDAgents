@@ -39,14 +39,14 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, and F1–F6 of the plan are built and under the quality gate. Nothing in the running graph
+Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, and G1–G4 of the plan are built and under the quality gate. Nothing in the running graph
 calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
 | File / Subpackage | Ships |
 |---|---|
 | `config.py` | `RunConfig` + `Gates`, snapshotted once at entry by `build_run_config()` |
 | `state.py` | `LoopState` (frozen, tuples, **no field has a default**), `CompactionTracking`, `initial_loop_state()` |
-| `context/` | Subpackage providing `AppState`, `AppStateStore`, `CancelToken`, `ToolContext`, `discard_app_state_update` |
+| `context/` | Subpackage providing `AppState`, `AppStateStore`, `CancelToken`, `ToolContext` (with `workspace`), `discard_app_state_update` |
 | `context/tokens.py` | Fast heuristic token counter (`(len+3)//4`), block/message/sequence token estimators, `TokenWarningState`, `TokenCounter` (E1) |
 | `context/slicing.py` | Head-slicing enforcing all 3 hard invariants (user-first, unbroken tool pairs, non-orphaned thinking), `find_safe_truncation_index`, `slice_messages_head` (E2) |
 | `context/instructions.py` | HTML comment cleaner (`strip_html_comments`), `load_instruction_file`, `find_and_load_project_instructions`, `find_and_load_claude_rules` (E3) |
@@ -67,7 +67,7 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `tools/execution.py` | `run_tool_use`, `yield_missing_tool_results`, history-repair invariant (B4 & B7) |
 | `tools/orchestration.py` | `partition_tool_calls`, serial & concurrent `run_tools`, context-modifier replay (B5 & B6) |
 | `tools/pool.py` | `assemble_tool_pool` with partition-sorting, prompt-cache stability, and phase-derived deny rules (B8 & D3) |
-| `tools/run_tests.py` | `RunTests` loop tool, ground truth test execution, `SuiteExecutionResult`, updating authoritative ledger (D2) |
+| `tools/run_tests.py` | `RunTests` loop tool, ground truth test execution, `SuiteExecutionResult`, updating authoritative ledger, workspace execution (D2 & G) |
 | `permissions/types.py` | `PermissionMode`, `PermissionBehavior`, `PermissionRule`, `ToolPermissionContext`, ladder cycling (C1) |
 | `permissions/rules.py` | `rule_matches`, rule lookups, `extract_permission_context`, `check_rule_based_permissions` (C2) |
 | `permissions/gate.py` | `has_permissions_to_use_tool` runtime authorization gate, mode rules, bypass mode, TDD phase rules (C3 & D4) |
@@ -79,6 +79,13 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `streaming/withhold.py` | Withhold-then-decide gate snapshot (`WithholdGateSnapshot`, `take_withhold_gate_snapshot`), recovery error predicates (F5 & F6) |
 | `streaming/executor.py` | Eager content-block tool dispatch (`StreamingToolExecutor`, `TrackedTool`), upward bubbling (#21056), Bash-only sibling cascade, synthetic errors, strictly ordered emission, `discard()` (F2, F3, F4) |
 | `streaming/__init__.py` | Clean re-export of Part F streaming & abort primitives |
+| `app/workspace/base.py` | `Workspace` protocol, POSIX path normalization, `CommandResult`, `FileEntry`, and `WorkspaceError` hierarchy (G1) |
+| `app/sandbox/adapter.py` | `E2BAdapter` wrapping E2B SDK, static surface verified, `E2BWorkspace` delegation (G2) |
+| `app/workspace/local.py` | `LocalWorkspace` rooted on host, login-shell parity (`/bin/bash -l -c`), symlink boundary defense (G3) |
+| `app/workspace/router.py` | `DualWorkspace` and `resolve_workspace` target resolution |
+| `app/sync/baseline.py` | SHA256 snapshot, `IgnoreRules` (.gitignore matching), 3-way `classify` conflict resolution (G4) |
+| `app/sync/events.py` | `SyncCheckpoint`, `SyncConflict`, event logging and drainable sink (G4) |
+| `app/sync/engine.py` | `SyncEngine`: bidirectional sync at 4 deterministic checkpoints (`seed`, `reconcile_ledger`, `flush`), conflict backup (G4) |
 
 
 
@@ -294,6 +301,22 @@ All 43 survivors across `app/loop/streaming/` are triaged and documented:
 - **2 in `app/loop/streaming/executor.py` (`_process_queue`)**: debug logger mutations and boolean short-circuits.
 - **21 in `app/loop/streaming/executor.py` (`_execute_tool`)**: string mutations in debug/error logging, fallback defaults on unexercised optional branches.
 - **6 in `app/loop/streaming/executor.py` (`get_completed_results` / `get_remaining_results`)**: logger mutations and local tracking set operations with no external read.
+
+**`app/workspace/` and `app/sync/` (Part G1–G4) are measured under `paths_to_mutate = ["app/workspace/", "app/sync/"]` and clear the bar**, at 158 tests:
+
+| | |
+|---|---|
+| Mutants | 831 (0 timeout) |
+| Killed | 757 |
+| Survived | 74 |
+| **Mutation score** | **91.09%** (757 / 831) |
+
+All 74 survivors across `app/workspace/` and `app/sync/` are triaged and documented:
+- **Default arguments in signatures (28)**: e.g. `LocalWorkspace.list_files(path=".", depth=1)`, `read_file(encoding="utf-8")`, `SyncEngine.flush(kind="sub_req_boundary", full=False)`, `_reconcile(ignore_baseline=False)`. Equivalent by construction: caller defaults are resolved on the public wrapper and passed positionally.
+- **Equivalent path logic (2)**: `if normalized == ".": return "."` vs `return normalized` (since `normalized` is already `"."`).
+- **Codec aliases (8)**: `"utf-8"` -> `"UTF-8"` or `None` on systems where UTF-8 is the default encoding.
+- **Logging wording and telemetry strings (24)**: logger messages, debug strings, and decision reasons (e.g. `f"both sides changed; {winner} wins"`).
+- **Fallback defaults and timing bounds (12)**: non-contractual timestamps (`taken_at=None` when ignoring baseline) and command duration timing boundaries.
 
 Two earlier rounds on this package are worth repeating as method. Four survivors were
 removed by deleting a `typing.cast` whose string argument is a runtime no-op — the mutants

@@ -374,3 +374,44 @@ def test_call_run_tests_argument_handling_and_formatting():
         )
 
     asyncio.run(go())
+
+
+def test_run_tests_default_runner_uses_workspace_if_provided():
+    async def go():
+        store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+
+        class FakeWorkspaceWithExecute:
+            def __init__(self):
+                self.commands = []
+
+            def execute(self, cmd):
+                self.commands.append(cmd)
+                from app.workspace.base import CommandResult
+                return CommandResult(
+                    stdout="pytest output",
+                    stderr="",
+                    exit_code=0,
+                    duration=0.1,
+                    workspace="sandbox",
+                )
+
+        ws = FakeWorkspaceWithExecute()
+        ctx = tool_context_for(store, workspace=ws)
+        tool = build_run_tests_tool(None)
+
+        res = await tool.call({"test_path": "tests/test_bar.py"}, ctx)
+        assert ws.commands == ['PYTHONPATH=. python -m pytest "tests/test_bar.py" -vv --tb=short']
+        assert res.exit_code == 0
+        assert "pytest output" in res.content
+
+        # Error handling when workspace.execute raises
+        class BrokenWorkspace:
+            def execute(self, cmd):
+                raise RuntimeError("Sandbox crashed")
+
+        ctx_broken = tool_context_for(store, workspace=BrokenWorkspace())
+        res_broken = await tool.call({"test_path": "tests/test_broken.py"}, ctx_broken)
+        assert res_broken.exit_code == 1
+        assert "Error executing pytest in workspace: Sandbox crashed" in res_broken.content
+
+    asyncio.run(go())

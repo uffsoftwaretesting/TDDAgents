@@ -120,6 +120,7 @@ class ToolContext:
     in_flight_tool_ids: set[str] = field(default_factory=set)
     tools: tuple[Any, ...] = ()
     permission_context: Any = None
+    workspace: Any = None
 
 
 def tool_context_for(
@@ -128,6 +129,7 @@ def tool_context_for(
     messages: tuple[Message, ...] = (),
     tools: tuple[Any, ...] = (),
     permission_context: Any = None,
+    workspace: Any = None,
 ) -> ToolContext:
     """
     Build a context wired to a store, which is what the main loop wants.
@@ -143,6 +145,7 @@ def tool_context_for(
         messages=messages,
         tools=tools,
         permission_context=permission_context,
+        workspace=workspace,
     )
 
 

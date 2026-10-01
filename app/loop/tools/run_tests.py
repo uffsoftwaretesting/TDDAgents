@@ -71,6 +71,24 @@ async def _default_test_runner(test_path: str, context: ToolContext) -> SuiteExe
             return out
         return SuiteExecutionResult(exit_code=getattr(out, "exit_code", 0))
 
+    # Workspace execution if available
+    ws: Any = getattr(context, "workspace", None)
+    if ws is not None and hasattr(ws, "execute"):
+        cmd = f'PYTHONPATH=. python -m pytest "{test_path}" -vv --tb=short'
+        try:
+            res = ws.execute(cmd)
+            return SuiteExecutionResult(
+                exit_code=res.exit_code,
+                stdout=res.stdout,
+                stderr=res.stderr,
+            )
+        except Exception as exc:
+            return SuiteExecutionResult(
+                exit_code=1,
+                stdout="",
+                stderr=f"Error executing pytest in workspace: {exc}",
+            )
+
     # Offline fallback
     return SuiteExecutionResult(
         exit_code=0,

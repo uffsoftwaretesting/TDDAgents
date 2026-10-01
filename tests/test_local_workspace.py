@@ -133,6 +133,13 @@ def test_read_missing_file_raises_not_found(local_ws):
         local_ws.read_file("nope.py")
 
 
+def test_read_directory_raises_path_error(local_ws):
+    local_ws.write_file("dir/child.py", "x = 1")
+    with pytest.raises(WorkspacePathError) as exc_info:
+        local_ws.read_file("dir")
+    assert "Path is a directory, not a file: dir" in str(exc_info.value)
+
+
 def test_delete_missing_file_raises_not_found(local_ws):
     with pytest.raises(WorkspaceNotFound, match="File not found: nope.py"):
         local_ws.delete_file("nope.py")
@@ -346,3 +353,75 @@ def test_execute_uses_a_login_shell_matching_e2b(local_ws):
     """
     result = local_ws.execute("echo $0")
     assert "bash" in result.stdout
+
+
+def test_resolve_oserror_raises_workspace_path_error(local_ws, monkeypatch):
+    from pathlib import Path
+
+    def fake_resolve(self):
+        raise OSError("Permission denied")
+
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+    with pytest.raises(WorkspacePathError, match="Could not resolve path 'file.txt': Permission denied"):
+        local_ws.resolve("file.txt")
+
+
+def test_read_file_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
+    from pathlib import Path
+
+    local_ws.write_file("file.txt", "content")
+
+    def fake_read_text(self, encoding="utf-8"):
+        raise OSError("I/O error")
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+    with pytest.raises(WorkspaceProviderError, match="Could not read 'file.txt': I/O error"):
+        local_ws.read_file("file.txt")
+
+
+def test_write_file_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
+    from pathlib import Path
+
+    def fake_write_text(self, content, encoding="utf-8"):
+        raise OSError("Disk full")
+
+    monkeypatch.setattr(Path, "write_text", fake_write_text)
+    with pytest.raises(WorkspaceProviderError, match="Could not write 'file.txt': Disk full"):
+        local_ws.write_file("file.txt", "content")
+
+
+def test_delete_file_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
+    from pathlib import Path
+
+    local_ws.write_file("file.txt", "content")
+
+    def fake_unlink(self):
+        raise OSError("Device busy")
+
+    monkeypatch.setattr(Path, "unlink", fake_unlink)
+    with pytest.raises(WorkspaceProviderError, match="Could not delete 'file.txt': Device busy"):
+        local_ws.delete_file("file.txt")
+
+
+def test_move_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
+    from pathlib import Path
+
+    local_ws.write_file("old.txt", "content")
+
+    def fake_rename(self, target):
+        raise OSError("Cross-device link")
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+    with pytest.raises(WorkspaceProviderError, match="Could not move 'old.txt' to 'new.txt': Cross-device link"):
+        local_ws.move("old.txt", "new.txt")
+
+
+def test_execute_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
+    import subprocess
+
+    def fake_run(*args, **kwargs):
+        raise OSError("Exec format error")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(WorkspaceProviderError, match="Could not run local command 'some_cmd': Exec format error"):
+        local_ws.execute("some_cmd")

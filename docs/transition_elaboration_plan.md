@@ -801,8 +801,14 @@ then never surfaced.
 
 ### Part G — Workspace and execution (4)
 
-`G1` workspace protocol · `G2` sandbox adapter · `G3` local workspace · `G4` checkpointed
-sync. Generated code continues to run only in the sandbox.
+| # | Ships | Notes |
+|---|---|---|
+| G1 | Workspace protocol | Protocol, path normalization, CommandResult, FileEntry, and WorkspaceError hierarchy |
+| G2 | Sandbox adapter | E2BAdapter wrapping E2B SDK, static surface verification, E2BWorkspace delegation |
+| G3 | Local workspace | Host-rooted LocalWorkspace, login-shell execution parity, symlink containment |
+| G4 | Checkpointed sync | Bidirectional reconciliation at 4 deterministic checkpoints, conflict preservation, marker tracking |
+
+Generated code continues to run only in the sandbox.
 
 ### Part H — Hooks (5)
 
