@@ -20,3 +20,6 @@ mutants/
 # ...except the shared, version-controlled hook configuration. The user scope
 # (~/.tddagents/settings.json) and the local scope (settings.local.json) stay ignored.
 !.tddagents/settings.json
+
+# Reference clones
+reference/claude-code-system-prompts/

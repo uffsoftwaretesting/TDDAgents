@@ -786,10 +786,14 @@ without clearing the outer one that wraps it is a no-op from the caller's side.
 
 ### Part F — Streaming and recovery (6)
 
-`F1` streamed model call · `F2` dispatch at content-block close, not on partial parse ·
-`F3` the three-controller abort tree — turn, sibling, per-tool — with only Bash errors
-cascading to siblings and exactly one deliberate upward bubble · `F4` ordered emission and
-`discard()` · `F5` withhold-then-decide · `F6` the recovery continue sites.
+| # | Ships | Notes |
+|---|---|---|
+| F1 | Streamed model call | `deps.call_model(state, config)` yielding stream chunks |
+| F2 | Dispatch at content-block close | `StreamingToolExecutor.add_tool(call, message)` during stream |
+| F3 | Three-controller abort tree | Turn, sibling, per-tool — Bash-only sibling cascade and upward bubbling (#21056) |
+| F4 | Strictly ordered emission and `discard()` | Result drainage preserving model call sequence, synthetic fallback on discard |
+| F5 | Withhold-then-decide gate snapshot | Hoisted before stream loop (`take_withhold_gate_snapshot`) |
+| F6 | Recovery continue sites | `REACTIVE_COMPACT_RETRY`, `MAX_OUTPUT_TOKENS_RECOVERY` |
 
 F5's hazard is specific: the withhold decision and the recovery decision must read the **same**
 gate snapshot, or a value flipping during a long stream causes a message to be withheld and

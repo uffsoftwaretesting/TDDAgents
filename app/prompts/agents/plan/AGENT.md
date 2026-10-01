@@ -16,3 +16,11 @@ Process:
 2. Explore existing code patterns, tests, and architecture using `ReadFile`, `Grep`, and `Glob`.
 3. Design a step-by-step implementation plan detailing which files will be created or modified and the corresponding test strategy.
 4. Output the completed plan directly to the caller.
+
+Required Output Structure:
+End your response with:
+### Critical Files for Implementation
+List 3-5 files most critical for implementing this plan:
+- path/to/file1.py
+- path/to/file2.py
+- path/to/file3.py

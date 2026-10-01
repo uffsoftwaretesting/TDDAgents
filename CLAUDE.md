@@ -39,7 +39,7 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, C1–C5, D1–D6, and E1–E8 of the plan are built and under the quality gate. Nothing in the running graph
+Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, and F1–F6 of the plan are built and under the quality gate. Nothing in the running graph
 calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
 | File / Subpackage | Ships |
@@ -75,6 +75,10 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `permissions/filesystem.py` | `is_path_allowed`, `is_dangerous_path`, `is_path_in_allowed_working_dirs` (C5) |
 | `permissions/tdd.py` | `get_phase_deny_rules`, tool classification (`is_implementation_writing_tool`, `is_test_writing_tool`, `is_test_path`), `check_tdd_phase_permission` (D3 & D4) |
 | `tdd/hooks.py` | `tdd_phase_incomplete_hook`, stop hook honoring `stop_hook_active` without infinite loops (D5) |
+| `streaming/abort.py` | Three-controller abort tree (`AbortSignal`, `AbortController`, `create_child_abort_controller`, `bridge_cancel_token`) (F3) |
+| `streaming/withhold.py` | Withhold-then-decide gate snapshot (`WithholdGateSnapshot`, `take_withhold_gate_snapshot`), recovery error predicates (F5 & F6) |
+| `streaming/executor.py` | Eager content-block tool dispatch (`StreamingToolExecutor`, `TrackedTool`), upward bubbling (#21056), Bash-only sibling cascade, synthetic errors, strictly ordered emission, `discard()` (F2, F3, F4) |
+| `streaming/__init__.py` | Clean re-export of Part F streaming & abort primitives |
 
 
 
@@ -275,6 +279,21 @@ All 128 survivors across `app/loop/` are triaged and documented:
   - parser state initializers in `split_shell_commands` (`in_single = False` / `in_double = False` mutated to `None`, evaluating identically in boolean checks).
   - `split_shell_commands` list appends and loop step increments.
   - duration pattern regex matching variations and command wrapper argument skipping fallbacks.
+
+**`app/loop/streaming/` (Part F1–F6) is measured under `paths_to_mutate = ["app/loop/streaming/"]` and clears the bar**, at 54 tests:
+
+| | |
+|---|---|
+| Mutants | 594 (43 timeout) |
+| Killed | 508 |
+| Survived | 43 |
+| **Mutation score** | **92.76%** (551 / 594) |
+
+All 43 survivors across `app/loop/streaming/` are triaged and documented:
+- **14 in `app/loop/streaming/executor.py` (`add_tool`)**: dictionary fallback defaults (`call.get("id") or "XXXX"`, `call.get("name") or "XXXX"`), logger message mutations.
+- **2 in `app/loop/streaming/executor.py` (`_process_queue`)**: debug logger mutations and boolean short-circuits.
+- **21 in `app/loop/streaming/executor.py` (`_execute_tool`)**: string mutations in debug/error logging, fallback defaults on unexercised optional branches.
+- **6 in `app/loop/streaming/executor.py` (`get_completed_results` / `get_remaining_results`)**: logger mutations and local tracking set operations with no external read.
 
 Two earlier rounds on this package are worth repeating as method. Four survivors were
 removed by deleting a `typing.cast` whose string argument is a runtime no-op — the mutants
