@@ -121,6 +121,25 @@ def has_output_redirection(command: str) -> bool:
     return ">" in unquoted
 
 
+def has_command_or_process_substitution(command: str) -> bool:
+    """
+    Check if a shell command contains command substitution ($() or backticks)
+    or process substitution (<() or >()). Subshells or substitutions can execute
+    arbitrary mutating commands.
+    """
+    # Strip single-quoted content (single quotes prevent shell expansion)
+    unquoted = re.sub(r"'[^']*'", "", command)
+    if re.search(r"(?<!\\)\$\(", unquoted):
+        return True
+    if re.search(r"(?<!\\)<(?:\()", unquoted) or re.search(r"(?<!\\)>(?:\()", unquoted):
+        return True
+    if re.search(r"(?<!\\)=\(", unquoted):
+        return True
+    if re.search(r"(?<!\\)`", unquoted):
+        return True
+    return False
+
+
 def split_shell_commands(command: str) -> list[str]:
     """
     Split a compound shell command into individual commands by ';', '&&', '||', or '|'.
@@ -202,6 +221,10 @@ def is_single_subcommand_read_only(cmd_str: str) -> bool:
 
     # Redirections make any command a write
     if has_output_redirection(stripped):
+        return False
+
+    # Command or process substitutions can execute arbitrary mutating commands
+    if has_command_or_process_substitution(stripped):
         return False
 
     try:
