@@ -1,15 +1,18 @@
 """
-Markdown prompt and agent definition loader.
+Agent definition loader and multi-tier override resolution.
 
-Replaces Jinja2 with plain Markdown, explicit variable substitution,
-and disciplined frontmatter parsing as specified in §4 and §5 Part E4.
+Implements I1 conforming to §4.5:
+- 4 parser discipline rules: omission unset, invalid logged and ignored,
+  loud phase validation, inherit is sentinel.
+- Multi-tier discovery: built-in, user (~/.tddagents/agents/), project (.tddagents/agents/).
+- Precedence: project > user > built-in.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 import yaml
@@ -22,17 +25,26 @@ logger = logging.getLogger(__name__)
 
 _VAR_RE = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}")
 
-_VALID_PERMISSION_MODES = frozenset({"read_only", "workspace_write", "full", "bypass"})
-_VALID_MEMORIES = frozenset({"run", "session", "none"})
+_VALID_PERMISSION_MODES = frozenset({
+    "default",
+    "plan",
+    "read_only",
+    "workspace_write",
+    "full",
+    "bypass",
+    "bypass_permissions",
+    "accept_edits",
+    "dont_ask",
+})
 
-__all__ = [
-    "AgentDefinition",
-    "AgentFrontmatterError",
-    "load_agent_definition",
-    "load_agent_definition_from_path",
-    "parse_markdown_frontmatter",
-    "render_prompt",
-]
+_VALID_MEMORIES = frozenset({
+    "run",
+    "session",
+    "local",
+    "project",
+    "user",
+    "none",
+})
 
 
 def render_prompt(
@@ -54,13 +66,13 @@ def render_prompt(
     if not vars:
         return text
 
-    def _replace(match: re.Match[str]) -> str:
+    def _replace(match: Any) -> str:
         key = match.group(1)
         if key in vars:
             return str(vars[key])
-        return match.group(0)
+        return str(match.group(0))
 
-    return _VAR_RE.sub(_replace, text)
+    return str(_VAR_RE.sub(_replace, text))
 
 
 def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
@@ -89,6 +101,8 @@ def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
 def load_agent_definition(
     content: str,
     vars: Mapping[str, Any] | None = None,
+    source: str = "built-in",
+    base_dir: str = "",
 ) -> AgentDefinition:
     """
     Parse an AGENT.md content into a validated AgentDefinition.
@@ -129,6 +143,15 @@ def load_agent_definition(
             tools = tuple(raw_tools)
         else:
             logger.warning("Invalid tools list in agent '%s': %r", name, raw_tools)
+
+    # Disallowed tools validation
+    disallowed_tools: tuple[str, ...] | None = None
+    raw_disallowed = fm.get("disallowedTools", fm.get("disallowed_tools"))
+    if raw_disallowed is not None:
+        if isinstance(raw_disallowed, (list, tuple)) and all(isinstance(t, str) for t in raw_disallowed):
+            disallowed_tools = tuple(raw_disallowed)
+        else:
+            logger.warning("Invalid disallowed_tools in agent '%s': %r", name, raw_disallowed)
 
     # PermissionMode validation
     permission_mode: str | None = None
@@ -175,6 +198,15 @@ def load_agent_definition(
         else:
             logger.warning("Invalid revertOnRed in agent '%s': %r", name, raw_ror)
 
+    # Background validation
+    background: bool | None = None
+    if "background" in fm:
+        raw_bg = fm["background"]
+        if isinstance(raw_bg, bool):
+            background = raw_bg
+        else:
+            logger.warning("Invalid background in agent '%s': %r", name, raw_bg)
+
     # Hooks validation
     hooks: dict[str, Any] | None = None
     if "hooks" in fm:
@@ -190,12 +222,16 @@ def load_agent_definition(
         prompt=prompt,
         phase=phase,
         tools=tools,
+        disallowed_tools=disallowed_tools,
         permission_mode=permission_mode,
         memory=memory,
         fork_from=fork_from,
         revert_on_red=revert_on_red,
         hooks=hooks,
         model=model,
+        background=background,
+        source=source,
+        base_dir=base_dir,
         raw_frontmatter=dict(fm),
     )
 
@@ -203,6 +239,7 @@ def load_agent_definition(
 def load_agent_definition_from_path(
     path: Path | str,
     vars: Mapping[str, Any] | None = None,
+    source: str = "built-in",
 ) -> AgentDefinition:
     """Load and parse an AGENT.md file from disk."""
     file_path = Path(path)
@@ -210,4 +247,83 @@ def load_agent_definition_from_path(
         raise FileNotFoundError(f"Agent definition file not found: {file_path}")
 
     content = file_path.read_text(encoding="utf-8")
-    return load_agent_definition(content, vars)
+    return load_agent_definition(content, vars, source=source, base_dir=str(file_path.parent))
+
+
+def _scan_agent_dir(
+    directory: Path,
+    source: str,
+    vars: Mapping[str, Any] | None = None,
+) -> dict[str, AgentDefinition]:
+    """Scan a directory for AGENT.md files or .md files."""
+    agents: dict[str, AgentDefinition] = {}
+    if not directory.is_dir():
+        return agents
+
+    for entry in sorted(directory.iterdir()):
+        if entry.is_dir():
+            agent_md = entry / "AGENT.md"
+            if agent_md.is_file():
+                try:
+                    agent_def = load_agent_definition_from_path(agent_md, vars=vars, source=source)
+                    agents[agent_def.name] = agent_def
+                except AgentFrontmatterError:
+                    raise
+                except Exception as e:
+                    logger.warning("Failed loading agent from %s: %s", agent_md, e)
+        elif entry.is_file() and entry.suffix == ".md" and entry.name != "README.md":
+            try:
+                agent_def = load_agent_definition_from_path(entry, vars=vars, source=source)
+                agents[agent_def.name] = agent_def
+            except AgentFrontmatterError:
+                raise
+            except Exception as e:
+                logger.warning("Failed loading agent from %s: %s", entry, e)
+
+    return agents
+
+
+def get_agent_definitions_with_overrides(
+    project_dir: Path | str | None = None,
+    user_home: Path | str | None = None,
+    built_in_dir: Path | str | None = None,
+    vars: Mapping[str, Any] | None = None,
+) -> dict[str, AgentDefinition]:
+    """
+    Load agent definitions across built-in, user, and project tiers.
+
+    Precedence order:
+    1. Built-in: lowest priority.
+    2. User (~/.tddagents/agents): overrides built-in by agent name.
+    3. Project (<project_dir>/.tddagents/agents): overrides user and built-in.
+    """
+    if built_in_dir is None:
+        built_in_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "agents"
+    else:
+        built_in_path = Path(built_in_dir)
+
+    definitions: dict[str, AgentDefinition] = {}
+
+    # 1. Built-in
+    if built_in_path.is_dir():
+        definitions.update(_scan_agent_dir(built_in_path, source="built-in", vars=vars))
+
+    # 2. User
+    if user_home is not None:
+        user_path = Path(user_home) / ".tddagents" / "agents"
+    else:
+        user_path = Path.home() / ".tddagents" / "agents"
+
+    if user_path.is_dir():
+        definitions.update(_scan_agent_dir(user_path, source="user", vars=vars))
+
+    # 3. Project
+    if project_dir is not None:
+        proj_path = Path(project_dir) / ".tddagents" / "agents"
+    else:
+        proj_path = Path.cwd() / ".tddagents" / "agents"
+
+    if proj_path.is_dir():
+        definitions.update(_scan_agent_dir(proj_path, source="project", vars=vars))
+
+    return definitions

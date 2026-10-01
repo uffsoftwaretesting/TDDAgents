@@ -10,7 +10,7 @@ Ported from:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from app.loop.permissions.types import PermissionResult
 
@@ -49,6 +49,7 @@ class ToolResult:
     hook_stopped_continuation: bool = False
     context_modifier: Callable[[ToolContext], ToolContext] | None = None
     exit_code: int | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
