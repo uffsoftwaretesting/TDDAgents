@@ -18,7 +18,7 @@ import sys
 from typing import Any, AsyncIterator
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.hooks.stop_hooks import build_stop_hooks_runner
 from app.loop.config import build_run_config
@@ -404,23 +404,24 @@ def test_e2e_sync_engine_checkpoint_reconciliation_and_conflict_resolution(tmp_p
 # 5. Live OpenAI LLM Verification (Conditional on Key Availability)
 # ============================================================================
 
-@pytest.mark.anyio
-async def test_live_llm_invocation_smoke() -> None:
-    api_key: str | None = None
+def _get_live_openai_key() -> str | None:
     env_path = Path(".env")
     if env_path.is_file():
         for line in env_path.read_text().splitlines():
             if line.startswith("OPENAI_API_KEY="):
                 val = line.split("=", 1)[1].strip().strip("'\"")
                 if val and val != "test-openai-key":
-                    api_key = val
-                    break
+                    return val
 
-    if not api_key:
-        candidate = os.getenv("OPENAI_API_KEY")
-        if candidate and candidate != "test-openai-key":
-            api_key = candidate
+    candidate = os.getenv("OPENAI_API_KEY")
+    if candidate and candidate != "test-openai-key":
+        return candidate
+    return None
 
+
+@pytest.mark.anyio
+async def test_live_llm_invocation_smoke() -> None:
+    api_key = _get_live_openai_key()
     if not api_key:
         pytest.skip("No valid OPENAI_API_KEY configured in environment or .env")
 
@@ -430,3 +431,82 @@ async def test_live_llm_invocation_smoke() -> None:
     model = ChatOpenAI(model="gpt-4o-mini", api_key=SecretStr(api_key))
     response = await model.ainvoke([HumanMessage(content="Say the word 'ANTIGRAVITY_READY' and nothing else.")])
     assert "ANTIGRAVITY" in str(response.content).upper()
+
+
+@pytest.mark.anyio
+async def test_e2e_live_openai_skill_activation_and_execution() -> None:
+    api_key = _get_live_openai_key()
+    if not api_key:
+        pytest.skip("No valid OPENAI_API_KEY configured in environment or .env")
+
+    from pydantic import SecretStr
+    from langchain_openai import ChatOpenAI
+    from app.loop.skills.loader import discover_skills
+    from app.loop.skills.activation import render_skills_prompt_section
+    from app.loop.skills.tool import build_skill_tool
+
+    # 1. Discover bundled skills and render system prompt
+    registry = discover_skills()
+    skills_section = render_skills_prompt_section(registry.list_skills())
+    assert "<available_skills>" in skills_section
+    assert "tdd-test-design" in skills_section
+
+    # 2. Build Skill tool and bind to live model
+    skill_tool = build_skill_tool(registry)
+    openai_tool_schema = {
+        "type": "function",
+        "function": {
+            "name": skill_tool.name,
+            "description": skill_tool.prompt,
+            "parameters": skill_tool.input_schema,
+        },
+    }
+
+    model = ChatOpenAI(model="gpt-4o-mini", api_key=SecretStr(api_key), temperature=0)
+    bound_model = model.bind_tools([openai_tool_schema])
+
+    system_prompt = (
+        "You are an expert TDD assistant.\n\n"
+        f"{skills_section}\n\n"
+        "When designing new unit tests, you must execute the appropriate skill first to load its guidelines."
+    )
+    user_prompt = (
+        "I am writing a new test suite in tests/test_validator.py for an email validator function. "
+        "Invoke the test design skill to get guidelines for writing clean isolated tests."
+    )
+
+    # 3. Model invocation produces a Skill tool call
+    ai_msg = await bound_model.ainvoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ])
+    assert isinstance(ai_msg, AIMessage)
+    assert len(ai_msg.tool_calls) >= 1
+
+    selected_call = next((tc for tc in ai_msg.tool_calls if tc["name"] == "Skill"), None)
+    assert selected_call is not None
+    assert selected_call["args"]["skill_name"] == "tdd-test-design"
+
+    # 4. Execute Skill tool through our real engine tool runner
+    store = AppStateStore(AppState())
+    ctx = tool_context_for(store)
+    tool_result = await skill_tool.call(selected_call["args"], ctx)
+
+    assert tool_result.is_error is False
+    assert '<command-message name="tdd-test-design">' in tool_result.content
+    assert "Test Isolation and Mocking Principles" in tool_result.content
+
+    # 5. Return tool execution response back to live model
+    tool_msg = ToolMessage(
+        content=tool_result.content,
+        tool_call_id=selected_call["id"],
+    )
+    followup_msg = await bound_model.ainvoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+        ai_msg,
+        tool_msg,
+    ])
+
+    assert isinstance(followup_msg, AIMessage)
+    assert len(str(followup_msg.content)) > 50
