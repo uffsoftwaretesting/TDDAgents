@@ -82,6 +82,28 @@ async def run_tool_use(
         )
         return ToolExecutionOutcome(message=msg)
 
+    # Run PreToolUse hooks before permission checks
+    hook_dispatcher = getattr(context, "hook_dispatcher", None)
+    if hook_dispatcher is not None:
+        cmd_arg = tool_args.get("command") if isinstance(tool_args, dict) else None
+        pre_outcome = hook_dispatcher.run(
+            "PreToolUse",
+            tool_name=tool_name,
+            tool_input=tool_args if isinstance(tool_args, dict) else {},
+            command=str(cmd_arg) if cmd_arg is not None else None,
+        )
+        if pre_outcome.denied:
+            denied_msg = pre_outcome.reason or f"Blocked by hook for tool: {tool_name}"
+            msg = ToolMessage(
+                content=denied_msg,
+                tool_call_id=call_id,
+                status="error",
+                additional_kwargs={"is_error": True, "permission_behavior": "deny"},
+            )
+            return ToolExecutionOutcome(message=msg)
+        if pre_outcome.updated_input is not None:
+            tool_args = pre_outcome.updated_input
+
     # Check tool permissions through the permission gate
     permission = await has_permissions_to_use_tool(tool, tool_args, context)
     if permission.behavior != "allow":
@@ -105,6 +127,25 @@ async def run_tool_use(
             is_error=True,
             tool_use_id=call_id,
         )
+
+    # Run PostToolUse hooks
+    if hook_dispatcher is not None:
+        cmd_arg = effective_args.get("command") if isinstance(effective_args, dict) else None
+        post_outcome = hook_dispatcher.run(
+            "PostToolUse",
+            tool_name=tool_name,
+            tool_input=effective_args if isinstance(effective_args, dict) else {},
+            tool_response=str(result.content),
+            command=str(cmd_arg) if cmd_arg is not None else None,
+        )
+        if post_outcome.additional_context:
+            extra = f"\n\n[Hook feedback]: {post_outcome.additional_context}"
+            result = ToolResult(
+                content=f"{result.content}{extra}",
+                is_error=result.is_error,
+                tool_use_id=result.tool_use_id,
+                context_modifier=result.context_modifier,
+            )
 
     # Map to ToolMessage
     message = tool.map_result(result, call_id)

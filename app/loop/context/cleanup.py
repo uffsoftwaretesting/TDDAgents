@@ -8,9 +8,13 @@ Ported from `reference/claude-code/src/constants/systemPromptSections.ts` -> `cl
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.loop.context.cache import SessionLatches
 from app.loop.prompts.sections import PromptSectionCache
-from app.loop.state import CompactionTracking
+
+if TYPE_CHECKING:
+    from app.loop.state import CompactionTracking
 
 
 def invalidate_context_caches(
@@ -35,6 +39,8 @@ def notify_compaction(
     turn_counter: int = 0,
 ) -> CompactionTracking:
     """Return a fresh CompactionTracking record after compaction runs."""
+    from app.loop.state import CompactionTracking
+
     return CompactionTracking(
         compacted=True,
         turn_id=turn_id,

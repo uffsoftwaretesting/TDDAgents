@@ -812,10 +812,13 @@ Generated code continues to run only in the sandbox.
 
 ### Part H — Hooks (5)
 
-`H1` event vocabulary and matching — per-event match key, dedup, `if`-conditions ·
-`H2` the command schema · `H3` exit-code semantics: 0 proceeds, 2 blocks, anything else is
-logged and ignored · `H4` prompt and agent backends · `H5` the TDD lifecycle hooks, including
-the one from §3.3.
+| # | Ships | Notes |
+|---|---|---|
+| H1 | Vocabulary & Matching | 27 `HookEvent` values, per-event match keys, regex/wildcard/alternation, scoping dedup (`events.py`, `matching.py`) |
+| H2 | Schemas & Config | Discriminated union (`CommandHook`, `PromptHook`, `AgentHook`, `HttpHook`), lossless round-trip serialization, 3-tier config (`schemas.py`, `config.py`) |
+| H3 | Command Backend & Exit Protocol | Exit 0 proceeds, exit 2 blocks, others ignored; stdout JSON parsing with fail-closed safety (`backends.py`, `dispatcher.py`) |
+| H4 | Prompt, Agent & HTTP Backends | `PromptHookBackend` ($ARGUMENTS interpolation, LLM validation), `AgentHookBackend` (tool verification), `HttpHookBackend` (`backends.py`) |
+| H5 | Stop Hooks & Tool Middleware | Unified stop hooks runner with `stop_hook_active` latching, Pre/Post/Failure tool execution hooks (`stop_hooks.py`, `loop/tools/execution.py`) |
 
 H2 carries a bug worth not rediscovering: a schema used for round-tripping user configuration
 must not contain transforms producing non-serializable values, or saving the file silently

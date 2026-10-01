@@ -39,7 +39,7 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, and G1–G4 of the plan are built and under the quality gate. Nothing in the running graph
+Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate. Nothing in the running graph
 calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
 | File / Subpackage | Ships |
@@ -86,6 +86,13 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `app/sync/baseline.py` | SHA256 snapshot, `IgnoreRules` (.gitignore matching), 3-way `classify` conflict resolution (G4) |
 | `app/sync/events.py` | `SyncCheckpoint`, `SyncConflict`, event logging and drainable sink (G4) |
 | `app/sync/engine.py` | `SyncEngine`: bidirectional sync at 4 deterministic checkpoints (`seed`, `reconcile_ledger`, `flush`), conflict backup (G4) |
+| `app/hooks/events.py` | 27 `HookEvent` enum values, per-event match keys, regex/wildcard/alternation, scoping dedup (H1) |
+| `app/hooks/matching.py` | `matches_pattern`, `matches_rule`, `deduplicate_hooks` enforcing most-specific precedence (H1) |
+| `app/hooks/schemas.py` | Discriminated union (`CommandHook`, `PromptHook`, `AgentHook`, `HttpHook`, `HookMatcher`, `HookSettings`), lossless round-trip serialization (H2) |
+| `app/hooks/config.py` | 3-tier config loading (project, user global, defaults), file discovery and merging (H2) |
+| `app/hooks/backends.py` | Execution backends: Command (exit 0/2 semantics, stdout JSON), Prompt, Agent, and HTTP (H3 & H4) |
+| `app/hooks/dispatcher.py` | `HookDispatcher` event runner, exit-code protocol, payload enrichment, fail-closed safety (H3 & H4) |
+| `app/hooks/stop_hooks.py` | `build_stop_hooks_runner` unifying `tdd_phase_incomplete_hook`, extra hooks, and configured Stop hooks with `stop_hook_active` latching (H5) |
 
 
 

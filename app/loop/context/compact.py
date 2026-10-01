@@ -22,10 +22,10 @@ from app.loop.config import RunConfig
 from app.loop.context.cleanup import notify_compaction
 from app.loop.context.slicing import is_user_message, slice_messages_head
 from app.loop.context.tokens import TokenCounter
-from app.loop.deps import CompactionResult
 from app.loop.messages import Message
 
 if TYPE_CHECKING:
+    from app.loop.deps import CompactionResult
     from app.loop.state import LoopState
 
 
@@ -171,6 +171,8 @@ async def try_reactive_compact(
         turn_id=f"reactive_turn_{state.turn_count}",
         turn_counter=state.turn_count,
     )
+
+    from app.loop.deps import CompactionResult
 
     return CompactionResult(
         compacted=True,

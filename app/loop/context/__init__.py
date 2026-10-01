@@ -121,6 +121,7 @@ class ToolContext:
     tools: tuple[Any, ...] = ()
     permission_context: Any = None
     workspace: Any = None
+    hook_dispatcher: Any = None
 
 
 def tool_context_for(
@@ -130,6 +131,7 @@ def tool_context_for(
     tools: tuple[Any, ...] = (),
     permission_context: Any = None,
     workspace: Any = None,
+    hook_dispatcher: Any = None,
 ) -> ToolContext:
     """
     Build a context wired to a store, which is what the main loop wants.
@@ -146,6 +148,7 @@ def tool_context_for(
         tools=tools,
         permission_context=permission_context,
         workspace=workspace,
+        hook_dispatcher=hook_dispatcher,
     )
 
 

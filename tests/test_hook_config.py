@@ -69,7 +69,7 @@ class TestLoading:
         matchers = settings.matchers_for("PreToolUse")
         assert len(matchers) == 1
         assert matchers[0].matcher == "Bash"
-        assert matchers[0].hooks[0].command == "echo hi"
+        assert getattr(matchers[0].hooks[0], "command") == "echo hi"
         assert matchers[0].hooks[0].timeout == DEFAULT_HOOK_TIMEOUT
 
     def test_optional_fields_are_read(self, project, home):
@@ -95,7 +95,7 @@ class TestMergeOrder:
         write_settings(project / ".tddagents", "settings.local.json", hooks_doc(command="local"))
 
         matchers = load_hook_settings(project, home).matchers_for("PreToolUse")
-        assert [m.hooks[0].command for m in matchers] == ["user", "project", "local"]
+        assert [getattr(m.hooks[0], "command") for m in matchers] == ["user", "project", "local"]
 
     def test_a_local_file_cannot_remove_a_project_hook(self, project, home):
         """Later scopes append. A personal file can add a veto, never silence one."""
@@ -103,7 +103,7 @@ class TestMergeOrder:
         write_settings(project / ".tddagents", "settings.local.json", {"hooks": {}})
 
         matchers = load_hook_settings(project, home).matchers_for("PreToolUse")
-        assert [m.hooks[0].command for m in matchers] == ["gate"]
+        assert [getattr(m.hooks[0], "command") for m in matchers] == ["gate"]
 
     def test_events_are_kept_separate(self, project, home):
         write_settings(
@@ -117,8 +117,8 @@ class TestMergeOrder:
             },
         )
         settings = load_hook_settings(project, home)
-        assert settings.matchers_for("PreToolUse")[0].hooks[0].command == "a"
-        assert settings.matchers_for("PostToolUse")[0].hooks[0].command == "b"
+        assert getattr(settings.matchers_for("PreToolUse")[0].hooks[0], "command") == "a"
+        assert getattr(settings.matchers_for("PostToolUse")[0].hooks[0], "command") == "b"
 
 
 class TestDefensiveParsing:
@@ -130,7 +130,7 @@ class TestDefensiveParsing:
         write_settings(project / ".tddagents", "settings.local.json", hooks_doc(command="survivor"))
 
         matchers = load_hook_settings(project, home).matchers_for("PreToolUse")
-        assert [m.hooks[0].command for m in matchers] == ["survivor"]
+        assert [getattr(m.hooks[0], "command") for m in matchers] == ["survivor"]
 
     def test_non_object_top_level_is_skipped(self, project, home):
         write_settings(project / ".tddagents", "settings.json", ["not", "an", "object"])
@@ -141,14 +141,14 @@ class TestDefensiveParsing:
         assert load_hook_settings(project, home).is_empty
 
     def test_unsupported_event_is_ignored(self, project, home):
-        write_settings(project / ".tddagents", "settings.json", hooks_doc(event="SessionStart"))
+        write_settings(project / ".tddagents", "settings.json", hooks_doc(event="UnsupportedEvent"))
         assert load_hook_settings(project, home).is_empty
 
     def test_unsupported_hook_type_is_ignored(self, project, home):
         write_settings(
             project / ".tddagents",
             "settings.json",
-            {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "http", "url": "x"}]}]}},
+            {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "unsupported_type", "url": "x"}]}]}},
         )
         assert load_hook_settings(project, home).is_empty
 
@@ -200,7 +200,7 @@ class TestDefensiveParsing:
             "settings.json",
             {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"command": "x"}]}]}},
         )
-        assert load_hook_settings(project, home).matchers_for("PreToolUse")[0].hooks[0].command == "x"
+        assert getattr(load_hook_settings(project, home).matchers_for("PreToolUse")[0].hooks[0], "command") == "x"
 
 
 class TestDescribe:
@@ -216,8 +216,11 @@ class TestDescribe:
         assert "PostToolUse=0" in description
         assert str(path) in description
 
-    def test_known_events_are_exactly_the_two_tool_events(self):
-        assert KNOWN_EVENTS == ("PreToolUse", "PostToolUse")
+    def test_known_events_contain_tool_and_lifecycle_events(self):
+        assert "PreToolUse" in KNOWN_EVENTS
+        assert "PostToolUse" in KNOWN_EVENTS
+        assert "Stop" in KNOWN_EVENTS
+        assert "SessionStart" in KNOWN_EVENTS
 
 
 class TestHookCommandFields:
@@ -313,7 +316,7 @@ class TestBadEntriesDoNotStopParsing:
             },
         )
         hooks = load_hook_settings(project, home).matchers_for("PreToolUse")[0].hooks
-        assert [h.command for h in hooks] == ["survivor"]
+        assert [getattr(h, "command") for h in hooks] == ["survivor"]
 
     def test_an_invalid_matcher_does_not_drop_later_matchers(self, project, home):
         write_settings(
@@ -329,7 +332,7 @@ class TestBadEntriesDoNotStopParsing:
             },
         )
         matchers = load_hook_settings(project, home).matchers_for("PreToolUse")
-        assert [m.hooks[0].command for m in matchers] == ["survivor"]
+        assert [getattr(m.hooks[0], "command") for m in matchers] == ["survivor"]
 
     def test_an_unsupported_event_does_not_drop_a_later_event(self, project, home):
         write_settings(
@@ -337,13 +340,13 @@ class TestBadEntriesDoNotStopParsing:
             "settings.json",
             {
                 "hooks": {
-                    "SessionStart": [{"hooks": [{"command": "ignored"}]}],
+                    "UnsupportedEvent": [{"hooks": [{"command": "ignored"}]}],
                     "PostToolUse": [{"hooks": [{"command": "survivor"}]}],
                 }
             },
         )
         settings = load_hook_settings(project, home)
-        assert settings.matchers_for("PostToolUse")[0].hooks[0].command == "survivor"
+        assert getattr(settings.matchers_for("PostToolUse")[0].hooks[0], "command") == "survivor"
 
     def test_a_matcher_with_only_bad_hooks_does_not_drop_a_later_matcher(self, project, home):
         write_settings(

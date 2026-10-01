@@ -273,3 +273,15 @@ def find_tool_by_name(tools: Sequence[Tool], name: str) -> Tool | None:
         if name in getattr(tool, "aliases", ()):
             return tool
     return None
+
+
+__all__ = [
+    "PermissionResult",
+    "Tool",
+    "ToolResult",
+    "ValidationResult",
+    "build_tool",
+    "default_map_result",
+    "find_tool_by_name",
+    "tool_matches_name",
+]
