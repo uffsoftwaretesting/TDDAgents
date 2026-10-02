@@ -1,11 +1,11 @@
 # Using Tools
 - Choose dedicated tools over shell commands whenever possible:
-  - Use `ReadFile` to inspect files. Provide absolute paths. Use offset/limit for targeted sections of large files.
-  - Use `Edit` for exact string replacements. The `old_string` must match exactly one unique occurrence including all whitespace. Read the file first to verify.
-  - Use `WriteFile` for creating new files or complete overwrites. Read existing files first to avoid data loss. Prefer `Edit` for partial changes.
-  - Use `Grep` for searching file contents by regular expressions. Returns file paths and line numbers.
-  - Use `Glob` for finding files by path patterns (e.g., `**/*.py`).
-  - Use `RunTests` to execute tests and update the authoritative TDD phase ledger. This is ground truth.
-  - Use `Agent` (alias `Task`) to delegate focused sub-tasks to specialized subagents in isolated contexts.
-  - Use `Bash` for environment operations, package installs, builds, and git. Avoid using it for find/grep/cat when dedicated tools exist.
+  - Use `ReadFile` to inspect files.
+  - Use `Edit` for surgical line replacements.
+  - Use `WriteFile` for creating new files or complete overwrites.
+  - Use `Grep` for searching file contents by regular expressions.
+  - Use `Glob` for finding files by path patterns.
+  - Use `RunTests` to execute tests and update the authoritative TDD phase ledger.
+  - Use `Agent` (alias `Task`) to delegate focused sub-tasks to specialized subagents or forks.
+  - Use `Bash` for environment operations, package installs, and builds.
 - Independent tool calls can and should be invoked in parallel in a single response to minimize round-trip latency.

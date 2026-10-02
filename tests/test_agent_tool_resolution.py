@@ -155,3 +155,126 @@ def test_resolve_agent_tools_alias_matching() -> None:
     assert resolved.valid_tools == ("sh",)
     assert len(resolved.resolved_tools) == 1
     assert resolved.resolved_tools[0].name == "Bash"
+
+
+# ── Mutation defense tests (Phase I) ─────────────────────────────────────────
+
+import inspect
+from unittest.mock import patch
+
+from app.loop.agents.resolution import (
+    _tool_matches_name,
+    ALL_AGENT_DISALLOWED_TOOLS,
+    ASYNC_AGENT_ALLOWED_TOOLS,
+    ResolvedAgentTools,
+)
+
+
+def test_tool_matches_name_alias_fallback_default() -> None:
+    """Kill mutants 11, 14: getattr(tool, 'aliases', ()) -> None or empty."""
+    # A tool with no aliases attribute should not crash
+    class BareTool:
+        name = "Bash"
+    assert _tool_matches_name(BareTool(), "Bash") is True
+    assert _tool_matches_name(BareTool(), "sh") is False
+
+
+def test_filter_defaults_are_false() -> None:
+    """Kill mutants 1, 2 on filter_tools_for_agent: default bool args flipped."""
+    sig = inspect.signature(filter_tools_for_agent)
+    assert sig.parameters["is_async"].default is False
+    assert sig.parameters["allow_nested_agent"].default is False
+
+
+def test_resolve_defaults_are_false() -> None:
+    """Kill mutants 1, 2, 3 on resolve_agent_tools: default bool args flipped."""
+    sig = inspect.signature(resolve_agent_tools)
+    assert sig.parameters["is_async"].default is False
+    assert sig.parameters["is_main_thread"].default is False
+    assert sig.parameters["allow_nested_agent"].default is False
+
+
+def test_filter_mcp_continue_not_break() -> None:
+    """Kill mutant 8: continue -> break on MCP tools causes only first MCP tool to pass."""
+    t_mcp1 = _make_dummy_tool("mcp__tool_a")
+    t_mcp2 = _make_dummy_tool("mcp__tool_b")
+    t_read = _make_dummy_tool("ReadFile")
+    filtered = filter_tools_for_agent([t_mcp1, t_mcp2, t_read])
+    names = [t.name for t in filtered]
+    assert "mcp__tool_a" in names
+    assert "mcp__tool_b" in names
+    assert "ReadFile" in names
+
+
+def test_filter_plan_exit_continue_not_break() -> None:
+    """Kill mutant 18: continue -> break after ExitPlanMode causes early exit."""
+    t_exit = _make_dummy_tool("ExitPlanMode")
+    t_read = _make_dummy_tool("ReadFile")
+    filtered = filter_tools_for_agent([t_exit, t_read], permission_mode="plan")
+    names = [t.name for t in filtered]
+    assert "ExitPlanMode" in names
+    assert "ReadFile" in names
+
+
+def test_resolve_permission_mode_forwarded() -> None:
+    """Kill mutants 8, 12: permission_mode=None or removed from filter_tools_for_agent."""
+    t_exit = _make_dummy_tool("ExitPlanMode")
+    t_read = _make_dummy_tool("ReadFile")
+
+    defn = AgentDefinition(
+        name="planner",
+        description="plan agent",
+        prompt="plan",
+        tools=("ExitPlanMode", "ReadFile"),
+        permission_mode="plan",
+    )
+    # is_main_thread=False so filter_tools_for_agent is called
+    resolved = resolve_agent_tools(defn, [t_exit, t_read])
+    names = [t.name for t in resolved.resolved_tools]
+    assert "ExitPlanMode" in names
+
+
+def test_resolve_wildcard_allowed_agent_types_is_none() -> None:
+    """Kill mutant 52: removing allowed_agent_types=None from wildcard branch."""
+    defn = AgentDefinition(name="w", description="w", prompt="w", tools=("*",))
+    resolved = resolve_agent_tools(defn, [_make_dummy_tool("ReadFile")])
+    assert resolved.allowed_agent_types is None
+
+
+def test_resolve_initial_allowed_agent_types_is_none() -> None:
+    """Kill mutant 59: allowed_agent_types = None -> ''."""
+    defn = AgentDefinition(
+        name="x", description="x", prompt="x",
+        tools=("ReadFile",),
+    )
+    resolved = resolve_agent_tools(defn, [_make_dummy_tool("ReadFile")])
+    assert resolved.allowed_agent_types is None
+
+
+def test_resolve_disallowed_alias_getattr_default() -> None:
+    """Kill mutants 29, 32: getattr(t, 'aliases', ()) -> None or empty in disallowed check."""
+    class BareTool:
+        name = "CustomTool"
+    defn = AgentDefinition(
+        name="y", description="y", prompt="y",
+        tools=("*",),
+        disallowed_tools=("CustomTool",),
+    )
+    # BareTool has no aliases; should still be filtered by name
+    resolved = resolve_agent_tools(defn, [BareTool()], is_main_thread=True)
+    assert len(resolved.resolved_tools) == 0
+
+
+def test_resolve_invalid_tool_logs_warning() -> None:
+    """Kill mutant 93: logger.warning string mutation."""
+    defn = AgentDefinition(
+        name="logger_test", description="test", prompt="test",
+        tools=("NonExistent",),
+    )
+    with patch("app.loop.agents.resolution.logger") as mock_logger:
+        resolve_agent_tools(defn, [_make_dummy_tool("ReadFile")])
+        mock_logger.warning.assert_called_once()
+        args = mock_logger.warning.call_args[0]
+        assert "Agent" in args[0]
+        assert args[1] == "logger_test"
+        assert args[2] == "NonExistent"

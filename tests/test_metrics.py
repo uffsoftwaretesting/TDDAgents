@@ -547,6 +547,29 @@ class TestResilienceMetricsComputation:
 # ==============================================================================
 
 class TestMetricsReporting:
+    
+    def test_export_jsonl_logging_and_encoding(self, tmp_path, caplog) -> None:
+        import logging
+        from unittest.mock import patch
+        
+        caplog.set_level(logging.DEBUG)
+        log = EventLog(session_id="log-sess")
+        log.record(EventType.SESSION)
+        out_file = tmp_path / "log.jsonl"
+        
+        with patch("builtins.open") as mock_open:
+            with patch("app.metrics.event_log.json.dumps", return_value="{}") as mock_dumps:
+                log.export_jsonl(out_file)
+                
+                mock_open.assert_called_once_with(out_file, "w", encoding="utf-8")
+                
+                # Check ensure_ascii=False
+                mock_dumps.assert_called_once()
+                args, kwargs = mock_dumps.call_args
+                assert kwargs.get("ensure_ascii") is False
+                
+        assert caplog.messages[-1] == f"Exported 1 events to {out_file}"
+
     def test_generate_subreq_report(self, tmp_path: Path) -> None:
         plan = ["Setup module", "Implement logic"]
         subreq_events = {
@@ -649,7 +672,25 @@ class TestMetricsReporting:
 # ==============================================================================
 
 class TestMetricsBooster:
+
+    def test_record_signature_defaults(self) -> None:
+        import inspect
+        sig = inspect.signature(EventLog.record)
+        assert sig.parameters["turn_count"].default == 0
+        assert sig.parameters["phase"].default == ""
+        assert sig.parameters["red_confirmed"].default is False
+        assert sig.parameters["green_passed"].default is False
+        assert sig.parameters["session_id"].default == ""
+        
+        # Test EventLog.__init__ defaults too
+        sig_init = inspect.signature(EventLog.__init__)
+        assert sig_init.parameters["session_id"].default == ""
+
+
     def test_record_defaults(self) -> None:
+        log_empty = EventLog()
+        assert log_empty.session_id == ""
+        
         log = EventLog(session_id="def-sess")
         ev = log.record(EventType.SESSION)
         assert ev.turn_count == 0
@@ -660,6 +701,10 @@ class TestMetricsBooster:
         assert ev.payload == {}
         assert ev.session_id == "def-sess"
         assert ev.event_type == EventType.SESSION
+        
+        # Test default session id fallback
+        ev_empty = log_empty.record(EventType.SESSION)
+        assert ev_empty.session_id == ""
 
     def test_record_transition_all_fields(self) -> None:
         log = EventLog(session_id="trans-sess")

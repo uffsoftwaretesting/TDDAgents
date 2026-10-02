@@ -1033,3 +1033,60 @@ class TestFullSessionFlow:
         assert res["status"] == SessionStatus.FAILED
         assert res["failure_count"] == 1
         assert res["success_count"] == 0
+
+
+# ── Mutation defense tests (Phase K) ─────────────────────────────────────────
+
+import inspect
+from app.session.shell import create_initial_session_state, SessionShell
+
+
+class TestMutationDefensePhaseK:
+    """Kill surviving mutants from Phase K mutation testing."""
+
+    def test_create_initial_session_state_default_specification_is_empty(self) -> None:
+        """Kill mutant 1: specification default '' -> 'XXXX'."""
+        sig = inspect.signature(create_initial_session_state)
+        assert sig.parameters["specification"].default == ""
+
+    def test_run_default_specification_is_empty(self) -> None:
+        """Kill run mutant 1: specification default '' -> 'XXXX'."""
+        sig = inspect.signature(SessionShell.run)
+        assert sig.parameters["specification"].default == ""
+
+    def test_arun_default_specification_is_empty(self) -> None:
+        """Kill arun mutant 1: specification default '' -> 'XXXX'."""
+        sig = inspect.signature(SessionShell.arun)
+        assert sig.parameters["specification"].default == ""
+
+    def test_run_forwards_specification_to_create_state(self) -> None:
+        """Kill run mutants 7, 10: specification forwarded as None or dropped."""
+        from unittest.mock import MagicMock, patch
+
+        mock_graph = MagicMock()
+        mock_graph.invoke.return_value = {"status": "completed"}
+
+        shell = SessionShell.__new__(SessionShell)
+        shell._graph = mock_graph
+        shell._checkpointer = MagicMock()
+
+        with patch("app.session.shell.create_initial_session_state", wraps=create_initial_session_state) as mock_create:
+            shell.run("hello", "thread-1", specification="my spec")
+            mock_create.assert_called_once_with("thread-1", "hello", "my spec")
+
+    @pytest.mark.asyncio
+    async def test_arun_forwards_specification_to_create_state(self) -> None:
+        """Kill arun mutants 7, 10: specification forwarded as None or dropped."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"status": "completed"})
+
+        shell = SessionShell.__new__(SessionShell)
+        shell._graph = mock_graph
+        shell._checkpointer = MagicMock()
+
+        with patch("app.session.shell.create_initial_session_state", wraps=create_initial_session_state) as mock_create:
+            await shell.arun("hello", "thread-2", specification="async spec")
+            mock_create.assert_called_once_with("thread-2", "hello", "async spec")
+
