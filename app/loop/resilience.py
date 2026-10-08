@@ -69,11 +69,7 @@ class ResilienceReport:
     token_metrics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        term_str = (
-            self.terminal_reason.value
-            if hasattr(self.terminal_reason, "value")
-            else str(self.terminal_reason or "")
-        )
+        term_str = str(self.terminal_reason or "")
         return {
             "run_id": self.run_id,
             "total_sub_requirements": self.total_sub_requirements,
@@ -148,11 +144,7 @@ class ResilienceTracker:
         if total > 0:
             pass_rate = passed / total
         else:
-            term_val = (
-                self.terminal_event.value
-                if hasattr(self.terminal_event, "value")
-                else str(self.terminal_event or "")
-            )
+            term_val = str(self.terminal_event or "")
             pass_rate = 1.0 if term_val == Terminal.COMPLETED.value else 0.0
 
         recovery_events: list[str] = []
@@ -186,11 +178,7 @@ class ResilienceTracker:
     def render_scorecard(self) -> str:
         """Render a human-readable TDD resilience scorecard."""
         report = self.build_report()
-        term_str = (
-            report.terminal_reason.value
-            if hasattr(report.terminal_reason, "value")
-            else str(report.terminal_reason or "N/A")
-        )
+        term_str = str(report.terminal_reason or "N/A")
         rate_percent = f"{report.pass_rate * 100:.1f}%"
 
         lines = [

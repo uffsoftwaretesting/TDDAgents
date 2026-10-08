@@ -39,12 +39,19 @@ class LocalWorkspace:
 
     kind: WorkspaceKind = "local"
 
-    def __init__(self, root: str | os.PathLike[str]) -> None:
+    def __init__(self, root: str | os.PathLike[str], env: dict[str, str] | None = None) -> None:
         self._root = Path(root).expanduser().resolve()
         self._root.mkdir(parents=True, exist_ok=True)
+        # Merged into every command, under the per-call `env`: e.g. the session venv's PATH.
+        self._env: dict[str, str] = dict(env or {})
+
+    @property
+    def run_dir(self) -> Path:
+        """The directory that holds this workspace, its venv and transcripts."""
+        return self._root.parent
 
     @classmethod
-    def for_run(cls, thread_id: str) -> "LocalWorkspace":
+    def for_run(cls, thread_id: str, env: dict[str, str] | None = None) -> "LocalWorkspace":
         """
         The local side of a run, at
         `<Config.LOCAL_WORKSPACE_ROOT>/<thread_id>/workspace`.
@@ -54,7 +61,7 @@ class LocalWorkspace:
         end-of-run export written by main.py, so the paper's artifact directory never
         contains a half-synced tree.
         """
-        return cls(Path(Config.LOCAL_WORKSPACE_ROOT) / thread_id / "workspace")
+        return cls(Path(Config.LOCAL_WORKSPACE_ROOT) / thread_id / "workspace", env=env)
 
     @property
     def root(self) -> Path:
@@ -181,7 +188,7 @@ class LocalWorkspace:
         both sides. As in the sandbox, a non-zero exit code is returned, not raised.
         """
         limit = timeout if timeout is not None else Config.COMMAND_TIMEOUT
-        environment = {**os.environ, **(env or {})}
+        environment = {**os.environ, **self._env, **(env or {})}
         started = time.monotonic()
 
         try:

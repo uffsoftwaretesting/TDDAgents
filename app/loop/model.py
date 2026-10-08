@@ -13,9 +13,9 @@ place the rest of the pipeline resolves them; this module never names a model it
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterable, AsyncIterator
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, SystemMessage, message_chunk_to_message
 
 from app.config.config import Config
 from app.loop.config import RunConfig
@@ -31,6 +31,7 @@ from app.loop.prompts.sections import resolve_system_prompt_sections
 from app.loop.state import LoopState
 from app.loop.tools.base import Tool
 from app.utils.chat_model_factory import get_chat_model
+from app.utils.token_metrics import GlobalTokenTracker
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,6 @@ def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]
     return [system, *history, *([attachment] if attachment is not None else [])]
 
 
-from app.utils.token_metrics import GlobalTokenTracker
-
 _global_token_tracker = GlobalTokenTracker()
 
 
@@ -87,6 +86,32 @@ def get_global_token_tracker() -> GlobalTokenTracker:
 def get_token_usage_summary() -> dict[str, Any]:
     """Return structured token usage metrics summary (Plan D1)."""
     return _global_token_tracker.summary()
+
+
+async def accumulate_stream(stream: AsyncIterable[Any]) -> AsyncIterator[Message]:
+    """
+    Turn a provider stream into whole assistant messages.
+
+    The engine dispatches tools from every message it receives (Part F2, dispatch at
+    content-block close), so it must never see a partial chunk: an `AIMessageChunk` mid-stream
+    carries tool calls with an empty name or truncated arguments. Chunks are summed (LangChain
+    merges `tool_call_chunks` by index) and emitted as one complete `AIMessage` when the
+    stream ends; a complete, non-chunk message is passed through after flushing any pending
+    chunks, so ordering is preserved.
+    """
+    pending: AIMessageChunk | None = None
+    async for item in stream:
+        if isinstance(item, AIMessageChunk):
+            pending = item if pending is None else pending + item
+            continue
+        if pending is not None:
+            yield message_chunk_to_message(pending)
+            pending = None
+        if isinstance(item, BaseMessage):
+            yield item
+    if pending is not None:
+        yield message_chunk_to_message(pending)
+
 
 async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterator[Message]:
     """Real `call_model`: assemble the request, bind the context's tools, stream the reply."""
@@ -102,5 +127,5 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
     except TypeError:
         stream = model.astream(messages_to_send)
 
-    async for chunk in stream:
-        yield chunk
+    async for message in accumulate_stream(stream):
+        yield message

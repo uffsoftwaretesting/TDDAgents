@@ -7,11 +7,21 @@ via the `stop_hook_active` contract (§3.3 of `docs/transition_elaboration_plan.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage
 
+from app.hooks.dispatcher import HookOutcome
 from app.loop.deps import StopHookResult
+from app.loop.ledger import PhaseLedger, TddPhase
+from app.loop.permissions.tdd import (
+    GENERIC_WRITER_TOOL_NAMES,
+    IMPLEMENTATION_WRITER_TOOL_NAMES,
+    TEST_WRITER_TOOL_NAMES,
+    is_implementation_writing_tool,
+    is_test_path,
+    is_test_writing_tool,
+)
 
 if TYPE_CHECKING:
     from app.loop.config import RunConfig
@@ -62,18 +72,6 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
     return StopHookResult(blocking_errors=(HumanMessage(content=msg),))
 
 
-from app.hooks.dispatcher import HookOutcome
-from app.loop.permissions.tdd import (
-    GENERIC_WRITER_TOOL_NAMES,
-    IMPLEMENTATION_WRITER_TOOL_NAMES,
-    TEST_WRITER_TOOL_NAMES,
-    is_implementation_writing_tool,
-    is_test_path,
-    is_test_writing_tool,
-)
-from app.loop.ledger import PhaseLedger, TddPhase
-
-
 def tdd_pre_tool_use_hook(
     tool_name: str,
     tool_input: dict[str, Any],
@@ -113,14 +111,14 @@ def tdd_pre_tool_use_hook(
         if tool_name in TEST_WRITER_TOOL_NAMES or (tool and is_test_writing_tool(tool)):
             return HookOutcome(
                 denied=True,
-                reason=f"TDD phase {ledger.phase.value} denies test-writing tool '{tool_name}'.",
+                reason=f"TDD phase {ledger.phase} denies test-writing tool '{tool_name}'.",
             )
         if tool_name in GENERIC_WRITER_TOOL_NAMES or tool_name in ("WriteFile", "Edit", "MultiEdit"):
             path = str(tool_input.get("path") or tool_input.get("file_path") or "")
             if path and is_test_path(path):
                 return HookOutcome(
                     denied=True,
-                    reason=f"TDD phase {ledger.phase.value} denies modifying test file '{path}'.",
+                    reason=f"TDD phase {ledger.phase} denies modifying test file '{path}'.",
                 )
 
     return HookOutcome(denied=False)
@@ -145,8 +143,9 @@ def tdd_post_tool_use_hook(
         elif "pass" in content or "ok" in content:
             if ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR):
                 return HookOutcome(
-                    additional_context="TDD GREEN phase test pass observed. Ready to transition to REFACTOR or complete cycle."
+                    additional_context=(
+                        "TDD GREEN phase test pass observed. Ready to transition to REFACTOR or complete cycle."
+                    )
                 )
 
     return HookOutcome()
-

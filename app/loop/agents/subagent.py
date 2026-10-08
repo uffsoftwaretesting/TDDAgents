@@ -40,7 +40,6 @@ from app.loop.agents.loader import (
 from app.loop.agents.memory import AgentMemoryStore
 from app.loop.agents.resolution import resolve_agent_tools
 from app.loop.context import ToolContext, discard_app_state_update
-from app.loop.messages import Message
 from app.loop.tools.base import Tool
 from app.loop.tools.pool import assemble_tool_pool
 
@@ -64,7 +63,7 @@ class SubagentInstance:
         child_messages = list(self.context.messages)
         if not any(isinstance(m, HumanMessage) for m in child_messages):
             child_messages.append(HumanMessage(content=prompt))
-        return await self.runner(
+        result: tuple[str, str | None] = await self.runner(
             self.definition,
             prompt,
             child_messages,
@@ -72,6 +71,7 @@ class SubagentInstance:
             self.context,
             self.memory_prompt,
         )
+        return result
 
 
 def _resolve_agent_definition(
@@ -167,8 +167,8 @@ def create_subagent(
     if agent_def.phase is not None and current_ledger is not None:
         if current_ledger.phase != agent_def.phase:
             raise ValueError(
-                f"Agent '{agent_def.name}' requires phase {agent_def.phase.value}, "
-                f"but current TDD ledger is in phase {current_ledger.phase.value}."
+                f"Agent '{agent_def.name}' requires phase {agent_def.phase}, "
+                f"but current TDD ledger is in phase {current_ledger.phase}."
             )
 
     # 3. Resolve worker tools

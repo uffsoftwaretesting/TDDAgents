@@ -47,6 +47,12 @@ from app.session.state import PlanItemResult, SessionState, SessionStatus
 # ==============================================================================
 
 
+def ok_runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
+    """A runner that reports an observed Red-then-Green cycle (the shell never invents one)."""
+    return PlanItemResult(index=idx, sub_requirement=sub_req, status="success", terminal_reason="completed",
+                          red_confirmed=True, green_passed=True)
+
+
 class TestCheckpointerFactory:
     """Verifies checkpointer factory initialization and fallback behaviour (Part K1)."""
 
@@ -504,7 +510,7 @@ class TestPlanItemExecutor:
         out = node_execute_plan_item(state)
         assert out["status"] == SessionStatus.COMPLETED
 
-    def test_executor_default_stub_success_preserves_history(self) -> None:
+    def test_executor_success_preserves_history(self) -> None:
         state: SessionState = {
             "plan": ["Task 1"],
             "plan_index": 0,
@@ -513,7 +519,7 @@ class TestPlanItemExecutor:
             "audit_log": ["[Init] Started"],
             "subreq_results": [{"prev": 1}],
         }
-        out = node_execute_plan_item(state)
+        out = node_execute_plan_item(state, loop_runner=ok_runner)
         assert out["status"] == SessionStatus.ITEM_COMPLETE
         assert out["success_count"] == 3
         assert out["failure_count"] == 1
@@ -667,10 +673,10 @@ class TestPlanItemExecutor:
 
         asyncio.run(_test())
 
-    def test_async_executor_default_stub(self) -> None:
+    def test_async_executor_with_runner(self) -> None:
         async def _test() -> None:
             state: SessionState = {"plan": ["A"], "plan_index": 0}
-            out = await anode_execute_plan_item(state)
+            out = await anode_execute_plan_item(state, loop_runner=ok_runner)
             assert out["status"] == SessionStatus.ITEM_COMPLETE
             assert out["success_count"] == 1
 
@@ -678,8 +684,23 @@ class TestPlanItemExecutor:
 
     def test_executor_logging(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO):
-            node_execute_plan_item({"plan": ["Subtask 1"], "plan_index": 0})
+            node_execute_plan_item({"plan": ["Subtask 1"], "plan_index": 0}, loop_runner=ok_runner)
         assert "Executing plan item 1/1: 'Subtask 1'" in caplog.text
+
+    def test_executor_without_runner_refuses_to_fabricate(self) -> None:
+        """Without a runner nothing observed Red or Green, so nothing may be reported."""
+        from app.session.iteration import LoopRunnerNotConfigured
+
+        state: SessionState = {"plan": ["Subtask 1"], "plan_index": 0, "success_count": 0}
+        with pytest.raises(LoopRunnerNotConfigured, match="refusing to fabricate"):
+            node_execute_plan_item(state)
+        with pytest.raises(LoopRunnerNotConfigured):
+            asyncio.run(anode_execute_plan_item(state))
+        assert issubclass(LoopRunnerNotConfigured, RuntimeError)
+
+    def test_executor_without_runner_is_fine_once_the_plan_is_done(self) -> None:
+        assert node_execute_plan_item({"plan": ["A"], "plan_index": 1})["status"] == SessionStatus.COMPLETED
+        assert node_execute_plan_item({"plan": [], "plan_index": 0})["status"] == SessionStatus.COMPLETED
 
     def test_executor_error_logging(self, caplog: pytest.LogCaptureFixture) -> None:
         def crashing(req: str, idx: int, state: SessionState) -> PlanItemResult:
@@ -810,6 +831,7 @@ class TestRoutersAndState:
         shell = SessionShell(
             analyzer_fn=analyzer,
             planner_fn=lambda s: ["Step 1"],
+            loop_runner=ok_runner,
         )
         thread_id = "test-no-spec-sync"
         shell.run("My task", thread_id)
@@ -824,6 +846,7 @@ class TestRoutersAndState:
         shell = SessionShell(
             analyzer_fn=analyzer,
             planner_fn=lambda s: ["Step 1"],
+            loop_runner=ok_runner,
         )
 
         async def _test() -> None:
@@ -965,6 +988,7 @@ class TestFullSessionFlow:
         shell = SessionShell(
             analyzer_fn=multi_turn_analyzer,
             planner_fn=lambda s: ["Setup project"],
+            loop_runner=ok_runner,
         )
 
         thread_id = "test-multi-turn"

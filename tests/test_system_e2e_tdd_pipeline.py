@@ -419,6 +419,7 @@ def _get_live_openai_key() -> str | None:
     return None
 
 
+@pytest.mark.live
 @pytest.mark.anyio
 async def test_live_llm_invocation_smoke() -> None:
     api_key = _get_live_openai_key()
@@ -433,6 +434,7 @@ async def test_live_llm_invocation_smoke() -> None:
     assert "ANTIGRAVITY" in str(response.content).upper()
 
 
+@pytest.mark.live
 @pytest.mark.anyio
 async def test_e2e_live_openai_skill_activation_and_execution() -> None:
     api_key = _get_live_openai_key()
@@ -512,6 +514,7 @@ async def test_e2e_live_openai_skill_activation_and_execution() -> None:
     assert len(str(followup_msg.content)) > 50
 
 
+@pytest.mark.live
 def test_e2e_live_openai_session_shell_interrupt_and_iteration() -> None:
     """
     Live OpenAI E2E integration test for Part K:
@@ -555,6 +558,7 @@ def test_e2e_live_openai_session_shell_interrupt_and_iteration() -> None:
     assert result2.get("success_count", 0) >= 1
 
 
+@pytest.mark.live
 def test_e2e_live_openai_metrics_artifact_export_roundtrip(tmp_path: Path) -> None:
     """
     Live OpenAI E2E integration test for Part L:

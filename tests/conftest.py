@@ -28,6 +28,37 @@ if str(REPO_ROOT) not in sys.path:
 
 import pytest  # noqa: E402
 
+LIVE_ENV_FLAG = "RUN_LIVE_LLM_TESTS"
+
+
+def pytest_configure(config: Any) -> None:
+    config.addinivalue_line(
+        "markers", f"live: calls a real provider; runs only with {LIVE_ENV_FLAG}=1 and real keys in .env"
+    )
+
+
+def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:
+    """Live tests never run by accident: a key in .env is not consent to spend it."""
+    if os.environ.get(LIVE_ENV_FLAG) == "1":
+        return
+    skip = pytest.mark.skip(reason=f"live test; set {LIVE_ENV_FLAG}=1 with real keys in .env")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip)
+
+
+def read_dotenv_key(name: str) -> str | None:
+    """A real credential from the repo's .env (the conftest placeholders do not count)."""
+    env_path = REPO_ROOT / ".env"
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{name}="):
+                value = line.split("=", 1)[1].strip().strip("'\"")
+                if value and not value.startswith("test-"):
+                    return value
+    return None
+
+
 from app.workspace.base import (  # noqa: E402
     CommandResult,
     FileEntry,
@@ -245,3 +276,17 @@ def local_tool_ctx(local_ws: LocalWorkspace) -> ToolContext:
         permission_mode="full",
         session_id="test-session",
     )
+
+
+@pytest.fixture(scope="session")
+def session_python(tmp_path_factory: Any) -> Any:
+    """One real session venv (pytest installed) shared by every integration test."""
+    from app.workspace.pyenv import ensure_session_python
+
+    return ensure_session_python(tmp_path_factory.mktemp("session-run"))
+
+
+@pytest.fixture
+def python_workspace(tmp_path: Path, session_python: Any) -> LocalWorkspace:
+    """A LocalWorkspace whose commands run with the session venv first on PATH."""
+    return LocalWorkspace(str(tmp_path / "workspace"), env=session_python.env())

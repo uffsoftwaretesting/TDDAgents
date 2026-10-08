@@ -63,6 +63,17 @@ from app.workspace.base import (
 
 logger = logging.getLogger("TDDOrchestrator.Sandbox")
 
+
+def require_e2b_api_key() -> None:
+    """
+    The E2B key is optional at import time (runs default to a local workspace); requesting
+    a sandbox without one is a configuration error, raised here rather than as an opaque
+    SDK authentication failure.
+    """
+    if not Config.E2B_API_KEY:
+        raise WorkspaceAuthError("E2B_API_KEY is not configured; a sandbox workspace cannot be created.")
+
+
 # Commands run as root, matching the behavior every recorded experimental run relied on.
 _SANDBOX_USER = "root"
 
@@ -161,6 +172,7 @@ class E2BAdapter:
     @classmethod
     def create(cls, timeout: int | None = None) -> "E2BAdapter":
         """Provisions a new sandbox with an explicit lifetime."""
+        require_e2b_api_key()
         lifetime = timeout if timeout is not None else Config.SANDBOX_TIMEOUT
         try:
             sandbox = Sandbox.create(api_key=Config.E2B_API_KEY, timeout=lifetime)
@@ -182,6 +194,7 @@ class E2BAdapter:
     @classmethod
     def connect(cls, sandbox_id: str) -> "E2BAdapter":
         """Connects to an existing sandbox. Raises WorkspaceNotFound if it is gone."""
+        require_e2b_api_key()
         try:
             sandbox = Sandbox.connect(sandbox_id, api_key=Config.E2B_API_KEY)
         except Exception as exc:

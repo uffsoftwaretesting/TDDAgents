@@ -140,7 +140,12 @@ class MCPRouter:
                         t_name = t.get("name", "tool")
                         t_desc = t.get("description", f"{server_name} {t_name}")
                         t_schema = t.get("inputSchema", {})
-                        dummy_handler = lambda a, c: ToolResult(content=f"mcp call {server_name}.{t_name}")
+
+                        async def dummy_handler(
+                            a: dict[str, Any], c: ToolContext, _server: str = server_name, _tool: str = t_name
+                        ) -> ToolResult:
+                            return ToolResult(content=f"mcp call {_server}.{_tool}")
+
                         self.register_tool(
                             server_name=server_name,
                             tool_name=t_name,

@@ -6,9 +6,21 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.tools.run_tests import RunTests, SuiteExecutionResult, build_run_tests_tool
+from app.loop.tools.run_tests import (
+    LEDGER_EXIT_CODES,
+    PYTEST_EXIT_REASONS,
+    RunTests,
+    RunTestsUnavailable,
+    SuiteExecutionResult,
+    build_run_tests_tool,
+    pytest_command,
+    run_tests_timeout_seconds,
+)
+from app.workspace.base import WorkspaceTimeout
 
 
 def test_run_tests_in_red_failing_test_advances_to_green():
@@ -91,327 +103,354 @@ def test_run_tests_green_in_red_f2_case():
     asyncio.run(go())
 
 
-def test_run_tests_async_runner_and_context_injection():
+def test_exit_2_is_not_an_observation_and_leaves_the_ledger():
     async def go():
-        store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False))
-        )
+        ledger = PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False)
+        store = AppStateStore(AppState(phase_ledger=ledger))
         ctx = tool_context_for(store)
 
         async def async_runner(path, context):
             assert context is ctx
             return SuiteExecutionResult(exit_code=2, stdout="Syntax error", stderr="Failed")
 
-        tool = build_run_tests_tool(async_runner)
-        res = await tool.call({"test_path": "tests/test_bar.py"}, ctx)
-
+        res = await build_run_tests_tool(async_runner).call({"test_path": "tests/test_bar.py"}, ctx)
+        assert res.is_error is True
         assert res.exit_code == 2
-        assert "Syntax error" in res.content
-        assert store.get().phase_ledger.phase == TddPhase.GREEN
-        assert store.get().phase_ledger.red_confirmed is True
+        assert res.content == (
+            "Tests could not be evaluated (exit 2: test execution was interrupted). The TDD ledger was not "
+            "changed.\n\n--- STDOUT ---\nSyntax error\n--- STDERR ---\nFailed")
+        assert store.get().phase_ledger == ledger
 
     asyncio.run(go())
+
+
+@pytest.mark.parametrize("code, reason", [
+    (2, "test execution was interrupted"),
+    (3, "pytest hit an internal error"),
+    (4, "pytest was invoked incorrectly (usage error)"),
+    (5, "no tests were collected"),
+    (127, "pytest did not report a test outcome"),
+    (-9, "pytest did not report a test outcome"),
+])
+@pytest.mark.parametrize("phase", list(TddPhase))
+def test_non_observation_codes_never_move_the_ledger(code, reason, phase):
+    """'No tests collected' can never confirm RED; nothing but 0/1 is evidence."""
+    ledger = PhaseLedger(phase=phase, red_confirmed=phase != TddPhase.RED,
+                         green_passed=phase == TddPhase.REFACTOR)
+    store = AppStateStore(AppState(phase_ledger=ledger))
+    tool = build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=code, stdout="o"))
+    res = asyncio.run(tool.call({}, tool_context_for(store)))
+    assert res.is_error is True
+    assert res.exit_code == code
+    assert res.content.startswith(f"Tests could not be evaluated (exit {code}: {reason}). The TDD ledger")
+    assert store.get().phase_ledger == ledger
+
+
+def test_ledger_codes_constant():
+    assert LEDGER_EXIT_CODES == frozenset({0, 1})
+    assert PYTEST_EXIT_REASONS == {
+        2: "test execution was interrupted",
+        3: "pytest hit an internal error",
+        4: "pytest was invoked incorrectly (usage error)",
+        5: "no tests were collected",
+    }
 
 
 def test_default_instance_and_properties():
-    async def go():
-        store = AppStateStore()
-        ctx = tool_context_for(store)
+    from app.loop.tools.run_tests import RUN_TESTS_PROMPT
 
-        from app.loop.tools.run_tests import RUN_TESTS_PROMPT
+    built_instance = build_run_tests_tool()
+    for t in (RunTests, built_instance):
+        assert t.name == "RunTests"
+        assert t.prompt == RUN_TESTS_PROMPT
+        assert t.input_schema == {
+            "type": "object",
+            "properties": {
+                "test_path": {
+                    "type": "string",
+                    "description": "File or directory to run. '.' runs the whole suite.",
+                    "default": ".",
+                }
+            },
+        }
+        assert t.is_read_only({}) is True
+        assert t.is_concurrency_safe({}) is False
+        assert t.is_implementation_writer() is False
+        assert t.is_test_writer() is False
+        assert t.description({"test_path": "tests/test_x.py"}) == "Run tests in tests/test_x.py"
+        assert t.description({}) == "Run tests in ."
+    assert "workspace" in RUN_TESTS_PROMPT and "sandbox" not in RUN_TESTS_PROMPT
 
-        built_instance = build_run_tests_tool()
 
-        for t in (RunTests, built_instance):
-            assert t.name == "RunTests"
-            assert t.prompt == RUN_TESTS_PROMPT
-            assert t.input_schema == {
-                "type": "object",
-                "properties": {
-                    "test_path": {
-                        "type": "string",
-                        "description": "File or directory to run. '.' runs the whole suite.",
-                        "default": ".",
-                    }
-                },
-            }
-            props = t.input_schema["properties"]["test_path"]
-            assert props["type"] == "string"
-            assert props["description"] == "File or directory to run. '.' runs the whole suite."
-            assert props["default"] == "."
-            assert t.is_read_only({}) is True
-            assert t.is_read_only({"test_path": "foo"}) is True
-            assert t.is_concurrency_safe({}) is False
-            assert t.is_concurrency_safe({"test_path": "foo"}) is False
-            assert t.is_implementation_writer() is False
-            assert t.is_test_writer() is False
-            assert t.description({"test_path": "tests/test_x.py"}) == "Run tests in tests/test_x.py"
-            assert t.description({}) == "Run tests in ."
-            assert t.description({"test_path": "XX.XX"}) == "Run tests in XX.XX"
-            assert t.description({"other": "foo"}) == "Run tests in ."
-
-        res = await RunTests.call({}, ctx)
-        assert res.is_error is False
-        assert res.exit_code == 0
-        assert res.content == "All tests passed.\n\n--- STDOUT ---\nPytest executed on .: all tests passed."
-
-    asyncio.run(go())
+def test_fails_closed_without_a_workspace():
+    """The old offline fallback reported 'all tests passed' with nothing run."""
+    ledger = PhaseLedger(phase=TddPhase.RED)
+    store = AppStateStore(AppState(phase_ledger=ledger))
+    res = asyncio.run(RunTests.call({}, tool_context_for(store)))
+    assert res.is_error is True
+    assert res.exit_code is None
+    assert res.content == ("RunTests could not run the tests: no workspace is available to run the tests in. "
+                           "The TDD ledger was not changed.")
+    assert store.get().phase_ledger == ledger
 
 
 def test_suite_execution_result_defaults_and_alias():
-
     from app.loop.tools.run_tests import TestExecutionResult
 
     res = SuiteExecutionResult(exit_code=0)
-    assert res.exit_code == 0
-    assert res.stdout == ""
-    assert res.stderr == ""
-    assert res.__test__ is False
+    assert (res.exit_code, res.stdout, res.stderr, res.__test__) == (0, "", "", False)
     assert TestExecutionResult is SuiteExecutionResult
 
 
-def test_default_test_runner_branches():
+class _Wrap:
+    def __init__(self, ctx):
+        self._ctx = ctx
+
+    def __getattr__(self, item):
+        return getattr(self._ctx, item)
+
+
+def test_default_test_runner_context_runner_shapes():
     async def go():
         from app.loop.tools.run_tests import _default_test_runner
 
-        store = AppStateStore()
-        base_ctx = tool_context_for(store)
+        base = tool_context_for(AppStateStore())
 
-        # 1. 2-arg sync runner on context
-        class ContextWithSyncRunner2Args:
-            def __init__(self, ctx):
-                self._ctx = ctx
-
+        class Sync2(_Wrap):
             def test_runner(self, path, c):
-                assert path == "tests/test_sync2.py"
                 assert c is self
-                return SuiteExecutionResult(exit_code=0, stdout="sync2 out", stderr="sync2 err")
+                return SuiteExecutionResult(exit_code=0, stdout=f"s2 {path}", stderr="e")
 
-            def __getattr__(self, item):
-                return getattr(self._ctx, item)
-
-        ctx_s2 = ContextWithSyncRunner2Args(base_ctx)
-        res_s2 = await _default_test_runner("tests/test_sync2.py", ctx_s2)  # type: ignore[arg-type]
-        assert res_s2.exit_code == 0
-        assert res_s2.stdout == "sync2 out"
-        assert res_s2.stderr == "sync2 err"
-
-        # 2. 1-arg sync runner on context (TypeError fallback)
-        class ContextWithSyncRunner1Arg:
-            def __init__(self, ctx):
-                self._ctx = ctx
-
+        class Sync1(_Wrap):
             def test_runner(self, path):
-                assert path == "tests/test_sync1.py"
-                return SuiteExecutionResult(exit_code=1, stdout="sync1 out")
+                return SuiteExecutionResult(exit_code=1, stdout=f"s1 {path}")
 
-            def __getattr__(self, item):
-                return getattr(self._ctx, item)
-
-        ctx_s1 = ContextWithSyncRunner1Arg(base_ctx)
-        res_s1 = await _default_test_runner("tests/test_sync1.py", ctx_s1)  # type: ignore[arg-type]
-        assert res_s1.exit_code == 1
-        assert res_s1.stdout == "sync1 out"
-
-        # 3. 2-arg async runner on context
-        class ContextWithAsyncRunner2Args:
-            def __init__(self, ctx):
-                self._ctx = ctx
-
+        class Async2(_Wrap):
             async def test_runner(self, path, c):
-                assert path == "tests/test_async2.py"
-                assert c is self
-                return SuiteExecutionResult(exit_code=2, stdout="async2 out")
+                return SuiteExecutionResult(exit_code=2, stdout="a2")
 
-            def __getattr__(self, item):
-                return getattr(self._ctx, item)
-
-        ctx_a2 = ContextWithAsyncRunner2Args(base_ctx)
-        res_a2 = await _default_test_runner("tests/test_async2.py", ctx_a2)  # type: ignore[arg-type]
-        assert res_a2.exit_code == 2
-        assert res_a2.stdout == "async2 out"
-
-        # 4. 1-arg async runner on context (TypeError fallback)
-        class ContextWithAsyncRunner1Arg:
-            def __init__(self, ctx):
-                self._ctx = ctx
-
+        class Async1(_Wrap):
             async def test_runner(self, path):
-                assert path == "tests/test_async1.py"
-                return SuiteExecutionResult(exit_code=3, stdout="async1 out")
+                return SuiteExecutionResult(exit_code=3, stdout="a1")
 
-            def __getattr__(self, item):
-                return getattr(self._ctx, item)
-
-        ctx_a1 = ContextWithAsyncRunner1Arg(base_ctx)
-        res_a1 = await _default_test_runner("tests/test_async1.py", ctx_a1)  # type: ignore[arg-type]
-        assert res_a1.exit_code == 3
-        assert res_a1.stdout == "async1 out"
-
-        # 5. Runner returning arbitrary object with exit_code
-        class CustomResult:
-            exit_code = 42
-
-        class ContextWithCustomResult:
-            def __init__(self, ctx):
-                self._ctx = ctx
-
+        class Custom(_Wrap):
             def test_runner(self, path):
-                return CustomResult()
+                return type("R", (), {"exit_code": 42})()
 
-            def __getattr__(self, item):
-                return getattr(self._ctx, item)
-
-        ctx_cr = ContextWithCustomResult(base_ctx)
-        res_cr = await _default_test_runner("tests/test_custom.py", ctx_cr)  # type: ignore[arg-type]
-        assert res_cr.exit_code == 42
-        assert res_cr.stdout == ""
-        assert res_cr.stderr == ""
-
-        # 6. Runner returning arbitrary object without exit_code
-        class ContextWithNoExitCode:
-            def __init__(self, ctx):
-                self._ctx = ctx
-
-            def test_runner(self, path):
-                return object()
-
-            def __getattr__(self, item):
-                return getattr(self._ctx, item)
-
-        ctx_no_ec = ContextWithNoExitCode(base_ctx)
-        res_no_ec = await _default_test_runner("tests/test_none.py", ctx_no_ec)  # type: ignore[arg-type]
-        assert res_no_ec.exit_code == 0
-
-        # 7. Non-callable test_runner attribute
-        class ContextWithNonCallable:
-            def __init__(self, ctx):
-                self._ctx = ctx
-                self.test_runner = "not-callable"
-
-            def __getattr__(self, item):
-                return getattr(self._ctx, item)
-
-        ctx_nc = ContextWithNonCallable(base_ctx)
-        res_nc = await _default_test_runner("tests/test_fallback.py", ctx_nc)  # type: ignore[arg-type]
-        assert res_nc.exit_code == 0
-        assert res_nc.stdout == "Pytest executed on tests/test_fallback.py: all tests passed."
-        assert res_nc.stderr == ""
-
-        # 8. Plain ToolContext without test_runner (offline fallback)
-        res_offline = await _default_test_runner("tests/test_off.py", base_ctx)
-        assert res_offline.exit_code == 0
-        assert res_offline.stdout == "Pytest executed on tests/test_off.py: all tests passed."
-        assert res_offline.stderr == ""
+        r = await _default_test_runner("t.py", Sync2(base))  # type: ignore[arg-type]
+        assert (r.exit_code, r.stdout, r.stderr) == (0, "s2 t.py", "e")
+        assert (await _default_test_runner("t.py", Sync1(base))).stdout == "s1 t.py"  # type: ignore[arg-type]
+        assert (await _default_test_runner("t.py", Async2(base))).exit_code == 2  # type: ignore[arg-type]
+        assert (await _default_test_runner("t.py", Async1(base))).exit_code == 3  # type: ignore[arg-type]
+        r = await _default_test_runner("t.py", Custom(base))  # type: ignore[arg-type]
+        assert (r.exit_code, r.stdout, r.stderr) == (42, "", "")
 
     asyncio.run(go())
 
 
-def test_call_run_tests_argument_handling_and_formatting():
+@pytest.mark.parametrize("bad_exit", [None, "1", 1.0, object()])
+def test_context_runner_without_an_int_exit_code_is_unavailable(bad_exit):
+    from app.loop.tools.run_tests import _default_test_runner
+
+    class NoCode(_Wrap):
+        def test_runner(self, path):
+            return type("R", (), {"exit_code": bad_exit})()
+
+    with pytest.raises(RunTestsUnavailable, match="returned no exit code"):
+        asyncio.run(_default_test_runner("t.py", NoCode(tool_context_for(AppStateStore()))))  # type: ignore[arg-type]
+
+
+def test_non_callable_context_runner_falls_through_to_workspace_rule():
+    from app.loop.tools.run_tests import _default_test_runner
+
+    class NotCallable(_Wrap):
+        test_runner = "nope"
+
+    with pytest.raises(RunTestsUnavailable, match="no workspace"):
+        asyncio.run(_default_test_runner("t.py", NotCallable(tool_context_for(AppStateStore()))))  # type: ignore
+
+
+def test_call_argument_handling_and_formatting():
     async def go():
         store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
         ctx = tool_context_for(store)
+        seen: list[str] = []
 
-        seen_paths: list[str] = []
-
-        def recording_runner(path):
-            seen_paths.append(path)
+        def recording(path):
+            seen.append(path)
             return SuiteExecutionResult(exit_code=0, stdout=f"Ran {path}", stderr="   \n ")
 
-        tool = build_run_tests_tool(recording_runner)
+        tool = build_run_tests_tool(recording)
+        assert (await tool.call({"test_path": "tests/x.py"}, ctx)).content == (
+            "All tests passed.\n\n--- STDOUT ---\nRan tests/x.py")
+        for args in ({"test_path": ""}, {"test_path": None}, {}):
+            await tool.call(args, ctx)
+            assert seen[-1] == "."
 
-        # Explicit test_path
-        res1 = await tool.call({"test_path": "tests/test_specific.py"}, ctx)
-        assert seen_paths[-1] == "tests/test_specific.py"
-        assert res1.is_error is False
-        assert res1.exit_code == 0
-        # When stderr is only whitespace, stderr section is not added
-        assert res1.content == "All tests passed.\n\n--- STDOUT ---\nRan tests/test_specific.py"
+        fail = build_run_tests_tool(lambda p: SuiteExecutionResult(exit_code=1, stdout="F", stderr="E"))
+        res = await fail.call({}, ctx)
+        assert (res.is_error, res.exit_code) == (False, 1)
+        assert res.content == "Tests failed (exit 1).\n\n--- STDOUT ---\nF\n--- STDERR ---\nE"
 
-        # Empty string test_path defaults to "."
-        res2 = await tool.call({"test_path": ""}, ctx)
-        assert seen_paths[-1] == "."
-        assert res2.content == "All tests passed.\n\n--- STDOUT ---\nRan ."
+        two = build_run_tests_tool(lambda p, c: SuiteExecutionResult(exit_code=0, stdout=f"2 {p} {c is ctx}"))
+        assert (await two.call({"test_path": "a"}, ctx)).content.endswith("2 a True")
 
-        # None test_path defaults to "."
-        res3 = await tool.call({"test_path": None}, ctx)
-        assert seen_paths[-1] == "."
-        assert res3.content == "All tests passed.\n\n--- STDOUT ---\nRan ."
+        def unavailable(path):
+            raise RunTestsUnavailable("runner exploded")
 
-        # Missing test_path defaults to "."
-        res4 = await tool.call({}, ctx)
-        assert seen_paths[-1] == "."
-        assert res4.content == "All tests passed.\n\n--- STDOUT ---\nRan ."
-
-        # Failure formatting with non-empty stderr
-        def failing_runner(path):
-            return SuiteExecutionResult(exit_code=5, stdout="Failed out", stderr="Error log")
-
-        fail_tool = build_run_tests_tool(failing_runner)
-        res5 = await fail_tool.call({"test_path": "tests/test_fail.py"}, ctx)
-        assert res5.is_error is False
-        assert res5.exit_code == 5
-        assert (
-            res5.content
-            == "Tests failed (exit 5).\n\n--- STDOUT ---\nFailed out\n--- STDERR ---\nError log"
-        )
-
-        # Runner using 2-arg sync callable
-        def sync_2arg_runner(path, c):
-            assert c is ctx
-            return SuiteExecutionResult(exit_code=0, stdout=f"2arg sync {path}")
-
-        tool_sync2 = build_run_tests_tool(sync_2arg_runner)
-        res6 = await tool_sync2.call({"test_path": "tests/test_sync2.py"}, ctx)
-        assert res6.content == "All tests passed.\n\n--- STDOUT ---\n2arg sync tests/test_sync2.py"
-
-        # Runner with test_runner=None uses _default_test_runner
-        default_built_tool = build_run_tests_tool(None)
-        res7 = await default_built_tool.call({"test_path": "tests/test_def.py"}, ctx)
-        assert (
-            res7.content
-            == "All tests passed.\n\n--- STDOUT ---\nPytest executed on tests/test_def.py: all tests passed."
-        )
+        res = await build_run_tests_tool(unavailable).call({}, ctx)
+        assert (res.is_error, res.content) == (
+            True, "RunTests could not run the tests: runner exploded. The TDD ledger was not changed.")
 
     asyncio.run(go())
 
 
-def test_run_tests_default_runner_uses_workspace_if_provided():
-    async def go():
-        store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+class _RecordingWorkspace:
+    def __init__(self, exit_code=0, exc=None):
+        self.calls = []
+        self.exit_code, self.exc = exit_code, exc
 
-        class FakeWorkspaceWithExecute:
-            def __init__(self):
-                self.commands = []
+    def execute(self, cmd, timeout=None, env=None):
+        self.calls.append((cmd, timeout))
+        if self.exc:
+            raise self.exc
+        from app.workspace.base import CommandResult
+        return CommandResult(stdout="pytest output", stderr="", exit_code=self.exit_code, duration=0.1,
+                             workspace="local")
 
-            def execute(self, cmd):
-                self.commands.append(cmd)
-                from app.workspace.base import CommandResult
-                return CommandResult(
-                    stdout="pytest output",
-                    stderr="",
-                    exit_code=0,
-                    duration=0.1,
-                    workspace="sandbox",
-                )
 
-        ws = FakeWorkspaceWithExecute()
-        ctx = tool_context_for(store, workspace=ws)
-        tool = build_run_tests_tool(None)
+def test_workspace_command_is_quoted_and_time_limited():
+    ws = _RecordingWorkspace()
+    ctx = tool_context_for(AppStateStore(), workspace=ws)
+    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests/a b.py; rm -rf /"}, ctx))
+    assert res.exit_code == 0 and "pytest output" in res.content
+    assert ws.calls == [("PYTHONPATH=. python -m pytest 'tests/a b.py; rm -rf /' -vv --tb=short", 120.0)]
+    assert pytest_command("tests/x.py") == "PYTHONPATH=. python -m pytest tests/x.py -vv --tb=short"
 
-        res = await tool.call({"test_path": "tests/test_bar.py"}, ctx)
-        assert ws.commands == ['PYTHONPATH=. python -m pytest "tests/test_bar.py" -vv --tb=short']
-        assert res.exit_code == 0
-        assert "pytest output" in res.content
 
-        # Error handling when workspace.execute raises
-        class BrokenWorkspace:
-            def execute(self, cmd):
-                raise RuntimeError("Sandbox crashed")
+def test_timeout_follows_the_bash_default(monkeypatch):
+    monkeypatch.setenv("BASH_DEFAULT_TIMEOUT_MS", "30000")
+    assert run_tests_timeout_seconds() == 30.0
+    monkeypatch.delenv("BASH_DEFAULT_TIMEOUT_MS")
+    assert run_tests_timeout_seconds() == 120.0
 
-        ctx_broken = tool_context_for(store, workspace=BrokenWorkspace())
-        res_broken = await tool.call({"test_path": "tests/test_broken.py"}, ctx_broken)
-        assert res_broken.exit_code == 1
-        assert "Error executing pytest in workspace: Sandbox crashed" in res_broken.content
 
-    asyncio.run(go())
+@pytest.mark.parametrize("exc", [RuntimeError("Sandbox crashed"), WorkspaceTimeout("slow")])
+def test_workspace_failure_is_unavailable_not_red(exc):
+    """A crashed or timed-out run used to be mapped to exit 1 and could confirm RED."""
+    ledger = PhaseLedger(phase=TddPhase.RED)
+    store = AppStateStore(AppState(phase_ledger=ledger))
+    ctx = tool_context_for(store, workspace=_RecordingWorkspace(exc=exc))
+    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests/t.py"}, ctx))
+    assert res.is_error is True
+    assert res.content == (f"RunTests could not run the tests: pytest could not be executed in the workspace: {exc}. "
+                           "The TDD ledger was not changed.")
+    assert store.get().phase_ledger == ledger
+
+
+def test_workspace_without_execute_is_unavailable():
+    ctx = tool_context_for(AppStateStore(), workspace=object())
+    res = asyncio.run(build_run_tests_tool(None).call({}, ctx))
+    assert res.is_error is True and "no workspace is available" in res.content
+
+
+# ── integration: real pytest in a real LocalWorkspace ────────────────────────
+
+def test_real_pytest_red_then_green_in_a_local_workspace(python_workspace):
+    ws = python_workspace
+    store = AppStateStore()
+    ctx = tool_context_for(store, workspace=ws)
+    tool = build_run_tests_tool(None)
+
+    ws.write_file("tests/test_add.py", "from add import add\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+    ws.write_file("add.py", "def add(a, b):\n    return 0\n")
+    red = asyncio.run(tool.call({"test_path": "tests"}, ctx))
+    assert red.exit_code == 1 and red.is_error is False
+    assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=False)
+
+    ws.write_file("add.py", "def add(a, b):\n    return a + b\n")
+    green = asyncio.run(tool.call({"test_path": "tests"}, ctx))
+    assert green.exit_code == 0
+    assert store.get().phase_ledger.is_cycle_complete
+
+
+def test_real_pytest_with_no_tests_cannot_confirm_red(python_workspace):
+    ws = python_workspace
+    store = AppStateStore()
+    ws.write_file("tests/helper.py", "X = 1\n")
+    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
+    assert res.exit_code == 5 and res.is_error is True
+    assert "no tests were collected" in res.content
+    assert store.get().phase_ledger == PhaseLedger()
+
+
+# ── exit 2: a collection error from missing code is RED evidence ─────────────
+
+BANNER = "______ ERROR collecting tests/test_mod.py ______\n"
+
+
+@pytest.mark.parametrize("error_line", [
+    "E   ModuleNotFoundError: No module named 'calculator'",
+    "E   ImportError: cannot import name 'sub' from 'calc2' (/w/calc2.py)",
+    "E   AttributeError: module 'calc2' has no attribute 'nothing'",
+])
+def test_missing_code_collection_errors_are_failing_tests(error_line):
+    from app.loop.tools.run_tests import is_missing_code_collection_error, ledger_exit_code
+
+    res = SuiteExecutionResult(exit_code=2, stdout=BANNER + error_line + "\n!!! Interrupted: 1 error !!!")
+    assert is_missing_code_collection_error(res) is True
+    assert ledger_exit_code(res) == 1
+    store = AppStateStore()
+    out = asyncio.run(build_run_tests_tool(lambda p: res).call({}, tool_context_for(store)))
+    assert out.is_error is False and out.exit_code == 2
+    assert out.content.startswith(
+        "Tests failed (exit 2: collection error — the code under test does not exist yet).")
+    assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+
+
+@pytest.mark.parametrize("stdout, stderr", [
+    (BANNER + "E   SyntaxError: invalid syntax", ""),                                  # broken test
+    (BANNER + "E   ModuleNotFoundError: x\nE   SyntaxError: bad", ""),                # any syntax error wins
+    (BANNER + "E   IndentationError: unexpected indent", ""),
+    (BANNER + "E   TabError: inconsistent", ""),
+    (BANNER + "E   NameError: name 'x' is not defined", ""),                          # not a missing-code kind
+    ("E   ModuleNotFoundError: No module named 'x'", ""),                              # no collection banner
+    ("KeyboardInterrupt", ""),                                                         # interrupted
+    ("", BANNER + "E   ModuleNotFoundError: No module named 'calculator'"),           # stderr counts too
+])
+def test_other_exit_2_runs_are_not_evidence(stdout, stderr):
+    from app.loop.tools.run_tests import is_missing_code_collection_error, ledger_exit_code
+
+    res = SuiteExecutionResult(exit_code=2, stdout=stdout, stderr=stderr)
+    expected = "calculator" in stderr
+    assert is_missing_code_collection_error(res) is expected
+    assert ledger_exit_code(res) == (1 if expected else None)
+
+
+def test_collection_shape_only_applies_to_exit_2():
+    from app.loop.tools.run_tests import is_missing_code_collection_error, ledger_exit_code
+
+    text = BANNER + "E   ModuleNotFoundError: No module named 'calculator'"
+    for code in (1, 3, 4, 5, 0):
+        assert is_missing_code_collection_error(SuiteExecutionResult(exit_code=code, stdout=text)) is False
+    assert ledger_exit_code(SuiteExecutionResult(exit_code=5, stdout=text)) is None
+    assert ledger_exit_code(SuiteExecutionResult(exit_code=0)) == 0
+    assert ledger_exit_code(SuiteExecutionResult(exit_code=1)) == 1
+
+
+def test_real_pytest_missing_module_confirms_red(python_workspace):
+    ws = python_workspace
+    store = AppStateStore()
+    ws.write_file("tests/test_calc.py", "import calculator\n\ndef test_add():\n    assert calculator.add(2, 3) == 5\n")
+    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
+    assert res.exit_code == 2 and res.is_error is False
+    assert store.get().phase_ledger.red_confirmed is True
+
+
+def test_real_pytest_syntax_error_in_test_is_not_red(python_workspace):
+    ws = python_workspace
+    store = AppStateStore()
+    ws.write_file("tests/test_bad.py", "def test_x(:\n    pass\n")
+    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
+    assert res.exit_code == 2 and res.is_error is True
+    assert store.get().phase_ledger == PhaseLedger()

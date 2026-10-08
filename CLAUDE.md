@@ -337,6 +337,17 @@ All 74 survivors across `app/workspace/` and `app/sync/` are triaged and documen
 - **Logging wording and telemetry strings (24)**: logger messages, debug strings, and decision reasons (e.g. `f"both sides changed; {winner} wins"`).
 - **Fallback defaults and timing bounds (12)**: non-contractual timestamps (`taken_at=None` when ignoring baseline) and command duration timing boundaries.
 
+**Phase 0 (local runner baseline) is measured under `paths_to_mutate` = runner, run_tests, model, state, engine, factory, session/iteration, session/export, workspace/pyenv, workspace/local, and clears the bar**, at 4482 tests:
+
+| | |
+|---|---|
+| Mutants | 1417 (6 timeout) |
+| Killed | 1293 |
+| Survived | 118 |
+| **Mutation score** | **91.64%** (1293 / 1411) |
+
+Survivor triage: `runner.py` 34 (29 log wording/arguments; 3 pool `phase_ledger` mutants equivalent because in RED the pool keeps all seven built-ins — writer classification is per call, at the gate; 2 `ToolContext.messages` mutants equivalent because `initial_loop_state` carries the messages), `factory.py` 2 (`tracking` default), `model.py` 1 (`keep_recent_turns=2` equals the default), `workspace/local.py` 13 (codec aliases, unreachable `list_files` branches, default arguments), plus the pre-existing engine/iteration/run_tests log and equivalent classes. Two tests had to be made mutmut-safe: subprocess imports of `app.main` hit trampolines in the child (`test_app_main_imports_without_an_e2b_key` now imports only), and the single-ledger-writer AST check dedupes files because a mutated module holds one copy of each function per mutant. Removed as redundant rather than covered: two `mkdir(parents=True)` calls already implied by `copytree` and `venv`, and the runner's `tool_vars` dict, which no tool prompt consumed.
+
 Two earlier rounds on this package are worth repeating as method. Four survivors were
 removed by deleting a `typing.cast` whose string argument is a runtime no-op — the mutants
 went away with the redundancy rather than being covered by a test. Three more were genuine
@@ -409,10 +420,17 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
   and its output have nothing in common.
 - `tests/conftest.py` seeds `OPENAI_API_KEY` / `E2B_API_KEY` / `POSTGRES_URL` before any
   `app.*` import, because `config.py` raises at import time without them.
+- **Live tests never run by accident.** Tests marked `@pytest.mark.live` call a real provider and
+  run only with `RUN_LIVE_LLM_TESTS=1`; the key comes from the repo's gitignored `.env` via
+  `tests/conftest.py::read_dotenv_key`. `config.py` calls `load_dotenv()`, so a key in `.env`
+  would otherwise silently turn skip conditions into live calls.
+- **Real-pytest integration tests use the `python_workspace` fixture**, a `LocalWorkspace` whose
+  commands run in one session-scoped venv (`session_python`). A bare `LocalWorkspace` has no
+  `python` with pytest on `PATH` on hosts without one, and `RunTests` then exits 127.
 
 ## What this is
 
-TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed inside a remote **E2B cloud sandbox**, never on the host. State is checkpointed to PostgreSQL.
+TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed in a **local per-session workspace** (`.tddagents/runs/<thread_id>/workspace`) with its own Python virtualenv (`.tddagents/runs/<thread_id>/venv`, pytest pinned), not inside TDDAgents' environment. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL.
 
 It is **a LangGraph pipeline today and a loop tomorrow** — the refactor rebuilds it on claude-code's loop architecture, and LangGraph is reduced to a session shell (checkpointing, `interrupt()`, plan iteration). See [Upcoming refactor](#upcoming-refactor--read-before-extending-anything).
 
@@ -652,7 +670,7 @@ it to `TransientInfraError` for the legacy nodes, and goes away with them in Pha
 
 ### State and config
 
-`config/config.py` holds both `Config` and the two `TypedDict` state schemas. It **raises at import time** if `OPENAI_API_KEY`, `E2B_API_KEY`, or `POSTGRES_URL` are unset — importing anything under `app/` without a `.env` fails immediately. Model selection is hardcoded there (`CHAT_MODEL = "openai"`, `MODEL = "o4-mini"`), not read from the environment; switching providers means editing `Config` and passing the right kwargs through `utils/chat_model_factory.py`.
+`config/config.py` holds both `Config` and the two `TypedDict` state schemas. It **raises at import time** if `OPENAI_API_KEY` or `POSTGRES_URL` is unset (`E2B_API_KEY` is optional since Phase 0) — importing anything under `app/` without a `.env` fails immediately. Model selection is hardcoded there (`CHAT_MODEL = "openai"`, `MODEL = "o4-mini"`), not read from the environment; switching providers means editing `Config` and passing the right kwargs through `utils/chat_model_factory.py`.
 
 Postgres is not required: `TDDOrchestrator.run` falls back to `InMemorySaver` on `OperationalError`, losing cross-restart resumability.
 

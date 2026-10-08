@@ -20,7 +20,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.loop.config import RunConfig, build_run_config
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.deps import (
     CallModel,
     Compact,
@@ -137,9 +137,13 @@ class FakeCompact:
 
 
 def start(**overrides: Any) -> LoopState:
-    state = initial_loop_state(
-        (HumanMessage(content="spec"),), tool_context_for(AppStateStore())
-    )
+    """
+    A starting state. A `phase_ledger` override is seeded through the app-state store,
+    the only place a run's ledger may be set (RunTests is the only later writer).
+    """
+    ledger = overrides.pop("phase_ledger", None)
+    store = AppStateStore(AppState(phase_ledger=ledger)) if ledger is not None else AppStateStore()
+    state = initial_loop_state((HumanMessage(content="spec"),), tool_context_for(store))
     return replace(state, **overrides) if overrides else state
 
 

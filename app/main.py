@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from app.graph.subgraphs.requirements_orchestrator_subgraph import RequirementsOrchestrator
 from app.graph.orchestrator import TDDOrchestrator
+from app.session.export import export_run_workspace
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -312,7 +313,6 @@ def main() -> None:
     # ── Result and Extraction ──────────────────────────────────────────────
     final_status = final_state.get("status", "unknown")
     failed = final_state.get("failed_requirements", [])
-    file_system = final_state.get("file_system", {})
     plan = final_state.get("plan", [])
 
     if final_status in ("plan_complete", "completed_with_review", "completed_successfully"):
@@ -322,18 +322,9 @@ def main() -> None:
 
     print(f"\n💾 Extracting artifacts to the local machine ({workspace_dir}/)...")
 
-    # 1. Extracts the source code
-    if file_system:
-        for filepath, content in file_system.items():
-            clean_path = filepath.lstrip("/")
-            if clean_path.startswith("home/user/"):
-                clean_path = clean_path.replace("home/user/", "", 1)
-
-            full_path = os.path.join(workspace_dir, clean_path)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(content)
+    # 1. Copies the session workspace (the code the agents actually wrote and ran)
+    exported = export_run_workspace(orchestrator.workspace.root, workspace_dir)
+    print(f"   {len(exported)} file(s) exported from {orchestrator.workspace.root}")
 
     # 2. Extracts planner.txt
     if plan:

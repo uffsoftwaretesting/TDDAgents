@@ -7,12 +7,13 @@ while maintaining backwards-compatible AgentState outputs.
 
 from __future__ import annotations
 
+import functools
 import logging
 
 from app.config.config import AgentState
 from app.session.checkpointer import build_checkpointer
 from app.session.shell import SessionShell
-from app.loop.runner import tdd_loop_runner
+from app.loop.runner import session_workspace, tdd_loop_runner
 from app.session.state import SessionStatus
 from app.utils.token_metrics import GlobalTokenTracker
 
@@ -27,7 +28,11 @@ class TDDOrchestrator:
     def __init__(self, task_key: str = "tdd_task") -> None:
         self.task_key = task_key
         self.token_tracker = GlobalTokenTracker()
-        self._shell = SessionShell(checkpointer=build_checkpointer(), loop_runner=tdd_loop_runner)
+        # One local workspace per session, shared by its plan items; a parameter so a
+        # sandbox workspace can be bound here later (docs/refactoring_transition_plan.md).
+        self.workspace = session_workspace(task_key)
+        runner = functools.partial(tdd_loop_runner, workspace=self.workspace)
+        self._shell = SessionShell(checkpointer=build_checkpointer(), loop_runner=runner)
 
     def run(self, specification: str, requirements: str) -> AgentState:
         """

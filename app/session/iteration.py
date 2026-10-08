@@ -18,6 +18,10 @@ from app.session.state import PlanItemResult, SessionState, SessionStatus
 logger = logging.getLogger(__name__)
 
 
+class LoopRunnerNotConfigured(RuntimeError):
+    """The session shell was asked to execute a plan item with no loop runner wired in."""
+
+
 def node_plan(
     state: SessionState,
     *,
@@ -148,39 +152,33 @@ def node_execute_plan_item(
         return {"status": SessionStatus.COMPLETED}
 
     sub_req = plan[idx]
+    if loop_runner is None:
+        # A shell without a runner is a wiring bug, not a TDD outcome: never report a
+        # Red-Green cycle that nothing observed.
+        raise LoopRunnerNotConfigured("the session shell has no loop runner; refusing to fabricate a result")
     logger.info("Executing plan item %d/%d: '%s'", idx + 1, total, sub_req)
 
-    if loop_runner is not None:
-        try:
-            if inspect.iscoroutinefunction(loop_runner):
-                result_item = _run_coroutine_sync(loop_runner(sub_req, idx, state))
+    try:
+        if inspect.iscoroutinefunction(loop_runner):
+            result_item = _run_coroutine_sync(loop_runner(sub_req, idx, state))
+        else:
+            res = loop_runner(sub_req, idx, state)
+            if inspect.isawaitable(res):
+                result_item = _run_coroutine_sync(res)
             else:
-                res = loop_runner(sub_req, idx, state)
-                if inspect.isawaitable(res):
-                    result_item = _run_coroutine_sync(res)
-                else:
-                    result_item = res
-            if not isinstance(result_item, PlanItemResult):
-                raise TypeError(f"loop_runner must return PlanItemResult, got {type(result_item)}")
-        except Exception as exc:
-            logger.error("Error executing plan item '%s': %s", sub_req, exc)
-            result_item = PlanItemResult(
-                index=idx,
-                sub_requirement=sub_req,
-                status="failed",
-                terminal_reason="error",
-                red_confirmed=False,
-                green_passed=False,
-                error_message=str(exc),
-            )
-    else:
+                result_item = res
+        if not isinstance(result_item, PlanItemResult):
+            raise TypeError(f"loop_runner must return PlanItemResult, got {type(result_item)}")
+    except Exception as exc:
+        logger.error("Error executing plan item '%s': %s", sub_req, exc)
         result_item = PlanItemResult(
             index=idx,
             sub_requirement=sub_req,
-            status="success",
-            terminal_reason="completed",
-            red_confirmed=True,
-            green_passed=True,
+            status="failed",
+            terminal_reason="error",
+            red_confirmed=False,
+            green_passed=False,
+            error_message=str(exc),
         )
 
     return _process_item_outcome(result_item, idx, total, sub_req, state)

@@ -9,8 +9,8 @@ load_dotenv()
 if not os.getenv("OPENAI_API_KEY"):
     raise Exception("No API key configured")
 
-if not os.getenv("E2B_API_KEY"):
-    raise Exception("No E2B API key configured")
+# E2B_API_KEY is optional: runs use a local workspace, and the sandbox adapter checks the
+# key only when a sandbox is actually requested (`app/sandbox/adapter.py`).
 
 if not os.getenv("POSTGRES_URL"):
     raise Exception("No POSTGRES_URL configured")

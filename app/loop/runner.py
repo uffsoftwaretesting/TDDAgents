@@ -1,99 +1,155 @@
-import uuid
+"""
+The production runner: one sub-requirement through one `run_loop` (Phase 0 baseline).
+
+`tdd_loop_runner` is what the LangGraph session shell calls per plan item. It builds a
+real `LoopState` with `initial_loop_state` and `build_run_config`, gives the tools a real
+workspace, and reports only what the ledger observed.
+
+* **Workspace.** Runs are local for now (a decision recorded in
+  `docs/refactoring_transition_plan.md`): by default the session's shared
+  `LocalWorkspace.for_run(session_id)`, so later sub-requirements build on earlier code. The
+  workspace is a parameter, which is the room left for E2B.
+* **Ledger.** Each sub-requirement gets a fresh `AppStateStore`; that construction is the
+  only place a ledger is seeded, and after it `RunTests` is the only writer.
+* **Permissions.** The run is headless (`should_avoid_permission_prompts`): an `ask` nobody
+  can answer is a deny. Settings-loaded rules are wired in Phase 3.
+* **Transcript.** Written beside the workspace, never inside it, so agents cannot read or
+  edit their own record and it never reaches the exported artifact.
+"""
+
+from __future__ import annotations
+
 import logging
+import uuid
+from pathlib import Path
 from typing import Any
 
-from app.loop.config import RunConfig
-from app.loop.state import LoopState, CompactionTracking
-from app.loop.context import tool_context_for, AppStateStore
-from app.loop.engine import run_loop, drain
-from app.loop.factory import get_production_deps
-from app.loop.transitions import Terminal, Terminated
+from langchain_core.messages import HumanMessage
+
+from app.loop.config import build_run_config
+from app.loop.context import AppStateStore, tool_context_for
+from app.loop.deps import LoopDeps
+from app.loop.engine import drain, run_loop
+from app.loop.permissions.types import ToolPermissionContext
+from app.loop.state import initial_loop_state
+from app.loop.tools.base import Tool
 from app.loop.tools.pool import assemble_tool_pool
+from app.loop.transitions import Terminal
 from app.session.state import PlanItemResult, SessionState
+from app.workspace.local import LocalWorkspace
 
 logger = logging.getLogger("loop_runner")
 
-async def tdd_loop_runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
+
+def build_builtin_tools() -> list[Tool]:
     """
-    Executes a single sub-requirement using the robust Claude Code style 'while-loop'.
+    The Phase 0 roster: the file primitives, Bash and RunTests.
+
+    No per-run template vars, as in claude-code: a tool's prompt is static, and what varies per
+    run (the workspace, the phase) reaches the tool through `ToolContext` at call time.
     """
-    logger.info(f"🚀 Launching TDD Loop for sub_req: {sub_req}")
-    run_id = f"loop-{uuid.uuid4().hex[:8]}"
-    config = RunConfig(run_id=run_id, abort_signal=None)
-    deps = get_production_deps()
-    store = AppStateStore()
-    
-    # Initialize tools using the robust pool assembly mapped to the prompt registry
-    from app.loop.tools.fs import (
-        build_read_file_tool, 
-        build_write_file_tool, 
-        build_edit_tool, 
-        build_glob_tool, 
-        build_grep_tool
-    )
     from app.loop.tools.bash import build_bash_tool
-    from app.loop.tools.run_tests import build_run_tests_tool
-    
-    tool_vars = {
-        "working_directory": str(Path.cwd()),
-        "user_id": "tdd_user",
-        "agent_name": "TDDAgent",
-        "phase": str(store.get().phase_ledger.phase.value),
-        "run_id": run_id,
-    }
-    builtins = [
-        build_read_file_tool(vars=tool_vars), 
-        build_write_file_tool(vars=tool_vars), 
-        build_edit_tool(vars=tool_vars), 
-        build_glob_tool(vars=tool_vars), 
-        build_grep_tool(vars=tool_vars), 
-        build_bash_tool(vars=tool_vars), 
-        build_run_tests_tool(vars=tool_vars),
-    ]
-    tools = assemble_tool_pool(builtins, phase_ledger=store.get().phase_ledger)
-    
-    # Provide the orchestrator context with the prompt as a message
-    from langchain_core.messages import HumanMessage
-    initial_message = HumanMessage(content=sub_req)
-    
-    ctx = tool_context_for(store=store, tools=tools, messages=(initial_message,))
-    loop_state = LoopState(
-        messages=(initial_message,),
-        tool_context=ctx,
-        phase_ledger=store.get().phase_ledger,
-        compaction_tracking=CompactionTracking(message_id_range=(0,0)),
-        turn_count=0
+    from app.loop.tools.fs import (
+        build_edit_tool,
+        build_glob_tool,
+        build_grep_tool,
+        build_read_file_tool,
+        build_write_file_tool,
     )
+    from app.loop.tools.run_tests import build_run_tests_tool
+
+    return [
+        build_read_file_tool(),
+        build_write_file_tool(),
+        build_edit_tool(),
+        build_glob_tool(),
+        build_grep_tool(),
+        build_bash_tool(),
+        build_run_tests_tool(),
+    ]
+
+
+def session_workspace(thread_id: str) -> LocalWorkspace:
+    """
+    The session's shared local workspace, with its own Python environment
+    (`app/workspace/pyenv.py`) first on `PATH` for every command the tools run.
+    """
+    from app.workspace.pyenv import ensure_session_python
+
+    probe = LocalWorkspace.for_run(thread_id)
+    python = ensure_session_python(probe.run_dir)
+    return LocalWorkspace.for_run(thread_id, env=python.env())
+
+
+def default_workspace(state: SessionState) -> LocalWorkspace:
+    """The session's shared local workspace; a session without an id is a wiring bug."""
+    session_id = state.get("session_id")
+    if not session_id:
+        raise ValueError("tdd_loop_runner needs a session_id to locate the session workspace")
+    return session_workspace(str(session_id))
+
+
+async def tdd_loop_runner(
+    sub_req: str,
+    idx: int,
+    state: SessionState,
+    *,
+    workspace: Any = None,
+    deps: LoopDeps | None = None,
+    permission_context: ToolPermissionContext | None = None,
+) -> PlanItemResult:
+    """Run one sub-requirement through the loop and report what the ledger observed."""
+    run_id = f"loop-{uuid.uuid4().hex[:8]}"
+    ws = workspace if workspace is not None else default_workspace(state)
+    if deps is None:
+        from app.loop.factory import get_production_deps
+
+        deps = get_production_deps()
+    perm = permission_context or ToolPermissionContext(should_avoid_permission_prompts=True)
+
+    store = AppStateStore()
+    ledger = store.get().phase_ledger
+    tools = assemble_tool_pool(build_builtin_tools(), phase_ledger=ledger)
+
+    initial_message = HumanMessage(content=sub_req)
+    ctx = tool_context_for(
+        store,
+        messages=(initial_message,),
+        tools=tools,
+        permission_context=perm,
+        workspace=ws,
+    )
+    loop_state = initial_loop_state((initial_message,), ctx)
+    config = build_run_config(run_id, postgres_checkpointing=False)
 
     from app.loop.transcript import TranscriptLogger, with_transcript_logger
-    transcript_logger = TranscriptLogger(run_id=run_id)
-    
+
+    run_dir = getattr(ws, "run_dir", None)
+    transcript_dir = Path(run_dir) if run_dir is not None else None
+    transcript = TranscriptLogger(run_id=run_id, base_dir=transcript_dir)
+
+    logger.info("Launching TDD loop %s for sub-requirement %d: %s", run_id, idx, sub_req)
     try:
-        events = with_transcript_logger(run_loop(loop_state, config, deps), transcript_logger)
-        terminal_event = await drain(events)
-        reason = terminal_event.reason
-    except Exception as e:
-        logger.error(f"Loop crashed: {e}")
+        terminal = await drain(with_transcript_logger(run_loop(loop_state, config, deps), transcript))
+        reason = terminal.reason
+    except Exception:
+        logger.exception("Loop %s crashed", run_id)
         reason = Terminal.MODEL_ERROR
-        
-    final_ledger = store.get().phase_ledger
-    
-    from app.loop.model import _global_token_tracker
-    token_usage = _global_token_tracker.summary()
-    
-    status_str = "success" if reason == Terminal.COMPLETED else "failed"
+
+    final = store.get().phase_ledger
+    succeeded = reason == Terminal.COMPLETED
     logger.info(
-        f"📊 Resilience Log [Sub-req {idx}]: Status={status_str}, "
-        f"Reason={reason}, RED={final_ledger.red_confirmed}, GREEN={final_ledger.green_passed}, "
-        f"Tokens={token_usage['totals']['total_tokens']}"
+        "Loop %s finished: reason=%s red=%s green=%s", run_id, reason, final.red_confirmed, final.green_passed
     )
-    
     return PlanItemResult(
         index=idx,
         sub_requirement=sub_req,
-        status="success" if reason == Terminal.COMPLETED else "failed",
+        status="success" if succeeded else "failed",
         terminal_reason=str(reason),
-        red_confirmed=final_ledger.red_confirmed,
-        green_passed=final_ledger.green_passed,
-        error_message=None if reason == Terminal.COMPLETED else f"Terminated early: {reason}"
+        red_confirmed=final.red_confirmed,
+        green_passed=final.green_passed,
+        error_message=None if succeeded else f"Terminated early: {reason}",
     )
+
+
+__all__ = ["build_builtin_tools", "default_workspace", "session_workspace", "tdd_loop_runner"]

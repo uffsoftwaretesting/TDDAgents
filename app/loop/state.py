@@ -32,7 +32,7 @@ recoverable from the transition history, which is where Part L2 reads it from an
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from app.loop.context import ToolContext
 from app.loop.ledger import PhaseLedger
@@ -86,7 +86,6 @@ class LoopState:
 def initial_loop_state(
     messages: tuple[Message, ...],
     tool_context: ToolContext,
-    phase_ledger: PhaseLedger | None = None,
 ) -> LoopState:
     """
     The record a run starts from.
@@ -99,11 +98,11 @@ def initial_loop_state(
     `transition` is `None` on the first iteration and only there, which is what makes it a
     reliable "is this the first pass" test for code that needs one.
 
-    `phase_ledger` is reconciled with `tool_context.get_app_state().phase_ledger` (Part D1).
+    `phase_ledger` is read from the app-state store, never written: a run's starting ledger
+    is seeded when its `AppStateStore` is constructed, and after that `RunTests` is the only
+    writer (barrier 1, Part D1/D2).
     """
-    ledger = phase_ledger if phase_ledger is not None else tool_context.get_app_state().phase_ledger
-    if phase_ledger is not None and tool_context.get_app_state().phase_ledger != phase_ledger:
-        tool_context.set_app_state(lambda s: replace(s, phase_ledger=ledger))
+    ledger = tool_context.get_app_state().phase_ledger
 
     return LoopState(
         messages=messages,

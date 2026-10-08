@@ -2,16 +2,23 @@ import asyncio
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 
 from app.config.config import Config
 from app.loop import model as model_mod
 from app.loop.config import build_run_config
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.context.assembly import reset_session_context
 from app.loop.context.attachments import TDD_STATE_KEY
 from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.model import build_request_messages, convert_tool_to_langchain, read_todo, stream_call_model
+from app.loop.messages import tool_calls_in
+from app.loop.model import (
+    accumulate_stream,
+    build_request_messages,
+    convert_tool_to_langchain,
+    read_todo,
+    stream_call_model,
+)
 from app.loop.state import initial_loop_state
 from app.loop.tools.base import build_tool
 from app.loop.tools.types import ToolResult
@@ -73,8 +80,9 @@ def config():
 
 
 def _state(ws=None, messages=(), ledger=None, tools=()):
-    ctx = tool_context_for(AppStateStore(), workspace=ws, tools=tools)
-    return initial_loop_state(messages=messages, tool_context=ctx, phase_ledger=ledger)
+    store = AppStateStore(AppState(phase_ledger=ledger)) if ledger is not None else AppStateStore()
+    ctx = tool_context_for(store, workspace=ws, tools=tools)
+    return initial_loop_state(messages=messages, tool_context=ctx)
 
 
 def test_stream_call_model_propagates_factory_error(monkeypatch, config):
@@ -181,3 +189,88 @@ def test_request_is_keyed_by_run_and_memoizes_sections(monkeypatch, tmp_path):
     assert first[0].content == expected
     assert f"You are powered by the model {Config.MODEL}." in first[0].content
     assert f"Primary working directory: {ws.root}" in first[0].content
+
+
+# ── whole-message accumulation (Phase 0: the engine never sees a partial tool call) ──
+
+
+async def _aiter(items):
+    for item in items:
+        yield item
+
+
+def _accumulate(items):
+    async def go():
+        return [m async for m in accumulate_stream(_aiter(items))]
+    return asyncio.run(go())
+
+
+def _tool_call_chunks():
+    return [
+        AIMessageChunk(content="", tool_call_chunks=[{"name": "WriteFile", "args": "", "id": "call_1", "index": 0}]),
+        AIMessageChunk(content="", tool_call_chunks=[{"name": None, "args": '{"file_path": "tests/t', "id": None,
+                                                      "index": 0}]),
+        AIMessageChunk(content="", tool_call_chunks=[{"name": None, "args": 'est_a.py", "content": "x"}', "id": None,
+                                                      "index": 0}]),
+    ]
+
+
+def test_partial_chunks_never_expose_tool_calls():
+    """The defect this fixes: a mid-stream chunk parses to a call with no name or args."""
+    partial = _tool_call_chunks()[1]
+    assert tool_calls_in(partial)[0]["name"] == "" or tool_calls_in(partial)[0]["args"] == {}
+
+
+def test_chunks_are_merged_into_one_complete_ai_message():
+    out = _accumulate([AIMessageChunk(content="Writing "), AIMessageChunk(content="a test.")] + _tool_call_chunks())
+    assert len(out) == 1
+    msg = out[0]
+    assert isinstance(msg, AIMessage) and not isinstance(msg, AIMessageChunk)
+    assert msg.content == "Writing a test."
+    assert tool_calls_in(msg) == ({"name": "WriteFile", "args": {"file_path": "tests/test_a.py", "content": "x"},
+                                   "id": "call_1", "type": "tool_call"},)
+
+
+def test_parallel_tool_calls_are_kept_apart_by_index():
+    chunks = [
+        AIMessageChunk(content="", tool_call_chunks=[{"name": "ReadFile", "args": '{"file_path": "a"}', "id": "c1",
+                                                      "index": 0}]),
+        AIMessageChunk(content="", tool_call_chunks=[{"name": "ReadFile", "args": '{"file_path": "b"}', "id": "c2",
+                                                      "index": 1}]),
+    ]
+    (msg,) = _accumulate(chunks)
+    assert [(c["id"], c["args"]) for c in tool_calls_in(msg)] == [
+        ("c1", {"file_path": "a"}), ("c2", {"file_path": "b"})]
+
+
+def test_complete_messages_pass_through_and_flush_pending_chunks_in_order():
+    whole = AIMessage(content="whole")
+    out = _accumulate([AIMessageChunk(content="part-1"), whole, AIMessageChunk(content="part-2")])
+    assert [m.content for m in out] == ["part-1", "whole", "part-2"]
+    assert out[1] is whole
+    assert all(not isinstance(m, AIMessageChunk) for m in out)
+
+
+def test_non_message_items_are_dropped_and_empty_stream_yields_nothing():
+    assert _accumulate([]) == []
+    assert [m.content for m in _accumulate(["noise", AIMessageChunk(content="x"), 42])] == ["x"]
+
+
+def test_stream_call_model_yields_one_message_for_a_chunked_reply(monkeypatch, config):
+    class ChunkModel(MockModel):
+        async def astream(self, messages, config=None):
+            self.sent = messages
+            self.config = config
+            for c in [AIMessageChunk(content="a"), AIMessageChunk(content="b")] + _tool_call_chunks():
+                yield c
+
+    from app.loop.model import get_global_token_tracker
+
+    model = ChunkModel()
+    monkeypatch.setattr("app.loop.model.get_chat_model", lambda *a, **k: model)
+    out = _collect(_state(tools=(_tool("WriteFile"),)), config)
+    assert model.config == {"callbacks": [get_global_token_tracker()]}
+    assert model.sent and isinstance(model.sent, list)
+    assert len(out) == 1
+    assert out[0].content == "ab"
+    assert tool_calls_in(out[0])[0]["args"] == {"file_path": "tests/test_a.py", "content": "x"}

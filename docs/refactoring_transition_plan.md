@@ -84,6 +84,13 @@ nothing can report success it did not observe.
 - Session shell: with no runner, `execute_plan_item` must fail, never fabricate success.
 - Delete the root-level one-off scripts `patch_assembly.py`, `patch_loader.py`.
 
+*Phase 0 outcome (2026-10-08), per the interview:* runs are **local** (E2B optional, room kept
+via the runner's `Workspace` parameter); one workspace per session at
+`.tddagents/runs/<thread_id>/workspace`, exported by copy to `workspace_output_<thread_id>/`;
+tests run in a per-session venv (`ensure_session_python`, pytest pinned); `call_model` yields
+whole messages (pulled forward from Phase 1); `RunTests` moves the ledger only on exit 0/1 and
+on an exit-2 collection error caused by missing code; a shell without a runner raises.
+
 *Acceptance:* `python -c "import app.main"` succeeds; an end-to-end smoke run on `LocalWorkspace`
 with a scripted model writes a test, observes RED via `RunTests`, writes code, observes GREEN.
 

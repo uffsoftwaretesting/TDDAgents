@@ -94,9 +94,6 @@ async def run_loop(
 
         messages_for_query = state.messages
 
-        if state.transition is None and state.phase_ledger != state.tool_context.get_app_state().phase_ledger:
-            state.tool_context.set_app_state(lambda s: replace(s, phase_ledger=state.phase_ledger))
-
         state = replace(
             state, tool_context=replace(state.tool_context, messages=messages_for_query)
         )

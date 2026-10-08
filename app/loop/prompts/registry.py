@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
@@ -31,7 +30,7 @@ class PromptRegistry:
 
     def __init__(self, base_dir: Optional[Path] = None) -> None:
         self.base_dir = base_dir or PROMPTS_DIR
-        self.prompts: Dict[str, Dict[str, dict]] = {
+        self.prompts: Dict[str, Dict[str, dict[str, Any]]] = {
             "system-prompts": {},
             "tool-prompts": {},
             "data-prompts": {},
@@ -96,7 +95,7 @@ class PromptRegistry:
 
     def find_prompt(
         self, category: str, key: str
-    ) -> Optional[dict]:
+    ) -> Optional[dict[str, Any]]:
         """Lookup prompt entry by exact name, filename, normalized key, or substring."""
         cat_prompts = self.prompts.get(category, {})
         if not cat_prompts:

@@ -9,7 +9,7 @@ Ported from:
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Any, Sequence
 
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.tdd import (
