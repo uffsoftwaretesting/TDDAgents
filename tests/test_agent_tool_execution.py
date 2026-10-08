@@ -115,6 +115,33 @@ async def test_agent_tool_sync_delegation_success() -> None:
 
 
 @pytest.mark.anyio
+async def test_worker_gets_a_copy_of_read_file_state() -> None:
+    """createSubagentContext clones readFileState: the worker sees the parent's reads, and
+    its own reads never leak back."""
+    from app.loop.context import FileState
+
+    dev_def = AgentDefinition(
+        name="developer", description="d", prompt="p", phase=TddPhase.GREEN, tools=("ReadFile",),
+    )
+    seen = {}
+
+    async def runner(agent_def, directive, child_messages, worker_tools, worker_context, memory_prompt):
+        seen["state"] = dict(worker_context.read_file_state)
+        worker_context.read_file_state["worker.txt"] = FileState(content="w")
+        return "ok", "completed"
+
+    tool = build_agent_tool(
+        available_tools=[_make_dummy_tool("ReadFile")], definitions={"developer": dev_def}, subagent_runner=runner,
+    )
+    ctx = _make_context(phase=TddPhase.GREEN)
+    ctx.read_file_state["parent.txt"] = FileState(content="p")
+    await tool.call({"subagent_type": "developer", "prompt": "x"}, ctx)
+
+    assert seen["state"] == {"parent.txt": FileState(content="p")}
+    assert ctx.read_file_state == {"parent.txt": FileState(content="p")}
+
+
+@pytest.mark.anyio
 async def test_agent_tool_async_delegation() -> None:
     tool = build_agent_tool(
         definitions={

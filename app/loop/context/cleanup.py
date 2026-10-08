@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 def invalidate_context_caches(
     section_cache: PromptSectionCache | None = None,
     session_latches: SessionLatches | None = None,
+    run_id: str | None = None,
 ) -> None:
     """
     Clear context caches at a named lifecycle point (post-compaction or session clear).
@@ -32,6 +33,12 @@ def invalidate_context_caches(
         section_cache.clear()
     if session_latches is not None:
         session_latches.clear()
+    if run_id is not None:
+        # Upstream clears getUserContext/getMemoryFiles after compaction; the memoized
+        # per-run context wraps its own section cache, so both layers go together.
+        from app.loop.context.assembly import reset_session_context
+
+        reset_session_context(run_id)
 
 
 def notify_compaction(

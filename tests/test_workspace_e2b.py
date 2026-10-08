@@ -65,9 +65,7 @@ def ws(adapter) -> E2BWorkspace:
 
 
 def test_satisfies_the_workspace_protocol(ws):
-    required = ["read_file", "write_file", "delete_file", "list_files", "exists", "move", "execute"]
-    for method in required:
-        assert hasattr(ws, method), f"E2BWorkspace missing {method}"
+    assert isinstance(ws, Workspace)
     assert ws.kind == "sandbox"
 
 

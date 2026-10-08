@@ -12,6 +12,7 @@ import logging
 from app.config.config import AgentState
 from app.session.checkpointer import build_checkpointer
 from app.session.shell import SessionShell
+from app.loop.runner import tdd_loop_runner
 from app.session.state import SessionStatus
 from app.utils.token_metrics import GlobalTokenTracker
 
@@ -26,7 +27,7 @@ class TDDOrchestrator:
     def __init__(self, task_key: str = "tdd_task") -> None:
         self.task_key = task_key
         self.token_tracker = GlobalTokenTracker()
-        self._shell = SessionShell(checkpointer=build_checkpointer())
+        self._shell = SessionShell(checkpointer=build_checkpointer(), loop_runner=tdd_loop_runner)
 
     def run(self, specification: str, requirements: str) -> AgentState:
         """

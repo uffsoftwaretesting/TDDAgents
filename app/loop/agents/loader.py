@@ -23,7 +23,7 @@ from app.loop.ledger import TddPhase
 
 logger = logging.getLogger(__name__)
 
-_VAR_RE = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}")
+_VAR_RE = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}|\$\{([A-Za-z0-9_]+)\}|\{([A-Za-z0-9_]+)\}")
 
 _VALID_PERMISSION_MODES = frozenset({
     "default",
@@ -53,10 +53,10 @@ def render_prompt(
     strip_comments: bool = True,
 ) -> str:
     """
-    Render prompt text by substituting {{VAR}} placeholders.
+    Render prompt text by substituting {{VAR}}, ${VAR}, or {VAR} placeholders.
 
     Load-bearing acceptance rule (§4.1):
-    Unresolved placeholders survive visibly in the text as {{VAR}}.
+    Unresolved placeholders survive visibly in the text as {{VAR}} or {VAR}.
     They NEVER render as an empty string.
     """
     text = template
@@ -67,7 +67,7 @@ def render_prompt(
         return text
 
     def _replace(match: Any) -> str:
-        key = match.group(1)
+        key = match.group(1) or match.group(2) or match.group(3)
         if key in vars:
             return str(vars[key])
         return str(match.group(0))
@@ -77,7 +77,7 @@ def render_prompt(
 
 def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """
-    Parse YAML frontmatter delimited by leading '---'.
+    Parse YAML frontmatter delimited by leading '---' or '<!--'.
 
     Returns (frontmatter_dict, markdown_body).
     """
@@ -92,6 +92,18 @@ def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
                 fm = data if isinstance(data, dict) else {}
             except Exception as e:
                 logger.warning("Failed to parse YAML frontmatter: %s", e)
+                fm = {}
+            return fm, body.strip()
+    elif stripped.startswith("<!--"):
+        parts = stripped.split("-->", 1)
+        if len(parts) >= 2:
+            raw_fm = parts[0][4:]
+            body = parts[1]
+            try:
+                data = yaml.safe_load(raw_fm)
+                fm = data if isinstance(data, dict) else {}
+            except Exception as e:
+                logger.warning("Failed to parse HTML comment frontmatter: %s", e)
                 fm = {}
             return fm, body.strip()
 
@@ -289,27 +301,23 @@ def get_agent_definitions_with_overrides(
     built_in_dir: Path | str | None = None,
     vars: Mapping[str, Any] | None = None,
 ) -> dict[str, AgentDefinition]:
-    """
-    Load agent definitions across built-in, user, and project tiers.
-
-    Precedence order:
-    1. Built-in: lowest priority.
-    2. User (~/.tddagents/agents): overrides built-in by agent name.
-    3. Project (<project_dir>/.tddagents/agents): overrides user and built-in.
-    """
-    if built_in_dir is None:
-        built_in_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "agents"
-    else:
-        built_in_path = Path(built_in_dir)
-
+    from app.loop.prompts.registry import global_prompt_registry
+    
     definitions: dict[str, AgentDefinition] = {}
 
     # 1. Built-in
-    if built_in_path.is_dir():
-        definitions.update(_scan_agent_dir(built_in_path, source="built-in", vars=vars))
+    if built_in_dir is not None:
+        built_in_path = Path(built_in_dir)
+        if built_in_path.is_dir():
+            definitions.update(_scan_agent_dir(built_in_path, source="built-in", vars=vars))
+    else:
+        built_in_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "agents"
+        if built_in_path.is_dir():
+            definitions.update(_scan_agent_dir(built_in_path, source="built-in", vars=vars))
 
     # 2. User
     if user_home is not None:
+
         user_path = Path(user_home) / ".tddagents" / "agents"
     else:
         user_path = Path.home() / ".tddagents" / "agents"

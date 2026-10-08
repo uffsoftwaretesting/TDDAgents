@@ -20,7 +20,7 @@ from app.loop.ledger import TddPhase
 
 logger = logging.getLogger(__name__)
 
-_VAR_RE = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}")
+_VAR_RE = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}|\$\{([A-Za-z0-9_]+)\}|\{([A-Za-z0-9_]+)\}")
 
 _VALID_PERMISSION_MODES = frozenset({"read_only", "workspace_write", "full", "bypass"})
 _VALID_MEMORIES = frozenset({"run", "session", "none"})
@@ -41,10 +41,10 @@ def render_prompt(
     strip_comments: bool = True,
 ) -> str:
     """
-    Render prompt text by substituting {{VAR}} placeholders.
+    Render prompt text by substituting {{VAR}}, ${VAR}, or {VAR} placeholders.
 
     Load-bearing acceptance rule (§4.1):
-    Unresolved placeholders survive visibly in the text as {{VAR}}.
+    Unresolved placeholders survive visibly in the text as {{VAR}} or {VAR}.
     They NEVER render as an empty string.
     """
     text = template
@@ -55,7 +55,7 @@ def render_prompt(
         return text
 
     def _replace(match: re.Match[str]) -> str:
-        key = match.group(1)
+        key = match.group(1) or match.group(2) or match.group(3)
         if key in vars:
             return str(vars[key])
         return match.group(0)
@@ -65,7 +65,7 @@ def render_prompt(
 
 def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """
-    Parse YAML frontmatter delimited by leading '---'.
+    Parse YAML frontmatter delimited by leading '---' or '<!--'.
 
     Returns (frontmatter_dict, markdown_body).
     """
@@ -80,6 +80,18 @@ def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
                 fm = data if isinstance(data, dict) else {}
             except Exception as e:
                 logger.warning("Failed to parse YAML frontmatter: %s", e)
+                fm = {}
+            return fm, body.strip()
+    elif stripped.startswith("<!--"):
+        parts = stripped.split("-->", 1)
+        if len(parts) >= 2:
+            raw_fm = parts[0][4:]
+            body = parts[1]
+            try:
+                data = yaml.safe_load(raw_fm)
+                fm = data if isinstance(data, dict) else {}
+            except Exception as e:
+                logger.warning("Failed to parse HTML comment frontmatter: %s", e)
                 fm = {}
             return fm, body.strip()
 

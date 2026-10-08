@@ -104,6 +104,22 @@ async def run_tool_use(
         if pre_outcome.updated_input is not None:
             tool_args = pre_outcome.updated_input
 
+    # TDD PreToolUse hook check mapped directly to TDD Ledger (Plan B1)
+    app_state = context.get_app_state() if hasattr(context, "get_app_state") else None
+    phase_ledger = getattr(app_state, "phase_ledger", None)
+    if phase_ledger is not None:
+        from app.loop.tdd.hooks import tdd_pre_tool_use_hook
+
+        tdd_pre = tdd_pre_tool_use_hook(tool_name, tool_args if isinstance(tool_args, dict) else {}, phase_ledger, tool)
+        if tdd_pre.denied:
+            msg = ToolMessage(
+                content=tdd_pre.reason,
+                tool_call_id=call_id,
+                status="error",
+                additional_kwargs={"is_error": True, "permission_behavior": "deny", "tdd_phase_violation": True},
+            )
+            return ToolExecutionOutcome(message=msg)
+
     # Check tool permissions through the permission gate
     permission = await has_permissions_to_use_tool(tool, tool_args, context)
     if permission.behavior != "allow":
@@ -140,6 +156,25 @@ async def run_tool_use(
         )
         if post_outcome.additional_context:
             extra = f"\n\n[Hook feedback]: {post_outcome.additional_context}"
+            result = ToolResult(
+                content=f"{result.content}{extra}",
+                is_error=result.is_error,
+                tool_use_id=result.tool_use_id,
+                context_modifier=result.context_modifier,
+            )
+
+    # TDD PostToolUse hook check mapped directly to TDD Ledger (Plan B1)
+    if phase_ledger is not None:
+        from app.loop.tdd.hooks import tdd_post_tool_use_hook
+
+        tdd_post = tdd_post_tool_use_hook(
+            tool_name,
+            effective_args if isinstance(effective_args, dict) else {},
+            str(result.content),
+            phase_ledger,
+        )
+        if tdd_post.additional_context:
+            extra = f"\n\n[TDD Ledger Feedback]: {tdd_post.additional_context}"
             result = ToolResult(
                 content=f"{result.content}{extra}",
                 is_error=result.is_error,

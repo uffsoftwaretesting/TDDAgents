@@ -2,7 +2,17 @@
 Tests for Part E6: Attachments and delta pattern (app/loop/context/attachments.py).
 """
 
-from app.loop.context.attachments import DeltaManager
+from langchain_core.messages import HumanMessage
+
+from app.loop.context.attachments import (
+    TDD_STATE_KEY,
+    DeltaManager,
+    compute_tdd_state_attachment,
+    last_announced_tdd_state,
+    tdd_state_payload,
+    wrap_in_system_reminder,
+)
+from app.loop.ledger import PhaseLedger, TddPhase
 
 
 def test_initial_agent_announcement() -> None:
@@ -218,3 +228,112 @@ def test_attachments_extraction_edge_cases() -> None:
             )
         ],
     ) is None
+
+
+# ── TDD state attachment ─────────────────────────────────────────────────────
+
+def test_wrap_in_system_reminder() -> None:
+    assert wrap_in_system_reminder("x") == "<system-reminder>\nx\n</system-reminder>"
+
+
+def test_tdd_state_attachment_first_announcement() -> None:
+    ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=False)
+    msg = compute_tdd_state_attachment([], ledger)
+    assert msg is not None
+    assert msg.content == (
+        "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
+        "Current Phase: GREEN\nRed Confirmed: True\nGreen Passed: False\n</system-reminder>"
+    )
+    assert msg.additional_kwargs == {
+        "is_meta": True,
+        TDD_STATE_KEY: {"phase": "GREEN", "red_confirmed": True, "green_passed": False, "todo": None},
+    }
+
+
+def test_tdd_state_attachment_includes_todo_when_non_blank() -> None:
+    msg = compute_tdd_state_attachment([], PhaseLedger(), "  - [ ] write test  \n")
+    assert msg is not None
+    assert str(msg.content).endswith(
+        "Green Passed: False\n\nContents of TODO.md:\n- [ ] write test\n</system-reminder>")
+    blank = compute_tdd_state_attachment([], PhaseLedger(), "   ")
+    assert blank is not None and "TODO.md" not in str(blank.content)
+
+
+def test_tdd_state_attachment_is_a_delta() -> None:
+    ledger = PhaseLedger()
+    first = compute_tdd_state_attachment([], ledger)
+    assert first is not None
+    history = [HumanMessage(content="hi"), first, HumanMessage(content="later")]
+    assert compute_tdd_state_attachment(history, ledger) is None
+    changed = compute_tdd_state_attachment(history, PhaseLedger(red_confirmed=True))
+    assert changed is not None
+    assert compute_tdd_state_attachment(history, ledger, "todo") is not None
+
+
+def test_last_announced_tdd_state_uses_latest_and_ignores_noise() -> None:
+    old = HumanMessage(content="", additional_kwargs={TDD_STATE_KEY: {"phase": "RED"}})
+    new = HumanMessage(content="", additional_kwargs={TDD_STATE_KEY: {"phase": "GREEN"}})
+    noise = HumanMessage(content="", additional_kwargs={TDD_STATE_KEY: "not a dict"})
+
+    class Bare:
+        pass
+
+    assert last_announced_tdd_state([old, new, noise, Bare()]) == {"phase": "GREEN"}  # type: ignore[list-item]
+    assert last_announced_tdd_state([]) is None
+
+
+def test_tdd_state_payload() -> None:
+    assert tdd_state_payload(PhaseLedger(phase=TddPhase.REFACTOR, red_confirmed=True, green_passed=True), "t") == {
+        "phase": "REFACTOR", "red_confirmed": True, "green_passed": True, "todo": "t"}
+
+
+# ── mutation-driven pins for the delta reconstruction ────────────────────────
+
+def _delta_msg(key, **info):
+    return HumanMessage(content="", additional_kwargs={key: info})
+
+
+def test_agent_reconstruction_skips_noise_and_applies_removals_in_order() -> None:
+    m = DeltaManager()
+    noise = HumanMessage(content="plain")
+    history = [
+        noise,
+        _delta_msg("agent_listing_delta", is_initial=True, added_types=["a", "b"]),
+        HumanMessage(content="x", additional_kwargs={"agent_listing_delta": "not a dict"}),
+        _delta_msg("agent_listing_delta", added_types=["c"], removed_types=["a"]),
+    ]
+    assert m.extract_announced_agents(history) == {"b", "c"}
+    # missing is_initial means an incremental delta, not a reset
+    assert m.extract_announced_agents([
+        _delta_msg("agent_listing_delta", is_initial=True, added_types=["a"]),
+        _delta_msg("agent_listing_delta", added_types=["b"]),
+    ]) == {"a", "b"}
+    # an initial announcement without added_types resets to empty
+    assert m.extract_announced_agents([
+        _delta_msg("agent_listing_delta", is_initial=True, added_types=["a"]),
+        _delta_msg("agent_listing_delta", is_initial=True),
+    ]) == set()
+    # removals without additions
+    assert m.extract_announced_agents([
+        _delta_msg("agent_listing_delta", is_initial=True, added_types=["a", "b"]),
+        _delta_msg("agent_listing_delta", removed_types=["b"]),
+    ]) == {"a"}
+
+
+def test_mcp_reconstruction_skips_noise_and_applies_removals() -> None:
+    m = DeltaManager()
+    history = [
+        HumanMessage(content="plain"),
+        _delta_msg("mcp_instructions_delta", added_names=["s1", "s2"]),
+        _delta_msg("mcp_instructions_delta", removed_names=["s1"]),
+    ]
+    assert m.extract_announced_mcp_servers(history) == {"s2"}
+
+
+def test_agent_delta_message_lists_are_comma_separated() -> None:
+    from app.loop.context.attachments import AgentListingDelta
+
+    msg = DeltaManager().format_agent_delta_message(
+        AgentListingDelta(added_types=("a", "b"), added_lines=(), removed_types=("c", "d"), is_initial=False))
+    assert "Newly available agents: a, b" in str(msg.content)
+    assert "Removed agents: c, d" in str(msg.content)

@@ -1,10 +1,11 @@
 ---
 name: Glob
-description: Finds files in the workspace matching a glob pattern.
+description: Fast file pattern matching across the workspace.
 ---
-Searches for files by pattern matching against filesystem paths.
+Fast file pattern matching that works with any workspace size.
 
 Usage:
-- Provide `pattern` (e.g. `**/*.py`, `tests/test_*.py`).
-- Returns matching relative file paths sorted predictably.
-- Ideal for discovering project structure and locating specific module directories.
+- Supports glob patterns like `**/*.py` or `tests/test_*.py`. A pattern without `/` matches file names at any depth.
+- Optionally provide `path`, the directory to search in. Omit it to search the workspace root.
+- Returns matching workspace-relative file paths. Results are capped; a truncation note tells you to narrow the pattern or path.
+- Use this tool when you need to find files by name patterns; use `Grep` to search contents.

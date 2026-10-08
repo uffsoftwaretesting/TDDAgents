@@ -64,4 +64,4 @@ tests_dir = ["tests/"]
 # suite there, but copy_src_dir() walks ONLY paths_to_mutate. Without this, app/config/
 # is never copied, every mutant dies of ImportError instead of of a real assertion, and
 # the run reports a meaningless 100%.
-also_copy = ["app/"]
+also_copy = ["app/", "requirements.txt", ".tddagents/", "docs/"]

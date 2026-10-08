@@ -83,10 +83,7 @@ def test_valid_specs_are_exactly_the_three_targets():
 # ── DualWorkspace ────────────────────────────────────────────────────────────
 
 def test_dual_satisfies_the_workspace_protocol(sandbox, local):
-    dual = DualWorkspace(sandbox, local)
-    required = ["read_file", "write_file", "delete_file", "list_files", "exists", "move", "execute"]
-    for method in required:
-        assert hasattr(dual, method), f"DualWorkspace missing {method}"
+    assert isinstance(DualWorkspace(sandbox, local), Workspace)
 
 
 def test_dual_reads_come_from_the_sandbox(sandbox, local):

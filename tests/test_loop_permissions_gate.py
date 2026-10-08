@@ -7,7 +7,12 @@ from __future__ import annotations
 import asyncio
 
 from app.loop.context import AppStateStore, tool_context_for
-from app.loop.permissions.gate import has_permissions_to_use_tool
+from app.loop.permissions.gate import (
+    DENIAL_WORKAROUND_GUIDANCE,
+    auto_reject_message,
+    has_permissions_to_use_tool,
+)
+from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.types import (
     PermissionBehavior,
     PermissionMode,
@@ -396,3 +401,162 @@ class TestRuntimePermissionGate:
             assert res.behavior == PermissionBehavior.ALLOW
 
         asyncio.run(go())
+
+
+# ── outer gate: dontAsk and headless (upstream hasPermissionsToUseTool) ──────
+
+def _gate(tool, perm_ctx):
+    ctx = tool_context_for(AppStateStore(), permission_context=perm_ctx)
+    return asyncio.run(has_permissions_to_use_tool(tool, {}, ctx))
+
+
+def _asking_tool(name="Asker", behavior=PermissionBehavior.PASSTHROUGH):
+    return build_tool(name=name, prompt="p", call=lambda a, c: ToolResult(content="ok"),
+                      check_permissions=lambda a, c: PermissionResult(behavior=behavior, message="m"))
+
+
+def test_auto_reject_message_text():
+    assert DENIAL_WORKAROUND_GUIDANCE.startswith("IMPORTANT: You *may* attempt to accomplish this action")
+    assert DENIAL_WORKAROUND_GUIDANCE.endswith("Let the user decide how to proceed.")
+    assert auto_reject_message("Bash") == f"Permission to use Bash has been denied. {DENIAL_WORKAROUND_GUIDANCE}"
+
+
+def test_headless_context_denies_unresolved_asks():
+    perm = ToolPermissionContext(should_avoid_permission_prompts=True)
+    for behavior in (PermissionBehavior.PASSTHROUGH, PermissionBehavior.ASK):
+        res = _gate(_asking_tool(behavior=behavior), perm)
+        assert res.behavior == PermissionBehavior.DENY
+        assert res.message == auto_reject_message("Asker")
+        assert res.decision_reason == {"type": "asyncAgent",
+                                       "reason": "Permission prompts are not available in this context"}
+
+
+def test_interactive_context_keeps_the_ask():
+    res = _gate(_asking_tool(), ToolPermissionContext(should_avoid_permission_prompts=False))
+    assert res.behavior == PermissionBehavior.ASK
+    assert res.message == "m"
+
+
+def test_headless_does_not_touch_allow_or_deny():
+    perm = ToolPermissionContext(should_avoid_permission_prompts=True)
+    assert _gate(_asking_tool(behavior=PermissionBehavior.ALLOW), perm).behavior == PermissionBehavior.ALLOW
+    denied = _gate(_asking_tool(behavior=PermissionBehavior.DENY), perm)
+    assert denied.behavior == PermissionBehavior.DENY
+    assert denied.message == "m"
+
+
+def test_dont_ask_wins_over_headless():
+    perm = ToolPermissionContext(mode=PermissionMode.DONT_ASK, should_avoid_permission_prompts=True)
+    res = _gate(_asking_tool(), perm)
+    assert res.behavior == PermissionBehavior.DENY
+    assert res.message == "Permission prompt suppressed in dontAsk mode for Asker."
+    assert res.decision_reason == {"type": "mode", "mode": PermissionMode.DONT_ASK}
+
+
+def test_should_avoid_permission_prompts_defaults_off():
+    assert ToolPermissionContext().should_avoid_permission_prompts is False
+
+
+# ── mutation-driven pins: pass-through of context, input and results ────────
+
+class _Tool:
+    """A duck-typed tool: sync check_permissions, configurable predicates."""
+
+    def __init__(self, name="T", result=None, read_only=lambda a: False, interaction=None):
+        self.name = name
+        self._result = result if result is not None else PermissionResult(behavior=PermissionBehavior.PASSTHROUGH)
+        self._read_only = read_only
+        self.seen_ctx = None
+        self.seen_input = None
+        if interaction is not None:
+            self.requires_user_interaction = interaction
+
+    def check_permissions(self, input_args, context):
+        self.seen_ctx = context
+        return self._result
+
+    def is_read_only(self, input_args):
+        self.seen_input = input_args
+        return self._read_only(input_args)
+
+
+def _run_gate(tool, perm=None, args=None, ctx=None):
+    ctx = ctx or tool_context_for(AppStateStore(), permission_context=perm or ToolPermissionContext())
+    return asyncio.run(has_permissions_to_use_tool(tool, args if args is not None else {}, ctx))
+
+
+def test_phase_rule_decision_reason_is_exact():
+    store = AppStateStore()
+    store.update(lambda s: s.__class__(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+    ctx = tool_context_for(store)
+    tool = build_tool(name="WriteImplementation", prompt="p", call=lambda a, c: ToolResult(content="x"))
+    res = asyncio.run(has_permissions_to_use_tool(tool, {}, ctx))
+    assert res.behavior == PermissionBehavior.DENY
+    assert res.decision_reason == {"type": "phase_rule", "phase": TddPhase.RED, "reason": res.message}
+
+
+def test_sync_check_permissions_result_and_context_are_used():
+    tool = _Tool(result=PermissionResult(behavior=PermissionBehavior.DENY, message="nope"))
+    ctx = tool_context_for(AppStateStore())
+    res = _run_gate(tool, ctx=ctx)
+    assert (res.behavior, res.message) == (PermissionBehavior.DENY, "nope")
+    assert tool.seen_ctx is ctx
+
+
+def test_zero_arg_requires_user_interaction_is_honored():
+    tool = _Tool(interaction=lambda: True)
+    res = _run_gate(tool, ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS))
+    assert res.behavior == PermissionBehavior.ASK
+    assert res.decision_reason == {"type": "userInteraction"}
+
+
+def test_tool_without_requires_user_interaction_is_fine():
+    tool = _Tool(result=PermissionResult(behavior=PermissionBehavior.ALLOW))
+    assert not hasattr(tool, "requires_user_interaction")
+    assert _run_gate(tool).behavior == PermissionBehavior.ALLOW
+
+
+def test_allow_with_rule_reason_does_not_short_circuit_plan_mode():
+    reason = {"type": "rule", "rule": "r"}
+    tool = _Tool(result=PermissionResult(behavior=PermissionBehavior.ALLOW, decision_reason=reason))
+    res = _run_gate(tool, ToolPermissionContext(mode=PermissionMode.PLAN, is_bypass_permissions_mode_available=False))
+    assert res.behavior == PermissionBehavior.ASK
+
+
+def test_allow_with_safety_reason_does_not_short_circuit_plan_mode():
+    reason = {"type": "safetyCheck", "reason": "x"}
+    tool = _Tool(result=PermissionResult(behavior=PermissionBehavior.ALLOW, decision_reason=reason))
+    res = _run_gate(tool, ToolPermissionContext(mode=PermissionMode.PLAN, is_bypass_permissions_mode_available=False))
+    assert res.behavior == PermissionBehavior.ASK
+
+
+def test_updated_input_is_carried_through_every_allow_path():
+    upd = {"command": "rewritten"}
+    base = PermissionResult(behavior=PermissionBehavior.PASSTHROUGH, updated_input=upd)
+    rule = PermissionRule(tool_name="T", rule_behavior=PermissionBehavior.ALLOW)
+    cases = [
+        ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS),
+        ToolPermissionContext(always_allow_rules=(rule,)),
+        ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS),
+        ToolPermissionContext(mode=PermissionMode.PLAN, is_bypass_permissions_mode_available=False),
+    ]
+    for perm in cases:
+        res = _run_gate(_Tool(result=base, read_only=lambda a: True), perm)
+        assert res.behavior == PermissionBehavior.ALLOW, perm
+        assert res.updated_input == upd, perm
+    asked = _run_gate(_Tool(result=base), cases[3])
+    assert asked.behavior == PermissionBehavior.ASK
+    assert asked.updated_input == upd
+
+
+def test_read_only_predicate_gets_the_input_and_failures_are_not_reads():
+    tool = _Tool(read_only=lambda a: a.get("ro") is True)
+    perm = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
+    assert _run_gate(tool, perm, {"ro": True}).behavior == PermissionBehavior.ALLOW
+    assert tool.seen_input == {"ro": True}
+
+    def boom(a):
+        raise RuntimeError("x")
+
+    plan = ToolPermissionContext(mode=PermissionMode.PLAN, is_bypass_permissions_mode_available=False)
+    assert _run_gate(_Tool(read_only=boom), plan).behavior == PermissionBehavior.ASK

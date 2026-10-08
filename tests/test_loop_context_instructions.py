@@ -5,8 +5,6 @@ Tests for Part E3: Instruction-file loading (app/loop/context/instructions.py).
 from pathlib import Path
 
 from app.loop.context.instructions import (
-    find_and_load_claude_rules,
-    find_and_load_project_instructions,
     load_instruction_file,
     strip_html_comments,
 )
@@ -98,41 +96,6 @@ def test_load_instruction_file_non_utf8(tmp_path: Path) -> None:
     assert "[Truncated" in res_trunc.content
 
 
-def test_find_and_load_project_instructions(tmp_path: Path) -> None:
-    (tmp_path / "CLAUDE.md").write_text("# Claude instructions", encoding="utf-8")
-    (tmp_path / "CONVENTIONS.md").write_text("# Conventions", encoding="utf-8")
-
-    loaded = find_and_load_project_instructions(tmp_path)
-    assert "CLAUDE.md" in loaded
-    assert "CONVENTIONS.md" in loaded
-    assert "Claude instructions" in loaded["CLAUDE.md"].content
-    assert "Conventions" in loaded["CONVENTIONS.md"].content
-
-
-def test_find_and_load_project_instructions_default_budget(tmp_path: Path) -> None:
-    (tmp_path / "CLAUDE.md").write_text("C" * 55_000, encoding="utf-8")
-    loaded = find_and_load_project_instructions(tmp_path)
-    assert loaded["CLAUDE.md"].truncated is True
-    assert loaded["CLAUDE.md"].original_bytes == 55_000
-
-
-def test_find_and_load_claude_rules(tmp_path: Path) -> None:
-    # Missing directory -> returns empty list
-    assert find_and_load_claude_rules(tmp_path) == []
-
-    rules_dir = tmp_path / ".claude" / "rules"
-    rules_dir.mkdir(parents=True)
-    (rules_dir / "style.md").write_text("# Style rule", encoding="utf-8")
-    (rules_dir / "security.md").write_text("# Security rule", encoding="utf-8")
-    (rules_dir / "ignored.txt").write_text("Not markdown", encoding="utf-8")
-
-    rules = find_and_load_claude_rules(tmp_path)
-    assert len(rules) == 2
-    paths = [r.path for r in rules]
-    assert any("style.md" in p for p in paths)
-    assert any("security.md" in p for p in paths)
-
-
 def test_load_instruction_file_default_max_bytes_boundary(tmp_path: Path) -> None:
     f50001 = tmp_path / "OVER_LIMIT.md"
     f50001.write_bytes(b"A" * 50_001)
@@ -142,11 +105,9 @@ def test_load_instruction_file_default_max_bytes_boundary(tmp_path: Path) -> Non
     assert res.original_bytes == 50_001
 
 
-def test_find_and_load_claude_rules_default_max_bytes(tmp_path: Path) -> None:
-    rules_dir = tmp_path / ".claude" / "rules"
-    rules_dir.mkdir(parents=True)
-    (rules_dir / "big.md").write_bytes(b"R" * 50_001)
-    rules = find_and_load_claude_rules(tmp_path)
-    assert len(rules) == 1
-    assert rules[0].truncated is True
-    assert rules[0].original_bytes == 50_001
+def test_truncated_content_keeps_the_head(tmp_path: Path) -> None:
+    file_path = tmp_path / "BIG.md"
+    file_path.write_text("HEAD" + "A" * 2000, encoding="utf-8")
+    res = load_instruction_file(file_path, max_bytes=500)
+    assert res is not None
+    assert res.content.startswith("HEAD")

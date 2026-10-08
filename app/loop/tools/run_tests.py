@@ -98,6 +98,7 @@ async def _default_test_runner(test_path: str, context: ToolContext) -> SuiteExe
 
 def build_run_tests_tool(
     test_runner: TestRunner | Callable[[str], Awaitable[SuiteExecutionResult] | SuiteExecutionResult] | None = None,
+    vars: Mapping[str, Any] | None = None,
 ) -> BuiltTool:
     """
     Build a RunTests tool instance with an optional custom runner.
@@ -134,9 +135,15 @@ def build_run_tests_tool(
             exit_code=exec_result.exit_code,
         )
 
+    from app.loop.prompts.loader import render_prompt
+    from app.loop.prompts.registry import global_prompt_registry
+    prompt_text = global_prompt_registry.get_tool_prompt("run_tests", vars) or RUN_TESTS_PROMPT
+    if vars:
+        prompt_text = render_prompt(prompt_text, vars)
+
     return build_tool(
         name="RunTests",
-        prompt=RUN_TESTS_PROMPT,
+        prompt=prompt_text,
         input_schema={
 
             "type": "object",

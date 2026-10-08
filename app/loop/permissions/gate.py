@@ -30,7 +30,56 @@ if TYPE_CHECKING:
     from app.loop.tools.base import Tool
 
 
+#: `DENIAL_WORKAROUND_GUIDANCE` (`src/utils/messages.ts`).
+DENIAL_WORKAROUND_GUIDANCE = (
+    "IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used "
+    "to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around "
+    "this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. "
+    "You should only try to work around this restriction in reasonable ways that do not attempt to bypass "
+    "the intent behind this denial. If you believe this capability is essential to complete the user's "
+    "request, STOP and explain to the user what you were trying to do and why you need this permission. "
+    "Let the user decide how to proceed."
+)
+
+
+def auto_reject_message(tool_name: str) -> str:
+    """`AUTO_REJECT_MESSAGE`."""
+    return f"Permission to use {tool_name} has been denied. {DENIAL_WORKAROUND_GUIDANCE}"
+
+
 async def has_permissions_to_use_tool(
+    tool: Tool,
+    input_args: dict[str, Any],
+    context: ToolContext,
+) -> PermissionResult:
+    """
+    The outer gate, as upstream's `hasPermissionsToUseTool`: every 'ask' the inner gate
+    produces becomes 'deny' in dontAsk mode, and then in a context that cannot show a
+    prompt (`should_avoid_permission_prompts`, upstream's headless/background agents).
+
+    Upstream runs PermissionRequest hooks before the headless deny; this repository's hook
+    layer has no PermissionRequest decision protocol, so the deny is unconditional.
+    """
+    result = await _has_permissions_to_use_tool_inner(tool, input_args, context)
+    if result.behavior != PermissionBehavior.ASK:
+        return result
+    perm_ctx = extract_permission_context(context)
+    if perm_ctx.mode == PermissionMode.DONT_ASK:
+        return PermissionResult(
+            behavior=PermissionBehavior.DENY,
+            message=f"Permission prompt suppressed in {perm_ctx.mode} mode for {tool.name}.",
+            decision_reason={"type": "mode", "mode": perm_ctx.mode},
+        )
+    if perm_ctx.should_avoid_permission_prompts:
+        return PermissionResult(
+            behavior=PermissionBehavior.DENY,
+            message=auto_reject_message(tool.name),
+            decision_reason={"type": "asyncAgent", "reason": "Permission prompts are not available in this context"},
+        )
+    return result
+
+
+async def _has_permissions_to_use_tool_inner(
     tool: Tool,
     input_args: dict[str, Any],
     context: ToolContext,
@@ -54,9 +103,7 @@ async def has_permissions_to_use_tool(
        - Always-allow rule -> allow
        - acceptEdits mode: read-only operations allow
        - plan mode: read-only operations allow, mutating operations ask
-    4. Passthrough conversion:
-       - 'passthrough' becomes 'ask' (or 'deny' if in dontAsk mode)
-       - 'ask' in dontAsk mode becomes 'deny'
+    4. Passthrough conversion: 'passthrough' becomes 'ask'.
     """
     # 1. Cooperative cancellation check
     if context.cancel.cancelled:
@@ -207,26 +254,12 @@ async def has_permissions_to_use_tool(
             decision_reason={"type": "mode", "mode": mode},
         )
 
-    # 4. Passthrough -> Ask conversion
+    # 4. Passthrough -> Ask conversion (dontAsk and headless are applied by the outer gate)
     if tool_perm_res.behavior == PermissionBehavior.PASSTHROUGH:
-        if mode == PermissionMode.DONT_ASK:
-            return PermissionResult(
-                behavior=PermissionBehavior.DENY,
-                message=f"Permission prompt suppressed in {mode} mode for {tool.name}.",
-                decision_reason={"type": "mode", "mode": mode},
-            )
         return PermissionResult(
             behavior=PermissionBehavior.ASK,
             message=tool_perm_res.message or f"Permission requested for {tool.name}.",
             decision_reason=tool_perm_res.decision_reason or {"type": "other", "reason": "passthrough"},
-        )
-
-    # dontAsk mode suppresses prompts -> deny
-    if tool_perm_res.behavior == PermissionBehavior.ASK and mode == PermissionMode.DONT_ASK:
-        return PermissionResult(
-            behavior=PermissionBehavior.DENY,
-            message=f"Permission prompt suppressed in {mode} mode for {tool.name}.",
-            decision_reason={"type": "mode", "mode": mode},
         )
 
     return tool_perm_res

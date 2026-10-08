@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -1037,10 +1038,6 @@ class TestFullSessionFlow:
 
 # ── Mutation defense tests (Phase K) ─────────────────────────────────────────
 
-import inspect
-from app.session.shell import create_initial_session_state, SessionShell
-
-
 class TestMutationDefensePhaseK:
     """Kill surviving mutants from Phase K mutation testing."""
 
@@ -1074,8 +1071,7 @@ class TestMutationDefensePhaseK:
             shell.run("hello", "thread-1", specification="my spec")
             mock_create.assert_called_once_with("thread-1", "hello", "my spec")
 
-    @pytest.mark.asyncio
-    async def test_arun_forwards_specification_to_create_state(self) -> None:
+    def test_arun_forwards_specification_to_create_state(self) -> None:
         """Kill arun mutants 7, 10: specification forwarded as None or dropped."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1087,6 +1083,5 @@ class TestMutationDefensePhaseK:
         shell._checkpointer = MagicMock()
 
         with patch("app.session.shell.create_initial_session_state", wraps=create_initial_session_state) as mock_create:
-            await shell.arun("hello", "thread-2", specification="async spec")
+            asyncio.run(shell.arun("hello", "thread-2", specification="async spec"))
             mock_create.assert_called_once_with("thread-2", "hello", "async spec")
-

@@ -100,11 +100,7 @@ def test_root_is_resolved_and_expanded(tmp_path):
 # ── Protocol conformance ─────────────────────────────────────────────────────
 
 def test_satisfies_the_workspace_protocol(local_ws):
-    # isinstance on Protocols can fail inside pytest due to module reloading cache bugs.
-    # Instead, assert the required protocol methods are present.
-    required_methods = ["read_file", "write_file", "delete_file", "list_files", "exists", "move", "execute"]
-    for method in required_methods:
-        assert hasattr(local_ws, method), f"Missing protocol method: {method}"
+    assert isinstance(local_ws, Workspace)
     assert local_ws.kind == "local"
 
 

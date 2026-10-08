@@ -9,7 +9,7 @@ Ported from:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -24,6 +24,10 @@ class PermissionResult:
     updated_input: dict[str, Any] | None = None
     message: str = ""
     decision_reason: dict[str, Any] | None = None
+    #: Upstream `isBashSecurityCheckForMisparsing` (`src/types/permissions.ts`): set on an
+    #: 'ask' from a Bash security validator whose concern is a parser differential, so the
+    #: Bash permission check blocks before any command splitting runs.
+    is_bash_security_check_for_misparsing: bool = False
 
 
 class PermissionMode(StrEnum):
@@ -114,6 +118,9 @@ class ToolPermissionContext:
     always_ask_rules: tuple[PermissionRule, ...] = ()
     is_bypass_permissions_mode_available: bool = True
     additional_working_directories: tuple[str, ...] = ()
+    #: Upstream `shouldAvoidPermissionPrompts`: no surface can show a prompt, so an
+    #: unresolved 'ask' is denied (`hasPermissionsToUseTool`, background/headless agents).
+    should_avoid_permission_prompts: bool = False
 
 
 def get_next_permission_mode(
@@ -153,11 +160,4 @@ def cycle_permission_mode(context: ToolPermissionContext) -> ToolPermissionConte
         context.mode,
         is_bypass_available=context.is_bypass_permissions_mode_available,
     )
-    return ToolPermissionContext(
-        mode=next_mode,
-        always_allow_rules=context.always_allow_rules,
-        always_deny_rules=context.always_deny_rules,
-        always_ask_rules=context.always_ask_rules,
-        is_bypass_permissions_mode_available=context.is_bypass_permissions_mode_available,
-        additional_working_directories=context.additional_working_directories,
-    )
+    return replace(context, mode=next_mode)

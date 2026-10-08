@@ -135,24 +135,15 @@ def test_normalize_path_escapes_raise_workspace_path_error(escaping_path: str) -
 
 
 def test_workspace_protocol_runtime_checkable(tmp_path: Path) -> None:
-    # isinstance on runtime_checkable Protocols can fail under pytest module
-    # reloading in Python 3.14. Use duck-type verification instead.
-    required = ["read_file", "write_file", "delete_file", "list_files", "exists", "move", "execute"]
-
     fake = FakeWorkspace()
-    for method in required:
-        assert hasattr(fake, method), f"FakeWorkspace missing {method}"
+    assert isinstance(fake, Workspace)
     assert fake.kind == "sandbox"
 
     local = LocalWorkspace(tmp_path)
-    for method in required:
-        assert hasattr(local, method), f"LocalWorkspace missing {method}"
+    assert isinstance(local, Workspace)
     assert local.kind == "local"
 
     class Incomplete:
         kind = "local"
 
-    incomplete = Incomplete()
-    missing = [m for m in required if not hasattr(incomplete, m)]
-    assert len(missing) > 0, "Incomplete should be missing protocol methods"
-
+    assert not isinstance(Incomplete(), Workspace)

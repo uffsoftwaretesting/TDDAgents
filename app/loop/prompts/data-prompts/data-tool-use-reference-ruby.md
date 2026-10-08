@@ -1,0 +1,54 @@
+---
+name: "Data: Tool use reference — Ruby"
+description: "Ruby tool use reference including the beta tool runner and manual agentic-loop guidance"
+type: "data-prompts"
+---
+
+# Tool Use - Ruby
+
+For conceptual overview (tool definitions, tool choice, tips), see [shared/tool-use-concepts.md](../../shared/tool-use-concepts.md).
+
+## Tool Use
+
+The Ruby SDK supports tool use via raw JSON schema definitions and also provides a beta tool runner for automatic tool execution.
+
+### Tool Runner (Beta)
+
+```ruby
+class GetWeatherInput < Anthropic::BaseModel
+  required :location, String, doc: "City and state, e.g. San Francisco, CA"
+end
+
+class GetWeather < Anthropic::BaseTool
+  doc "Get the current weather for a location"
+
+  input_schema GetWeatherInput
+
+  def call(input)
+    "The weather in #{input.location} is sunny and 72°F."
+  end
+end
+
+client.beta.messages.tool_runner(
+  model: :"{{OPUS_ID}}",
+  max_tokens: 16000,
+  tools: [GetWeather.new],
+  messages: [{ role: "user", content: "What's the weather in San Francisco?" }]
+).each_message do |message|
+  puts message.content
+end
+```
+
+### Manual Loop
+
+See the [shared tool use concepts](../../shared/tool-use-concepts.md) for the tool definition format and agentic loop pattern.
+
+---
+
+
+> **Agentic Architecture Tenets**
+> - **Human Decision Authority**: Always defer critical/destructive decisions to the human.
+> - **Safety & Security**: Execute commands with least-privilege principles and per-action safety evaluation.
+> - **Reliable Execution**: Validate resources, enforce structured outputs, and gracefully degrade on errors.
+> - **Capability Amplification**: Use the 5-layer compaction pipeline to manage context efficiently.
+> - **Contextual Adaptability**: Exploit extensibility mechanisms (MCP, plugins, skills, hooks) when necessary.

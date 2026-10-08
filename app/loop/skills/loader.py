@@ -245,20 +245,49 @@ def load_skill_from_path(
 class SkillRegistry:
     """
     Registry for holding and querying discovered skills.
+    Supports canonical alias resolution (e.g. artifact-diagramming for Skill: Artifact diagramming).
     """
 
-    __slots__ = ("_skills",)
+    __slots__ = ("_skills", "_aliases")
 
     def __init__(self, skills: Mapping[str, SkillDefinition] | None = None) -> None:
         self._skills: dict[str, SkillDefinition] = dict(skills) if skills else {}
+        self._aliases: dict[str, str] = {}
+        for skill in self._skills.values():
+            self._index_aliases(skill)
+
+    def _index_aliases(self, skill: SkillDefinition) -> None:
+        raw_name = skill.name
+        self._aliases[raw_name.lower()] = skill.name
+        norm = raw_name.lower().strip()
+        if norm.startswith("skill:"):
+            norm = norm[6:].strip()
+        slug = re.sub(r"[\s_]+", "-", norm)
+        self._aliases[norm] = skill.name
+        self._aliases[slug] = skill.name
+        if skill.skill_file_path:
+            p = Path(skill.skill_file_path)
+            stem = p.stem.lower()
+            if stem.startswith("skill-"):
+                self._aliases[stem[6:]] = skill.name
+            self._aliases[stem] = skill.name
 
     def register(self, skill: SkillDefinition, overwrite: bool = True) -> None:
         if not overwrite and skill.name in self._skills:
             return
         self._skills[skill.name] = skill
+        self._index_aliases(skill)
 
     def get(self, name: str) -> SkillDefinition | None:
-        return self._skills.get(name)
+        if name in self._skills:
+            return self._skills[name]
+        norm = name.lower().strip()
+        if norm in self._aliases:
+            return self._skills.get(self._aliases[norm])
+        slug = re.sub(r"[\s_]+", "-", norm)
+        if slug in self._aliases:
+            return self._skills.get(self._aliases[slug])
+        return None
 
     def list_skills(self) -> tuple[SkillDefinition, ...]:
         return tuple(self._skills.values())
@@ -267,7 +296,7 @@ class SkillRegistry:
         return tuple(self._skills.keys())
 
     def __contains__(self, name: str) -> bool:
-        return name in self._skills
+        return self.get(name) is not None
 
     def __len__(self) -> int:
         return len(self._skills)
@@ -291,7 +320,7 @@ def _scan_skills_in_directory(dir_path: Path, source: str) -> list[SkillDefiniti
                     skills.append(load_skill_from_path(entry, source=source))
                 except Exception as exc:
                     logger.warning("Error loading skill from '%s': %s", skill_md, exc)
-        elif entry.is_file() and entry.suffix == ".md" and entry.name != "SKILL.md":
+        elif entry.is_file() and entry.suffix == ".md" and entry.name != "SKILL.md" and entry.name != "README.md":
             try:
                 skills.append(load_skill_from_path(entry, source=source))
             except Exception as exc:
@@ -313,11 +342,22 @@ def discover_skills(
     registry = SkillRegistry()
 
     # 1. Built-in skills
-    default_built_in = Path(__file__).resolve().parent.parent.parent / "prompts" / "skills"
-    built_in = Path(built_in_dir).resolve() if built_in_dir else default_built_in
-    if built_in.is_dir():
-        for skill in _scan_skills_in_directory(built_in, source="built-in"):
-            registry.register(skill, overwrite=True)
+    if built_in_dir is not None:
+        built_in = Path(built_in_dir).resolve()
+        if built_in.is_dir():
+            for skill in _scan_skills_in_directory(built_in, source="built-in"):
+                registry.register(skill, overwrite=True)
+    else:
+        # Default built-ins: prompts/skills and prompts/skill-prompts
+        built_in_prompts = Path(__file__).resolve().parent.parent / "prompts" / "skill-prompts"
+        if built_in_prompts.is_dir():
+            for skill in _scan_skills_in_directory(built_in_prompts, source="built-in"):
+                registry.register(skill, overwrite=True)
+
+        legacy_built_in = Path(__file__).resolve().parent.parent.parent / "prompts" / "skills"
+        if legacy_built_in.is_dir():
+            for skill in _scan_skills_in_directory(legacy_built_in, source="built-in"):
+                registry.register(skill, overwrite=False)
 
     # 2. User skills (~/.tddagents/skills and ~/.claude/skills)
     user_dirs = [

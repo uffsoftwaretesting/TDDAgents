@@ -17,6 +17,7 @@ from typing import Mapping, Sequence
 
 from langchain_core.messages import HumanMessage
 
+from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
 
 
@@ -209,3 +210,58 @@ class DeltaManager:
                 }
             },
         )
+
+
+# ── TDD run state ────────────────────────────────────────────────────────────
+
+TDD_STATE_KEY = "tdd_state"
+
+
+def wrap_in_system_reminder(content: str) -> str:
+    """`src/utils/messages.ts` -> `wrapInSystemReminder`."""
+    return f"<system-reminder>\n{content}\n</system-reminder>"
+
+
+def tdd_state_payload(ledger: PhaseLedger, todo: str | None) -> dict[str, object]:
+    return {
+        "phase": str(ledger.phase),
+        "red_confirmed": ledger.red_confirmed,
+        "green_passed": ledger.green_passed,
+        "todo": todo,
+    }
+
+
+def last_announced_tdd_state(messages: Sequence[Message]) -> dict[str, object] | None:
+    for msg in reversed(messages):
+        kwargs = getattr(msg, "additional_kwargs", None)
+        if isinstance(kwargs, dict) and isinstance(kwargs.get(TDD_STATE_KEY), dict):
+            state: dict[str, object] = kwargs[TDD_STATE_KEY]
+            return state
+    return None
+
+
+def compute_tdd_state_attachment(
+    messages: Sequence[Message], ledger: PhaseLedger, todo: str | None = None
+) -> Message | None:
+    """
+    The run's TDD state as an attachment, announced only when it changed.
+
+    The ledger is written by `RunTests` alone (Part D2), so this is an observation, not the
+    model's claim. Delivered as a meta user message wrapped in `<system-reminder>`, the shape
+    upstream uses for its todo reminder, so the system prompt prefix stays cacheable.
+    """
+    payload = tdd_state_payload(ledger, todo)
+    if last_announced_tdd_state(messages) == payload:
+        return None
+    lines = [
+        "TDD phase ledger (written only by RunTests from observed test runs):",
+        f"Current Phase: {ledger.phase}",
+        f"Red Confirmed: {ledger.red_confirmed}",
+        f"Green Passed: {ledger.green_passed}",
+    ]
+    if todo is not None and todo.strip():
+        lines += ["", "Contents of TODO.md:", todo.strip()]
+    return HumanMessage(
+        content=wrap_in_system_reminder("\n".join(lines)),
+        additional_kwargs={"is_meta": True, TDD_STATE_KEY: payload},
+    )

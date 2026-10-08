@@ -117,6 +117,7 @@ def build_agent_tool(
     memory_store: AgentMemoryStore | None = None,
     subagent_runner: SubagentRunner | None = None,
     allow_nested_agent: bool = False,
+    vars: Mapping[str, Any] | None = None,
 ) -> BuiltTool:
     """
     Build the Agent delegation tool conforming to the Tool protocol.
@@ -132,145 +133,77 @@ def build_agent_tool(
 
         run_in_background = bool(input_dict.get("run_in_background", False))
 
-        # Check fork guard
-        if subagent_type is None and is_in_fork_child(context.messages):
+        # Dynamic subagent instantiation conforming to Plan A
+        try:
+            from app.loop.agents.subagent import create_subagent
+
+            target = subagent_type if subagent_type is not None else FORK_SUBAGENT_TYPE
+            subagent = create_subagent(
+                agent_name_or_def=target,
+                parent_context=context,
+                directive=prompt,
+                vars=vars,
+                available_tools=available_tools,
+                definitions=definitions,
+                memory_store=memory_store,
+                subagent_runner=subagent_runner,
+                allow_nested_agent=allow_nested_agent,
+                run_in_background=run_in_background,
+            )
+        except ValueError as exc:
+            err_msg = str(exc)
+            if "requires phase" in err_msg:
+                return ToolResult(content=f"Denied: {err_msg}", is_error=True)
+            return ToolResult(content=f"Error: {err_msg}", is_error=True)
+
+        # Async branch
+        if run_in_background or subagent.definition.background is True:
             return ToolResult(
-                content="Error: Fork children cannot recursively spawn fork subagents.",
-                is_error=True,
-            )
-
-        # 1. Resolve agent definition
-        if subagent_type is None:
-            agent_def = FORK_AGENT
-        else:
-            all_defs = (
-                dict(definitions)
-                if definitions is not None
-                else get_agent_definitions_with_overrides(
-                    project_dir=getattr(context.workspace, "root", None)
-                )
-            )
-            if subagent_type not in all_defs:
-                return ToolResult(
-                    content=(
-                        f"Error: Unknown agent type '{subagent_type}'. "
-                        f"Available: {sorted(all_defs.keys())}"
-                    ),
-                    is_error=True,
-                )
-            agent_def = all_defs[subagent_type]
-
-        # 2. Enforce TDD phase invariant
-        current_app_state = context.get_app_state()
-        current_ledger = current_app_state.phase_ledger
-        if agent_def.phase is not None and current_ledger is not None:
-            if current_ledger.phase != agent_def.phase:
-                return ToolResult(
-                    content=(
-                        f"Denied: Agent '{agent_def.name}' requires phase {agent_def.phase}, "
-                        f"but current TDD ledger is in phase {current_ledger.phase}."
-                    ),
-                    is_error=True,
-                )
-
-        # 3. Resolve worker tools (I2)
-        candidate_pool = list(available_tools) if available_tools else list(context.tools)
-        resolved_tools = resolve_agent_tools(
-            agent_def,
-            candidate_pool,
-            is_async=run_in_background,
-            is_main_thread=False,
-            allow_nested_agent=allow_nested_agent,
-        )
-
-        worker_pool = assemble_tool_pool(
-            built_in_tools=resolved_tools.resolved_tools,
-            phase_ledger=current_ledger,
-        )
-
-        # 4. Context & message preparation (I4)
-        if agent_def.name == FORK_SUBAGENT_TYPE:
-            last_assistant = next(
-                (
-                    m for m in reversed(context.messages)
-                    if getattr(m, "type", "") == "assistant" or isinstance(m, AIMessage)
-                ),
-                None,
-            )
-            if last_assistant is not None:
-                prior_history = [m for m in context.messages if m is not last_assistant]
-                filtered_prior = filter_incomplete_tool_calls(prior_history)
-                child_messages = build_forked_messages(prompt, last_assistant, filtered_prior)
-            else:
-                child_messages = [HumanMessage(content=build_child_message(prompt))]
-        else:
-            child_messages = [HumanMessage(content=prompt)]
-
-        # 5. Agent memory setup (I5)
-        run_id = f"run_{uuid4().hex[:8]}"
-        agent_id = f"agent_{uuid4().hex[:8]}"
-        store = memory_store or AgentMemoryStore(base_dir=getattr(context.workspace, "root", None))
-        memory_prompt = ""
-        if agent_def.memory and agent_def.memory != "none":
-            memory_prompt = store.load_memory_prompt(agent_def.name, agent_def.memory, run_id=run_id)
-
-        # 6. Async branch
-        if run_in_background or agent_def.background is True:
-            return ToolResult(
-                content=f"Agent '{agent_def.name}' ({agent_id}) launched in background.",
+                content=f"Agent '{subagent.definition.name}' ({subagent.agent_id}) launched in background.",
                 metadata={
-                    "agent_id": agent_id,
-                    "agent_type": agent_def.name,
+                    "agent_id": subagent.agent_id,
+                    "agent_type": subagent.definition.name,
                     "status": "async_launched",
-                    "run_id": run_id,
-                    "tools": tuple(t.name for t in worker_pool),
+                    "run_id": subagent.run_id,
+                    "tools": tuple(t.name for t in subagent.tools),
                 },
             )
 
-        # 7. Sync in-process execution (decision A1)
-        worker_context = ToolContext(
-            cancel=context.cancel,
-            get_app_state=context.get_app_state,
-            set_app_state=discard_app_state_update,
-            messages=tuple(child_messages),
-            tools=tuple(worker_pool),
-            permission_context=context.permission_context,
-            workspace=context.workspace,
-            hook_dispatcher=context.hook_dispatcher,
-        )
-
-        runner = subagent_runner or default_subagent_runner
+        # Sync in-process execution
         try:
-            summary, terminal_reason = await runner(
-                agent_def,
-                prompt,
-                child_messages,
-                worker_pool,
-                worker_context,
-                memory_prompt,
-            )
+            summary, terminal_reason = await subagent.execute(prompt)
             return ToolResult(
                 content=summary,
                 metadata={
-                    "agent_id": agent_id,
-                    "agent_type": agent_def.name,
+                    "agent_id": subagent.agent_id,
+                    "agent_type": subagent.definition.name,
                     "status": "completed",
                     "terminal_reason": terminal_reason,
-                    "run_id": run_id,
+                    "run_id": subagent.run_id,
                 },
             )
         finally:
-            if store is not None and agent_def.memory == "run":
-                store.discard_run_memory(run_id)
+            if memory_store is not None and subagent.definition.memory == "run":
+                memory_store.discard_run_memory(subagent.run_id)
 
     def _validate(input_dict: dict[str, Any], context: ToolContext) -> ValidationResult:
         if not input_dict.get("prompt"):
             return ValidationResult(valid=False, message="Missing required parameter 'prompt'")
         return ValidationResult(valid=True)
 
+    from app.loop.prompts.loader import render_prompt
+    from app.loop.prompts.registry import global_prompt_registry
+
+    prompt_text = (
+        global_prompt_registry.get_tool_prompt("agent-usage-notes", vars)
+        or "Spawn a subagent to perform focused work on a specific task."
+    )
+    if vars:
+        prompt_text = render_prompt(prompt_text, vars)
+
     return build_tool(
         name=AGENT_TOOL_NAME,
-        prompt="Spawn a subagent to perform focused work on a specific task.",
+        prompt=prompt_text,
         call=_call,
         input_schema=AGENT_TOOL_SCHEMA,
         aliases=(LEGACY_AGENT_TOOL_NAME,),

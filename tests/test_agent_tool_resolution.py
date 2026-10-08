@@ -2,17 +2,18 @@
 Unit tests for I2: Per-agent tool resolution and filtering.
 """
 
-from typing import Any
+import inspect
+from typing import Any, cast
+from unittest.mock import patch
 
 from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.resolution import (
+    _tool_matches_name,
     filter_tools_for_agent,
     parse_tool_spec,
     resolve_agent_tools,
 )
 from app.loop.tools.base import build_tool
-
-
 from app.loop.tools.types import ToolResult
 
 
@@ -159,24 +160,15 @@ def test_resolve_agent_tools_alias_matching() -> None:
 
 # ── Mutation defense tests (Phase I) ─────────────────────────────────────────
 
-import inspect
-from unittest.mock import patch
-
-from app.loop.agents.resolution import (
-    _tool_matches_name,
-    ALL_AGENT_DISALLOWED_TOOLS,
-    ASYNC_AGENT_ALLOWED_TOOLS,
-    ResolvedAgentTools,
-)
-
 
 def test_tool_matches_name_alias_fallback_default() -> None:
     """Kill mutants 11, 14: getattr(tool, 'aliases', ()) -> None or empty."""
     # A tool with no aliases attribute should not crash
     class BareTool:
         name = "Bash"
-    assert _tool_matches_name(BareTool(), "Bash") is True
-    assert _tool_matches_name(BareTool(), "sh") is False
+    bare = cast(Any, BareTool())  # deliberately has no `aliases`
+    assert _tool_matches_name(bare, "Bash") is True
+    assert _tool_matches_name(bare, "sh") is False
 
 
 def test_filter_defaults_are_false() -> None:
@@ -261,7 +253,7 @@ def test_resolve_disallowed_alias_getattr_default() -> None:
         disallowed_tools=("CustomTool",),
     )
     # BareTool has no aliases; should still be filtered by name
-    resolved = resolve_agent_tools(defn, [BareTool()], is_main_thread=True)
+    resolved = resolve_agent_tools(defn, [cast(Any, BareTool())], is_main_thread=True)
     assert len(resolved.resolved_tools) == 0
 
 

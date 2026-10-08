@@ -1,5 +1,8 @@
 """
-Instruction-file loading (CLAUDE.md, CONVENTIONS.md, .claude/rules/*.md).
+Instruction-file reading for the prompt loaders (agents, skills, prompts).
+
+The memory hierarchy itself (TDDAGENTS.md, rules, @include) lives in
+`app/loop/context/memory.py`, the port of claude-code's `utils/claudemd.ts`.
 
 Ported from Claude Code conventions:
 - Pure reading from disk with optional comment stripping.
@@ -12,7 +15,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 
 # Matches innermost HTML comment that does not contain another opening <!--
@@ -85,39 +87,3 @@ def load_instruction_file(
         truncated=truncated,
         original_bytes=original_size,
     )
-
-
-def find_and_load_project_instructions(
-    workspace_dir: Path | str,
-    candidates: Sequence[str] = ("CLAUDE.md", "CONVENTIONS.md"),
-    max_bytes: int = 50_000,
-) -> dict[str, InstructionFile]:
-    """Search workspace directory for standard instruction files and load them."""
-    root = Path(workspace_dir)
-    results: dict[str, InstructionFile] = {}
-
-    for name in candidates:
-        p = root / name
-        loaded = load_instruction_file(p, max_bytes=max_bytes)
-        if loaded is not None:
-            results[name] = loaded
-
-    return results
-
-
-def find_and_load_claude_rules(
-    workspace_dir: Path | str,
-    max_bytes: int = 50_000,
-) -> list[InstructionFile]:
-    """Search for rule markdown files under .claude/rules/*.md."""
-    rules_dir = Path(workspace_dir) / ".claude" / "rules"
-    if not rules_dir.is_dir():
-        return []
-
-    results: list[InstructionFile] = []
-    for item in sorted(rules_dir.glob("*.md")):
-        loaded = load_instruction_file(item, max_bytes=max_bytes)
-        if loaded is not None:
-            results.append(loaded)
-
-    return results

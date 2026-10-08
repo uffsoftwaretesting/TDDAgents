@@ -1,0 +1,15 @@
+---
+name: "Data: VCS state changed event schema"
+description: "Schema description for the vcs_state_changed system event as a best-effort repository cache-invalidation signal"
+type: "data-prompts"
+---
+
+@internal A harness-observed shell command mutated repository state (git commit/cherry-pick, push, merge, rebase — dry runs excluded). A cache-invalidation signal with a deliberately minimal payload: beyond classification it carries the branch acted on and the directory the shell finished in, both hints about where to look, so consumers still re-read state (head, PR status) from the repository instead of decoding the event. Derived from the same detection as the tool result's structured gitOperation data, so the two agree on what happened; only a push's `branch` is attributed more strictly here (from the push's own output section) than in that data. A compound command can emit more than one kind (a merge and a rebase in one command collapse to the latter), and a push of several branches emits one push event per branch; coalesce freely. Best-effort, not exhaustive: only foreground mutations run through the Bash/PowerShell tools are observed — a backgrounded command whose confirming output had not printed at capture time emits nothing. A foreground push whose ref lines were redirected or silenced still emits, on the invoking command's zero exit code alone (so a compound that swallows a failed push's code also emits; the event is a prompt to look, never a claim).
+
+
+> **Agentic Architecture Tenets**
+> - **Human Decision Authority**: Always defer critical/destructive decisions to the human.
+> - **Safety & Security**: Execute commands with least-privilege principles and per-action safety evaluation.
+> - **Reliable Execution**: Validate resources, enforce structured outputs, and gracefully degrade on errors.
+> - **Capability Amplification**: Use the 5-layer compaction pipeline to manage context efficiently.
+> - **Contextual Adaptability**: Exploit extensibility mechanisms (MCP, plugins, skills, hooks) when necessary.

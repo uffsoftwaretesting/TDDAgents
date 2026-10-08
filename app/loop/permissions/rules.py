@@ -23,14 +23,45 @@ if TYPE_CHECKING:
     from app.loop.tools.base import Tool
 
 
+def mcp_info_from_string(tool_string: str) -> tuple[str, str | None] | None:
+    """
+    `mcpStringUtils.ts` -> `mcpInfoFromString`: `mcp__server__tool` -> ("server", "tool").
+
+    Everything after the server name is the tool name, double underscores preserved.
+    """
+    parts = tool_string.split("__")
+    if len(parts) < 2 or parts[0] != "mcp" or not parts[1]:
+        return None
+    tool = "__".join(parts[2:]) if len(parts) > 2 else None
+    return parts[1], tool
+
+
+def tool_name_matches_rule(rule_tool_name: str, tool_name: str) -> bool:
+    """
+    The name half of upstream `toolMatchesRule`: an exact name, or an MCP server rule
+    (`mcp__server` or `mcp__server__*`) matching every tool on that server. A plain prefix
+    is not a match: a `Bash` rule must not cover `BashOutput`.
+    """
+    if rule_tool_name == tool_name:
+        return True
+    rule_info = mcp_info_from_string(rule_tool_name)
+    tool_info = mcp_info_from_string(tool_name)
+    return (
+        rule_info is not None
+        and tool_info is not None
+        and rule_info[1] in (None, "*")
+        and rule_info[0] == tool_info[0]
+    )
+
+
 def rule_matches(rule: PermissionRule, tool_name: str, input_content: str | None = None) -> bool:
     """
     Check if a permission rule matches a tool call.
 
-    Matches if tool_name equals rule.tool_name or starts with rule.tool_name (for MCP prefixes like 'mcp__server').
-    If rule.rule_content is defined, input_content must match (exact match or glob-style prefix with '*').
+    The tool name must match as `tool_name_matches_rule` defines it. If rule.rule_content
+    is defined, input_content must match (exact match or glob-style prefix with '*').
     """
-    if tool_name != rule.tool_name and not (rule.tool_name and tool_name.startswith(rule.tool_name)):
+    if not tool_name_matches_rule(rule.tool_name, tool_name):
         return False
 
     if rule.rule_content is None:

@@ -38,7 +38,7 @@ def is_tool_denied(tool: Tool, deny_rules: set[str]) -> bool:
 
 def assemble_tool_pool(
     built_in_tools: Sequence[Tool] = (),
-    mcp_tools: Sequence[Tool] = (),
+    mcp_tools: Sequence[Tool] | Any = (),
     *,
     deny_rules: Sequence[str | PermissionRule] | set[str] = (),
     phase_ledger: PhaseLedger | None = None,
@@ -57,6 +57,9 @@ def assemble_tool_pool(
     5. Concatenate with built-ins as a contiguous prefix.
     6. Deduplicate by name, preserving insertion order (built-ins win on name conflicts).
     """
+    if hasattr(mcp_tools, "get_tools") and callable(mcp_tools.get_tools):
+        mcp_tools = mcp_tools.get_tools()
+
     deny_set: set[str] = set()
     for rule in deny_rules:
         if isinstance(rule, PermissionRule):

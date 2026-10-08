@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from app.loop.context.file_state import FileState
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
 
@@ -111,6 +112,10 @@ class ToolContext:
     single iteration, and the set is the record of which ones are outstanding right now.
     Part B5 decides how concurrent updates to it are coordinated, when there is a scheduler
     to coordinate them.
+
+    `read_file_state` is upstream's `readFileState`: what `ReadFile` saw of each file, which
+    `Edit` and `WriteFile` check before writing. A worker receives a copy, never the
+    parent's dict (`createSubagentContext` clones it the same way).
     """
 
     cancel: CancelToken
@@ -122,6 +127,7 @@ class ToolContext:
     permission_context: Any = None
     workspace: Any = None
     hook_dispatcher: Any = None
+    read_file_state: dict[str, FileState] = field(default_factory=dict)
 
 
 def tool_context_for(
@@ -178,8 +184,6 @@ from app.loop.context.compact import (  # noqa: E402
 )
 from app.loop.context.instructions import (  # noqa: E402
     InstructionFile,
-    find_and_load_claude_rules,
-    find_and_load_project_instructions,
     load_instruction_file,
     strip_html_comments,
 )
@@ -205,6 +209,7 @@ __all__ = [
     "AppState",
     "AppStateStore",
     "discard_app_state_update",
+    "FileState",
     "ToolContext",
     "tool_context_for",
     "TokenCounter",
@@ -221,8 +226,6 @@ __all__ = [
     "is_assistant_message",
     "InstructionFile",
     "load_instruction_file",
-    "find_and_load_project_instructions",
-    "find_and_load_claude_rules",
     "strip_html_comments",
     "CacheBlock",
     "CacheLatchError",

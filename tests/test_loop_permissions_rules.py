@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from app.loop.context import AppStateStore, tool_context_for
 from app.loop.permissions.rules import (
     check_rule_based_permissions,
@@ -14,7 +16,9 @@ from app.loop.permissions.rules import (
     get_allow_rule_for_tool,
     get_ask_rule_for_tool,
     get_deny_rule_for_tool,
+    mcp_info_from_string,
     rule_matches,
+    tool_name_matches_rule,
 )
 from app.loop.permissions.types import (
     PermissionBehavior,
@@ -279,3 +283,41 @@ class TestCheckRuleBasedPermissions:
         extracted_err = extract_permission_context(ctx_error)  # type: ignore[arg-type]
         assert isinstance(extracted_err, ToolPermissionContext)
         assert extracted_err.mode == PermissionMode.DEFAULT
+
+
+# ── tool-name matching (upstream toolMatchesRule / mcpInfoFromString) ────────
+
+def test_plain_prefix_is_not_a_match():
+    """The old `startswith` check let a `Bash` rule cover `BashOutput`."""
+    assert rule_matches(PermissionRule(tool_name="Bash"), "BashOutput") is False
+    assert tool_name_matches_rule("Bash", "BashOutput") is False
+    assert tool_name_matches_rule("Bash", "Bash") is True
+    assert tool_name_matches_rule("", "Bash") is False
+
+
+def test_mcp_server_rules():
+    assert tool_name_matches_rule("mcp__srv", "mcp__srv__read") is True
+    assert tool_name_matches_rule("mcp__srv__*", "mcp__srv__read") is True
+    assert tool_name_matches_rule("mcp__srv__read", "mcp__srv__write") is False
+    assert tool_name_matches_rule("mcp__srv", "mcp__srvx__read") is False
+    assert tool_name_matches_rule("mcp__srv", "Bash") is False
+    assert tool_name_matches_rule("Bash", "mcp__srv__read") is False
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("mcp__srv__tool", ("srv", "tool")),
+    ("mcp__srv__a__b", ("srv", "a__b")),
+    ("mcp__srv", ("srv", None)),
+    ("mcp__", None),
+    ("mcp", None),
+    ("other__srv__tool", None),
+    ("mcp____tool", None),
+])
+def test_mcp_info_from_string(value, expected):
+    assert mcp_info_from_string(value) == expected
+
+
+def test_extract_ignores_a_non_context_value_on_app_state():
+    ctx = SimpleNamespace(permission_context=None,
+                          get_app_state=lambda: SimpleNamespace(tool_permission_context="garbage"))
+    assert extract_permission_context(ctx) == ToolPermissionContext()  # type: ignore[arg-type]

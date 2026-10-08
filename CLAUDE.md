@@ -13,6 +13,11 @@ A massive refactor of TDDAgents is under way. Before doing **any** work in this 
 
 Only after these steps should you propose a plan or start editing.
 
+**Decisions go to the user.** Every architecture decision, open question, or ambiguity is put
+to the user with the `AskUserQuestion` tool before acting on it — never resolved silently by
+picking a default. A `UserPromptSubmit` hook in `.claude/settings.json` restates this on every
+prompt.
+
 ## Upcoming refactor — read before extending anything
 
 **The architecture has pivoted.** TDDAgents is being rebuilt on claude-code's *loop
@@ -49,7 +54,14 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `context/` | Subpackage providing `AppState`, `AppStateStore`, `CancelToken`, `ToolContext` (with `workspace`), `discard_app_state_update` |
 | `context/tokens.py` | Fast heuristic token counter (`(len+3)//4`), block/message/sequence token estimators, `TokenWarningState`, `TokenCounter` (E1) |
 | `context/slicing.py` | Head-slicing enforcing all 3 hard invariants (user-first, unbroken tool pairs, non-orphaned thinking), `find_safe_truncation_index`, `slice_messages_head` (E2) |
-| `context/instructions.py` | HTML comment cleaner (`strip_html_comments`), `load_instruction_file`, `find_and_load_project_instructions`, `find_and_load_claude_rules` (E3) |
+| `context/instructions.py` | Iterative HTML comment cleaner and `load_instruction_file`, used by the prompt/agent/skill loaders (E3) |
+| `context/memory.py` | Port of `utils/claudemd.ts`: Managed → User → Project → rules → Local memory files (`TDDAGENTS.md`, `.tddagents/`), `@include`, conditional `paths:` rules, block-level comment stripping, `getClaudeMds`; AutoMem off unless `TDDAGENTS_ENABLE_AUTO_MEMORY` (Part I5) |
+| `context/assembly.py` | Port of `getSystemPrompt` (static sections in upstream order + `tdd-contract.md`, boundary, `env_info_simple`), `getGitStatus`/`getSystemContext`/`getUserContext`, `appendSystemContext`/`prependUserContext`, per-run memoization |
+| `context/file_state.py` | `FileState` — upstream `readFileState`; `ToolContext.read_file_state` backs read-before-write |
+| `model.py` | `stream_call_model`: system prompt + system context, `<system-reminder>` user context, history, TDD-state attachment; model resolved from `Config` |
+| `tools/fs.py` | `ReadFile`/`WriteFile`/`Edit`/`Glob`/`Grep` on the `sdk-tools.d.ts` contracts, upstream `errorCode`s in `validate_input`, read-before-write |
+| `tools/ripgrep.py` | Port of `utils/ripgrep.ts`; rg runs inside the workspace, vendored via the pinned `ripgrep` wheel (installed into the sandbox on creation and on first use) |
+| `tools/bash.py`, `permissions/bash_*.py` | Bash tool and the port of `bashSecurity.ts`'s validator battery + `bashToolHasPermission`; no LLM classifier |
 | `prompts/loader.py` | Markdown frontmatter parser, visible placeholder rendering (`{{VAR}}`), agent loader enforcing 4-rule discipline and loud phase validation (E4) |
 | `prompts/sections.py` | `systemPromptSection` (memoized), `DANGEROUS_uncachedSystemPromptSection` (volatile with required reason), `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`, run-scoped `PromptSectionCache` (E4b) |
 | `context/cache.py` | `SessionLatches` (`CacheLatchError` on mid-session flip), `build_system_prompt_blocks` with ephemeral `cache_control` on static Block 3, `validate_cache_breakpoints_budget` (E5) |
@@ -148,7 +160,7 @@ Every piece of code created or refactored in `app/` passes this gate before it i
 Run the steps **in this order** — each one is cheap only because the previous one passed.
 
 ```bash
-P=/home/amaro/tdd-agents/.venv/bin      # this repo has no venv of its own; see Commands
+P=.venv/bin      # the repo-local, gitignored venv; see Commands
 
 # 1. Unit tests — written alongside the change, never bolted on afterwards
 $P/pytest tests/ -q
@@ -350,8 +362,28 @@ string literals no contract depends on. Anything behavioral that survives a muta
 must be either killed or written down — treat that as the standard to hold, and treat 90%
 as the floor it usually implies rather than as a number to reach by any route.
 
+**claude-code ports of 2026-10 (file tools, ripgrep, memory/context assembly, Bash
+permissions) are measured per module and all clear the bar**:
+
+| Module group | Mutants | Score |
+|---|---|---|
+| `tools/fs.py`, `tools/ripgrep.py`, `context/{memory,assembly,attachments,model}`, `permissions/{settings,shell_rules,rules,gate}` | 4273 | 97.3% |
+| `permissions/bash_permissions.py` / `bash_path_validation.py` | 1812 | 92.5% / 96.3% |
+| `permissions/bash_commands.py` / `bash_sed_validation.py` | 2178 | 93.2% / 95.9% |
+| `permissions/bash_read_only.py` / `bash_read_only_commands.py` / `bash_security.py` / `tools/bash.py` | 3903 | 96.1% / 92.6% / 94.0% / 99.6% |
+
+Remaining survivors are the documented equivalent classes (defaults, `False`→`None`,
+codec aliases, case flips with no letters, unreachable branches upstream also has).
+**Not yet re-triaged:** `tools/execution.py` (77.6%), `orchestration.py`, `pool.py`,
+`context/compact.py`, `slicing.py` — 84.9% together, and currently being edited.
+
 ### Gotchas
 
+- **`also_copy` must name every non-code file a test reads**, in *directory* form:
+  `["app/", "requirements.txt", ".tddagents/", "docs/"]`. mutmut copies with
+  `shutil.copy2`, which does not create parent directories, so `.tddagents/settings.json`
+  silently fails to copy; any missing file makes stats collection die with
+  "failed to collect stats" and every mutant reports "not checked".
 - **Invoke mutmut as `mutmut run`, never `python -m mutmut`.** Under `-m` the module is
   `__main__`, so `mutmut.__main__` is absent from `sys.modules`; the mutation trampoline
   re-imports it in each forked child, re-runs `set_start_method('fork')`, and the whole
@@ -411,13 +443,14 @@ python -m app.main --fresh
 
 ### Quality tooling
 
-**This repository has no venv of its own.** Use `/home/amaro/tdd-agents/.venv`, which has
-the full dependency set. (`/home/amaro/tdd-agents/venv` also exists but is missing
+Use the repo-local, gitignored `.venv` (`python3 -m venv .venv && .venv/bin/pip install -r
+requirements.txt`; it also provides the vendored `rg` binary and `types-PyYAML`). On the
+original workstation the equivalent is `/home/amaro/tdd-agents/.venv`. (`/home/amaro/tdd-agents/venv` there is missing
 `langchain_together`, which `app/utils/chat_model_factory.py` imports at module scope, so
 importing anything under `app/graph/` fails there.)
 
 ```bash
-P=/home/amaro/tdd-agents/.venv/bin
+P=.venv/bin
 
 $P/pytest tests/ -q                                     # offline suite, no credentials
 $P/flake8 app/loop app/workspace app/sync app/sandbox app/tools app/hooks tests   # touched files

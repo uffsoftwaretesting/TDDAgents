@@ -39,6 +39,7 @@ from app.loop.agents.resolution import (
     parse_tool_spec,
     resolve_agent_tools,
 )
+from app.loop.agents.subagent import SubagentInstance, create_subagent
 from app.loop.agents.tool import (
     AGENT_TOOL_NAME,
     AGENT_TOOL_SCHEMA,
@@ -79,6 +80,8 @@ __all__ = [
     "LEGACY_AGENT_TOOL_NAME",
     "AGENT_TOOL_SCHEMA",
     "SubagentRunner",
+    "SubagentInstance",
+    "create_subagent",
     "build_agent_tool",
     "default_subagent_runner",
 ]

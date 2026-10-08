@@ -60,3 +60,93 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
         )
 
     return StopHookResult(blocking_errors=(HumanMessage(content=msg),))
+
+
+from app.hooks.dispatcher import HookOutcome
+from app.loop.permissions.tdd import (
+    GENERIC_WRITER_TOOL_NAMES,
+    IMPLEMENTATION_WRITER_TOOL_NAMES,
+    TEST_WRITER_TOOL_NAMES,
+    is_implementation_writing_tool,
+    is_test_path,
+    is_test_writing_tool,
+)
+from app.loop.ledger import PhaseLedger, TddPhase
+
+
+def tdd_pre_tool_use_hook(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    ledger: PhaseLedger,
+    tool: Any = None,
+) -> HookOutcome:
+    """
+    PreToolUse hook that enforces TDD phase boundaries (Plan B1).
+    - In RED: implementation writing is blocked; test writing is allowed.
+    - In GREEN/REFACTOR: test writing is blocked; implementation writing is allowed.
+    - RunTests is always allowed.
+    """
+    if tool_name == "RunTests":
+        return HookOutcome(denied=False)
+
+    if ledger.phase == TddPhase.RED:
+        if tool_name in IMPLEMENTATION_WRITER_TOOL_NAMES or (tool and is_implementation_writing_tool(tool)):
+            return HookOutcome(
+                denied=True,
+                reason=(
+                    f"TDD phase RED denies implementation-writing tool '{tool_name}' "
+                    "before a failing test is confirmed."
+                ),
+            )
+        if tool_name in GENERIC_WRITER_TOOL_NAMES or tool_name in ("WriteFile", "Edit", "MultiEdit"):
+            path = str(tool_input.get("path") or tool_input.get("file_path") or "")
+            if path and not is_test_path(path):
+                return HookOutcome(
+                    denied=True,
+                    reason=(
+                        f"TDD phase RED denies writing to production file '{path}'. "
+                        "Only test files may be written in RED phase."
+                    ),
+                )
+
+    elif ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR):
+        if tool_name in TEST_WRITER_TOOL_NAMES or (tool and is_test_writing_tool(tool)):
+            return HookOutcome(
+                denied=True,
+                reason=f"TDD phase {ledger.phase.value} denies test-writing tool '{tool_name}'.",
+            )
+        if tool_name in GENERIC_WRITER_TOOL_NAMES or tool_name in ("WriteFile", "Edit", "MultiEdit"):
+            path = str(tool_input.get("path") or tool_input.get("file_path") or "")
+            if path and is_test_path(path):
+                return HookOutcome(
+                    denied=True,
+                    reason=f"TDD phase {ledger.phase.value} denies modifying test file '{path}'.",
+                )
+
+    return HookOutcome(denied=False)
+
+
+def tdd_post_tool_use_hook(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    tool_response: str,
+    ledger: PhaseLedger,
+) -> HookOutcome:
+    """
+    PostToolUse hook that observes test executions and provides TDD ledger feedback (Plan B1).
+    """
+    if tool_name == "RunTests":
+        content = tool_response.lower()
+        if "fail" in content or "error" in content:
+            if ledger.phase == TddPhase.RED:
+                return HookOutcome(
+                    additional_context="TDD RED phase test failure observed. Ready to transition to GREEN phase."
+                )
+        elif "pass" in content or "ok" in content:
+            if ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR):
+                return HookOutcome(
+                    additional_context="TDD GREEN phase test pass observed. Ready to transition to REFACTOR or complete cycle."
+                )
+
+    return HookOutcome()
+

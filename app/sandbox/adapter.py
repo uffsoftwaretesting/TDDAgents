@@ -168,7 +168,16 @@ class E2BAdapter:
             raise _translate(exc, "Sandbox.create") from exc
 
         logger.info("☁️  Sandbox %s created with a %ss lifetime.", sandbox.sandbox_id, lifetime)
-        return cls(sandbox)
+        adapter = cls(sandbox)
+        # Grep/Glob run ripgrep in the sandbox; install the pinned wheel up front. A failure
+        # is not fatal here: `ensure_ripgrep` retries on first use and reports it there.
+        from app.loop.tools.ripgrep import provision_sandbox_ripgrep
+
+        try:
+            provision_sandbox_ripgrep(adapter)
+        except Exception as exc:
+            logger.warning("ripgrep provisioning failed for sandbox %s: %s", sandbox.sandbox_id, exc)
+        return adapter
 
     @classmethod
     def connect(cls, sandbox_id: str) -> "E2BAdapter":
