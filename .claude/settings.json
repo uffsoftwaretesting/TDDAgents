@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Project rule (TDDAgents): every architecture decision, open question, or ambiguity must be put to the user with the AskUserQuestion tool before acting on it. Do not resolve such decisions silently or by picking a default.'"
+            "command": "echo 'Project rule (TDDAgents): ALWAYS interview the user with the AskUserQuestion tool to resolve every open question, ambiguity, and architecture decision before acting on it. Never resolve such decisions silently or by picking a default. Commits and pushes carry the user as sole author: no Co-Authored-By or Claude attribution lines.'"
           }
         ]
       }
