@@ -2,12 +2,22 @@
 Tool call partitioning, concurrency, and context modifier replay (Parts B5 and B6).
 
 Ported from:
-- `reference/claude-code/src/services/tools/toolOrchestration.ts` -> `partitionToolCalls`, `runTools`
+- `reference/claude-code/src/services/tools/toolOrchestration.ts` -> `partitionToolCalls`,
+  `runTools`, `getMaxToolUseConcurrency`
+
+Concurrent results are emitted **in completion order**, which is upstream's behaviour here:
+`runTools` yields through `all()` as each generator finishes and `query.ts` appends them in
+arrival order with no sort. (The streaming executor is the path that preserves the model's
+call order — see `streaming/executor.py::get_completed_results`, which stops scanning at the
+first still-running non-concurrency-safe tool.) Context modifiers are the exception and are
+replayed in call order, because a modifier out of order changes what the next tool sees.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncIterator, Callable, Sequence
 
@@ -15,11 +25,15 @@ from langchain_core.messages import AIMessage
 
 from app.loop.messages import Message, ToolCall
 from app.loop.tools.base import Tool, find_tool_by_name
+from app.loop.tools.validation import validate_against_schema
 from app.loop.tools.execution import (
     ToolExecutionOutcome,
     run_tool_use,
     yield_missing_tool_results,
 )
+
+#: `toolOrchestration.ts` -> `getMaxToolUseConcurrency`'s fallback.
+DEFAULT_MAX_TOOL_USE_CONCURRENCY = 10
 
 if TYPE_CHECKING:
     from app.loop.config import RunConfig
@@ -37,6 +51,19 @@ class ToolBatch:
     calls: tuple[ToolCall, ...]
 
 
+def get_max_tool_use_concurrency() -> int:
+    """
+    `toolOrchestration.ts` -> `getMaxToolUseConcurrency`.
+
+    Upstream writes `parseInt(env) || 10`, so a 0 or an unparseable value both fall back to
+    10 rather than disabling concurrency — the `||` is not a typo for `??`.
+    """
+    raw = os.environ.get("TDDAGENTS_MAX_TOOL_USE_CONCURRENCY", "")
+    match = re.match(r"\s*([+-]?[0-9]+)", raw)
+    parsed = int(match.group(1)) if match else 0
+    return parsed or DEFAULT_MAX_TOOL_USE_CONCURRENCY
+
+
 def partition_tool_calls(
     tool_calls: Sequence[ToolCall],
     tools: Sequence[Tool],
@@ -48,17 +75,27 @@ def partition_tool_calls(
     1. A single non-concurrency-safe tool call, or
     2. Multiple consecutive concurrency-safe tool calls.
 
-    Fail-closed: if tool is not found, or is_concurrency_safe raises, it is treated as False.
+    **Schema validation runs before `is_concurrency_safe`**, as upstream: the predicate is
+    only ever asked about input that parsed, so a tool cannot be handed a shape its own
+    classifier was not written for. The parse result is then discarded — `run_tool_use`
+    validates again for real, and upstream parses twice here for exactly this reason.
+
+    Three paths fail closed to "not safe", so an unclassifiable call runs alone: the tool is
+    unknown, its input does not match the schema, or the predicate raises.
     """
     batches: list[ToolBatch] = []
 
     for call in tool_calls:
-        tool = find_tool_by_name(tools, str(call.get("name") or ""))
+        tool_name = str(call.get("name") or "")
+        tool = find_tool_by_name(tools, tool_name)
+        args = call.get("args") or {}
         if tool is None:
+            is_safe = False
+        elif validate_against_schema(tool_name, getattr(tool, "input_schema", None), args) is not None:
             is_safe = False
         else:
             try:
-                is_safe = bool(tool.is_concurrency_safe(call.get("args") or {}))
+                is_safe = bool(tool.is_concurrency_safe(args))
             except Exception:
                 is_safe = False
 
@@ -121,28 +158,41 @@ async def run_tools(
                 break
 
             if batch.is_concurrency_safe:
-                # Concurrent batch execution
+                # Concurrent batch. Results are yielded **as they complete**, which is what
+                # upstream's `all()` does and what nothing downstream re-sorts. Only the
+                # context modifiers are put back into the model's call order, below — that
+                # replay is the one place ordering is restored by hand, because a modifier
+                # applied out of order would change what the *next* tool sees.
                 for call in batch.calls:
                     cid = str(call.get("id") or "")
                     context.in_flight_tool_ids.add(cid)
 
                 queued_modifiers: dict[str, list[Callable[[ToolContext], ToolContext]]] = {}
+                semaphore = asyncio.Semaphore(get_max_tool_use_concurrency())
 
-                async def execute_concurrent(c: ToolCall) -> ToolExecutionOutcome:
+                async def execute_concurrent(c: ToolCall) -> tuple[str, ToolExecutionOutcome]:
                     cid_inner = str(c.get("id") or "")
                     try:
-                        return await run_tool_use(c, assistant_message, context, available_tools)
+                        async with semaphore:
+                            outcome = await run_tool_use(c, assistant_message, context, available_tools)
+                        return cid_inner, outcome
                     finally:
                         context.in_flight_tool_ids.discard(cid_inner)
 
-                outcomes = await asyncio.gather(*(execute_concurrent(c) for c in batch.calls))
-
-                for call, outcome in zip(batch.calls, outcomes):
-                    cid = str(call.get("id") or "")
-                    completed_tool_ids.add(cid)
-                    yield outcome.message
-                    if outcome.context_modifier is not None:
-                        queued_modifiers.setdefault(cid, []).append(outcome.context_modifier.modify_context)
+                pending = [asyncio.ensure_future(execute_concurrent(c)) for c in batch.calls]
+                try:
+                    for finished in asyncio.as_completed(pending):
+                        cid, outcome = await finished
+                        completed_tool_ids.add(cid)
+                        yield outcome.message
+                        if outcome.context_modifier is not None:
+                            queued_modifiers.setdefault(cid, []).append(
+                                outcome.context_modifier.modify_context
+                            )
+                finally:
+                    for task in pending:
+                        if not task.done():
+                            task.cancel()
 
                 # Part B6: Replay context modifiers strictly in the model's call order
                 for call in batch.calls:

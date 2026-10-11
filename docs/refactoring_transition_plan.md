@@ -115,6 +115,16 @@ with a scripted model writes a test, observes RED via `RunTests`, writes code, o
 *TDD:* the stop hook latch stays as-is (`stop_hook_active` set only at `stop_hook_blocking`,
 `has_attempted_reactive_compact` preserved across it — already matches upstream).
 
+*Phase 1 outcome (2026-10-11), per the interview:* `withRetry` ported with upstream's
+constants and its attempt ceiling — the one ceiling in the codebase, and `CLAUDE.md`'s
+blanket "no ceilings" rule was rewritten to "ceilings follow claude-code, nothing else".
+The model emits **one message per content block** (`streaming/blocks.py`), restoring eager
+dispatch. Retry wraps opening the stream only. The fallback branch is an inner retry inside
+one iteration, so the continue vocabulary is unchanged. The API-error guard skips stop hooks
+but terminates `model_error` rather than upstream's `completed`, because the runner reads
+`completed` as a passed sub-requirement. `refresh_tools` rebuilds the phase-filtered pool
+between turns, compared by identity. `resilience.py` is now `metrics.py`.
+
 ### Phase 2 — Tool execution pipeline parity
 
 - Code: `claude-code/src/services/tools/toolExecution.ts` → `runToolUse`, `checkPermissionsAndCallTool`; `claude-code/src/services/tools/toolHooks.ts` → `resolveHookPermissionDecision`; `claude-code/src/utils/toolResultStorage.ts` → `persistToolResult`, `getPersistenceThreshold`; `claude-code/src/constants/toolLimits.ts` → `DEFAULT_MAX_RESULT_SIZE_CHARS`; `claude-code/src/services/tools/toolOrchestration.ts` → `partitionToolCalls`
@@ -134,6 +144,16 @@ with a scripted model writes a test, observes RED via `RunTests`, writes code, o
   barrier 2 is bypassable through `Bash`.
 - Fix the pool's `startswith` deny (prefix only for `mcp__server`).
 - TodoWrite tool (upstream `TodoWrite`) replacing the ad-hoc `TODO.md` read.
+
+*Phase 2 outcome (2026-10-11), per the interview:* pipeline order is upstream's, with
+schema validation (`jsonschema`) first and result governance **before** PostToolUse. A hook
+`allow` is re-checked against the gate (`tools/hook_permissions.py`), so it cannot defeat a
+phase rule. Oversized results are filed under `<config>/projects/<cwd>/<run>/tool-results/`
+with a head-only 2000-byte preview, and `ReadFile` may read that one directory. **`Bash` is
+phase-aware** through its redirection targets, closing the `echo code > calculator.py`
+bypass of barrier 2. Both duplicate TDD hooks are deleted, leaving the gate as the single
+enforcement point. Prefix tool denial is restricted to `mcp__`. Concurrent results are
+emitted in completion order, matching `runTools`. `TodoWrite` replaces the `TODO.md` read.
 
 ### Phase 3 — Permissions and settings wired at runtime
 

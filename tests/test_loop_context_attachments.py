@@ -254,7 +254,7 @@ def test_tdd_state_attachment_includes_todo_when_non_blank() -> None:
     msg = compute_tdd_state_attachment([], PhaseLedger(), "  - [ ] write test  \n")
     assert msg is not None
     assert str(msg.content).endswith(
-        "Green Passed: False\n\nContents of TODO.md:\n- [ ] write test\n</system-reminder>")
+        "Green Passed: False\n\nCurrent todo list:\n- [ ] write test\n</system-reminder>")
     blank = compute_tdd_state_attachment([], PhaseLedger(), "   ")
     assert blank is not None and "TODO.md" not in str(blank.content)
 

@@ -154,3 +154,5 @@ zipp==3.23.0
 zstandard==0.25.0
 ripgrep==15.1.0
 types-PyYAML==6.0.12.20260906
+jsonschema==4.26.0
+types-jsonschema==4.26.0.20261006

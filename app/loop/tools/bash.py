@@ -21,6 +21,7 @@ local workspace); otherwise the process working directory, upstream's `getCwd()`
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from pathlib import Path
@@ -41,6 +42,10 @@ BASH_PROMPT = (
     if PROMPT_PATH.exists()
     else "Runs a command in a bash shell."
 )
+
+#: `BashTool.tsx` -> `maxResultSizeChars`. Lower than the global clamp, so it is the one
+#: that bites: shell output is the most likely thing to flood a context window.
+BASH_MAX_RESULT_SIZE_CHARS = 30_000
 
 #: `src/utils/timeouts.ts` -> `DEFAULT_TIMEOUT_MS` / `MAX_TIMEOUT_MS`.
 DEFAULT_TIMEOUT_MS = 120_000
@@ -113,7 +118,10 @@ def build_bash_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
 
         timeout_ms = input_args.get("timeout") or get_default_bash_timeout_ms()
         try:
-            res = ws.execute(command, timeout=timeout_ms / 1000)
+            # `Workspace.execute` blocks on a subprocess. Running it on the event loop
+            # would stall every concurrently dispatched tool and the model stream with it,
+            # which is the whole point of the streaming executor.
+            res = await asyncio.to_thread(ws.execute, command, timeout=timeout_ms / 1000)
         except Exception as e:
             return ToolResult(content=f"Execution error: {e}", is_error=True)
 
@@ -150,6 +158,7 @@ def build_bash_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
             "required": ["command"],
         },
         description=lambda args: args.get("description") or "Run shell command",
+        max_result_size_chars=BASH_MAX_RESULT_SIZE_CHARS,
         is_read_only=is_bash_read_only,
         is_concurrency_safe=is_bash_read_only,
         validate_input=validate_bash_input,

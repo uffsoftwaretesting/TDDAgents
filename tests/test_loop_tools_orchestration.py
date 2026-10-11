@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
+import pytest
+
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.loop.config import Gates, RunConfig
@@ -22,6 +24,22 @@ from app.loop.tools.orchestration import (
     run_tools,
 )
 from app.loop.tools.types import ToolResult
+
+
+def dummy_call(args, ctx):
+    return ToolResult(content="ok")
+
+
+def run_tools_sync(calls, tools):
+    """Drive `run_tools` to completion and return the messages it yielded, in order."""
+    store = AppStateStore(AppState())
+    ctx = tool_context_for(store, tools=tuple(tools))
+    state = initial_loop_state(messages=(), tool_context=ctx)
+
+    async def go():
+        return [m async for m in run_tools(tuple(calls), (AIMessage(content=""),), state, make_config())]
+
+    return asyncio.run(go())
 
 
 def make_config() -> RunConfig:
@@ -483,3 +501,156 @@ class TestRunTools:
             assert results[1].additional_kwargs.get("synthetic_repair") is True
 
         asyncio.run(go())
+
+
+# ── Phase 2: partitioning gate, concurrency cap, completion order ───────────
+
+class TestPhase2Orchestration:
+    def test_schema_validation_runs_before_the_concurrency_predicate(self):
+        """
+        Upstream only ever asks `isConcurrencySafe` about input that parsed, so a tool's
+        classifier is never handed a shape it was not written for.
+        """
+        asked: list[dict] = []
+
+        def classifier(args):
+            asked.append(args)
+            return True
+
+        tool = build_tool(
+            name="Grep", prompt="p", call=dummy_call,
+            input_schema={"type": "object", "properties": {"pattern": {"type": "string"}},
+                          "required": ["pattern"]},
+            is_concurrency_safe=classifier,
+        )
+        batches = partition_tool_calls(
+            [{"name": "Grep", "args": {"pattern": 7}, "id": "c1"}], [tool]
+        )
+        assert asked == []
+        assert batches[0].is_concurrency_safe is False
+
+    def test_a_valid_call_still_reaches_the_predicate(self):
+        tool = build_tool(
+            name="Grep", prompt="p", call=dummy_call,
+            input_schema={"type": "object", "properties": {"pattern": {"type": "string"}},
+                          "required": ["pattern"]},
+            is_concurrency_safe=lambda args: True,
+        )
+        batches = partition_tool_calls(
+            [{"name": "Grep", "args": {"pattern": "x"}, "id": "c1"}], [tool]
+        )
+        assert batches[0].is_concurrency_safe is True
+
+    def test_the_concurrency_cap_defaults_to_ten(self, monkeypatch):
+        from app.loop.tools.orchestration import (
+            DEFAULT_MAX_TOOL_USE_CONCURRENCY,
+            get_max_tool_use_concurrency,
+        )
+
+        monkeypatch.delenv("TDDAGENTS_MAX_TOOL_USE_CONCURRENCY", raising=False)
+        assert get_max_tool_use_concurrency() == DEFAULT_MAX_TOOL_USE_CONCURRENCY == 10
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("3", 3), ("25", 25), ("0", 10), ("", 10), ("nonsense", 10), ("  7 ", 7),
+    ])
+    def test_the_cap_is_overridable_and_zero_falls_back(self, monkeypatch, raw, expected):
+        """Upstream writes `parseInt(env) || 10`, so 0 and NaN both mean the default."""
+        from app.loop.tools.orchestration import get_max_tool_use_concurrency
+
+        monkeypatch.setenv("TDDAGENTS_MAX_TOOL_USE_CONCURRENCY", raw)
+        assert get_max_tool_use_concurrency() == expected
+
+    def test_concurrent_results_arrive_in_completion_order(self):
+        """
+        Upstream's `runTools` yields through `all()` as each finishes and nothing re-sorts.
+        The slow call was asked for first and answers last.
+        """
+        async def slow(args, ctx):
+            await asyncio.sleep(0.02)
+            return ToolResult(content="slow")
+
+        async def fast(args, ctx):
+            return ToolResult(content="fast")
+
+        slow_tool = build_tool(name="Slow", prompt="p", call=slow, is_concurrency_safe=lambda a: True)
+        fast_tool = build_tool(name="Fast", prompt="p", call=fast, is_concurrency_safe=lambda a: True)
+        calls = (
+            {"name": "Slow", "args": {}, "id": "c1"},
+            {"name": "Fast", "args": {}, "id": "c2"},
+        )
+        messages = run_tools_sync(calls, [slow_tool, fast_tool])
+        assert [m.content for m in messages] == ["fast", "slow"]
+
+    def test_the_cap_limits_how_many_run_at_once(self, monkeypatch):
+        monkeypatch.setenv("TDDAGENTS_MAX_TOOL_USE_CONCURRENCY", "2")
+        live = {"now": 0, "peak": 0}
+
+        async def tracked(args, ctx):
+            live["now"] += 1
+            live["peak"] = max(live["peak"], live["now"])
+            await asyncio.sleep(0.01)
+            live["now"] -= 1
+            return ToolResult(content="ok")
+
+        tool = build_tool(name="T", prompt="p", call=tracked, is_concurrency_safe=lambda a: True)
+        calls = tuple({"name": "T", "args": {}, "id": f"c{i}"} for i in range(6))
+        messages = run_tools_sync(calls, [tool])
+        assert len(messages) == 6
+        assert live["peak"] <= 2
+
+    def test_one_failing_tool_does_not_abort_its_siblings(self):
+        async def explode(args, ctx):
+            raise RuntimeError("boom")
+
+        async def fine(args, ctx):
+            return ToolResult(content="fine")
+
+        bad = build_tool(name="Bad", prompt="p", call=explode, is_concurrency_safe=lambda a: True)
+        good = build_tool(name="Good", prompt="p", call=fine, is_concurrency_safe=lambda a: True)
+        calls = (
+            {"name": "Bad", "args": {}, "id": "c1"},
+            {"name": "Good", "args": {}, "id": "c2"},
+        )
+        messages = run_tools_sync(calls, [bad, good])
+        assert len(messages) == 2
+        assert any("boom" in str(m.content) for m in messages)
+        assert any(str(m.content) == "fine" for m in messages)
+
+
+class TestContextModifierFields:
+    def test_a_modifier_can_replace_the_permission_context(self):
+        """
+        A tool that widens or narrows permissions for the rest of the turn does it here;
+        if the field were not copied across, the change would silently not happen.
+        """
+        from app.loop.permissions.types import ToolPermissionContext
+        from app.loop.tools.orchestration import apply_context_modifier
+
+        store = AppStateStore(AppState())
+        context = tool_context_for(store, permission_context=ToolPermissionContext())
+        replacement = ToolPermissionContext(should_avoid_permission_prompts=True)
+
+        def modifier(ctx):
+            return replace(ctx, permission_context=replacement)
+
+        applied = apply_context_modifier(context, modifier)
+        assert applied.permission_context is replacement
+
+    def test_a_modifier_can_replace_the_tool_roster(self):
+        from app.loop.tools.orchestration import apply_context_modifier
+
+        store = AppStateStore(AppState())
+        tool = build_tool(name="A", prompt="p", call=dummy_call)
+        context = tool_context_for(store, tools=())
+
+        def modifier(ctx):
+            return replace(ctx, tools=(tool,))
+
+        assert apply_context_modifier(context, modifier).tools == (tool,)
+
+    def test_a_modifier_returning_the_same_context_changes_nothing(self):
+        from app.loop.tools.orchestration import apply_context_modifier
+
+        store = AppStateStore(AppState())
+        context = tool_context_for(store, tools=())
+        assert apply_context_modifier(context, lambda ctx: ctx) is context

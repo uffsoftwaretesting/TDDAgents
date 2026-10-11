@@ -28,6 +28,7 @@ pretending the suite passed.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 import shlex
@@ -148,7 +149,9 @@ async def _default_test_runner(test_path: str, context: ToolContext) -> SuiteExe
     if ws is None or not hasattr(ws, "execute"):
         raise RunTestsUnavailable("no workspace is available to run the tests in")
     try:
-        res = ws.execute(pytest_command(test_path), timeout=run_tests_timeout_seconds())
+        res = await asyncio.to_thread(
+            ws.execute, pytest_command(test_path), timeout=run_tests_timeout_seconds()
+        )
     except Exception as exc:
         raise RunTestsUnavailable(f"pytest could not be executed in the workspace: {exc}") from exc
     return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr)

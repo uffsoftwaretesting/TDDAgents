@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol, Sequence, 
 
 from langchain_core.messages import ToolMessage
 
+from app.loop.tools.result_storage import MAX_TOOL_RESULT_BYTES
 from app.loop.tools.types import PermissionResult, ToolResult, ValidationResult
 
 if TYPE_CHECKING:
@@ -92,6 +93,12 @@ class BuiltTool:
     input_schema: dict[str, Any] = field(default_factory=lambda: {"type": "object"})
     aliases: tuple[str, ...] = ()
     is_mcp: bool = False
+    #: `Tool.ts` -> `maxResultSizeChars`. `math.inf` is the hard opt-out from persistence,
+    #: which upstream uses for `Read` alone: persisting a read creates a
+    #: ReadFile -> file -> ReadFile loop and the tool already bounds itself. Upstream makes
+    #: this field required on every tool; here the fallback is the global byte budget, so a
+    #: tool that forgets it is governed rather than unbounded.
+    max_result_size_chars: float = MAX_TOOL_RESULT_BYTES
     _description: Callable[[dict[str, Any]], str] = field(default_factory=lambda: (lambda args: ""))
     _is_enabled: Callable[[], bool] = field(default_factory=lambda: (lambda: True))
     _is_concurrency_safe: Callable[[dict[str, Any]], bool] = field(default_factory=lambda: (lambda args: False))
@@ -211,6 +218,7 @@ def build_tool(
     map_result: Callable[[ToolResult, str], ToolMessage] | None = None,
     aliases: Sequence[str] = (),
     is_mcp: bool = False,
+    max_result_size_chars: float = MAX_TOOL_RESULT_BYTES,
 ) -> BuiltTool:
     """
     Builds a Tool with fail-closed defaults for omitted members.
@@ -232,6 +240,7 @@ def build_tool(
         input_schema=input_schema if input_schema is not None else {"type": "object"},
         aliases=tuple(aliases),
         is_mcp=is_mcp,
+        max_result_size_chars=max_result_size_chars,
         _description=description if description is not None else (lambda args: name),
         _is_enabled=is_enabled if is_enabled is not None else (lambda: True),
         _is_concurrency_safe=is_concurrency_safe if is_concurrency_safe is not None else (lambda args: False),

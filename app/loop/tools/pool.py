@@ -21,6 +21,10 @@ from app.loop.permissions.types import PermissionRule
 from app.loop.tools.base import Tool
 
 
+#: `mcpStringUtils.ts` -> `buildMcpToolName`'s namespace prefix.
+MCP_TOOL_PREFIX = "mcp__"
+
+
 def is_tool_denied(tool: Tool, deny_rules: set[str]) -> bool:
     """
     Check if a tool is blanket-denied by name or MCP prefix.
@@ -28,9 +32,12 @@ def is_tool_denied(tool: Tool, deny_rules: set[str]) -> bool:
     if tool.name in deny_rules:
         return True
 
-    # Check for prefix rules, e.g. "mcp__server" blanket-denying all tools from that server
+    # Prefix denial is for MCP namespaces only — `mcp__server` blanket-denies every tool
+    # that server exposes. Applying it to any rule made a deny of `Read` also deny
+    # `ReadFile`, and a deny of `Run` also deny `RunTests`: a rule silently removing tools
+    # nobody named, which in RED is the difference between a filtered pool and a broken one.
     for rule in deny_rules:
-        if rule and tool.name.startswith(rule):
+        if rule.startswith(MCP_TOOL_PREFIX) and tool.name.startswith(rule):
             return True
 
     return False

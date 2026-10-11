@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncIterable, AsyncIterator
 
-from langchain_core.messages import AIMessageChunk, BaseMessage, SystemMessage, message_chunk_to_message
+from langchain_core.messages import SystemMessage
 
 from app.config.config import Config
 from app.loop.config import RunConfig
@@ -28,14 +28,14 @@ from app.loop.context.assembly import (
 from app.loop.context.attachments import compute_tdd_state_attachment
 from app.loop.messages import Message
 from app.loop.prompts.sections import resolve_system_prompt_sections
+from app.loop.retry import RetryContext, RetryOptions, with_retry
 from app.loop.state import LoopState
+from app.loop.streaming.blocks import frame_content_blocks
 from app.loop.tools.base import Tool
 from app.utils.chat_model_factory import get_chat_model
 from app.utils.token_metrics import GlobalTokenTracker
 
 logger = logging.getLogger(__name__)
-
-TODO_FILE = "TODO.md"
 
 
 def convert_tool_to_langchain(tool: Tool) -> dict[str, Any]:
@@ -50,14 +50,23 @@ def convert_tool_to_langchain(tool: Tool) -> dict[str, Any]:
     }
 
 
-def read_todo(ws: Any) -> str | None:
-    if ws is None:
-        return None
+def read_todo(context: Any) -> str | None:
+    """
+    The session's todo list, rendered for the attachment.
+
+    It comes from `TodoWrite`'s store rather than a `TODO.md` in the workspace: a file there
+    is indistinguishable from one the project itself owns, and the agent could edit its own
+    checklist as ordinary content.
+    """
+    from app.loop.tools.todo import read_todos
+
     try:
-        content: str = ws.read_file(TODO_FILE)
+        todos = read_todos(context)
     except Exception:
         return None
-    return content
+    if not todos:
+        return None
+    return "\n".join(f"- [{item.status}] {item.content}" for item in todos)
 
 
 def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]:
@@ -71,7 +80,9 @@ def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]
     compacted = microcompact_tool_results(state.messages, keep_recent_turns=2)
     budgeted = apply_tool_result_budget(compacted)
     history = prepend_user_context(budgeted, session.user_context)
-    attachment = compute_tdd_state_attachment(state.messages, state.phase_ledger, read_todo(ws))
+    attachment = compute_tdd_state_attachment(
+        state.messages, state.phase_ledger, read_todo(state.tool_context)
+    )
     return [system, *history, *([attachment] if attachment is not None else [])]
 
 
@@ -90,42 +101,91 @@ def get_token_usage_summary() -> dict[str, Any]:
 
 async def accumulate_stream(stream: AsyncIterable[Any]) -> AsyncIterator[Message]:
     """
-    Turn a provider stream into whole assistant messages.
+    Turn a provider stream into complete assistant messages, one per content block.
 
-    The engine dispatches tools from every message it receives (Part F2, dispatch at
-    content-block close), so it must never see a partial chunk: an `AIMessageChunk` mid-stream
-    carries tool calls with an empty name or truncated arguments. Chunks are summed (LangChain
-    merges `tool_call_chunks` by index) and emitted as one complete `AIMessage` when the
-    stream ends; a complete, non-chunk message is passed through after flushing any pending
-    chunks, so ordering is preserved.
+    Thin alias for `frame_content_blocks`, which ports upstream's `content_block_stop`
+    emission. The engine dispatches tools from every message it receives (Part F2), so it
+    must never see a partial chunk — an `AIMessageChunk` mid-stream carries tool calls with
+    an empty name or truncated arguments — and it must see a finished tool call as soon as
+    that call's own block closes, not when the whole answer ends.
     """
-    pending: AIMessageChunk | None = None
-    async for item in stream:
-        if isinstance(item, AIMessageChunk):
-            pending = item if pending is None else pending + item
-            continue
-        if pending is not None:
-            yield message_chunk_to_message(pending)
-            pending = None
-        if isinstance(item, BaseMessage):
-            yield item
-    if pending is not None:
-        yield message_chunk_to_message(pending)
+    async for message in frame_content_blocks(stream):
+        yield message
 
 
-async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterator[Message]:
-    """Real `call_model`: assemble the request, bind the context's tools, stream the reply."""
+def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext) -> AsyncIterable[Any]:
+    """
+    Build the request and open the provider stream. One attempt, no iteration.
+
+    This is `with_retry`'s `operation`: everything that can fail before a single token has
+    been emitted. `RetryContext` carries what the previous failure asked to change — today
+    only the model, which the 529 fallback swaps.
+    """
     messages_to_send = build_request_messages(state, config)
     lc_tools = [convert_tool_to_langchain(t) for t in state.tool_context.tools]
 
-    model = get_chat_model(Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
+    model = get_chat_model(Config.CHAT_MODEL, model=context.model, temperature=Config.TEMPERATURE)
     if lc_tools:
         model = model.bind_tools(lc_tools)
 
     try:
-        stream = model.astream(messages_to_send, config={"callbacks": [_global_token_tracker]})
+        stream: AsyncIterable[Any] = model.astream(
+            messages_to_send, config={"callbacks": [_global_token_tracker]}
+        )
     except TypeError:
         stream = model.astream(messages_to_send)
+    return stream
 
-    async for message in accumulate_stream(stream):
+
+async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterator[Message]:
+    """
+    Real `call_model`: assemble the request, bind the context's tools, stream the reply.
+
+    **Retry covers the opening of the stream only.** Upstream wraps `withRetry` around
+    request creation and lets the stream body fail into a separate non-streaming fallback
+    (`claude.ts`: the retry generator settles at response-headers-received, the
+    `for await` over the stream sits outside it). LangChain fuses request and stream into
+    one generator, so the achievable equivalent is to retry while nothing has been emitted
+    and to let a mid-stream failure raise: once a block has reached the loop, a retry would
+    duplicate content or orphan a tool call that was already dispatched.
+    """
+    async def operation(attempt: int, context: RetryContext) -> AsyncIterable[Any]:
+        stream = open_model_stream(state, config, context)
+        # Pull the first item inside the retried operation, so a provider that fails at
+        # connect or on the first frame is still "before any output" and may be retried.
+        iterator = stream.__aiter__()
+        try:
+            first = await iterator.__anext__()
+        except StopAsyncIteration:
+            return _empty_stream()
+        return _restream(first, iterator)
+
+    opened = await with_retry(
+        operation,
+        RetryOptions(
+            model=config.model,
+            max_retries=config.max_retries,
+            fallback_model=config.fallback_model,
+            on_notice=lambda notice: logger.warning(
+                "Model call attempt %d/%d failed: %s",
+                notice.attempt, notice.max_retries + 1, notice.error,
+            ),
+            is_cancelled=lambda: state.tool_context.cancel.cancelled,
+        ),
+    )
+
+    async for message in frame_content_blocks(opened):
         yield message
+
+
+async def _empty_stream() -> AsyncIterator[Any]:
+    """A provider that closed without emitting anything. Yields nothing."""
+    return
+    yield  # pragma: no cover - unreachable, makes this an async generator
+
+
+async def _restream(first: Any, rest: AsyncIterator[Any]) -> AsyncIterator[Any]:
+    """Put back the item the retry gate consumed, then hand over the rest of the stream."""
+    yield first
+    async for item in rest:
+        yield item

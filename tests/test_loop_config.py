@@ -57,8 +57,29 @@ class TestTheSnapshotIsImmutable:
 
 
 class TestNoCeilings:
-    def test_the_config_holds_identity_and_gates_and_nothing_else(self):
-        assert [f.name for f in fields(RunConfig)] == ["run_id", "gates"]
+    def test_the_config_holds_identity_gates_and_the_model_call_settings(self):
+        assert [f.name for f in fields(RunConfig)] == [
+            "run_id", "gates", "model", "fallback_model", "max_retries"]
+
+    def test_max_retries_is_the_ported_ceiling_and_the_only_number_here(self):
+        """
+        The one ceiling, and it is upstream's: `withRetry.ts` -> `DEFAULT_MAX_RETRIES`.
+        Nothing else in this record may become a budget — see the module docstring.
+        """
+        from app.loop.retry import DEFAULT_MAX_RETRIES
+
+        config = build_run_config("r", postgres_checkpointing=True)
+        assert config.max_retries == DEFAULT_MAX_RETRIES
+        numeric = [f.name for f in fields(RunConfig)
+                   if isinstance(getattr(config, f.name), int) and not isinstance(getattr(config, f.name), bool)]
+        assert numeric == ["max_retries"]
+
+    def test_the_model_is_resolved_once_from_config(self):
+        from app.config.config import Config
+
+        config = build_run_config("r", postgres_checkpointing=True)
+        assert config.model == Config.MODEL
+        assert config.fallback_model is None
 
     def test_no_gate_is_a_number(self):
         """

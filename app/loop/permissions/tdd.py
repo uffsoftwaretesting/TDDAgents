@@ -22,6 +22,9 @@ from app.loop.permissions.types import (
 if TYPE_CHECKING:
     from app.loop.tools.base import Tool
 
+#: The shell tool, whose write targets live inside its command string.
+BASH_TOOL_NAME = "Bash"
+
 #: Dedicated tools for writing production code
 IMPLEMENTATION_WRITER_TOOL_NAMES: frozenset[str] = frozenset({
     "WriteImplementation",
@@ -157,9 +160,19 @@ def check_tdd_phase_permission(
     Check if a tool call is permitted by the current TDD phase.
     Returns (permitted: bool, reason: str).
     RunTests is always permitted.
+
+    `Bash` is checked through its write targets rather than a path argument
+    (`bash_tdd.py`): without that, `echo code > calculator.py` would write production code
+    in RED through a tool the path check cannot see, and barrier 2 would be bypassable by
+    rephrasing the request.
     """
     if tool.name == "RunTests":
         return True, ""
+
+    if tool.name == BASH_TOOL_NAME:
+        from app.loop.permissions.bash_tdd import check_bash_tdd_phase
+
+        return check_bash_tdd_phase(str(input_args.get("command") or ""), ledger)
 
     if ledger.phase == TddPhase.RED:
         if is_implementation_writing_tool(tool):

@@ -260,7 +260,7 @@ def compute_tdd_state_attachment(
         f"Green Passed: {ledger.green_passed}",
     ]
     if todo is not None and todo.strip():
-        lines += ["", "Contents of TODO.md:", todo.strip()]
+        lines += ["", "Current todo list:", todo.strip()]
     return HumanMessage(
         content=wrap_in_system_reminder("\n".join(lines)),
         additional_kwargs={"is_meta": True, TDD_STATE_KEY: payload},

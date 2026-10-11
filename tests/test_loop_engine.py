@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from typing import Any, AsyncIterator
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.loop.config import RunConfig, build_run_config
 from app.loop.context import AppState, AppStateStore, tool_context_for
@@ -748,3 +748,286 @@ class TestDrain:
             LoopNeverTerminated, match=r"^the loop produced no Terminated event$"
         ):
             asyncio.run(drain(empty()))
+
+
+# ── Phase 1: fallback, API-error guard, history repair, pool refresh ─────────
+
+class FailingModel:
+    """Raises on each call until its script of errors runs out, then answers."""
+
+    def __init__(self, errors: list[BaseException], final: list[Message] | None = None) -> None:
+        self.errors = list(errors)
+        self.final = final if final is not None else [AIMessage(content="done")]
+        self.seen_configs: list[RunConfig] = []
+        self.emitted: list[list[Message]] = []
+
+    async def __call__(self, state: LoopState, config: RunConfig) -> AsyncIterator[Message]:
+        self.seen_configs.append(config)
+        emitted: list[Message] = []
+        self.emitted.append(emitted)
+        if self.errors:
+            error = self.errors.pop(0)
+            # Emit a tool call first, so the repair invariant has something to repair.
+            orphan = asks_for("WriteFile", "orphan-1")
+            emitted.append(orphan)
+            yield orphan
+            raise error
+        for final_message in self.final:
+            emitted.append(final_message)
+            yield final_message
+
+
+def test_a_model_error_repairs_every_orphaned_tool_call_before_terminating():
+    """
+    Invariant B7 at the model boundary: a tool_use was emitted, its tool_result never will
+    be, and the next request would be malformed without a synthetic one.
+    """
+    model = FailingModel([RuntimeError("provider exploded")], final=[])
+    events = collect(model)
+
+    repairs = [e for e in events if isinstance(e, ToolMessage)]
+    assert [r.tool_call_id for r in repairs] == ["orphan-1"]
+    assert "provider exploded" in str(repairs[0].content)
+    assert repairs[0].additional_kwargs["is_error"] is True
+    assert isinstance(events[-1], Terminated) and events[-1].reason == Terminal.MODEL_ERROR
+
+
+def test_a_model_fallback_repairs_switches_model_and_retries_the_same_turn():
+    from app.loop.retry import FallbackTriggeredError
+
+    model = FailingModel([FallbackTriggeredError("big", "small")])
+    events = collect(model)
+
+    repairs = [e for e in events if isinstance(e, ToolMessage)]
+    assert [r.tool_call_id for r in repairs] == ["orphan-1"]
+    assert "Model fallback triggered" in str(repairs[0].content)
+
+    notices = [e for e in events if isinstance(e, SystemMessage)]
+    assert "Switched to small due to high demand for big" in str(notices[0].content)
+
+    # The retry is part of the same turn: the model was called twice, on one iteration.
+    assert [c.model for c in model.seen_configs] == [CONFIG.model, "small"]
+    assert isinstance(events[-1], Terminated) and events[-1].reason == Terminal.COMPLETED
+
+
+def test_the_abandoned_turn_is_dropped_so_the_fallback_answer_stands_alone():
+    """Upstream clears assistantMessages/toolResults/toolUseBlocks before retrying."""
+    from app.loop.retry import FallbackTriggeredError
+
+    model = FailingModel([FallbackTriggeredError("big", "small")])
+    deps = make_fake_deps(model)
+    terminal = asyncio.run(drain(run_loop(start(), CONFIG, deps)))
+
+    assert terminal.reason == Terminal.COMPLETED
+    # The orphaned call did not survive into the follow-up: the loop ended without tools.
+    assert model.seen_configs[-1].model == "small"
+
+
+def test_an_api_error_message_skips_the_stop_hooks_entirely():
+    """
+    `query.ts`'s anti-spiral guard. The TDD stop hook would otherwise block on an
+    incomplete cycle, the retry would hit the same provider error, and round it goes.
+    """
+    error_message = AIMessage(content="overloaded", additional_kwargs={"is_api_error_message": True})
+    hooks = FakeStopHooks([StopHookResult(blocking_errors=(HumanMessage(content="finish the cycle"),))])
+    model = FakeModel([[error_message]])
+
+    terminal = asyncio.run(drain(run_loop(start(), CONFIG, make_fake_deps(model, stop_hooks=hooks))))
+
+    assert hooks.seen == []
+    assert terminal.reason == Terminal.MODEL_ERROR
+
+
+def test_an_api_error_in_an_earlier_message_does_not_trigger_the_guard():
+    """Upstream reads the LAST message only."""
+    hooks = FakeStopHooks()
+    model = FakeModel([[
+        AIMessage(content="overloaded", additional_kwargs={"is_api_error_message": True}),
+        AIMessage(content="recovered"),
+    ]])
+
+    terminal = asyncio.run(drain(run_loop(start(), CONFIG, make_fake_deps(model, stop_hooks=hooks))))
+
+    assert len(hooks.seen) == 1
+    assert terminal.reason == Terminal.COMPLETED
+
+
+def test_an_ordinary_answer_still_reaches_the_stop_hooks():
+    hooks = FakeStopHooks()
+    model = FakeModel([[AIMessage(content="all done")]])
+    terminal = asyncio.run(drain(run_loop(start(), CONFIG, make_fake_deps(model, stop_hooks=hooks))))
+    assert len(hooks.seen) == 1 and terminal.reason == Terminal.COMPLETED
+
+
+def test_the_tool_pool_is_rebuilt_between_turns_when_the_roster_changes():
+    """
+    `refreshTools`: this is what lets a RED to GREEN ledger move change the tools the next
+    turn is offered. Without it a phase-filtered pool outlives its phase.
+    """
+    red_pool = (SimpleNamespace(name="WriteTest"),)
+    green_pool = (SimpleNamespace(name="WriteFile"),)
+    rosters = [green_pool]
+
+    state = start()
+    state.tool_context.tools = red_pool
+    state.tool_context.refresh_tools = lambda: rosters.pop(0) if rosters else green_pool
+
+    model = FakeModel([[asks_for("WriteTest", "c1")], [AIMessage(content="done")]])
+    asyncio.run(drain(run_loop(state, CONFIG, make_fake_deps(model, tools=FakeTools()))))
+
+    assert [t.name for t in model.seen[0].tool_context.tools] == ["WriteTest"]
+    assert [t.name for t in model.seen[1].tool_context.tools] == ["WriteFile"]
+
+
+def test_an_unchanged_roster_keeps_the_very_same_tuple_for_the_prompt_cache():
+    """The identity check is the point: an equal-but-new tuple would break the cache."""
+    pool = (SimpleNamespace(name="ReadFile"),)
+    state = start()
+    state.tool_context.tools = pool
+    state.tool_context.refresh_tools = lambda: pool
+
+    model = FakeModel([[asks_for("ReadFile", "c1")], [AIMessage(content="done")]])
+    asyncio.run(drain(run_loop(state, CONFIG, make_fake_deps(model, tools=FakeTools()))))
+
+    assert model.seen[1].tool_context.tools is pool
+
+
+def test_a_refresh_callback_that_raises_leaves_the_roster_alone():
+    pool = (SimpleNamespace(name="ReadFile"),)
+    state = start()
+    state.tool_context.tools = pool
+
+    def angry() -> tuple[Any, ...]:
+        raise RuntimeError("roster unavailable")
+
+    state.tool_context.refresh_tools = angry
+    model = FakeModel([[asks_for("ReadFile", "c1")], [AIMessage(content="done")]])
+    asyncio.run(drain(run_loop(state, CONFIG, make_fake_deps(model, tools=FakeTools()))))
+    assert model.seen[1].tool_context.tools is pool
+
+
+def test_a_refresh_callback_returning_none_leaves_the_roster_alone():
+    pool = (SimpleNamespace(name="ReadFile"),)
+    state = start()
+    state.tool_context.tools = pool
+
+    def empty_refresh() -> Any:
+        return None
+
+    state.tool_context.refresh_tools = empty_refresh
+    model = FakeModel([[asks_for("ReadFile", "c1")], [AIMessage(content="done")]])
+    asyncio.run(drain(run_loop(state, CONFIG, make_fake_deps(model, tools=FakeTools()))))
+    assert model.seen[1].tool_context.tools is pool
+
+
+def test_refresh_is_not_consulted_on_a_recovery_continue():
+    """Upstream refreshes once per iteration, after tools ran — never on a recovery path."""
+    calls: list[int] = []
+    state = replace(start(), has_attempted_reactive_compact=False)
+
+    def counting_refresh() -> tuple[Any, ...]:
+        calls.append(1)
+        return ()
+
+    state.tool_context.refresh_tools = counting_refresh
+
+    model = FakeModel([
+        [AIMessage(content="too long", additional_kwargs={"api_error": "prompt_too_long"})],
+        [AIMessage(content="done")],
+    ])
+    compact = FakeCompact([CompactionResult(compacted=True, messages=(HumanMessage(content="small"),))])
+    asyncio.run(drain(run_loop(state, CONFIG, make_fake_deps(model, compact=compact))))
+
+    assert calls == []
+
+
+# ── the two Phase 1 helpers, exercised directly ─────────────────────────────
+
+class TestIsApiErrorMessage:
+    def test_a_message_flagged_on_the_object_itself(self):
+        from app.loop.engine import is_api_error_message
+
+        message = AIMessage(content="x")
+        object.__setattr__(message, "is_api_error_message", True)
+        assert is_api_error_message(message) is True
+
+    def test_a_message_flagged_in_additional_kwargs(self):
+        from app.loop.engine import is_api_error_message
+
+        assert is_api_error_message(
+            AIMessage(content="x", additional_kwargs={"is_api_error_message": True})) is True
+
+    def test_an_api_error_code_also_counts(self):
+        from app.loop.engine import is_api_error_message
+
+        assert is_api_error_message(
+            AIMessage(content="x", additional_kwargs={"api_error": "prompt_too_long"})) is True
+
+    def test_an_empty_api_error_does_not_count(self):
+        from app.loop.engine import is_api_error_message
+
+        assert is_api_error_message(AIMessage(content="x", additional_kwargs={"api_error": ""})) is False
+
+    def test_a_flag_set_to_false_does_not_count(self):
+        from app.loop.engine import is_api_error_message
+
+        assert is_api_error_message(
+            AIMessage(content="x", additional_kwargs={"is_api_error_message": False})) is False
+
+    def test_an_ordinary_message_is_not_an_api_error(self):
+        from app.loop.engine import is_api_error_message
+
+        assert is_api_error_message(AIMessage(content="all good")) is False
+
+    def test_an_object_with_no_additional_kwargs_at_all(self):
+        from app.loop.engine import is_api_error_message
+
+        assert is_api_error_message(SimpleNamespace()) is False  # type: ignore[arg-type]
+
+    def test_additional_kwargs_that_is_not_a_mapping(self):
+        from app.loop.engine import is_api_error_message
+
+        assert is_api_error_message(SimpleNamespace(additional_kwargs="junk")) is False  # type: ignore[arg-type]
+
+
+class TestRefreshToolPool:
+    def _context(self, tools, refresh=None):
+        state = start()
+        state.tool_context.tools = tools
+        state.tool_context.refresh_tools = refresh
+        return state.tool_context
+
+    def test_without_a_callback_the_context_is_returned_unchanged(self):
+        from app.loop.engine import refresh_tool_pool
+
+        context = self._context((SimpleNamespace(name="A"),))
+        assert refresh_tool_pool(context) is context
+
+    def test_an_identical_tuple_is_returned_unchanged(self):
+        from app.loop.engine import refresh_tool_pool
+
+        pool = (SimpleNamespace(name="A"),)
+        context = self._context(pool, lambda: pool)
+        assert refresh_tool_pool(context) is context
+
+    def test_an_equal_but_new_tuple_still_replaces_the_context(self):
+        """Identity, not equality: upstream compares references and so do we."""
+        from app.loop.engine import refresh_tool_pool
+
+        tool = SimpleNamespace(name="A")
+        context = self._context((tool,), lambda: (tool,))
+        refreshed = refresh_tool_pool(context)
+        assert refreshed is not context
+        assert [t.name for t in refreshed.tools] == ["A"]
+
+    def test_a_changed_roster_is_adopted(self):
+        from app.loop.engine import refresh_tool_pool
+
+        context = self._context((SimpleNamespace(name="A"),), lambda: (SimpleNamespace(name="B"),))
+        assert [t.name for t in refresh_tool_pool(context).tools] == ["B"]
+
+    def test_a_list_is_accepted_and_stored_as_a_tuple(self):
+        from app.loop.engine import refresh_tool_pool
+
+        context = self._context((), lambda: [SimpleNamespace(name="B")])
+        assert isinstance(refresh_tool_pool(context).tools, tuple)

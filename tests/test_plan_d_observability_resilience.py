@@ -13,7 +13,7 @@ import pytest
 
 from app.loop.ledger import TddPhase
 from app.loop.model import get_global_token_tracker, get_token_usage_summary
-from app.loop.resilience import ResilienceReport, ResilienceTracker, SubRequirementStatus
+from app.loop.metrics import ResilienceReport, ResilienceTracker
 from app.loop.transitions import Continue, Terminal, Terminated, Transition
 
 

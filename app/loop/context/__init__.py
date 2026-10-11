@@ -24,7 +24,7 @@ anywhere in the tool path.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from app.loop.context.file_state import FileState
 from app.loop.ledger import PhaseLedger
@@ -62,9 +62,13 @@ class AppState:
     The phase ledger is the mirror described in §3.3: `LoopState` carries the copy the loop
     reads, and this is the copy a tool can write. Part D1 settles which way the mirror is
     reconciled; Part A1 only guarantees both sides exist and hold the same type.
+
+    `todos` is `TodoWrite`'s store, keyed by agent exactly as upstream keys it by
+    `agentId ?? sessionId`, so a subagent's checklist never overwrites the coordinator's.
     """
 
     phase_ledger: PhaseLedger = PhaseLedger()
+    todos: Mapping[str, tuple[Any, ...]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -116,6 +120,12 @@ class ToolContext:
     `read_file_state` is upstream's `readFileState`: what `ReadFile` saw of each file, which
     `Edit` and `WriteFile` check before writing. A worker receives a copy, never the
     parent's dict (`createSubagentContext` clones it the same way).
+
+    `refresh_tools` is upstream's `options.refreshTools`: the loop calls it between turns
+    and swaps `tools` only when the callback returns a *different object*. The identity
+    check is the point — an unchanged roster keeps the same tuple, so the tool block of the
+    prompt stays byte-identical and the prompt cache is not broken for nothing. For TDD it
+    is what makes a RED to GREEN ledger move change the tools the next turn is offered.
     """
 
     cancel: CancelToken
@@ -128,6 +138,14 @@ class ToolContext:
     workspace: Any = None
     hook_dispatcher: Any = None
     read_file_state: dict[str, FileState] = field(default_factory=dict)
+    refresh_tools: Callable[[], tuple[Any, ...]] | None = None
+    #: The run this context belongs to. Oversized tool results are filed under it, the way
+    #: upstream files them under the session id.
+    run_id: str = ""
+    #: Which agent this context belongs to, `None` for the main thread. Upstream's
+    #: `agentId`: per-agent state (the todo list today, more in Part J) is keyed by it, so a
+    #: worker's bookkeeping cannot overwrite the coordinator's.
+    agent_id: str | None = None
 
 
 def tool_context_for(
@@ -138,6 +156,9 @@ def tool_context_for(
     permission_context: Any = None,
     workspace: Any = None,
     hook_dispatcher: Any = None,
+    refresh_tools: Callable[[], tuple[Any, ...]] | None = None,
+    run_id: str = "",
+    agent_id: str | None = None,
 ) -> ToolContext:
     """
     Build a context wired to a store, which is what the main loop wants.
@@ -155,6 +176,9 @@ def tool_context_for(
         permission_context=permission_context,
         workspace=workspace,
         hook_dispatcher=hook_dispatcher,
+        refresh_tools=refresh_tools,
+        run_id=run_id,
+        agent_id=agent_id,
     )
 
 

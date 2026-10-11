@@ -58,7 +58,15 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `context/memory.py` | Port of `utils/claudemd.ts`: Managed → User → Project → rules → Local memory files (`TDDAGENTS.md`, `.tddagents/`), `@include`, conditional `paths:` rules, block-level comment stripping, `getClaudeMds`; AutoMem off unless `TDDAGENTS_ENABLE_AUTO_MEMORY` (Part I5) |
 | `context/assembly.py` | Port of `getSystemPrompt` (static sections in upstream order + `tdd-contract.md`, boundary, `env_info_simple`), `getGitStatus`/`getSystemContext`/`getUserContext`, `appendSystemContext`/`prependUserContext`, per-run memoization |
 | `context/file_state.py` | `FileState` — upstream `readFileState`; `ToolContext.read_file_state` backs read-before-write |
-| `model.py` | `stream_call_model`: system prompt + system context, `<system-reminder>` user context, history, TDD-state attachment; model resolved from `Config` |
+| `model.py` | `stream_call_model`: system prompt + system context, `<system-reminder>` user context, history, TDD-state attachment; model resolved from `RunConfig`; retry around opening the stream; per-content-block emission |
+| `retry.py` | Port of `withRetry.ts`: `with_retry`, `get_retry_delay` (500 ms base, x2, 32 s cap, +25% one-sided jitter), `should_retry`, `is_529_error`, `FallbackTriggeredError`, `CannotRetryError`. **The one ceiling in the codebase**, `DEFAULT_MAX_RETRIES = 10` |
+| `streaming/blocks.py` | Port of `claude.ts`'s `content_block_stop` framing: one complete assistant message per content block, which is what makes Part F2 eager dispatch real |
+| `tools/validation.py` | JSON-Schema input validation (`jsonschema`) + `formatZodValidationError`'s wording; step 1 of the tool pipeline |
+| `tools/result_storage.py` | Port of `toolResultStorage.ts`: 50 000-char clamp, 2000-byte head-only preview, `<persisted-output>` message, create-only writes, fail-open, `math.inf` opt-out |
+| `tools/hook_permissions.py` | Port of `resolveHookPermissionDecision`: a hook `allow` skips the prompt but is **still re-checked**, so it cannot defeat the TDD phase rules |
+| `tools/todo.py` | `TodoWrite`, keyed by agent in `AppState`; replaces the ad-hoc `TODO.md` read |
+| `permissions/bash_tdd.py` | Phase enforcement on `Bash` write targets — closes the `echo code > calculator.py` bypass of barrier 2 |
+| `metrics.py` | Renamed from `resilience.py`: it measures, it recovers nothing. "Retry" now means `retry.py` alone |
 | `tools/fs.py` | `ReadFile`/`WriteFile`/`Edit`/`Glob`/`Grep` on the `sdk-tools.d.ts` contracts, upstream `errorCode`s in `validate_input`, read-before-write |
 | `tools/ripgrep.py` | Port of `utils/ripgrep.ts`; rg runs inside the workspace, vendored via the pinned `ripgrep` wheel (installed into the sandbox on creation and on first use) |
 | `tools/bash.py`, `permissions/bash_*.py` | Bash tool and the port of `bashSecurity.ts`'s validator battery + `bashToolHasPermission`; no LLM classifier |
@@ -114,14 +122,68 @@ Three things about it are load-bearing and easy to undo by accident:
   the reset-or-preserve decision is visible in the diff. A default would let a future site
   stay silent about a field, which is the silence that produced upstream's
   `compact → error → stop hook → compact` spiral.
-- **There are no ceilings anywhere**, at the user's explicit direction: no turn limit, no
-  retry cap, no counters that exist to be compared against one. `stop_hook_active` and
-  `has_attempted_reactive_compact` are latches, not budgets, and must not be mistaken for
-  removable.
+- **Ceilings follow claude-code, nothing else** *(revised 2026-10-11 at the user's explicit
+  direction, superseding the earlier blanket "no ceilings anywhere" rule, which was written
+  against the pre-loop TDDAgents)*. Where upstream bounds something, this codebase ports the
+  bound **with upstream's own constant and a citation**; where upstream leaves something
+  unbounded, it stays unbounded here. So: **no turn limit** and no `max_turns` (upstream's is
+  `number | undefined` and falsy means unbounded), but the **API retry layer keeps
+  `withRetry`'s attempt ceiling**, because a provider that never recovers would otherwise hang
+  a run with no exit. `stop_hook_active` and `has_attempted_reactive_compact` remain latches,
+  not budgets, and must not be mistaken for removable. A ceiling that is in neither category
+  is still forbidden — invent nothing.
 - **`run_loop` yields `Terminated` as its last event** rather than returning it. That is the
   single forced divergence from the reference: PEP 525 forbids a value in an async
   generator's `return`, so JS's `yield*`-returns-`Terminal` has no Python equivalent. `drain`
   is the stand-in.
+
+### What Phases 1 and 2 changed (2026-10-11)
+
+Both phases are built, tested and under the gate. The premise, at the user's explicit
+direction, is **follow claude-code's design for every problem**; each divergence below was
+put to the user and chosen deliberately.
+
+**Phase 1 — the model call and the loop's recovery paths**
+- `withRetry` is ported with upstream's constants. Retry wraps **opening the stream only**:
+  upstream wraps request creation and lets a mid-stream failure fall to a non-streaming
+  request, a seam LangChain's `astream` does not have, so the achievable equivalent is to
+  retry while nothing has been emitted.
+- The model emits **one message per content block**, so a tool call is dispatchable the
+  moment its own block closes rather than when the answer ends.
+- The model-fallback branch is ported whole, as an **inner retry inside one iteration**
+  (upstream's `while (attemptWithFallback)`), which is why no fallback reason joins the
+  continue vocabulary — upstream's has none either. `fallback_model` is unset by default.
+- `model_error` repairs history first (invariant B7), then reports.
+- The **API-error guard** skips stop hooks, breaking upstream's `error → hook blocks →
+  retry → error` spiral. *Divergence:* it terminates `model_error`, not upstream's
+  `completed`, because the runner maps `completed` to a passed sub-requirement and a
+  provider outage must never be recorded as an observed TDD cycle.
+- `refresh_tools` rebuilds the phase-filtered pool between turns, compared **by identity**
+  so an unchanged roster does not break the prompt cache.
+
+**Phase 2 — the tool pipeline**
+- Pipeline order is upstream's: schema validation first, then `validate_input`, PreToolUse
+  hooks, permissions, the call, **governance, then PostToolUse**.
+- A PreToolUse hook's `allow` is **re-checked** against the gate, so it cannot defeat a
+  phase rule.
+- Oversized results are filed under `<config>/projects/<cwd>/<run>/tool-results/` and
+  replaced by a head-only 2000-byte preview. `ReadFile` is allowed to read that one
+  directory, because ours is workspace-bounded and upstream's `Read` is not.
+- **`Bash` is phase-aware.** Its redirection targets run through the phase check, closing
+  the `echo code > calculator.py` bypass of barrier 2. As upstream, `tee`/`dd`/`truncate`
+  get no special handling — the ledger remains the authority on what was proven.
+- **One TDD enforcement point.** `tdd_pre_tool_use_hook` duplicated the gate and
+  `tdd_post_tool_use_hook` decided the phase by grepping output for "fail"/"error"; both
+  are deleted. `RunTests` and its exit code are the only evidence the phase moves on.
+- Prefix tool denial applies to `mcp__` namespaces only — a deny of `Run` used to also
+  remove `RunTests`.
+- Concurrent results are emitted in **completion order**, matching `runTools`; only context
+  modifiers are replayed in call order.
+
+*Divergences, all recorded:* the API-error terminal; reactive compaction kept although
+`reactiveCompact.ts` is absent from the shipped build (its call sites in `query.ts` are
+not, and TDD runs produce long output); `tool_use_id` sanitized for the result filename,
+which is the identity transform for a well-formed id and blocks path traversal.
 
 ### The three things that change most
 
@@ -348,6 +410,38 @@ All 74 survivors across `app/workspace/` and `app/sync/` are triaged and documen
 
 Survivor triage: `runner.py` 34 (29 log wording/arguments; 3 pool `phase_ledger` mutants equivalent because in RED the pool keeps all seven built-ins — writer classification is per call, at the gate; 2 `ToolContext.messages` mutants equivalent because `initial_loop_state` carries the messages), `factory.py` 2 (`tracking` default), `model.py` 1 (`keep_recent_turns=2` equals the default), `workspace/local.py` 13 (codec aliases, unreachable `list_files` branches, default arguments), plus the pre-existing engine/iteration/run_tests log and equivalent classes. Two tests had to be made mutmut-safe: subprocess imports of `app.main` hit trampolines in the child (`test_app_main_imports_without_an_e2b_key` now imports only), and the single-ledger-writer AST check dedupes files because a mutated module holds one copy of each function per mutant. Removed as redundant rather than covered: two `mkdir(parents=True)` calls already implied by `copytree` and `venv`, and the runner's `tool_vars` dict, which no tool prompt consumed.
 
+**Phases 1 and 2 (model call, retry, tool pipeline) are measured under `paths_to_mutate` =
+`retry`, `streaming/blocks`, `tools/{validation,result_storage,hook_permissions,todo,execution,orchestration,pool}`,
+`permissions/bash_tdd`, `engine`, and clear the bar**, at 4813 tests:
+
+| | |
+|---|---|
+| Mutants | 1997 (4 timeout) |
+| Killed | 1807 |
+| Survived | 186 |
+| **Mutation score** | **90.67%** (1807 / 1993) |
+
+The first run scored **80.7%**, and the gap was mostly a defect in the *tests*, not missing
+coverage. `app/loop/tools/todo.py` reported 40% because the tool was built at test-module
+import: that runs during collection, so mutmut's stats pass attributed it to no test and the
+mutants were never exercised — every one died immediately once the build moved into a helper.
+Two more rounds then killed genuine gaps rather than wording: `retry.py`'s status/header
+lookups were only ever exercised through one attribute shape, so the `status`/`http_status`
+branches and the whole `is_connection_error` name list were untested; the context-overflow
+floor was never probed at its boundary (`available == FLOOR` must retry, one token less must
+raise); `result_storage`'s newline snap was never tested at exactly half the preview; and the
+hook payloads were never asserted, so a tool could have reported the wrong name or dropped a
+Bash command without any test noticing. `permissions/bash_tdd.py` reached **100%** by pinning
+each refusal verbatim — defensible here because that message is the only feedback the model
+gets about why a write was refused.
+
+The 186 survivors are the documented equivalent classes: logger wording and arguments,
+codec aliases (`"utf-8"` -> `"UTF-8"`/`None`), `False` -> `None` flag initializers,
+`getattr(x, "f", )` default drops on attributes that always exist, case-flips of internal
+dict keys no contract reads, and two verified-equivalent control-flow mutants —
+`while attempt <= max_retries + 2` (the inner `attempt > max_retries` guard already enforces
+the ceiling) and `has_more=None` (falsy exactly like `False`).
+
 Two earlier rounds on this package are worth repeating as method. Four survivors were
 removed by deleting a `typing.cast` whose string argument is a runtime no-op — the mutants
 went away with the redundancy rather than being covered by a test. Three more were genuine
@@ -395,6 +489,16 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
   `shutil.copy2`, which does not create parent directories, so `.tddagents/settings.json`
   silently fails to copy; any missing file makes stats collection die with
   "failed to collect stats" and every mutant reports "not checked".
+- **Never build the thing under test at test-module import.** A module-level
+  `TOOL = build_todo_write_tool()` runs during *collection*, so mutmut's stats pass
+  attributes it to no test, every mutant inside the builder is reported as surviving, and
+  the suite that would have killed them is never run against them. `app/loop/tools/todo.py`
+  went from 40% to green by moving one line into a helper. Symptom: a module with many
+  survivors that all die when you set `MUTANT_UNDER_TEST=...` by hand.
+- **Verify a survivor from inside `mutants/`, not from the snapshot root.** mutmut runs the
+  suite with the mutated copy as the working directory; running it from the snapshot root
+  imports the *unmutated* `app/`, so every mutant looks equivalent and the check is
+  worthless.
 - **Invoke mutmut as `mutmut run`, never `python -m mutmut`.** Under `-m` the module is
   `__main__`, so `mutmut.__main__` is absent from `sys.modules`; the mutation trampoline
   re-imports it in each forked child, re-runs `set_start_method('fork')`, and the whole

@@ -16,8 +16,6 @@ from app.loop.permissions.tdd import (
 )
 from app.loop.tdd.hooks import (
     tdd_phase_incomplete_hook,
-    tdd_post_tool_use_hook,
-    tdd_pre_tool_use_hook,
 )
 
 __all__ = [
@@ -31,6 +29,4 @@ __all__ = [
     "is_test_path",
     "is_test_writing_tool",
     "tdd_phase_incomplete_hook",
-    "tdd_pre_tool_use_hook",
-    "tdd_post_tool_use_hook",
 ]

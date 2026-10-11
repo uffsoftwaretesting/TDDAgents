@@ -57,6 +57,7 @@ def build_builtin_tools() -> list[Tool]:
         build_write_file_tool,
     )
     from app.loop.tools.run_tests import build_run_tests_tool
+    from app.loop.tools.todo import build_todo_write_tool
 
     return [
         build_read_file_tool(),
@@ -66,6 +67,7 @@ def build_builtin_tools() -> list[Tool]:
         build_grep_tool(),
         build_bash_tool(),
         build_run_tests_tool(),
+        build_todo_write_tool(),
     ]
 
 
@@ -109,15 +111,37 @@ async def tdd_loop_runner(
 
     store = AppStateStore()
     ledger = store.get().phase_ledger
-    tools = assemble_tool_pool(build_builtin_tools(), phase_ledger=ledger)
+    built_ins = build_builtin_tools()
+    pool_cache: dict[str, Any] = {
+        "phase": ledger.phase,
+        "tools": assemble_tool_pool(built_ins, phase_ledger=ledger),
+    }
+
+    def refresh_tools() -> tuple[Tool, ...]:
+        """
+        `refreshTools` for this loop: re-derive the phase-filtered pool when, and only
+        when, the phase has moved.
+
+        The cached tuple is returned unchanged otherwise, because the engine compares by
+        identity — a fresh but equal tuple would rebuild the serialized tool block every
+        turn and break the prompt cache for no reason.
+        """
+        current = store.get().phase_ledger
+        if current.phase != pool_cache["phase"]:
+            pool_cache["phase"] = current.phase
+            pool_cache["tools"] = assemble_tool_pool(built_ins, phase_ledger=current)
+        tools_now: tuple[Tool, ...] = pool_cache["tools"]
+        return tools_now
 
     initial_message = HumanMessage(content=sub_req)
     ctx = tool_context_for(
         store,
         messages=(initial_message,),
-        tools=tools,
+        tools=refresh_tools(),
         permission_context=perm,
         workspace=ws,
+        refresh_tools=refresh_tools,
+        run_id=run_id,
     )
     loop_state = initial_loop_state((initial_message,), ctx)
     config = build_run_config(run_id, postgres_checkpointing=False)

@@ -4,6 +4,11 @@ Tests for assemble_tool_pool with partition-sort and prompt-cache stability (Par
 
 from __future__ import annotations
 
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionRule,
+    PermissionRuleSource,
+)
 from app.loop.tools.base import build_tool
 from app.loop.tools.pool import assemble_tool_pool, is_tool_denied
 from app.loop.tools.types import ToolResult
@@ -119,5 +124,54 @@ class TestAssembleToolPool:
         assert is_tool_denied(tool, {""}) is False
         # Non-matching prefix
         assert is_tool_denied(tool, {"Basher"}) is False
-        # Matching prefix
-        assert is_tool_denied(tool, {"Ba"}) is True
+
+    def test_prefix_denial_applies_to_mcp_namespaces_only(self):
+        """
+        A bare prefix must not swallow unrelated tools: denying `Run` once also removed
+        `RunTests`, which is the one tool no phase rule may ever strip.
+        """
+        bash = build_tool(name="Bash", prompt="p", call=dummy_call)
+        run_tests = build_tool(name="RunTests", prompt="p", call=dummy_call)
+        mcp_tool = build_tool(name="mcp__github__list_issues", prompt="p", call=dummy_call)
+
+        assert is_tool_denied(bash, {"Ba"}) is False
+        assert is_tool_denied(run_tests, {"Run"}) is False
+        assert is_tool_denied(mcp_tool, {"mcp__github"}) is True
+        assert is_tool_denied(mcp_tool, {"mcp__gitlab"}) is False
+        assert is_tool_denied(mcp_tool, {"mcp__github__list_issues"}) is True
+
+
+class TestContentScopedDenyRules:
+    def test_a_rule_with_content_does_not_remove_the_tool_from_the_pool(self):
+        """
+        `Edit(src/**)` scopes a deny to paths; the tool itself must stay available, or the
+        model loses `Edit` everywhere because one directory was protected. Only a rule with
+        no content is a blanket deny.
+        """
+        write = build_tool(name="WriteFile", prompt="p", call=dummy_call)
+        scoped = PermissionRule(
+            tool_name="WriteFile",
+            rule_behavior=PermissionBehavior.DENY,
+            rule_content="src/*",
+            source=PermissionRuleSource.PROJECT_SETTINGS,
+        )
+        assert [t.name for t in assemble_tool_pool([write], deny_rules=[scoped])] == ["WriteFile"]
+
+    def test_a_rule_without_content_is_a_blanket_deny(self):
+        write = build_tool(name="WriteFile", prompt="p", call=dummy_call)
+        blanket = PermissionRule(
+            tool_name="WriteFile",
+            rule_behavior=PermissionBehavior.DENY,
+            source=PermissionRuleSource.PROJECT_SETTINGS,
+        )
+        assert assemble_tool_pool([write], deny_rules=[blanket]) == ()
+
+    def test_run_tests_survives_a_scoped_rule_too(self):
+        run_tests = build_tool(name="RunTests", prompt="p", call=dummy_call)
+        scoped = PermissionRule(
+            tool_name="RunTests",
+            rule_behavior=PermissionBehavior.DENY,
+            rule_content="tests/*",
+            source=PermissionRuleSource.PROJECT_SETTINGS,
+        )
+        assert [t.name for t in assemble_tool_pool([run_tests], deny_rules=[scoped])] == ["RunTests"]

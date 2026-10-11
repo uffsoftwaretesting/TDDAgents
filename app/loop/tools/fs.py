@@ -38,6 +38,8 @@ Divergences, each forced by the `Workspace` protocol:
 
 from __future__ import annotations
 
+import math
+
 import re
 import shlex
 from pathlib import Path
@@ -50,6 +52,7 @@ from app.loop.prompts.registry import global_prompt_registry
 from app.loop.tools.base import BuiltTool, build_tool
 from app.loop.tools.ripgrep import rip_grep, to_relative_path
 from app.loop.tools.types import ToolResult, ValidationResult
+from app.loop.tools.result_storage import TOOL_RESULTS_SUBDIR, config_home
 from app.workspace.base import WorkspaceNotFound, normalize_path
 
 #: `FileReadTool/prompt.ts` -> `MAX_LINES_TO_READ`.
@@ -110,8 +113,35 @@ def invalid(message: str, code: int) -> ValidationResult:
 
 # ── shared helpers ───────────────────────────────────────────────────────────
 
+def is_persisted_result_path(path: str) -> bool:
+    """
+    Whether `path` names a file in this run's persisted-tool-result store.
+
+    That store is the one place outside the workspace `ReadFile` may look. Upstream has no
+    equivalent check because its `Read` is not workspace-bounded at all; ours is, and
+    without this the path handed to the model by an oversized result would be a path the
+    model is then refused — a preview advertising a file it cannot open.
+    """
+    try:
+        candidate = Path(path).expanduser().resolve()
+    except (OSError, ValueError):
+        return False
+    root = (config_home() / "projects").resolve()
+    return root in candidate.parents and candidate.parent.name == TOOL_RESULTS_SUBDIR
+
+
 def read_text(ws: Any, path: str) -> str | None:
-    """File content with CRLF normalized (as `readFileForEdit` does), or None if missing."""
+    """
+    File content with CRLF normalized (as `readFileForEdit` does), or None if missing.
+
+    A persisted tool result is read straight off the host: it lives outside the workspace
+    on purpose, so the workspace cannot resolve it.
+    """
+    if is_persisted_result_path(path):
+        try:
+            return Path(path).expanduser().read_text(encoding="utf-8").replace("\r\n", "\n")
+        except OSError:
+            return None
     try:
         content: str = ws.read_file(path)
     except WorkspaceNotFound:
@@ -321,6 +351,9 @@ def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
     return build_tool(
         name="ReadFile",
         prompt=get_prompt("read_file.md", "Reads a file.", vars=vars),
+        # `FileReadTool.ts`: Infinity, because persisting a read would create a
+        # ReadFile -> file -> ReadFile loop and the tool already bounds its own output.
+        max_result_size_chars=math.inf,
         input_schema={
             "type": "object",
             "properties": {

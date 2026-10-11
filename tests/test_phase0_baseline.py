@@ -351,7 +351,8 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace):
     ctx = seen[0].tool_context
     assert ctx.workspace is python_workspace
     assert ctx.permission_context == ToolPermissionContext(should_avoid_permission_prompts=True)
-    assert {t.name for t in ctx.tools} == {"ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests"}
+    assert {t.name for t in ctx.tools} == {
+        "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite"}
     assert seen[0].messages[0].content == "add two numbers"
     assert seen[0].turn_count == 1
 
@@ -616,3 +617,30 @@ def test_run_tests_tool_is_serial():
     from app.loop.tools.run_tests import build_run_tests_tool
 
     assert build_run_tests_tool().is_concurrency_safe({}) is False
+
+
+def test_the_runner_refreshes_the_pool_only_when_the_phase_moves(python_workspace):
+    """
+    `refreshTools` wiring: RED hides the production writers, and the GREEN that RunTests
+    records must bring them back — on the next turn, not the next sub-requirement.
+    """
+    from app.loop.ledger import TddPhase
+    from app.loop.runner import tdd_loop_runner
+
+    seen: list[Any] = []
+    turns = [
+        [_call("WriteFile", "c1", file_path="tests/test_calc.py", content=CALC_TEST)],
+        [_call("RunTests", "c2", test_path="tests")],
+        [_call("WriteFile", "c3", file_path="calculator.py", content=CALC_IMPL)],
+        [AIMessage(content="done")],
+    ]
+    asyncio.run(tdd_loop_runner("add", 0, {"session_id": "s"}, workspace=python_workspace,
+                                deps=_scripted_deps(turns, seen)))
+
+    phases = [s.phase_ledger.phase for s in seen]
+    assert phases[0] == TddPhase.RED and phases[-1] == TddPhase.GREEN
+
+    rosters = [tuple(t.name for t in s.tool_context.tools) for s in seen]
+    # Identity is what the engine compares: unchanged phase, unchanged tuple.
+    assert seen[0].tool_context.tools is seen[1].tool_context.tools
+    assert "WriteFile" in rosters[-1]

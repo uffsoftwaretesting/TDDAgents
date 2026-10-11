@@ -8,9 +8,11 @@ view, because it is a design constraint and not a tidiness argument: it *"makes 
 step() extraction tractable — a pure reducer can take (state, event, config) where config
 is plain data."*
 
-**There are no ceilings here, and that is a decision rather than an omission.** No
-`max_turns`, no retry cap, no bound on how many times a recovery path may fire. The loop
-runs until it terminates for a reason in its own vocabulary. Upstream's `maxTurns` is
+**The only ceiling here is upstream's own.** No `max_turns`, no bound on how many times a
+recovery path may fire. `max_retries` is the one exception and it is a port, not an
+invention: `withRetry.ts` bounds API attempts at `DEFAULT_MAX_RETRIES`, because a provider
+that never recovers would otherwise hang a run with no exit. The loop itself still runs
+until it terminates for a reason in its own vocabulary. Upstream's `maxTurns` is
 `number | undefined` and the loop tests it as `if (maxTurns && ...)`, so falsy already
 means unbounded; when Part A6 gives this loop the same knob it arrives as an entry
 argument the way it does upstream, not as a value living in this record. The consequence
@@ -28,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.config.config import Config
+from app.loop.retry import DEFAULT_MAX_RETRIES
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +66,16 @@ class RunConfig:
     run_id: str
     gates: Gates
 
+    #: The model this run calls. Resolved once, so a transcript names what answered it.
+    model: str = Config.MODEL
+
+    #: Where `withRetry`'s 529 fallback switches to, or `None` for no fallback. Upstream's
+    #: `options.fallbackModel`: when it is unset the fallback branch simply never fires.
+    fallback_model: str | None = None
+
+    #: `withRetry.ts` -> `getMaxRetries`. Attempts are `max_retries + 1`.
+    max_retries: int = DEFAULT_MAX_RETRIES
+
 
 def build_run_config(run_id: str, *, postgres_checkpointing: bool) -> RunConfig:
     """
@@ -73,6 +86,10 @@ def build_run_config(run_id: str, *, postgres_checkpointing: bool) -> RunConfig:
     caller can contradict it. Whether Postgres checkpointing is live is a fact about an
     attempted connection, which only the caller that made the attempt can know, so it is
     passed in — inventing it here would mean guessing.
+
+    The model is resolved here for the same reason: `Config.MODEL` is the single place it
+    is named, and reading it once means every turn of a run is answered by the same model
+    even if the constant were reloaded underneath.
     """
     return RunConfig(
         run_id=run_id,
@@ -80,4 +97,6 @@ def build_run_config(run_id: str, *, postgres_checkpointing: bool) -> RunConfig:
             web_tools_available=bool(Config.TAVILY_API_KEY),
             postgres_checkpointing=postgres_checkpointing,
         ),
+        model=Config.MODEL,
+        fallback_model=getattr(Config, "FALLBACK_MODEL", None),
     )

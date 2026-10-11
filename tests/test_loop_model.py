@@ -1,11 +1,11 @@
 import asyncio
+import dataclasses
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 
 from app.config.config import Config
-from app.loop import model as model_mod
 from app.loop.config import build_run_config
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.context.assembly import reset_session_context
@@ -79,19 +79,32 @@ def config():
     return build_run_config(run_id="test", postgres_checkpointing=False)
 
 
-def _state(ws=None, messages=(), ledger=None, tools=()):
-    store = AppStateStore(AppState(phase_ledger=ledger)) if ledger is not None else AppStateStore()
+def _state(ws=None, messages=(), ledger=None, tools=(), todos=()):
+    app_state = AppState()
+    if ledger is not None:
+        app_state = dataclasses.replace(app_state, phase_ledger=ledger)
+    if todos:
+        app_state = dataclasses.replace(app_state, todos={"main": tuple(todos)})
+    store = AppStateStore(app_state)
     ctx = tool_context_for(store, workspace=ws, tools=tools)
     return initial_loop_state(messages=messages, tool_context=ctx)
 
 
-def test_stream_call_model_propagates_factory_error(monkeypatch, config):
+def test_stream_call_model_gives_up_on_an_unretryable_factory_error(monkeypatch, config):
+    """A ValueError carries no retryable status, so `shouldRetry` refuses it on attempt 1."""
+    from app.loop.retry import CannotRetryError
+
+    calls = []
+
     def boom(*args, **kwargs):
+        calls.append(1)
         raise ValueError("Mock Error")
 
     monkeypatch.setattr("app.loop.model.get_chat_model", boom)
-    with pytest.raises(ValueError, match="Mock Error"):
+    with pytest.raises(CannotRetryError) as excinfo:
         _collect(_state(), config)
+    assert isinstance(excinfo.value.original_error, ValueError)
+    assert len(calls) == 1
 
 
 def test_stream_call_model_resolves_model_from_config_and_binds_tools(monkeypatch, config):
@@ -119,9 +132,13 @@ def test_stream_call_model_does_not_bind_without_tools(monkeypatch, config):
 
 
 def test_request_shape(config):
-    ws = FakeWorkspace(files={"TDDAGENTS.md": "project rules", "TODO.md": "- [ ] t1"})
+    from app.loop.tools.todo import TodoItem
+
+    ws = FakeWorkspace(files={"TDDAGENTS.md": "project rules"})
     history = (HumanMessage(content="hi"),)
-    msgs = build_request_messages(_state(ws, history, PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)), config)
+    todos = (TodoItem(content="t1", status="pending", active_form="doing t1"),)
+    msgs = build_request_messages(
+        _state(ws, history, PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True), todos=todos), config)
 
     system, user_ctx, *rest = msgs
     assert isinstance(system, SystemMessage)
@@ -133,7 +150,7 @@ def test_request_shape(config):
     assert rest[0] is history[0]
     attachment = rest[1]
     assert attachment.additional_kwargs[TDD_STATE_KEY]["phase"] == "GREEN"
-    assert "Contents of TODO.md:\n- [ ] t1" in attachment.content
+    assert "Current todo list:\n- [pending] t1" in attachment.content
     assert len(rest) == 2
 
 
@@ -154,11 +171,23 @@ def test_system_context_is_appended(config, monkeypatch):
     assert str(msgs[0].content).endswith("gitStatus: GS")
 
 
-def test_read_todo():
-    assert read_todo(None) is None
-    assert read_todo(FakeWorkspace()) is None
-    assert read_todo(FakeWorkspace(files={"TODO.md": "x"})) == "x"
-    assert model_mod.TODO_FILE == "TODO.md"
+def test_read_todo_renders_the_todowrite_store_not_a_workspace_file():
+    """
+    The list is state, not content. A `TODO.md` in the workspace would be indistinguishable
+    from a file the project owns, and the agent could rewrite its own checklist as code.
+    """
+    from app.loop.tools.todo import TodoItem
+
+    assert read_todo(_state().tool_context) is None
+    assert read_todo(_state(ws=FakeWorkspace(files={"TODO.md": "x"})).tool_context) is None
+
+    todos = (TodoItem(content="Write the failing test", status="in_progress",
+                      active_form="Writing the failing test"),)
+    assert read_todo(_state(todos=todos).tool_context) == "- [in_progress] Write the failing test"
+
+
+def test_read_todo_survives_a_context_without_a_store():
+    assert read_todo(object()) is None
 
 
 def test_request_is_keyed_by_run_and_memoizes_sections(monkeypatch, tmp_path):
@@ -221,26 +250,65 @@ def test_partial_chunks_never_expose_tool_calls():
     assert tool_calls_in(partial)[0]["name"] == "" or tool_calls_in(partial)[0]["args"] == {}
 
 
-def test_chunks_are_merged_into_one_complete_ai_message():
+def test_each_content_block_becomes_its_own_complete_message():
+    """
+    Upstream emits one assistant message per content block, at `content_block_stop`.
+    Text then a tool call is two messages, and the tool call is whole in the second.
+    """
     out = _accumulate([AIMessageChunk(content="Writing "), AIMessageChunk(content="a test.")] + _tool_call_chunks())
-    assert len(out) == 1
-    msg = out[0]
-    assert isinstance(msg, AIMessage) and not isinstance(msg, AIMessageChunk)
-    assert msg.content == "Writing a test."
-    assert tool_calls_in(msg) == ({"name": "WriteFile", "args": {"file_path": "tests/test_a.py", "content": "x"},
-                                   "id": "call_1", "type": "tool_call"},)
+    assert len(out) == 2
+    assert all(isinstance(m, AIMessage) and not isinstance(m, AIMessageChunk) for m in out)
+    assert out[0].content == "Writing a test."
+    assert tool_calls_in(out[0]) == ()
+    assert out[1].content == ""
+    assert tool_calls_in(out[1]) == ({"name": "WriteFile", "args": {"file_path": "tests/test_a.py", "content": "x"},
+                                      "id": "call_1", "type": "tool_call"},)
 
 
-def test_parallel_tool_calls_are_kept_apart_by_index():
+def test_a_tool_block_closes_when_the_next_block_opens_not_at_stream_end():
+    """What makes eager dispatch real: call 1 is complete while call 2 is still arriving."""
     chunks = [
         AIMessageChunk(content="", tool_call_chunks=[{"name": "ReadFile", "args": '{"file_path": "a"}', "id": "c1",
                                                       "index": 0}]),
-        AIMessageChunk(content="", tool_call_chunks=[{"name": "ReadFile", "args": '{"file_path": "b"}', "id": "c2",
+        AIMessageChunk(content="", tool_call_chunks=[{"name": "ReadFile", "args": '{"file_pa', "id": "c2",
                                                       "index": 1}]),
+        AIMessageChunk(content="", tool_call_chunks=[{"name": None, "args": 'th": "b"}', "id": None, "index": 1}]),
     ]
-    (msg,) = _accumulate(chunks)
-    assert [(c["id"], c["args"]) for c in tool_calls_in(msg)] == [
-        ("c1", {"file_path": "a"}), ("c2", {"file_path": "b"})]
+    out = _accumulate(chunks)
+    assert len(out) == 2
+    assert [tool_calls_in(m)[0]["id"] for m in out] == ["c1", "c2"]
+    assert [tool_calls_in(m)[0]["args"] for m in out] == [{"file_path": "a"}, {"file_path": "b"}]
+
+
+def test_two_calls_in_one_chunk_become_two_messages():
+    chunk = AIMessageChunk(content="", tool_call_chunks=[
+        {"name": "ReadFile", "args": '{"file_path": "a"}', "id": "c1", "index": 0},
+        {"name": "ReadFile", "args": '{"file_path": "b"}', "id": "c2", "index": 1},
+    ])
+    out = _accumulate([chunk])
+    assert [tool_calls_in(m)[0]["id"] for m in out] == ["c1", "c2"]
+
+
+def test_text_and_a_tool_call_in_the_same_chunk_split_in_order():
+    chunk = AIMessageChunk(content="thinking", tool_call_chunks=[
+        {"name": "ReadFile", "args": '{"file_path": "a"}', "id": "c1", "index": 0}])
+    out = _accumulate([chunk])
+    assert [m.content for m in out] == ["thinking", ""]
+    assert tool_calls_in(out[1])[0]["id"] == "c1"
+
+
+def test_a_metadata_only_final_chunk_rides_along_and_opens_no_block():
+    """OpenAI's last frame carries finish_reason and no content; it must not make a message."""
+    out = _accumulate([
+        AIMessageChunk(content="answer"),
+        AIMessageChunk(content="", response_metadata={"finish_reason": "stop"}),
+    ])
+    assert [m.content for m in out] == ["answer"]
+    assert out[0].response_metadata.get("finish_reason") == "stop"
+
+
+def test_a_stream_of_only_metadata_yields_nothing():
+    assert _accumulate([AIMessageChunk(content="", response_metadata={"finish_reason": "stop"})]) == []
 
 
 def test_complete_messages_pass_through_and_flush_pending_chunks_in_order():
@@ -256,7 +324,7 @@ def test_non_message_items_are_dropped_and_empty_stream_yields_nothing():
     assert [m.content for m in _accumulate(["noise", AIMessageChunk(content="x"), 42])] == ["x"]
 
 
-def test_stream_call_model_yields_one_message_for_a_chunked_reply(monkeypatch, config):
+def test_stream_call_model_frames_a_chunked_reply_into_blocks(monkeypatch, config):
     class ChunkModel(MockModel):
         async def astream(self, messages, config=None):
             self.sent = messages
@@ -271,6 +339,5 @@ def test_stream_call_model_yields_one_message_for_a_chunked_reply(monkeypatch, c
     out = _collect(_state(tools=(_tool("WriteFile"),)), config)
     assert model.config == {"callbacks": [get_global_token_tracker()]}
     assert model.sent and isinstance(model.sent, list)
-    assert len(out) == 1
-    assert out[0].content == "ab"
-    assert tool_calls_in(out[0])[0]["args"] == {"file_path": "tests/test_a.py", "content": "x"}
+    assert [m.content for m in out] == ["ab", ""]
+    assert tool_calls_in(out[1])[0]["args"] == {"file_path": "tests/test_a.py", "content": "x"}

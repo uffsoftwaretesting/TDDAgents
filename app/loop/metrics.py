@@ -1,5 +1,9 @@
 """
-Observability and Resilience Metrics Subsystem (Plan D).
+Observability and resilience **metrics** (Plan D).
+
+Named `metrics` rather than `resilience` on purpose: in this codebase "retry" now means
+exactly one thing, `app/loop/retry.py`'s port of `withRetry`. This module measures what
+happened; it recovers nothing.
 
 Ported from:
 - `reference/claude-code/src/query/transitions.ts`
