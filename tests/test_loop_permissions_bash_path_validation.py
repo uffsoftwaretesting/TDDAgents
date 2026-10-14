@@ -191,8 +191,8 @@ def test_validate_path_tilde_home_and_unc(cwd, monkeypatch):
 
 
 def test_validate_path_carries_rule_and_safety_reasons(cwd):
-    rule = PermissionRule(tool_name="Bash", rule_behavior=PermissionBehavior.DENY,
-                          rule_content=os.path.join(cwd, "secret"), source=PermissionRuleSource.USER_SETTINGS)
+    rule = PermissionRule(tool_name="Read", rule_behavior=PermissionBehavior.DENY,
+                          rule_content="/" + os.path.join(cwd, "secret"), source=PermissionRuleSource.USER_SETTINGS)
     ctx = ToolPermissionContext(always_deny_rules=(rule,))
     allowed, _, reason = validate_path("secret", cwd, ctx, "read")
     assert allowed is False and reason == {"type": "rule", "rule": rule}
@@ -237,8 +237,8 @@ def test_validate_command_paths_blocked_message(cwd):
 
 
 def test_validate_command_paths_deny_rule(cwd):
-    rule = PermissionRule(tool_name="Bash", rule_behavior=PermissionBehavior.DENY,
-                          rule_content=os.path.join(cwd, "s"), source=PermissionRuleSource.USER_SETTINGS)
+    rule = PermissionRule(tool_name="Read", rule_behavior=PermissionBehavior.DENY,
+                          rule_content="/" + os.path.join(cwd, "s"), source=PermissionRuleSource.USER_SETTINGS)
     res = validate_command_paths("cat", ["s"], cwd, ToolPermissionContext(always_deny_rules=(rule,)))
     assert res.behavior == "deny"
     assert res.message.startswith(f"cat in '{os.path.join(cwd, 's')}' was blocked.")
@@ -266,7 +266,7 @@ def test_dangerous_removals(cwd):
 def test_check_command_paths_order(cwd):
     # dangerous removal beats acceptEdits allowing the write
     assert check_command_paths("rm", ["/usr"], cwd, EDITS).message.startswith("Dangerous rm operation")
-    rule = PermissionRule(tool_name="Bash", rule_behavior=PermissionBehavior.DENY, rule_content="/usr",
+    rule = PermissionRule(tool_name="Edit", rule_behavior=PermissionBehavior.DENY, rule_content="//usr",
                           source=PermissionRuleSource.USER_SETTINGS)
     # an explicit deny rule wins over the dangerous-path message
     assert check_command_paths("rm", ["/usr"], cwd, ToolPermissionContext(always_deny_rules=(rule,))).behavior == (

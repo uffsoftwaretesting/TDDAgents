@@ -1,22 +1,71 @@
 """
-Workspace boundary enforcement, dangerous path protection, and traversal guards (Part C5).
+Filesystem permissions: path rules, the working-directory boundary, dangerous paths, and
+the write check of `WriteFile` / `Edit`.
 
-Ported from:
-- `reference/claude-code/src/utils/permissions/filesystem.ts`
-- `reference/claude-code/src/utils/permissions/pathValidation.ts`
+Ported from claude-code v2.1.88:
+
+* `src/utils/permissions/filesystem.ts` -> `DANGEROUS_FILES`, `DANGEROUS_DIRECTORIES`,
+  `normalizeCaseForComparison`, `isDangerousFilePathToAutoEdit`,
+  `hasSuspiciousWindowsPathPattern`, `checkPathSafetyForAutoEdit`, `allWorkingDirectories`,
+  `pathInAllowedWorkingPath`, `pathInWorkingPath`, `relativePath`, `rootPathForSource`,
+  `patternWithRoot`, `getPatternsByRoot`, `matchingRuleForInput`,
+  `checkWritePermissionForTool`
+* `src/utils/permissions/pathValidation.ts` -> `isPathAllowed`
+* `src/utils/fsOperations.ts` -> `getPathsForPermissionCheck` (original + resolved path)
+
+**Path rules are gitignore patterns on the `Edit`/`Read` tool names**, matched with the
+pinned `pathspec` (upstream uses the `ignore` package; both implement gitignore). An
+`Edit(src/**)` rule governs every tool that edits files — `WriteFile`, `Edit`, and the
+redirect targets of `Bash` — exactly as upstream maps all of them onto `FILE_EDIT_TOOL_NAME`.
+Anchoring follows `patternWithRoot`: `//x` is filesystem-absolute, `~/x` is home, `/x` is
+the settings source's root, anything else floats under the working directory.
+
+**The working directory is the workspace root.** Upstream's `getOriginalCwd()` is where
+the agent works; here that is the session workspace, so project, local and policy patterns
+anchor there (`ToolPermissionContext.settings_roots` carries the exceptions, user and flag).
+
+**TDDAgents' config directory is protected too.** `.tddagents` and `.tddagents.json` join
+upstream's dangerous lists (the product rename of `.claude` / `.claude.json`, which stay,
+since a workspace may also be opened with Claude Code). Writing there could plant settings
+or memory the next run would load.
+
+Not ported, because no equivalent exists in this loop: the editable internal paths (plan
+files, scratchpad, step 1.5), the `.claude/**` session-allow carve-out (step 1.6, which
+serves an approval dialog), the sandbox write allowlist (step 3.7), permission-update
+suggestions, the Windows-only ADS check, and the full symlink-chain walk — the resolved
+path is checked, not each intermediate link.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Literal
+import os
+import posixpath
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal, Sequence
 
+from pathspec.util import lookup_pattern
+
+from app.loop.permissions.bash_read_only_commands import contains_vulnerable_unc_path
 from app.loop.permissions.types import (
     PermissionBehavior,
     PermissionMode,
     PermissionResult,
+    PermissionRule,
+    PermissionRuleSource,
     ToolPermissionContext,
 )
+
+if TYPE_CHECKING:
+    from app.loop.context import ToolContext
+
+FileOperationType = Literal["read", "write", "create"]
+ToolType = Literal["edit", "read"]
+RuleBehavior = Literal["allow", "deny", "ask"]
+
+#: `FILE_EDIT_TOOL_NAME` / `FILE_READ_TOOL_NAME`: the rule names path rules live under.
+FILE_EDIT_TOOL_NAME = "Edit"
+FILE_READ_TOOL_NAME = "Read"
 
 DANGEROUS_FILES: tuple[str, ...] = (
     ".gitconfig",
@@ -29,6 +78,7 @@ DANGEROUS_FILES: tuple[str, ...] = (
     ".ripgreprc",
     ".mcp.json",
     ".claude.json",
+    ".tddagents.json",
 )
 
 DANGEROUS_DIRECTORIES: tuple[str, ...] = (
@@ -36,136 +86,391 @@ DANGEROUS_DIRECTORIES: tuple[str, ...] = (
     ".vscode",
     ".idea",
     ".claude",
+    ".tddagents",
 )
 
+_GitIgnorePattern = lookup_pattern("gitignore")
+_TRAILING_DOTS_OR_SPACES = re.compile(r"[.\s]+$")
+_DOS_DEVICE = re.compile(r"\.(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$", re.IGNORECASE)
+_TRIPLE_DOTS = re.compile(r"(^|/|\\)\.{3,}(/|\\|$)")
+_SHORT_NAME = re.compile(r"~\d")
 
-def normalize_case(p: str) -> str:
-    """Normalize path case for case-insensitive comparison."""
-    return p.lower()
+
+@dataclass(frozen=True, slots=True)
+class PathCheckResult:
+    """`PathCheckResult` of `isPathAllowed`."""
+
+    allowed: bool
+    decision_reason: dict[str, Any] | None = None
 
 
-def is_dangerous_path(path: str | Path) -> tuple[bool, str]:
+def normalize_case_for_comparison(path: str) -> str:
+    """`normalizeCaseForComparison`: always lowercase, whatever the platform."""
+    return path.lower()
+
+
+def expand_path(path: str, cwd: str) -> str:
+    """`expandPath`: `~` to home, relative to `cwd`, normalized."""
+    if path == "~":
+        path = os.path.expanduser("~")
+    elif path.startswith("~/"):
+        path = os.path.join(os.path.expanduser("~"), path[2:])
+    return posixpath.normpath(path if posixpath.isabs(path) else posixpath.join(cwd, path))
+
+
+def get_paths_for_permission_check(path: str) -> tuple[str, ...]:
     """
-    Check if a path targets sensitive configuration files or directories (e.g. .git/, .bashrc).
+    `getPathsForPermissionCheck`, reduced: the path and, when different, its resolved form
+    (symlinks followed, including in a missing file's ancestors). UNC paths are never
+    touched, so no lookup can reach the network.
     """
-    p = Path(path)
-    # Check filename
-    name_lower = p.name.lower()
-    if name_lower in DANGEROUS_FILES:
-        return True, f"Modifying sensitive configuration file '{p.name}' is restricted."
-
-    # Check directory components
-    for part in p.parts:
-        if part.lower() in DANGEROUS_DIRECTORIES:
-            return True, f"Modifying files inside sensitive directory '{part}' is restricted."
-
-    return False, ""
+    if path.startswith("//") or path.startswith("\\\\"):
+        return (path,)
+    resolved = os.path.realpath(path)
+    return (path,) if resolved == path else (path, resolved)
 
 
-def is_path_in_working_dir(path: str | Path, working_dir: str | Path) -> bool:
-    """
-    Check if a path is located inside the working directory, resolving symlinks and traversal.
-    """
-    try:
-        resolved_work = Path(working_dir).resolve()
-        resolved_path = Path(path).resolve()
-        return resolved_path.is_relative_to(resolved_work)
-    except Exception:
-        return False
-
-
-def is_path_in_allowed_working_dirs(
-    path: str | Path,
-    working_dir: str | Path,
-    additional_dirs: tuple[str, ...] = (),
-) -> bool:
-    """
-    Check if a path is within the primary working directory or any additional working directories.
-    """
-    if is_path_in_working_dir(path, working_dir):
+def is_dangerous_file_path_to_auto_edit(path: str) -> bool:
+    """`isDangerousFilePathToAutoEdit`: UNC paths, dangerous directories and files."""
+    if path.startswith("\\\\") or path.startswith("//"):
         return True
+    segments = path.split("/")
+    for index, segment in enumerate(segments):
+        normalized = normalize_case_for_comparison(segment)
+        if normalized not in DANGEROUS_DIRECTORIES:
+            continue
+        # `.claude/worktrees/` is structural, not user configuration.
+        if (
+            normalized == ".claude"
+            and index + 1 < len(segments)
+            and normalize_case_for_comparison(segments[index + 1]) == "worktrees"
+        ):
+            continue
+        return True
+    file_name = segments[-1]
+    return normalize_case_for_comparison(file_name) in DANGEROUS_FILES
 
-    for add_dir in additional_dirs:
-        if is_path_in_working_dir(path, add_dir):
-            return True
 
-    return False
+def has_suspicious_windows_path_pattern(path: str) -> bool:
+    """
+    `hasSuspiciousWindowsPathPattern`, without the ADS colon check (Windows/WSL only):
+    8.3 short names, long-path prefixes, trailing dots or spaces, DOS device names,
+    `...` components and UNC paths. Checked on every platform, as upstream does, because
+    NTFS can be mounted anywhere.
+    """
+    if _SHORT_NAME.search(path):
+        return True
+    if path.startswith(("\\\\?\\", "\\\\.\\", "//?/", "//./")):
+        return True
+    if _TRAILING_DOTS_OR_SPACES.search(path):
+        return True
+    if _DOS_DEVICE.search(path):
+        return True
+    if _TRIPLE_DOTS.search(path):
+        return True
+    return contains_vulnerable_unc_path(path)
 
+
+def check_path_safety_for_auto_edit(path: str, paths_to_check: Sequence[str]) -> tuple[bool, str]:
+    """`checkPathSafetyForAutoEdit`: `(safe, message)`, over the original and resolved paths."""
+    for candidate in paths_to_check:
+        if has_suspicious_windows_path_pattern(candidate):
+            return False, (
+                f"The agent requested permissions to write to {path}, which contains a suspicious "
+                "Windows path pattern that requires manual approval."
+            )
+    for candidate in paths_to_check:
+        if is_dangerous_file_path_to_auto_edit(candidate):
+            return False, f"The agent requested permissions to edit {path} which is a sensitive file."
+    return True, ""
+
+
+# ── working directories ──────────────────────────────────────────────────────
+
+def all_working_directories(context: ToolPermissionContext, cwd: str) -> tuple[str, ...]:
+    """`allWorkingDirectories`: the working directory, then the additional ones."""
+    return (cwd, *context.additional_working_directories)
+
+
+def _strip_private(path: str) -> str:
+    path = re.sub(r"^/private/var/", "/var/", path)
+    return re.sub(r"^/private/tmp(/|$)", r"/tmp\1", path)
+
+
+def path_in_working_path(path: str, working_path: str) -> bool:
+    """`pathInWorkingPath`: case-insensitive containment, macOS `/private` folded."""
+    absolute = normalize_case_for_comparison(_strip_private(posixpath.normpath(path)))
+    working = normalize_case_for_comparison(_strip_private(posixpath.normpath(working_path)))
+    relative = posixpath.relpath(absolute, working)
+    if relative == ".":
+        return True
+    return relative != ".." and not relative.startswith("../") and not posixpath.isabs(relative)
+
+
+def path_in_allowed_working_path(
+    path: str,
+    context: ToolPermissionContext,
+    cwd: str,
+    paths_to_check: Sequence[str] | None = None,
+) -> bool:
+    """`pathInAllowedWorkingPath`: *every* checked form of the path is inside some working dir."""
+    candidates = paths_to_check if paths_to_check is not None else get_paths_for_permission_check(path)
+    working_paths = [
+        resolved
+        for working in all_working_directories(context, cwd)
+        for resolved in get_paths_for_permission_check(working)
+    ]
+    return all(any(path_in_working_path(candidate, wp) for wp in working_paths) for candidate in candidates)
+
+
+# ── path rules ───────────────────────────────────────────────────────────────
+
+def root_path_for_source(source: PermissionRuleSource, context: ToolPermissionContext, cwd: str) -> str:
+    """`rootPathForSource`: the settings root for user/flag rules, else the working dir."""
+    return context.settings_roots.get(source, cwd)
+
+
+def pattern_with_root(
+    pattern: str, source: PermissionRuleSource, context: ToolPermissionContext, cwd: str
+) -> tuple[str, str | None]:
+    """`patternWithRoot`: `(relative_pattern, root)`; a `None` root floats under the working dir."""
+    if pattern.startswith("//"):
+        return pattern[1:], "/"
+    if pattern.startswith("~/"):
+        return pattern[1:], os.path.expanduser("~")
+    if pattern.startswith("/"):
+        return pattern, root_path_for_source(source, context, cwd)
+    if pattern.startswith("./"):
+        return pattern[2:], None
+    return pattern, None
+
+
+def _rules_for(context: ToolPermissionContext, behavior: RuleBehavior) -> tuple[PermissionRule, ...]:
+    if behavior == "allow":
+        return context.always_allow_rules
+    if behavior == "deny":
+        return context.always_deny_rules
+    return context.always_ask_rules
+
+
+def get_patterns_by_root(
+    context: ToolPermissionContext, tool_type: ToolType, behavior: RuleBehavior, cwd: str
+) -> dict[str | None, dict[str, PermissionRule]]:
+    """`getPatternsByRoot`: every content rule on the Edit (or Read) name, grouped by root."""
+    tool_name = FILE_EDIT_TOOL_NAME if tool_type == "edit" else FILE_READ_TOOL_NAME
+    by_root: dict[str | None, dict[str, PermissionRule]] = {}
+    for rule in _rules_for(context, behavior):
+        if rule.tool_name != tool_name or not rule.rule_content:
+            continue
+        relative_pattern, root = pattern_with_root(rule.rule_content, rule.source, context, cwd)
+        by_root.setdefault(root, {})[relative_pattern] = rule
+    return by_root
+
+
+def _ignore_test(patterns: Sequence[str], relative: str) -> str | None:
+    """`ignore().add(patterns).test(path)`: the last matching pattern decides."""
+    decided: str | None = None
+    for pattern in patterns:
+        compiled = _GitIgnorePattern(pattern)
+        if compiled.include is None or not compiled.match_file(relative):
+            continue
+        decided = pattern if compiled.include else None
+    return decided
+
+
+def matching_rule_for_input(
+    path: str,
+    context: ToolPermissionContext,
+    tool_type: ToolType,
+    behavior: RuleBehavior,
+    cwd: str,
+) -> PermissionRule | None:
+    """`matchingRuleForInput`: the path rule of `behavior` that matches `path`, if any."""
+    absolute = expand_path(path, cwd)
+    for root, pattern_map in get_patterns_by_root(context, tool_type, behavior, cwd).items():
+        # The `ignore` package matches a path and everything under it, so `/**` is dropped.
+        adjusted = [p[:-3] if p.endswith("/**") else p for p in pattern_map]
+        relative = posixpath.relpath(absolute, root if root is not None else cwd)
+        if relative.startswith("../") or relative == "..":
+            continue
+        if relative == ".":
+            continue
+        matched = _ignore_test(adjusted, relative)
+        if matched is not None:
+            return pattern_map.get(matched + "/**") or pattern_map.get(matched)
+    return None
+
+
+# ── decisions ────────────────────────────────────────────────────────────────
 
 def is_path_allowed(
-    path: str | Path,
+    resolved_path: str,
     context: ToolPermissionContext,
-    working_dir: str | Path,
-    operation: Literal["read", "write"] = "write",
+    cwd: str,
+    operation: FileOperationType,
+    paths_to_check: Sequence[str] | None = None,
+) -> PathCheckResult:
+    """
+    `isPathAllowed` (`pathValidation.ts`), used for the paths inside Bash commands.
+
+    Deny rules, then (for writes) the safety check, then the working directory — reads
+    anywhere inside it, writes only in `acceptEdits` — then allow rules.
+    """
+    permission_type: ToolType = "read" if operation == "read" else "edit"
+    deny_rule = matching_rule_for_input(resolved_path, context, permission_type, "deny", cwd)
+    if deny_rule is not None:
+        return PathCheckResult(False, {"type": "rule", "rule": deny_rule})
+
+    candidates = paths_to_check if paths_to_check is not None else get_paths_for_permission_check(resolved_path)
+    if operation != "read":
+        safe, message = check_path_safety_for_auto_edit(resolved_path, candidates)
+        if not safe:
+            return PathCheckResult(False, {"type": "safetyCheck", "reason": message})
+
+    if path_in_allowed_working_path(resolved_path, context, cwd, candidates):
+        if operation == "read" or context.mode == PermissionMode.ACCEPT_EDITS:
+            return PathCheckResult(True)
+
+    allow_rule = matching_rule_for_input(resolved_path, context, permission_type, "allow", cwd)
+    if allow_rule is not None:
+        return PathCheckResult(True, {"type": "rule", "rule": allow_rule})
+    return PathCheckResult(False)
+
+
+def check_write_permission_for_tool(
+    path: str,
+    input_args: dict[str, Any],
+    context: ToolPermissionContext,
+    cwd: str,
 ) -> PermissionResult:
     """
-    Evaluate whether a path operation is allowed under the workspace boundary and permission context (Part C5).
+    `checkWritePermissionForTool`, the `checkPermissions` of `WriteFile` and `Edit`.
 
-    Precedence:
-    1. Deny rules targeting path -> deny
-    2. Containment in workspace (or additional dirs) -> if outside, deny
-    3. Dangerous path safety check on write -> ask (bypass-immune!)
-    4. Mode rules:
-       - read -> allow
-       - write in acceptEdits / bypassPermissions -> allow
-       - write in default / plan -> ask
+    1. A deny rule on the path (or its resolved form) denies.
+    2. The safety check asks — and the gate keeps that ask even in bypass mode.
+    3. An ask rule asks.
+    4. `acceptEdits` allows writes inside the working directories.
+    5. An allow rule allows.
+    6. Otherwise ask; headless runs turn that into a deny.
     """
-    path_str = str(path)
-
-    # 1. Deny rules
-    for rule in context.always_deny_rules:
-        if rule.rule_content and (rule.rule_content == path_str or path_str.startswith(rule.rule_content.rstrip("*"))):
+    absolute = expand_path(path, cwd)
+    candidates = get_paths_for_permission_check(absolute)
+    for candidate in candidates:
+        deny_rule = matching_rule_for_input(candidate, context, "edit", "deny", cwd)
+        if deny_rule is not None:
             return PermissionResult(
                 behavior=PermissionBehavior.DENY,
-                message=f"Access to path '{path_str}' denied by rule.",
-                decision_reason={"type": "rule", "rule": rule},
+                message=f"Permission to edit {path} has been denied.",
+                decision_reason={"type": "rule", "rule": deny_rule},
             )
 
-    # 2. Workspace boundary check
-    in_boundary = is_path_in_allowed_working_dirs(
-        path, working_dir, context.additional_working_directories
-    )
-    if not in_boundary:
+    safe, message = check_path_safety_for_auto_edit(absolute, candidates)
+    if not safe:
         return PermissionResult(
-            behavior=PermissionBehavior.DENY,
-            message=f"Path '{path_str}' is outside the allowed workspace boundary.",
-            decision_reason={"type": "other", "reason": "outside_workspace"},
+            behavior=PermissionBehavior.ASK,
+            message=message,
+            decision_reason={"type": "safetyCheck", "reason": message},
         )
 
-    # 3. Dangerous files check (bypass-immune on write)
-    if operation == "write":
-        is_dang, dang_msg = is_dangerous_path(path)
-        if is_dang:
+    for candidate in candidates:
+        ask_rule = matching_rule_for_input(candidate, context, "edit", "ask", cwd)
+        if ask_rule is not None:
             return PermissionResult(
                 behavior=PermissionBehavior.ASK,
-                message=dang_msg,
-                decision_reason={"type": "safetyCheck", "reason": dang_msg},
+                message=f"The agent requested permissions to write to {path}, but you haven't granted it yet.",
+                decision_reason={"type": "rule", "rule": ask_rule},
             )
 
-    # 4. Mode evaluation
-    if operation == "read":
+    in_working_dir = path_in_allowed_working_path(absolute, context, cwd, candidates)
+    if context.mode == PermissionMode.ACCEPT_EDITS and in_working_dir:
         return PermissionResult(
             behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
             decision_reason={"type": "mode", "mode": context.mode},
         )
 
-    # Write operation
-    if context.mode in (PermissionMode.ACCEPT_EDITS, PermissionMode.BYPASS_PERMISSIONS):
+    allow_rule = matching_rule_for_input(absolute, context, "edit", "allow", cwd)
+    if allow_rule is not None:
         return PermissionResult(
             behavior=PermissionBehavior.ALLOW,
-            decision_reason={"type": "mode", "mode": context.mode},
-        )
-
-    # Default / Plan / dontAsk modes
-    if context.mode == PermissionMode.DONT_ASK:
-        return PermissionResult(
-            behavior=PermissionBehavior.DENY,
-            message=f"Writing to '{path_str}' suppressed in dontAsk mode.",
-            decision_reason={"type": "mode", "mode": context.mode},
+            updated_input=input_args,
+            decision_reason={"type": "rule", "rule": allow_rule},
         )
 
     return PermissionResult(
         behavior=PermissionBehavior.ASK,
-        message=f"Writing to '{path_str}' requires permission in {context.mode} mode.",
-        decision_reason={"type": "mode", "mode": context.mode},
+        message=f"The agent requested permissions to write to {path}, but you haven't granted it yet.",
+        decision_reason=(
+            None
+            if in_working_dir
+            else {"type": "workingDir", "reason": "Path is outside allowed working directories"}
+        ),
     )
+
+
+def permission_cwd(context: ToolContext) -> str:
+    """The directory path checks resolve against: the workspace root, else `os.getcwd()`."""
+    root = getattr(getattr(context, "workspace", None), "root", None)
+    return str(root) if root is not None else os.getcwd()
+
+
+def workspace_absolute_path(raw_path: str, cwd: str) -> str:
+    """
+    A file tool's path as the permission check sees it. File tools read a leading `/` as
+    the workspace root (`normalize_path`), so it is re-rooted there rather than read as a
+    host path; `..` is kept, so an escape stays visible as outside the working directory.
+    """
+    return posixpath.normpath(posixpath.join(cwd, raw_path.replace("\\", "/").lstrip("/")))
+
+
+def path_from_tool_input(input_args: dict[str, Any]) -> str:
+    """A file tool's target: `file_path`, or the legacy `path`."""
+    return str(input_args.get("file_path") or input_args.get("path") or "")
+
+
+def check_file_write_permissions() -> Any:
+    """
+    Build the `check_permissions` callable of a file-writing tool. Upstream passes the tool
+    for its `getPath`; here every file tool names its target `file_path`.
+    """
+    from app.loop.permissions.rules import extract_permission_context
+
+    def check(input_args: dict[str, Any], context: ToolContext) -> PermissionResult:
+        cwd = permission_cwd(context)
+        raw = path_from_tool_input(input_args)
+        return check_write_permission_for_tool(
+            workspace_absolute_path(raw, cwd),
+            input_args,
+            extract_permission_context(context),
+            cwd,
+        )
+
+    return check
+
+
+__all__ = [
+    "DANGEROUS_DIRECTORIES",
+    "DANGEROUS_FILES",
+    "FILE_EDIT_TOOL_NAME",
+    "FILE_READ_TOOL_NAME",
+    "PathCheckResult",
+    "all_working_directories",
+    "check_file_write_permissions",
+    "check_path_safety_for_auto_edit",
+    "check_write_permission_for_tool",
+    "expand_path",
+    "get_paths_for_permission_check",
+    "get_patterns_by_root",
+    "has_suspicious_windows_path_pattern",
+    "is_dangerous_file_path_to_auto_edit",
+    "is_path_allowed",
+    "matching_rule_for_input",
+    "normalize_case_for_comparison",
+    "path_from_tool_input",
+    "path_in_allowed_working_path",
+    "path_in_working_path",
+    "pattern_with_root",
+    "permission_cwd",
+    "root_path_for_source",
+    "workspace_absolute_path",
+]

@@ -30,6 +30,7 @@ from typing import Any, Mapping
 from app.loop.context import ToolContext
 from app.loop.permissions.bash_permissions import bash_tool_has_permission
 from app.loop.permissions.bash_read_only import is_bash_read_only
+from app.loop.permissions.filesystem import permission_cwd
 from app.loop.permissions.rules import extract_permission_context
 from app.loop.permissions.types import PermissionResult
 from app.loop.prompts.loader import parse_markdown_frontmatter
@@ -92,12 +93,6 @@ def validate_bash_input(args: dict[str, Any], context: ToolContext) -> Validatio
     if description is not None and not isinstance(description, str):
         return ValidationResult(valid=False, message="description must be a string.")
     return ValidationResult(valid=True)
-
-
-def permission_cwd(context: ToolContext) -> str:
-    """The directory path checks resolve against: the workspace root, else `os.getcwd()`."""
-    root = getattr(getattr(context, "workspace", None), "root", None)
-    return str(root) if root is not None else os.getcwd()
 
 
 async def check_bash_permissions(args: dict[str, Any], context: ToolContext) -> PermissionResult:

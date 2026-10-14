@@ -162,7 +162,7 @@ async def run_tool_use(
     #    (`check_tdd_phase_permission`), which is why the duplicate pre-tool phase check
     #    that used to sit here is gone: two checks meant two places to get it wrong, and
     #    the gate is the one a hook cannot talk its way past.
-    resolved = await resolve_hook_permission_decision(hook_verdict, tool, tool_args, context)
+    resolved = await resolve_hook_permission_decision(hook_verdict, tool, tool_args, context, call_id)
     permission = resolved.decision
     if permission.behavior != "allow":
         denied_msg = permission.message or f"Permission denied for tool: {tool_name}"

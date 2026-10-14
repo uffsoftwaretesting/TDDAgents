@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import dataclasses
+import json
 import os
 import subprocess
 import sys
@@ -24,7 +25,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.types import ToolPermissionContext
+from app.loop.permissions.types import PermissionMode
 from app.loop.state import initial_loop_state
 from app.session.export import EXPORT_EXCLUDES, export_run_workspace
 from app.workspace import pyenv
@@ -331,8 +332,20 @@ CALC_TEST = "import calculator\n\ndef test_add():\n    assert calculator.add(2, 
 CALC_IMPL = "def add(a, b):\n    return a + b\n"
 
 
-def test_runner_drives_a_real_red_green_cycle(python_workspace):
+def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     from app.loop.runner import tdd_loop_runner
+
+    project = tmp_path / "project"
+    (project / ".tddagents").mkdir(parents=True)
+    (project / ".tddagents" / "settings.json").write_text(json.dumps({
+        "permissions": {"defaultMode": "acceptEdits", "allow": ["Bash(python:*)", "Bash(pytest:*)"],
+                        "additionalDirectories": [str(python_workspace.root / "tests"), str(tmp_path)]}}))
+    (tmp_path / "home" / ".tddagents").mkdir(parents=True)
+    (tmp_path / "home" / ".tddagents" / "settings.json").write_text(json.dumps({
+        "permissions": {"deny": ["Bash(from-home)"]}}))
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "managed-settings.json").write_text(json.dumps({
+        "permissions": {"ask": ["Bash(from-policy)"]}}))
 
     turns = [
         [_call("WriteFile", "c1", file_path="tests/test_calc.py", content=CALC_TEST)],
@@ -343,18 +356,43 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace):
     ]
     seen: list[Any] = []
     result = asyncio.run(tdd_loop_runner("add two numbers", 0, {"session_id": "s"},
-                                         workspace=python_workspace, deps=_scripted_deps(turns, seen)))
+                                         workspace=python_workspace, deps=_scripted_deps(turns, seen),
+                                         project_root=project, home=tmp_path / "home",
+                                         managed_dir=tmp_path / "etc"))
     assert (result.status, result.terminal_reason) == ("success", "completed")
     assert (result.red_confirmed, result.green_passed) == (True, True)
     assert result.error_message is None and result.sub_requirement == "add two numbers"
     assert python_workspace.read_file("calculator.py") == CALC_IMPL
     ctx = seen[0].tool_context
     assert ctx.workspace is python_workspace
-    assert ctx.permission_context == ToolPermissionContext(should_avoid_permission_prompts=True)
+    # The permission context lives in app state (upstream `appState.toolPermissionContext`):
+    # acceptEdits from project settings, headless, anchored at the workspace, with the
+    # interpreter allow stripped by the TDD managed tier.
+    assert ctx.permission_context is None
+    perm = ctx.get_app_state().tool_permission_context
+    assert (perm.mode, perm.should_avoid_permission_prompts) == (PermissionMode.ACCEPT_EDITS, True)
+    assert [r.rule_content for r in perm.always_allow_rules] == ["pytest:*"]
+    assert [r.rule_content for r in perm.stripped_dangerous_rules] == ["python:*"]
+    # User and policy scopes come from the given home / managed dir, and an additional
+    # directory inside the workspace is skipped because the workspace is the working dir.
+    assert [r.rule_content for r in perm.always_deny_rules] == ["from-home"]
+    assert [r.rule_content for r in perm.always_ask_rules] == ["from-policy"]
+    assert perm.additional_working_directories == (str(tmp_path),)
     assert {t.name for t in ctx.tools} == {
         "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite"}
     assert seen[0].messages[0].content == "add two numbers"
+    assert ctx.messages == seen[0].messages[:1]
+    assert ctx.run_id.startswith("loop-") and len(ctx.run_id) == len("loop-") + 8
     assert seen[0].turn_count == 1
+    # `refresh_tools`: the ledger moved RED -> GREEN during the run, so the pool was rebuilt
+    # once and is then returned *by identity* until the phase moves again.
+    assert ctx.refresh_tools is not None
+    current = ctx.refresh_tools()
+    assert current is not ctx.tools and current is ctx.refresh_tools()
+    assert {t.name for t in current} == {t.name for t in ctx.tools}
+    ctx.set_app_state(lambda st: dataclasses.replace(st, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+    rebuilt = ctx.refresh_tools()
+    assert rebuilt is not current and rebuilt is ctx.refresh_tools()
 
 
 def test_runner_blocks_production_writes_in_red(python_workspace):

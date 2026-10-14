@@ -16,6 +16,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.loop.context import AppStateStore, FileState, tool_context_for
+from app.loop.permissions.types import PermissionMode, ToolPermissionContext
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.tdd import check_tdd_phase_permission
 from app.loop.tools import fs
@@ -656,6 +657,7 @@ def test_edit_through_pipeline():
     path = "tests/test_f.py"
     ws = FakeWorkspace(files={path: "abc", "src/m.py": "abc"})
     ctx = ctx_for(ws)
+    ctx.permission_context = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
     msg = via_pipeline(build_edit_tool, edit_args(path=path), ctx)
     assert msg.content == f"<tool_use_error>{FILE_NOT_READ_ERROR}</tool_use_error>"
     assert msg.additional_kwargs["error_code"] == 6
@@ -668,6 +670,16 @@ def test_edit_through_pipeline():
     assert msg.status == "error"
     assert "TDD phase RED denies" in msg.content
     assert ws.files["src/m.py"] == "abc"
+
+
+def test_writes_ask_in_default_mode_and_an_interactive_context_keeps_the_ask():
+    """`checkWritePermissionForTool`: no acceptEdits and no allow rule means the write asks."""
+    ws = FakeWorkspace(files={})
+    ctx = ctx_for(ws)
+    msg = via_pipeline(build_write_file_tool, {"file_path": "tests/test_n.py", "content": "x"}, ctx)
+    assert msg.status == "error"
+    assert msg.additional_kwargs["permission_behavior"] == "ask"
+    assert "tests/test_n.py" not in ws.files
 
 
 # ── Glob (real ripgrep, the vendored wheel) ─────────────────────────────────

@@ -51,6 +51,7 @@ async def resolve_hook_permission_decision(
     tool: Tool,
     input_args: dict[str, Any],
     context: ToolContext,
+    tool_use_id: str = "",
 ) -> ResolvedPermission:
     """
     Combine a hook's verdict with the rule-based gate, in upstream's order.
@@ -63,7 +64,7 @@ async def resolve_hook_permission_decision(
     """
     if hook_verdict is None or hook_verdict.behavior is None:
         return ResolvedPermission(
-            decision=await has_permissions_to_use_tool(tool, input_args, context),
+            decision=await has_permissions_to_use_tool(tool, input_args, context, tool_use_id),
             input=input_args,
         )
 
@@ -80,7 +81,7 @@ async def resolve_hook_permission_decision(
     hook_input = hook_verdict.updated_input if hook_verdict.updated_input is not None else input_args
 
     if hook_verdict.behavior == PermissionBehavior.ALLOW:
-        rule_check = await has_permissions_to_use_tool(tool, hook_input, context)
+        rule_check = await has_permissions_to_use_tool(tool, hook_input, context, tool_use_id)
         if rule_check.behavior == PermissionBehavior.ALLOW:
             # No objection: the hook's approval stands and the prompt is skipped.
             return ResolvedPermission(
@@ -95,7 +96,7 @@ async def resolve_hook_permission_decision(
         return ResolvedPermission(decision=rule_check, input=hook_input)
 
     # `ask`: the gate decides, carrying the hook's message as the reason.
-    decision = await has_permissions_to_use_tool(tool, hook_input, context)
+    decision = await has_permissions_to_use_tool(tool, hook_input, context, tool_use_id)
     if decision.behavior == PermissionBehavior.ASK and hook_verdict.message:
         decision = PermissionResult(
             behavior=PermissionBehavior.ASK,

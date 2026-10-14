@@ -59,7 +59,17 @@ class TestTheSnapshotIsImmutable:
 class TestNoCeilings:
     def test_the_config_holds_identity_gates_and_the_model_call_settings(self):
         assert [f.name for f in fields(RunConfig)] == [
-            "run_id", "gates", "model", "fallback_model", "max_retries"]
+            "run_id", "gates", "model", "fallback_model", "max_retries",
+            "permission_mode", "settings_path", "dangerously_skip_permissions"]
+
+    def test_permission_inputs_are_upstreams_startup_flags_and_default_unset(self):
+        config = build_run_config("r", postgres_checkpointing=False)
+        assert (config.permission_mode, config.settings_path, config.dangerously_skip_permissions) == (
+            None, None, False)
+        given = build_run_config("r", postgres_checkpointing=False, permission_mode="plan",
+                                 settings_path="/s.json", dangerously_skip_permissions=True)
+        assert (given.permission_mode, given.settings_path, given.dangerously_skip_permissions) == (
+            "plan", "/s.json", True)
 
     def test_max_retries_is_the_ported_ceiling_and_the_only_number_here(self):
         """

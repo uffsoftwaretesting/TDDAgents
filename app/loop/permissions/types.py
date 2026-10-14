@@ -9,9 +9,9 @@ Ported from:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Any
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,16 +116,28 @@ class ToolPermissionContext:
     always_allow_rules: tuple[PermissionRule, ...] = ()
     always_deny_rules: tuple[PermissionRule, ...] = ()
     always_ask_rules: tuple[PermissionRule, ...] = ()
-    is_bypass_permissions_mode_available: bool = True
+    #: Upstream `isBypassPermissionsModeAvailable`, false unless the run was started in
+    #: `bypassPermissions` or with `allowDangerouslySkipPermissions`
+    #: (`initializeToolPermissionContext`). It decides whether `plan` mode bypasses.
+    is_bypass_permissions_mode_available: bool = False
     additional_working_directories: tuple[str, ...] = ()
     #: Upstream `shouldAvoidPermissionPrompts`: no surface can show a prompt, so an
     #: unresolved 'ask' is denied (`hasPermissionsToUseTool`, background/headless agents).
     should_avoid_permission_prompts: bool = False
+    #: Where a `/`-rooted path pattern of each settings source is anchored — upstream's
+    #: `rootPathForSource`. A source missing here is anchored at the working directory,
+    #: which is upstream's answer for `projectSettings`, `localSettings`, `policySettings`,
+    #: `cliArg`, `command` and `session` (all `getOriginalCwd()`).
+    settings_roots: Mapping[PermissionRuleSource, str] = field(default_factory=dict)
+    #: Upstream `strippedDangerousRules`: allow rules removed because they would let a
+    #: command bypass the automated judge (`stripDangerousPermissionsForAutoMode`). Kept
+    #: so the removal is visible after the fact, never consulted by the gate.
+    stripped_dangerous_rules: tuple[PermissionRule, ...] = ()
 
 
 def get_next_permission_mode(
     current_mode: PermissionMode | str,
-    is_bypass_available: bool = True,
+    is_bypass_available: bool = False,
 ) -> PermissionMode:
     """
     Determine the next permission mode when cycling through the ladder.

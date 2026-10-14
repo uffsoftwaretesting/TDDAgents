@@ -341,7 +341,9 @@ def test_zero_max_timeout_override_is_ignored():
 
 
 def test_permission_cwd_without_a_workspace_attribute():
-    assert bash_mod.permission_cwd(SimpleNamespace()) == os.getcwd()  # type: ignore[arg-type]
+    from app.loop.permissions.filesystem import permission_cwd
+
+    assert permission_cwd(SimpleNamespace()) == os.getcwd()  # type: ignore[arg-type]
 
 
 def test_call_without_a_workspace_attribute():

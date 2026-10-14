@@ -183,7 +183,7 @@ def test_a_hook_ask_leaves_the_decision_to_the_gate():
 
 
 def test_a_hook_ask_carries_its_own_message_when_the_gate_also_asks(monkeypatch):
-    async def asking(tool, args, context):
+    async def asking(tool, args, context, tool_use_id=""):
         return PermissionResult(behavior=PermissionBehavior.ASK, message="gate wording")
 
     monkeypatch.setattr("app.loop.tools.hook_permissions.has_permissions_to_use_tool", asking)
@@ -193,7 +193,7 @@ def test_a_hook_ask_carries_its_own_message_when_the_gate_also_asks(monkeypatch)
 
 
 def test_a_hook_ask_without_a_message_keeps_the_gates_wording(monkeypatch):
-    async def asking(tool, args, context):
+    async def asking(tool, args, context, tool_use_id=""):
         return PermissionResult(behavior=PermissionBehavior.ASK, message="gate wording")
 
     monkeypatch.setattr("app.loop.tools.hook_permissions.has_permissions_to_use_tool", asking)
@@ -270,7 +270,7 @@ def test_the_gate_is_asked_about_the_hooks_input_not_the_models():
 
 
 def test_a_hook_ask_preserves_the_gates_rewritten_input(monkeypatch):
-    async def asking(tool, args, context):
+    async def asking(tool, args, context, tool_use_id=""):
         return PermissionResult(behavior=PermissionBehavior.ASK, message="gate",
                                 updated_input={"file_path": "tests/gate.py"})
 

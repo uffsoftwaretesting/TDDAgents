@@ -25,12 +25,12 @@ from app.loop.permissions.capability import (
     is_bash_command_read_only,
     split_shell_commands,
 )
-from app.loop.permissions.filesystem import is_dangerous_path, is_path_allowed
+from app.loop.permissions.filesystem import check_write_permission_for_tool, is_dangerous_file_path_to_auto_edit
 from app.loop.permissions.tdd import (
     check_tdd_phase_permission,
     get_phase_deny_rules,
 )
-from app.loop.permissions.types import PermissionBehavior, ToolPermissionContext
+from app.loop.permissions.types import PermissionBehavior, PermissionMode, ToolPermissionContext
 from app.loop.tools.base import ToolResult, build_tool
 from app.workspace.base import (
     WorkspacePathError,
@@ -145,16 +145,17 @@ def test_dangerous_files_and_directories_blocked(tmp_path: Path) -> None:
         ".vscode/settings.json",
     ]
     for target in dangerous_targets:
-        is_dang, reason = is_dangerous_path(target)
-        assert is_dang is True
-        assert "restricted" in reason
+        assert is_dangerous_file_path_to_auto_edit(target) is True
 
-    ctx = ToolPermissionContext()
-    for target in dangerous_targets:
-        target_path = tmp_path / target
-        res = is_path_allowed(target_path, ctx, working_dir=tmp_path, operation="write")
-        assert res.behavior in (PermissionBehavior.DENY, PermissionBehavior.ASK)
-        assert "restricted" in res.message.lower() or "denied" in res.message.lower()
+    # Bypass mode included: the safety check is an 'ask' the gate never bypasses.
+    for mode in (PermissionMode.DEFAULT, PermissionMode.ACCEPT_EDITS, PermissionMode.BYPASS_PERMISSIONS):
+        ctx = ToolPermissionContext(mode=mode)
+        for target in dangerous_targets:
+            target_path = str(tmp_path / target)
+            res = check_write_permission_for_tool(target_path, {}, ctx, str(tmp_path))
+            assert res.behavior == PermissionBehavior.ASK
+            assert res.decision_reason == {"type": "safetyCheck", "reason": res.message}
+            assert "sensitive file" in res.message
 
 
 # ============================================================================

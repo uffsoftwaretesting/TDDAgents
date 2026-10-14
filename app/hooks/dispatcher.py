@@ -49,6 +49,9 @@ class HookOutcome:
     stop_continuation: bool = False
     prevent_continuation: bool = False
     blocking_errors: tuple[str, ...] = ()
+    #: The first PermissionRequest decision any hook stated (upstream takes the first
+    #: `permissionRequestResult` its generator yields).
+    permission_request_result: dict[str, Any] | None = None
 
 
 def _matches(matcher: str | None, tool_name: str) -> bool:
@@ -201,6 +204,9 @@ class HookDispatcher:
                 outcome.prevent_continuation = True
             if single.blocking_errors:
                 blocking_errors_acc.extend(single.blocking_errors)
+            request_result = getattr(single, "permission_request_result", None)
+            if request_result is not None and outcome.permission_request_result is None:
+                outcome.permission_request_result = request_result
             if single.denied:
                 outcome.denied = True
                 outcome.reason = single.reason

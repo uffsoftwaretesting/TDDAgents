@@ -17,10 +17,12 @@ from app.loop.permissions.capability import (
 from app.loop.permissions.filesystem import (
     DANGEROUS_DIRECTORIES,
     DANGEROUS_FILES,
-    is_dangerous_path,
+    check_write_permission_for_tool,
+    is_dangerous_file_path_to_auto_edit,
     is_path_allowed,
-    is_path_in_allowed_working_dirs,
-    is_path_in_working_dir,
+    matching_rule_for_input,
+    path_in_allowed_working_path,
+    path_in_working_path,
 )
 from app.loop.permissions.gate import has_permissions_to_use_tool
 from app.loop.permissions.rules import (
@@ -72,8 +74,10 @@ __all__ = [
     # Filesystem & boundary (C5)
     "DANGEROUS_FILES",
     "DANGEROUS_DIRECTORIES",
-    "is_dangerous_path",
-    "is_path_in_working_dir",
-    "is_path_in_allowed_working_dirs",
+    "is_dangerous_file_path_to_auto_edit",
+    "path_in_working_path",
+    "path_in_allowed_working_path",
     "is_path_allowed",
+    "matching_rule_for_input",
+    "check_write_permission_for_tool",
 ]

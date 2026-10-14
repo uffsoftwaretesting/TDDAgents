@@ -79,8 +79,11 @@ class TestPermissionDataStructures:
         assert ctx.always_allow_rules == ()
         assert ctx.always_deny_rules == ()
         assert ctx.always_ask_rules == ()
-        assert ctx.is_bypass_permissions_mode_available is True
+        # Upstream: bypass is available only when the run started in it (Phase 3).
+        assert ctx.is_bypass_permissions_mode_available is False
         assert ctx.additional_working_directories == ()
+        assert dict(ctx.settings_roots) == {}
+        assert ctx.stripped_dangerous_rules == ()
 
 
 class TestModeLadderCycling:
@@ -88,7 +91,7 @@ class TestModeLadderCycling:
         # Ladder: default -> acceptEdits -> plan -> bypassPermissions -> default
         assert get_next_permission_mode(PermissionMode.DEFAULT) == PermissionMode.ACCEPT_EDITS
         assert get_next_permission_mode(PermissionMode.ACCEPT_EDITS) == PermissionMode.PLAN
-        assert get_next_permission_mode(PermissionMode.PLAN) == PermissionMode.BYPASS_PERMISSIONS
+        assert get_next_permission_mode(PermissionMode.PLAN) == PermissionMode.DEFAULT  # unavailable by default
         assert (
             get_next_permission_mode(PermissionMode.PLAN, is_bypass_available=True)
             == PermissionMode.BYPASS_PERMISSIONS

@@ -250,7 +250,7 @@ def test_validate_output_redirections(cwd):
                   "path resolution bypass"}
     assert validate_output_redirections((), cwd, edits, compound_command_has_cd=True).behavior == "passthrough"
     deny_ctx = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS, always_deny_rules=(
-        rule(os.path.join(cwd, "s"), PermissionBehavior.DENY),))
+        rule("s", PermissionBehavior.DENY, tool="Edit"),))
     denied = validate_output_redirections((OutputRedirection("s", ">"),), cwd, deny_ctx)
     assert (denied.behavior, denied.message) == (
         "deny", f"Output redirection to '{os.path.join(cwd, 's')}' was blocked by a deny rule.")

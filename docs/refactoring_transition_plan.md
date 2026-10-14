@@ -173,6 +173,27 @@ emitted in completion order, matching `runTools`. `TodoWrite` replaces the `TODO
   so a project allow such as `Bash(python:*)` can never defeat RED. Review the shipped
   `.tddagents/settings.json` allow list against this.
 
+*Phase 3 outcome (2026-10-14), per the interview ("always follow claude-code"):* the gate is
+`hasPermissionsToUseToolInner` step for step (a `checkPermissions` exception is passthrough,
+not deny; no read-only shortcut for `acceptEdits`/`plan`; no invented "interaction" ask),
+with the TDD phase check above step 1a and **failing closed**. The run's context is built
+like upstream's startup — `initialPermissionModeFromCLI` (run config, then settings
+`defaultMode`), `initializeToolPermissionContext` over user, project, local, flag and policy
+(`/etc/tddagents/managed-settings.json` + `managed-settings.d/`), `allowManagedPermissionRulesOnly`
+— and lives in `AppState`. `WriteFile`/`Edit` port `checkWritePermissionForTool` with
+gitignore-style `Edit(...)` rules (`matchingRuleForInput`, via `pathspec`), and Bash path
+checks use the same `isPathAllowed`. The shipped settings gain `"defaultMode": "acceptEdits"`,
+upstream's way to let a headless run write. **TDD managed tier:** upstream's
+`stripDangerousPermissionsForAutoMode` (`isDangerousBashPermission`, `DANGEROUS_BASH_PATTERNS`)
+runs for every TDD context, because the phase gate — like the classifier it was built for —
+cannot see where an interpreter writes; `Bash(python:*)` and `Bash(python -m pytest:*)` are
+stripped from the shipped allow list at load. PermissionRequest hooks run before the
+headless deny (`runPermissionRequestHooksForHeadlessAgent`); they are reached only by an
+'ask', so a phase deny never reaches them. *Divergences:* a policy or flag allow for an
+interpreter survives, as upstream's source filter dictates; a PermissionRequest hook may
+approve a call no rule covers (operator configuration); `updatedPermissions` are logged,
+not persisted; `Read(...)` rules are not yet checked by `ReadFile`.
+
 ### Phase 4 — Hooks rebuilt against the loop
 
 - Code: `claude-code/src/utils/hooks.ts` → `getMatchingHooks`, `matchesPattern`, `processHookJSONOutput`; `claude-code/src/query/stopHooks.ts` → `handleStopHooks`; `claude-code/src/utils/hooks/hooksConfigSnapshot.ts` → `getHooksFromAllowedSources`

@@ -11,8 +11,12 @@ workspace, and reports only what the ledger observed.
   workspace is a parameter, which is the room left for E2B.
 * **Ledger.** Each sub-requirement gets a fresh `AppStateStore`; that construction is the
   only place a ledger is seeded, and after it `RunTests` is the only writer.
-* **Permissions.** The run is headless (`should_avoid_permission_prompts`): an `ask` nobody
-  can answer is a deny. Settings-loaded rules are wired in Phase 3.
+* **Permissions.** Built once at entry the way upstream's startup builds them
+  (`build_tool_permission_context`): the mode from the run config or settings
+  `defaultMode`, rules from user, project, local, flag and policy settings, with the TDD
+  managed tier applied. The context lives in the sub-requirement's `AppState`, so a worker
+  reading its parent's state is held to it. The run is headless
+  (`should_avoid_permission_prompts`): an `ask` that no PermissionRequest hook answers is a deny.
 * **Transcript.** Written beside the workspace, never inside it, so agents cannot read or
   edit their own record and it never reaches the exported artifact.
 """
@@ -26,10 +30,11 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from app.loop.config import build_run_config
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.config import RunConfig, build_run_config
+from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.deps import LoopDeps
 from app.loop.engine import drain, run_loop
+from app.loop.permissions.settings import build_tool_permission_context
 from app.loop.permissions.types import ToolPermissionContext
 from app.loop.state import initial_loop_state
 from app.loop.tools.base import Tool
@@ -83,6 +88,28 @@ def session_workspace(thread_id: str) -> LocalWorkspace:
     return LocalWorkspace.for_run(thread_id, env=python.env())
 
 
+def run_permission_context(
+    config: RunConfig,
+    workspace: Any,
+    project_root: Path | None = None,
+    home: Path | None = None,
+    managed_dir: Path | str | None = None,
+) -> ToolPermissionContext:
+    """The run's permission context from its config and settings, anchored at the workspace."""
+    from app.loop.permissions.settings import MANAGED_DIR
+
+    root = getattr(workspace, "root", None)
+    return build_tool_permission_context(
+        project_root if project_root is not None else Path.cwd(),
+        home,
+        flag_settings_path=config.settings_path,
+        managed_dir=managed_dir if managed_dir is not None else MANAGED_DIR,
+        permission_mode_cli=config.permission_mode,
+        dangerously_skip_permissions=config.dangerously_skip_permissions,
+        working_dir=Path(root) if root is not None else None,
+    )
+
+
 def default_workspace(state: SessionState) -> LocalWorkspace:
     """The session's shared local workspace; a session without an id is a wiring bug."""
     session_id = state.get("session_id")
@@ -99,17 +126,27 @@ async def tdd_loop_runner(
     workspace: Any = None,
     deps: LoopDeps | None = None,
     permission_context: ToolPermissionContext | None = None,
+    project_root: Path | None = None,
+    home: Path | None = None,
+    managed_dir: Path | str | None = None,
 ) -> PlanItemResult:
-    """Run one sub-requirement through the loop and report what the ledger observed."""
+    """
+    Run one sub-requirement through the loop and report what the ledger observed.
+
+    `project_root` is where the project and local settings live (the repository, upstream's
+    original cwd); the workspace is the working directory the rules anchor to.
+    `home` and `managed_dir` relocate the user and policy scopes (tests use them).
+    """
     run_id = f"loop-{uuid.uuid4().hex[:8]}"
     ws = workspace if workspace is not None else default_workspace(state)
     if deps is None:
         from app.loop.factory import get_production_deps
 
         deps = get_production_deps()
-    perm = permission_context or ToolPermissionContext(should_avoid_permission_prompts=True)
+    config = build_run_config(run_id, postgres_checkpointing=False)
+    perm = permission_context or run_permission_context(config, ws, project_root, home, managed_dir)
 
-    store = AppStateStore()
+    store = AppStateStore(state=AppState(tool_permission_context=perm))
     ledger = store.get().phase_ledger
     built_ins = build_builtin_tools()
     pool_cache: dict[str, Any] = {
@@ -138,13 +175,11 @@ async def tdd_loop_runner(
         store,
         messages=(initial_message,),
         tools=refresh_tools(),
-        permission_context=perm,
         workspace=ws,
         refresh_tools=refresh_tools,
         run_id=run_id,
     )
     loop_state = initial_loop_state((initial_message,), ctx)
-    config = build_run_config(run_id, postgres_checkpointing=False)
 
     from app.loop.transcript import TranscriptLogger, with_transcript_logger
 
@@ -176,4 +211,10 @@ async def tdd_loop_runner(
     )
 
 
-__all__ = ["build_builtin_tools", "default_workspace", "session_workspace", "tdd_loop_runner"]
+__all__ = [
+    "build_builtin_tools",
+    "default_workspace",
+    "run_permission_context",
+    "session_workspace",
+    "tdd_loop_runner",
+]

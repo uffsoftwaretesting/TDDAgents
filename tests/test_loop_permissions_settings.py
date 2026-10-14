@@ -148,7 +148,7 @@ def test_non_utf8_settings_are_logged_and_skipped(tmp_path, caplog):
     bad.parent.mkdir(parents=True)
     bad.write_bytes(b"\xff\xfe")
     write_settings(project / ".tddagents/settings.local.json", {"permissions": {"allow": ["Bash(ok)"]}})
-    assert st._read_settings(tmp_path / "missing.json") is None
+    assert st.parse_settings_file(tmp_path / "missing.json") is None
     with caplog.at_level(logging.WARNING, logger="TDDOrchestrator.Permissions"):
         rules = load_permission_rules(project, tmp_path / "home")
     assert [r.rule_content for r in rules] == ["ok"]
@@ -159,24 +159,26 @@ def test_build_tool_permission_context(tmp_path):
     project = tmp_path / "proj"
     write_settings(project / ".tddagents/settings.json",
                    {"permissions": {"allow": ["Bash(a)"], "deny": ["Bash(d)"], "ask": ["Bash(q)"]}})
-    ctx = build_tool_permission_context(project, tmp_path / "home")
+    ctx = build_tool_permission_context(project, tmp_path / "home", managed_dir=tmp_path / "etc")
     assert ctx.mode == PermissionMode.DEFAULT
     assert ctx.should_avoid_permission_prompts is True
     assert [r.rule_content for r in ctx.always_allow_rules] == ["a"]
     assert [r.rule_content for r in ctx.always_deny_rules] == ["d"]
     assert [r.rule_content for r in ctx.always_ask_rules] == ["q"]
-    other = build_tool_permission_context(project, tmp_path / "home", mode=PermissionMode.ACCEPT_EDITS,
-                                          should_avoid_permission_prompts=False)
+    other = build_tool_permission_context(project, tmp_path / "home", managed_dir=tmp_path / "etc",
+                                          permission_mode_cli="acceptEdits", should_avoid_permission_prompts=False)
     assert other.mode == PermissionMode.ACCEPT_EDITS
     assert other.should_avoid_permission_prompts is False
 
 
 def test_shipped_project_settings_parse():
-    """The checked-in `.tddagents/settings.json` loads and only allows."""
+    """The checked-in `.tddagents/settings.json` loads, only allows, and runs in acceptEdits."""
     repo = Path(__file__).parent.parent
     rules = load_permission_rules(repo, repo / "no-such-home")
     assert rules and all(r.rule_behavior == ALLOW and r.tool_name == "Bash" for r in rules)
     assert "pytest:*" in {r.rule_content for r in rules}
+    ctx = build_tool_permission_context(repo, repo / "no-such-home", managed_dir=repo / "no-such-etc")
+    assert ctx.mode == PermissionMode.ACCEPT_EDITS
 
 
 # ── shell rule matching ──────────────────────────────────────────────────────
@@ -262,7 +264,7 @@ def test_unescaped_paren_at_start_and_missing_open():
 def test_build_context_uses_the_given_home(tmp_path):
     home = tmp_path / "home"
     write_settings(home / ".tddagents/settings.json", {"permissions": {"allow": ["Bash(from-home)"]}})
-    ctx = build_tool_permission_context(tmp_path / "proj", home)
+    ctx = build_tool_permission_context(tmp_path / "proj", home, managed_dir=tmp_path / "etc")
     assert [r.rule_content for r in ctx.always_allow_rules] == ["from-home"]
 
 

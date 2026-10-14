@@ -75,9 +75,23 @@ class RunConfig:
 
     #: `withRetry.ts` -> `getMaxRetries`. Attempts are `max_retries + 1`.
     max_retries: int = DEFAULT_MAX_RETRIES
+    #: Upstream `--permission-mode`. `None` defers to settings `permissions.defaultMode`
+    #: (`initialPermissionModeFromCLI`), then `default`.
+    permission_mode: str | None = None
+    #: Upstream `--settings`: the flag-settings file, `None` when the run names none.
+    settings_path: str | None = None
+    #: Upstream `--dangerously-skip-permissions`.
+    dangerously_skip_permissions: bool = False
 
 
-def build_run_config(run_id: str, *, postgres_checkpointing: bool) -> RunConfig:
+def build_run_config(
+    run_id: str,
+    *,
+    postgres_checkpointing: bool,
+    permission_mode: str | None = None,
+    settings_path: str | None = None,
+    dangerously_skip_permissions: bool = False,
+) -> RunConfig:
     """
     The one place a `RunConfig` is resolved from the environment.
 
@@ -90,6 +104,9 @@ def build_run_config(run_id: str, *, postgres_checkpointing: bool) -> RunConfig:
     The model is resolved here for the same reason: `Config.MODEL` is the single place it
     is named, and reading it once means every turn of a run is answered by the same model
     even if the constant were reloaded underneath.
+
+    The permission inputs are upstream's startup flags and are passed in, because a flag is
+    the caller's to give: the session shell's entry point (Phase 9) is where they come from.
     """
     return RunConfig(
         run_id=run_id,
@@ -99,4 +116,7 @@ def build_run_config(run_id: str, *, postgres_checkpointing: bool) -> RunConfig:
         ),
         model=Config.MODEL,
         fallback_model=getattr(Config, "FALLBACK_MODEL", None),
+        permission_mode=permission_mode,
+        settings_path=settings_path,
+        dangerously_skip_permissions=dangerously_skip_permissions,
     )

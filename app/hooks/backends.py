@@ -43,6 +43,10 @@ class HookExecutionOutcome:
     stop_continuation: bool = False
     prevent_continuation: bool = False
     blocking_errors: tuple[str, ...] = ()
+    #: Upstream `permissionRequestResult`: a PermissionRequest hook's
+    #: `hookSpecificOutput.decision` (`{behavior: allow|deny, updatedInput?, message?,
+    #: interrupt?}`), or `None` when the hook stated no decision.
+    permission_request_result: dict[str, Any] | None = None
     exit_code: int = 0
     stdout: str = ""
     stderr: str = ""
@@ -211,6 +215,16 @@ class CommandHookBackend:
                 hook.label,
                 decision,
             )
+
+        specific = document.get("hookSpecificOutput")
+        if (
+            event == "PermissionRequest"
+            and isinstance(specific, dict)
+            and specific.get("hookEventName") == "PermissionRequest"
+        ):
+            request_decision = specific.get("decision")
+            if isinstance(request_decision, dict) and request_decision.get("behavior") in ("allow", "deny"):
+                outcome.permission_request_result = request_decision
 
         if event == "PreToolUse":
             updated = document.get("updatedInput")

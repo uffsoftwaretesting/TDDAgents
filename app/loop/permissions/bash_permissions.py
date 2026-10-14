@@ -57,6 +57,7 @@ from app.loop.permissions.bash_security import (
     try_parse_shell_command,
 )
 from app.loop.permissions.shell_rules import match_wildcard_pattern, parse_permission_rule
+from app.loop.permissions.messages import create_permission_request_message
 from app.loop.permissions.types import (
     PermissionBehavior,
     PermissionMode,
@@ -130,31 +131,8 @@ def _js_trim(s: str) -> str:
 
 
 def request_message(tool_name: str = BASH_TOOL_NAME, decision_reason: Mapping[str, Any] | None = None) -> str:
-    """`createPermissionRequestMessage` for the reason shapes this flow produces."""
-    if decision_reason is not None:
-        reason_type = decision_reason.get("type")
-        if reason_type in ("other", "safetyCheck"):
-            return str(decision_reason.get("reason"))
-        if reason_type == "subcommandResults":
-            reasons = decision_reason.get("reasons")
-            needs: list[str] = []
-            if isinstance(reasons, dict):
-                for cmd, result in reasons.items():
-                    if result.behavior in (PermissionBehavior.ASK, PermissionBehavior.PASSTHROUGH):
-                        if tool_name == BASH_TOOL_NAME:
-                            extraction = extract_output_redirections(cmd)
-                            needs.append(extraction.command_without_redirections if extraction.redirections else cmd)
-                        else:
-                            needs.append(cmd)
-            if needs:
-                part = "part" if len(needs) == 1 else "parts"
-                verb = "requires" if len(needs) == 1 else "require"
-                return (
-                    f"This {tool_name} command contains multiple operations. "
-                    f"The following {part} {verb} approval: {', '.join(needs)}"
-                )
-            return f"This {tool_name} command contains multiple operations that require approval"
-    return f"The agent requested permissions to use {tool_name}, but you haven't granted it yet."
+    """`createPermissionRequestMessage` (`app/loop/permissions/messages.py`), Bash by default."""
+    return create_permission_request_message(tool_name, decision_reason)
 
 
 def _ask(reason: str, message: str | None = None) -> PermissionResult:

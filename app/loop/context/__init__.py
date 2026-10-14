@@ -29,6 +29,7 @@ from typing import Any, Callable, Mapping
 from app.loop.context.file_state import FileState
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
+from app.loop.permissions.types import ToolPermissionContext
 
 
 @dataclass(slots=True)
@@ -69,6 +70,11 @@ class AppState:
 
     phase_ledger: PhaseLedger = PhaseLedger()
     todos: Mapping[str, tuple[Any, ...]] = field(default_factory=dict)
+    #: Upstream `appState.toolPermissionContext`: the run's rules and mode, built once at
+    #: entry by `build_tool_permission_context`. It lives here rather than on the
+    #: `ToolContext` so a synchronous worker, which reads its parent's app state, is held
+    #: to the same rules (`ToolContext.permission_context` still overrides it when set).
+    tool_permission_context: ToolPermissionContext = ToolPermissionContext()
 
 
 @dataclass(slots=True)

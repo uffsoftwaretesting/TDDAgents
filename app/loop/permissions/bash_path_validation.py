@@ -13,9 +13,9 @@ Ported from claude-code v2.1.88, legacy (no tree-sitter) path:
   `validatePath`; `src/utils/path.ts` -> `containsPathTraversal`.
 
 `validatePath`'s pre-checks (quotes, tilde variants, UNC, shell expansion, globs) are
-upstream's. The final containment and mode decision is this repository's Part C5
-`is_path_allowed`, mapped back to upstream's shape: allowed, or a `rule`/`safetyCheck`
-reason that is carried through, or no reason (the standard "was blocked" message).
+upstream's. The final containment and mode decision is upstream's `isPathAllowed`
+(`app/loop/permissions/filesystem.py`): deny rules, the safety check, the working directory
+(writes only in `acceptEdits`), then allow rules.
 
 Divergences: paths are resolved with `os.path.normpath` (Node's `path.resolve`), without
 upstream's symlink canonicalisation (`safeResolvePath`); the AST-only
@@ -91,13 +91,8 @@ def _resolve(path: str, cwd: str) -> str:
 def _is_path_allowed(
     resolved: str, context: ToolPermissionContext, cwd: str, operation: FileOperationType
 ) -> tuple[bool, dict[str, object] | None]:
-    verdict = is_path_allowed(resolved, context, cwd, "read" if operation == "read" else "write")
-    if verdict.behavior == PermissionBehavior.ALLOW:
-        return True, None
-    reason = verdict.decision_reason or {}
-    if reason.get("type") in ("rule", "safetyCheck"):
-        return False, reason
-    return False, None
+    verdict = is_path_allowed(resolved, context, cwd, operation)
+    return verdict.allowed, verdict.decision_reason
 
 
 def validate_path(

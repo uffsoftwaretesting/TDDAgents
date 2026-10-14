@@ -16,6 +16,12 @@ Preconditions live in `validate_input` with upstream's `errorCode`s, so they run
 same pipeline position as upstream (`run_tool_use`: resolve -> validate -> permission ->
 call). Read-before-write uses `ToolContext.read_file_state` (`app/loop/context/file_state.py`).
 
+`WriteFile` and `Edit` check permissions with upstream's `checkWritePermissionForTool`
+(`app/loop/permissions/filesystem.py`): `Edit(...)` path rules, the dangerous-path safety
+check, and `acceptEdits` inside the workspace. In `default` mode a write is an 'ask', which a
+headless run denies — the run's mode comes from settings `defaultMode` or the run config, as
+upstream's comes from `--permission-mode`.
+
 Every operation goes through the `Workspace` protocol, so the same tool works against the
 sandbox and the host, and the workspace's path containment is the boundary.
 
@@ -47,6 +53,7 @@ from typing import Any, Mapping
 
 from app.loop.context import ToolContext
 from app.loop.context.file_state import FileState
+from app.loop.permissions.filesystem import check_file_write_permissions
 from app.loop.prompts.loader import parse_markdown_frontmatter, render_prompt
 from app.loop.prompts.registry import global_prompt_registry
 from app.loop.tools.base import BuiltTool, build_tool
@@ -425,6 +432,7 @@ def build_write_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         description=lambda args: f"Write file: {args.get('file_path')}",
         is_destructive=lambda args: True,
         validate_input=validate_write,
+        check_permissions=check_file_write_permissions(),
         call=call_write,
     )
 
@@ -522,6 +530,7 @@ def build_edit_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         description=lambda args: f"Edit file: {args.get('file_path')}",
         is_destructive=lambda args: True,
         validate_input=validate_edit,
+        check_permissions=check_file_write_permissions(),
         call=call_edit,
     )
 

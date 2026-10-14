@@ -44,7 +44,7 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate. Nothing in the running graph
+Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–3 of `docs/refactoring_transition_plan.md` are wired into the loop runner (`app/loop/runner.py`). Nothing in the legacy graph
 calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
 | File / Subpackage | Ships |
@@ -90,9 +90,13 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `tools/run_tests.py` | `RunTests` loop tool, ground truth test execution, `SuiteExecutionResult`, updating authoritative ledger, workspace execution (D2 & G) |
 | `permissions/types.py` | `PermissionMode`, `PermissionBehavior`, `PermissionRule`, `ToolPermissionContext`, ladder cycling (C1) |
 | `permissions/rules.py` | `rule_matches`, rule lookups, `extract_permission_context`, `check_rule_based_permissions` (C2) |
-| `permissions/gate.py` | `has_permissions_to_use_tool` runtime authorization gate, mode rules, bypass mode, TDD phase rules (C3 & D4) |
+| `permissions/gate.py` | `hasPermissionsToUseTool` inner/outer step for step; TDD phase tier above step 1a, failing closed; dontAsk, headless deny after PermissionRequest hooks (C3, D4, Phase 3) |
 | `permissions/capability.py` | `is_bash_command_read_only`, `bash_is_read_only`, shell splitting, duration and wrapper handling (C4) |
-| `permissions/filesystem.py` | `is_path_allowed`, `is_dangerous_path`, `is_path_in_allowed_working_dirs` (C5) |
+| `permissions/filesystem.py` | `matchingRuleForInput` (gitignore `Edit(...)`/`Read(...)` rules via `pathspec`), `checkPathSafetyForAutoEdit`, `isPathAllowed`, `checkWritePermissionForTool` — the `check_permissions` of `WriteFile`/`Edit` (C5, Phase 3) |
+| `permissions/settings.py` | Five settings sources (user, project, local, flag, policy + `managed-settings.d`), `allowManagedPermissionRulesOnly`, `initialPermissionModeFromCLI`, `initializeToolPermissionContext`, `build_tool_permission_context` (Phase 3) |
+| `permissions/dangerous.py` | `DANGEROUS_BASH_PATTERNS`, `isDangerousBashPermission`, `stripDangerousPermissionsForAutoMode` run for **every** TDD context — the TDD managed tier (Phase 3) |
+| `permissions/permission_request.py` | `runPermissionRequestHooksForHeadlessAgent` over `ToolContext.hook_dispatcher` (Phase 3) |
+| `permissions/messages.py` | `createPermissionRequestMessage`, `AUTO_REJECT_MESSAGE`, `DONT_ASK_REJECT_MESSAGE`, source/mode display names (Phase 3) |
 | `permissions/tdd.py` | `get_phase_deny_rules`, tool classification (`is_implementation_writing_tool`, `is_test_writing_tool`, `is_test_path`), `check_tdd_phase_permission` (D3 & D4) |
 | `tdd/hooks.py` | `tdd_phase_incomplete_hook`, stop hook honoring `stop_hook_active` without infinite loops (D5) |
 | `streaming/abort.py` | Three-controller abort tree (`AbortSignal`, `AbortController`, `create_child_abort_controller`, `bridge_cancel_token`) (F3) |
@@ -184,6 +188,80 @@ put to the user and chosen deliberately.
 `reactiveCompact.ts` is absent from the shipped build (its call sites in `query.ts` are
 not, and TDD runs produce long output); `tool_use_id` sanitized for the result filename,
 which is the identity transform for a well-formed id and blocks path traversal.
+
+### What Phase 3 changed (2026-10-14)
+
+Permissions and settings are wired at runtime. The user's direction for every choice was
+**"always follow claude-code"**, so each item below is a port, and each divergence is named.
+
+- **The gate is `hasPermissionsToUseToolInner` step for step.** Three local inventions are
+  gone: a `checkPermissions` exception is now *passthrough* (upstream logs it), not deny;
+  `acceptEdits`/`plan` no longer allow read-only calls in the gate (the tool's own check
+  decides); and a tool that "requires interaction" no longer gets an invented ask.
+  The **TDD phase check sits above step 1a and fails closed**. It used to be
+  `except Exception: pass`.
+- **The context is built like upstream's startup** (`build_tool_permission_context`):
+  `initialPermissionModeFromCLI` takes `RunConfig.permission_mode` first, then settings
+  `permissions.defaultMode`. `initializeToolPermissionContext` loads user, project, local,
+  flag (`RunConfig.settings_path`) and policy (`/etc/tddagents/managed-settings.json` +
+  `managed-settings.d/*.json`), and honours `allowManagedPermissionRulesOnly`. It lives in
+  `AppState.tool_permission_context`, so a worker reading its parent's state gets it too.
+  `is_bypass_permissions_mode_available` defaults to `False`.
+- **`WriteFile`/`Edit` check permissions** with `checkWritePermissionForTool`. In `default`
+  mode every write is an 'ask', and a headless run denies it, which is why the shipped
+  `.tddagents/settings.json` now says `"defaultMode": "acceptEdits"`. That is upstream's way
+  to let a headless run edit. **A test that drives a write through the pipeline must set
+  `acceptEdits` (or an `Edit` allow rule)**, or the write is refused.
+- **Path rules are gitignore patterns on `Edit`/`Read`**, matched by `pathspec`. `/x` is
+  anchored at the workspace (upstream's original cwd), `//x` at the filesystem root, `~/x`
+  at home. A deny on a raw absolute string no longer matches. Write `Edit(//abs/path)`.
+- **TDD managed tier = upstream's dangerous-rule stripping, always on.** `Bash(python:*)`
+  lets the model write any file through the interpreter, and the phase gate (like the
+  auto-mode classifier upstream built `stripDangerousPermissionsForAutoMode` for) cannot see
+  where it writes. So `isDangerousBashPermission` strips such allows from editable sources
+  for every run. The shipped `Bash(python:*)` and `Bash(python -m pytest:*)` are stripped at
+  load; `pytest:*` survives.
+- **PermissionRequest hooks** run before the headless deny. Only an 'ask' reaches them, so
+  a phase deny can never be overturned by one. `app/hooks/` parses
+  `hookSpecificOutput.decision` for that event.
+
+*Divergences, all recorded:* a dangerous allow in **policy or flag** settings survives, as
+upstream's `isPermissionUpdateDestination` filter dictates. A PermissionRequest hook may
+approve a call no rule covers, which is operator configuration. `updatedPermissions` are
+logged, not persisted. `ReadFile` does not yet check `Read(...)` rules. The editable
+internal paths, the `.claude/**` session carve-out and the sandbox write allowlist have no
+equivalent here.
+
+**Phase 3 is measured under `paths_to_mutate` = `permissions/{gate,settings,filesystem,
+dangerous,messages,permission_request}`, `runner` and clears the bar**, at 4991 tests:
+
+| | |
+|---|---|
+| Mutants | 1955 (2 timeout) |
+| Killed | 1853 |
+| Survived | 100 |
+| **Mutation score** | **94.9%** (1853 / 1953) |
+
+The first run scored 91.7%. Triage killed two real gaps and removed two dead-code clusters:
+`runner.py` was never in Phase 1's mutation set, so `refresh_tools`' identity cache (rebuild
+only on a phase move, then return the same tuple) and the `run_id`/`refresh_tools` wiring
+were untested. `run_permission_context` is now pinned input by input. The gate's seed
+passthrough message (always rebuilt by step 3) and the write check's unused `tool_name` were
+deleted. The 100 survivors are equivalent:
+- log wording and arguments (runner 31, `permission_request` 9, gate 10);
+- `PermissionResult(behavior=ALLOW)` with the argument dropped, which is the dataclass
+  default (5);
+- default-argument mutations (8);
+- `False`→`None` initializers;
+- the `utf-8` codec alias;
+- `"ask"`→`None`/`"ASK"` in `_rules_for`, whose `else` branch *is* the ask rules;
+- `"read"` mutations where only `== "edit"` is tested;
+- `path_in_allowed_working_path` given the same candidates either way;
+- `_escaped`'s `-= 1` (parity is unchanged);
+- the unreachable `close_idx`/`range` bounds of `permission_rule_value_from_string`;
+- the macOS `/private` case folds (later lowercased);
+- `load_permission_rules`' managed dir (absent on the test host);
+- the runner's pool `phase_ledger` and `messages` mutants (Phase 0's equivalent classes).
 
 ### The three things that change most
 

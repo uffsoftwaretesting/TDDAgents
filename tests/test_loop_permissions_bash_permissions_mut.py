@@ -148,12 +148,12 @@ def test_dev_null_and_allowed_targets_do_not_stop_the_scan(tmp_path):
 def test_redirection_deny_rule_and_safety_reasons(tmp_path):
     cwd = str(tmp_path)
     target = str(tmp_path / "secret.txt")
-    path_rule = PermissionRule(tool_name="Bash", rule_behavior=DENY, rule_content=target)
+    path_rule = PermissionRule(tool_name="Edit", rule_behavior=DENY, rule_content="/" + target)
     res = bp.validate_output_redirections((OutputRedirection(target, ">"),), cwd, ctx(path_rule))
     assert res == PermissionResult(behavior=DENY,
                                    message=f"Output redirection to '{target}' was blocked by a deny rule.",
                                    decision_reason={"type": "rule", "rule": path_rule})
-    reason = "Modifying files inside sensitive directory '.git' is restricted."
+    reason = f"The agent requested permissions to edit {cwd}/.git/config which is a sensitive file."
     res = bp.validate_output_redirections((OutputRedirection(".git/config", ">"),), cwd,
                                           ctx(mode=PermissionMode.ACCEPT_EDITS))
     assert res == PermissionResult(behavior=ASK, message=reason,
@@ -399,7 +399,7 @@ def test_validate_command_paths_scans_every_path_and_keeps_reasons(tmp_path):
     accept = ctx(mode=PermissionMode.ACCEPT_EDITS)
     res = pv.validate_command_paths("mkdir", ["ok", "/etc/x"], cwd, accept)
     assert res.behavior == ASK and "/etc/x" in res.message
-    reason = "Modifying files inside sensitive directory '.git' is restricted."
+    reason = f"The agent requested permissions to edit {cwd}/.git/x which is a sensitive file."
     assert pv.validate_command_paths("touch", [".git/x"], cwd, accept) == PermissionResult(
         behavior=ASK, message=reason, decision_reason={"type": "safetyCheck", "reason": reason})
     assert pv.validate_command_paths("mkdir", ["d"], cwd, ctx(), True) == PermissionResult(
