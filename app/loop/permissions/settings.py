@@ -525,6 +525,7 @@ def initialize_tool_permission_context(
         additional_working_directories=tuple(directories),
         should_avoid_permission_prompts=should_avoid_permission_prompts,
         settings_roots=roots,
+        settings_locations=locations,
     )
     return context, warnings
 

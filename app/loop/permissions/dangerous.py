@@ -142,8 +142,9 @@ def strip_dangerous_permissions(context: ToolPermissionContext) -> ToolPermissio
     """
     `stripDangerousPermissionsForAutoMode`, run for every TDD context.
 
-    Removes each dangerous allow rule whose source is editable, records the removed rules
-    in `stripped_dangerous_rules`, and leaves the mode alone.
+    Removes each dangerous allow rule whose source is editable, appends the removed rules
+    to `stripped_dangerous_rules` (it also re-runs after a hook's `updatedPermissions` are
+    applied), and leaves the mode alone.
     """
     dangerous = find_dangerous_classifier_permissions(context.always_allow_rules)
     removable = tuple(rule for rule in dangerous if rule.source in PERMISSION_UPDATE_DESTINATIONS)
@@ -157,7 +158,7 @@ def strip_dangerous_permissions(context: ToolPermissionContext) -> ToolPermissio
     return replace(
         context,
         always_allow_rules=tuple(rule for rule in context.always_allow_rules if rule not in removable),
-        stripped_dangerous_rules=removable,
+        stripped_dangerous_rules=context.stripped_dangerous_rules + removable,
     )
 
 

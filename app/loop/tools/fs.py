@@ -16,6 +16,13 @@ Preconditions live in `validate_input` with upstream's `errorCode`s, so they run
 same pipeline position as upstream (`run_tool_use`: resolve -> validate -> permission ->
 call). Read-before-write uses `ToolContext.read_file_state` (`app/loop/context/file_state.py`).
 
+`ReadFile`, `Glob` and `Grep` check permissions with upstream's `checkReadPermissionForTool`:
+`Read(...)` deny/ask rules, reads inside the workspace allowed, this project's config
+directory (persisted tool results) readable, anything else an 'ask'. `Glob` and `Grep` also
+pass the `Read` deny patterns to ripgrep as exclude globs, as upstream does, so a denied file
+under a searchable directory is hidden rather than leaked. `ReadFile` refuses a Read-denied
+path in `validate_input` (errorCode 1), before any I/O.
+
 `WriteFile` and `Edit` check permissions with upstream's `checkWritePermissionForTool`
 (`app/loop/permissions/filesystem.py`): `Edit(...)` path rules, the dangerous-path safety
 check, and `acceptEdits` inside the workspace. In `default` mode a write is an 'ask', which a
@@ -37,8 +44,9 @@ Divergences, each forced by the `Workspace` protocol:
 
 * Staleness is decided by content comparison, not timestamps (see `file_state.py`).
 * Paths are workspace-relative; an absolute Glob pattern is re-rooted at the workspace.
-* Permission-derived read-ignore globs (`getFileReadIgnorePatterns`) and the plugin-cache
-  exclusions are not passed to rg: neither concept exists here yet.
+* The plugin-cache exclusions are not passed to rg: there is no plugin cache here.
+* Read-deny exclude globs are anchored at the workspace root (where rg runs) for Glob too;
+  upstream anchors Glob's at the search directory, which is rg's cwd there.
 * Read omits images, PDFs (`pages`) and notebooks.
 """
 
@@ -53,7 +61,15 @@ from typing import Any, Mapping
 
 from app.loop.context import ToolContext
 from app.loop.context.file_state import FileState
-from app.loop.permissions.filesystem import check_file_write_permissions
+from app.loop.permissions.filesystem import (
+    check_file_read_permissions,
+    check_file_write_permissions,
+    matching_rule_for_input,
+    permission_cwd,
+    read_deny_ignore_globs,
+    workspace_absolute_path,
+)
+from app.loop.permissions.rules import extract_permission_context
 from app.loop.prompts.loader import parse_markdown_frontmatter, render_prompt
 from app.loop.prompts.registry import global_prompt_registry
 from app.loop.tools.base import BuiltTool, build_tool
@@ -61,6 +77,9 @@ from app.loop.tools.ripgrep import rip_grep, to_relative_path
 from app.loop.tools.types import ToolResult, ValidationResult
 from app.loop.tools.result_storage import TOOL_RESULTS_SUBDIR, config_home
 from app.workspace.base import WorkspaceNotFound, normalize_path
+
+#: `FileReadTool.validateInput`'s refusal of a Read-denied path (errorCode 1).
+READ_DENIED_MESSAGE = "File is in a directory that is denied by your permission settings."
 
 #: `FileReadTool/prompt.ts` -> `MAX_LINES_TO_READ`.
 MAX_LINES_TO_READ = 2000
@@ -310,6 +329,11 @@ def add_line_numbers(lines: list[str], start_line: int) -> str:
 
 def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
     def validate_read(input_args: dict[str, Any], context: ToolContext) -> ValidationResult:
+        # `FileReadTool.validateInput`: a Read-deny match is refused before any I/O.
+        cwd = permission_cwd(context)
+        target = workspace_absolute_path(str(input_args.get("file_path") or ""), cwd)
+        if matching_rule_for_input(target, extract_permission_context(context), "read", "deny", cwd) is not None:
+            return invalid(READ_DENIED_MESSAGE, 1)
         if "offset" in input_args and not is_non_negative_int(input_args["offset"]):
             return invalid("offset must be a non-negative integer.", 0)
         limit = input_args.get("limit")
@@ -382,6 +406,7 @@ def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         is_read_only=lambda args: True,
         is_concurrency_safe=lambda args: True,
         validate_input=validate_read,
+        check_permissions=check_file_read_permissions("file_path"),
         call=call_read,
     )
 
@@ -579,6 +604,9 @@ def build_glob_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
             base, pattern = extract_glob_base_directory(pattern)
             search_dir = normalize_path(base)
         args = ["--files", "--glob", pattern, "--sort=modified", "--no-ignore", "--hidden"]
+        args += read_deny_ignore_globs(
+            extract_permission_context(context), permission_cwd(context), anchor_floating=False
+        )
         try:
             paths = [to_relative_path(p) for p in rip_grep(ws, args, search_dir)]
         except Exception as e:
@@ -608,6 +636,7 @@ def build_glob_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         is_read_only=lambda args: True,
         is_concurrency_safe=lambda args: True,
         validate_input=validate_glob,
+        check_permissions=check_file_read_permissions("path"),
         call=call_glob,
     )
 
@@ -623,8 +652,8 @@ MTIME_SCRIPT = (
 )
 
 
-def build_grep_args(input_args: dict[str, Any]) -> list[str]:
-    """`GrepTool.call`: the ripgrep argv, flag for flag."""
+def build_grep_args(input_args: dict[str, Any], ignore_globs: list[str] | None = None) -> list[str]:
+    """`GrepTool.call`: the ripgrep argv, flag for flag; `ignore_globs` hide Read-denied files."""
     mode = input_args.get("output_mode", "files_with_matches")
     pattern = str(input_args.get("pattern") or "")
     args = ["--hidden"]
@@ -656,6 +685,7 @@ def build_grep_args(input_args: dict[str, Any]) -> list[str]:
         args += ["--type", str(input_args["type"])]
     for g in split_grep_globs(str(input_args.get("glob") or "")):
         args += ["--glob", g]
+    args += ignore_globs or []
     return args
 
 
@@ -707,7 +737,10 @@ def build_grep_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
 
         target = normalize_path(str(input_args.get("path") or "."))
         try:
-            results = rip_grep(ws, build_grep_args(input_args), target)
+            ignore = read_deny_ignore_globs(
+                extract_permission_context(context), permission_cwd(context), anchor_floating=True
+            )
+            results = rip_grep(ws, build_grep_args(input_args, ignore), target)
         except Exception as e:
             return ToolResult(content=f"Grep error: {e}", is_error=True)
 
@@ -797,5 +830,6 @@ def build_grep_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         is_read_only=lambda args: True,
         is_concurrency_safe=lambda args: True,
         validate_input=validate_grep,
+        check_permissions=check_file_read_permissions("path"),
         call=call_grep,
     )

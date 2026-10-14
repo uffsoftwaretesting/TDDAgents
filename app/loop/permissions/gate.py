@@ -17,8 +17,6 @@ and the PowerShell guard.
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from typing import TYPE_CHECKING, Any
 
 from app.loop.permissions.messages import (
@@ -33,25 +31,27 @@ from app.loop.permissions.rules import (
     get_allow_rule_for_tool,
     get_ask_rule_for_tool,
     get_deny_rule_for_tool,
+    is_ask_rule_reason,
+    is_safety_check_ask,
+    requires_user_interaction,
+    tdd_phase_denial,
+    tool_permission_result,
 )
 from app.loop.permissions.types import (
     PermissionBehavior,
     PermissionMode,
     PermissionResult,
-    PermissionRule,
 )
 
 if TYPE_CHECKING:
     from app.loop.context import ToolContext
     from app.loop.tools.base import Tool
 
-logger = logging.getLogger("TDDOrchestrator.Permissions")
-
-
 __all__ = [
     "DENIAL_WORKAROUND_GUIDANCE",
     "auto_reject_message",
     "has_permissions_to_use_tool",
+    "resolve_ask_without_prompt",
 ]
 
 
@@ -62,11 +62,27 @@ async def has_permissions_to_use_tool(
     tool_use_id: str = "",
 ) -> PermissionResult:
     """
-    `hasPermissionsToUseTool`, the outer gate. Only an 'ask' is transformed, and in this
-    order: `dontAsk` denies; a context that cannot prompt (`should_avoid_permission_prompts`)
-    gives PermissionRequest hooks the first word and otherwise denies.
+    `hasPermissionsToUseTool`, the outer gate: the inner decision, with an 'ask' resolved
+    by `resolve_ask_without_prompt`.
     """
     result = await _has_permissions_to_use_tool_inner(tool, input_args, context)
+    return await resolve_ask_without_prompt(result, tool, input_args, context, tool_use_id)
+
+
+async def resolve_ask_without_prompt(
+    result: PermissionResult,
+    tool: Tool,
+    input_args: dict[str, Any],
+    context: ToolContext,
+    tool_use_id: str = "",
+) -> PermissionResult:
+    """
+    The outer gate's handling of an 'ask', split out so a PreToolUse hook's own 'ask'
+    (upstream's `forceDecision`) goes through it too. Only an 'ask' is transformed, in this
+    order: `dontAsk` denies; a context that cannot prompt (`should_avoid_permission_prompts`)
+    gives PermissionRequest hooks the first word and otherwise denies. Anything else is
+    returned unchanged — an interactive caller shows its prompt.
+    """
     if result.behavior != PermissionBehavior.ASK:
         return result
     perm_ctx = extract_permission_context(context)
@@ -88,57 +104,6 @@ async def has_permissions_to_use_tool(
             decision_reason={"type": "asyncAgent", "reason": "Permission prompts are not available in this context"},
         )
     return result
-
-
-def _check_tdd_phase(tool: Tool, input_args: dict[str, Any], context: ToolContext) -> PermissionResult | None:
-    """
-    The managed tier: a deny when the ledger's phase forbids this call, else `None`.
-
-    Fails closed — a check that raises is a refusal, because a phase rule that silently
-    stops applying is barrier 2 switched off.
-    """
-    try:
-        ledger = getattr(context.get_app_state(), "phase_ledger", None)
-        if ledger is None:
-            return None
-        from app.loop.permissions.tdd import check_tdd_phase_permission
-
-        permitted, reason = check_tdd_phase_permission(tool, input_args, ledger)
-    except Exception as exc:
-        logger.exception("TDD phase check failed for %s", tool.name)
-        reason = f"TDD phase check failed for {tool.name}: {exc}"
-        return PermissionResult(
-            behavior=PermissionBehavior.DENY,
-            message=reason,
-            decision_reason={"type": "phase_rule", "phase": None, "reason": reason},
-        )
-    if permitted:
-        return None
-    return PermissionResult(
-        behavior=PermissionBehavior.DENY,
-        message=reason,
-        decision_reason={"type": "phase_rule", "phase": ledger.phase, "reason": reason},
-    )
-
-
-def _requires_user_interaction(tool: Tool, input_args: dict[str, Any]) -> bool:
-    fn = getattr(tool, "requires_user_interaction", None)
-    if not callable(fn):
-        return False
-    try:
-        return bool(fn(input_args))
-    except TypeError:
-        return bool(fn())
-
-
-def _is_ask_rule_reason(result: PermissionResult) -> bool:
-    reason = result.decision_reason or {}
-    rule = reason.get("rule")
-    return (
-        reason.get("type") == "rule"
-        and isinstance(rule, PermissionRule)
-        and rule.rule_behavior == PermissionBehavior.ASK
-    )
 
 
 def _updated_input_or_fallback(result: PermissionResult, input_args: dict[str, Any]) -> dict[str, Any]:
@@ -170,7 +135,7 @@ async def _has_permissions_to_use_tool_inner(
             decision_reason={"type": "other", "reason": "cancelled"},
         )
 
-    phase_denial = _check_tdd_phase(tool, input_args, context)
+    phase_denial = tdd_phase_denial(tool, input_args, context)
     if phase_denial is not None:
         return phase_denial
 
@@ -192,30 +157,15 @@ async def _has_permissions_to_use_tool_inner(
             decision_reason={"type": "rule", "rule": ask_rule},
         )
 
-    # Upstream seeds this with a request message; step 3 rebuilds the message for every
-    # passthrough, so the seed's is never read and is not reproduced.
-    tool_perm_res = PermissionResult(behavior=PermissionBehavior.PASSTHROUGH)
-    try:
-        res = tool.check_permissions(input_args, context)
-        if asyncio.iscoroutine(res):
-            res = await res
-        if isinstance(res, PermissionResult):
-            tool_perm_res = res
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("Permission check of %s raised; treating it as passthrough", tool.name)
+    tool_perm_res = await tool_permission_result(tool, input_args, context)
 
     if tool_perm_res.behavior == PermissionBehavior.DENY:
         return tool_perm_res
 
-    if tool_perm_res.behavior == PermissionBehavior.ASK:
-        if _requires_user_interaction(tool, input_args):
-            return tool_perm_res
-        if _is_ask_rule_reason(tool_perm_res):
-            return tool_perm_res
-        if (tool_perm_res.decision_reason or {}).get("type") == "safetyCheck":
-            return tool_perm_res
+    if tool_perm_res.behavior == PermissionBehavior.ASK and requires_user_interaction(tool, input_args):
+        return tool_perm_res
+    if is_ask_rule_reason(tool_perm_res) or is_safety_check_ask(tool_perm_res):
+        return tool_perm_res
 
     mode = perm_ctx.mode
     should_bypass = mode == PermissionMode.BYPASS_PERMISSIONS or (

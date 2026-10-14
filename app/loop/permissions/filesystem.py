@@ -408,6 +408,167 @@ def check_write_permission_for_tool(
     )
 
 
+def is_project_dir_path(absolute_path: str, cwd: str) -> bool:
+    """
+    `isProjectDirPath`: inside `<config>/projects/<sanitized cwd>/`, where this project's
+    oversized tool results are filed (`app/loop/tools/result_storage.py`).
+    """
+    from app.loop.tools.result_storage import config_home, sanitize_path
+
+    project_dir = posixpath.normpath(str(config_home() / "projects" / sanitize_path(cwd)))
+    normalized = posixpath.normpath(absolute_path)
+    return normalized.startswith(project_dir + "/")
+
+
+def check_readable_internal_path(absolute_path: str, input_args: dict[str, Any], cwd: str) -> PermissionResult:
+    """
+    `checkReadableInternalPath`, reduced to the one internal store this loop has: the
+    project directory. Session memory, plan files, scratchpad, temp, memory, tasks, teams and
+    bundled-skill paths have no equivalent here.
+    """
+    if is_project_dir_path(absolute_path, cwd):
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "other", "reason": "Project directory files are allowed for reading"},
+        )
+    return PermissionResult(behavior=PermissionBehavior.PASSTHROUGH)
+
+
+def check_read_permission_for_tool(
+    path: str,
+    input_args: dict[str, Any],
+    context: ToolPermissionContext,
+    cwd: str,
+) -> PermissionResult:
+    """
+    `checkReadPermissionForTool`, the `check_permissions` of `ReadFile`, `Glob` and `Grep`.
+
+    1. A UNC path asks; 2. a suspicious Windows pattern asks (both reason 'other', so
+    bypass mode allows them); 3. a `Read` deny rule denies; 4. a `Read` ask rule asks;
+    5. edit access implies read access (only an 'allow' is used); 6. inside the working
+    directories it allows; 7. the readable internal paths allow; 8. a `Read` allow rule
+    (original path only) allows; otherwise ask with a 'workingDir' reason.
+    """
+    absolute = expand_path(path, cwd)
+    candidates = get_paths_for_permission_check(absolute)
+    for candidate in candidates:
+        if candidate.startswith("\\\\") or candidate.startswith("//"):
+            return PermissionResult(
+                behavior=PermissionBehavior.ASK,
+                message=(
+                    f"The agent requested permissions to read from {path}, which appears to be a UNC path "
+                    "that could access network resources."
+                ),
+                decision_reason={"type": "other", "reason": "UNC path detected (defense-in-depth check)"},
+            )
+    for candidate in candidates:
+        if has_suspicious_windows_path_pattern(candidate):
+            return PermissionResult(
+                behavior=PermissionBehavior.ASK,
+                message=(
+                    f"The agent requested permissions to read from {path}, which contains a suspicious "
+                    "Windows path pattern that requires manual approval."
+                ),
+                decision_reason={
+                    "type": "other",
+                    "reason": (
+                        "Path contains suspicious Windows-specific patterns (alternate data streams, short "
+                        "names, long path prefixes, or three or more consecutive dots) that require manual "
+                        "verification"
+                    ),
+                },
+            )
+    for candidate in candidates:
+        deny_rule = matching_rule_for_input(candidate, context, "read", "deny", cwd)
+        if deny_rule is not None:
+            return PermissionResult(
+                behavior=PermissionBehavior.DENY,
+                message=f"Permission to read {path} has been denied.",
+                decision_reason={"type": "rule", "rule": deny_rule},
+            )
+    for candidate in candidates:
+        ask_rule = matching_rule_for_input(candidate, context, "read", "ask", cwd)
+        if ask_rule is not None:
+            return PermissionResult(
+                behavior=PermissionBehavior.ASK,
+                message=f"The agent requested permissions to read from {path}, but you haven't granted it yet.",
+                decision_reason={"type": "rule", "rule": ask_rule},
+            )
+    edit_result = check_write_permission_for_tool(absolute, input_args, context, cwd)
+    if edit_result.behavior == PermissionBehavior.ALLOW:
+        return edit_result
+    if path_in_allowed_working_path(absolute, context, cwd, candidates):
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "mode", "mode": PermissionMode.DEFAULT},
+        )
+    internal = check_readable_internal_path(absolute, input_args, cwd)
+    if internal.behavior != PermissionBehavior.PASSTHROUGH:
+        return internal
+    allow_rule = matching_rule_for_input(absolute, context, "read", "allow", cwd)
+    if allow_rule is not None:
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "rule", "rule": allow_rule},
+        )
+    return PermissionResult(
+        behavior=PermissionBehavior.ASK,
+        message=f"The agent requested permissions to read from {path}, but you haven't granted it yet.",
+        decision_reason={"type": "workingDir", "reason": "Path is outside allowed working directories"},
+    )
+
+
+def get_file_read_ignore_patterns(context: ToolPermissionContext, cwd: str) -> dict[str | None, list[str]]:
+    """`getFileReadIgnorePatterns`: every `Read` deny pattern, grouped by its root."""
+    return {root: list(patterns) for root, patterns in get_patterns_by_root(context, "read", "deny", cwd).items()}
+
+
+def normalize_pattern_to_path(pattern_root: str, pattern: str, root_path: str) -> str | None:
+    """
+    `normalizePatternToPath`: a rooted pattern re-expressed against `root_path`, or `None`
+    when its root lies outside. Upstream's third branch (a root "inside the reference root
+    but not starting with it") cannot be reached: a root inside `root_path` always yields a
+    joined pattern that starts with it, so only its `None` outcome is kept.
+    """
+    if pattern_root == root_path:
+        return posixpath.join("/", pattern)
+    full_pattern = posixpath.join(pattern_root, pattern.lstrip("/"))
+    if full_pattern.startswith(root_path + "/"):
+        return full_pattern[len(root_path):]
+    return None
+
+
+def normalize_patterns_to_path(patterns_by_root: dict[str | None, list[str]], root: str) -> list[str]:
+    """`normalizePatternsToPath`: floating patterns as they are, rooted ones re-anchored at `root`."""
+    result = list(dict.fromkeys(patterns_by_root.get(None, [])))
+    for pattern_root, patterns in patterns_by_root.items():
+        if pattern_root is None:
+            continue
+        for pattern in patterns:
+            normalized = normalize_pattern_to_path(pattern_root, pattern, root)
+            if normalized is not None and normalized not in result:
+                result.append(normalized)
+    return result
+
+
+def read_deny_ignore_globs(context: ToolPermissionContext, cwd: str, *, anchor_floating: bool) -> list[str]:
+    """
+    The `--glob !pattern` arguments that hide `Read`-denied files from a search, as `glob.ts`
+    (bare `!pattern`) and `GrepTool` (`!**/pattern` for a floating pattern) build them. Both
+    are anchored at the workspace root, which is where ripgrep runs.
+    """
+    globs: list[str] = []
+    for pattern in normalize_patterns_to_path(get_file_read_ignore_patterns(context, cwd), cwd):
+        if anchor_floating and not pattern.startswith("/"):
+            globs += ["--glob", f"!**/{pattern}"]
+        else:
+            globs += ["--glob", f"!{pattern}"]
+    return globs
+
+
 def permission_cwd(context: ToolContext) -> str:
     """The directory path checks resolve against: the workspace root, else `os.getcwd()`."""
     root = getattr(getattr(context, "workspace", None), "root", None)
@@ -419,7 +580,15 @@ def workspace_absolute_path(raw_path: str, cwd: str) -> str:
     A file tool's path as the permission check sees it. File tools read a leading `/` as
     the workspace root (`normalize_path`), so it is re-rooted there rather than read as a
     host path; `..` is kept, so an escape stays visible as outside the working directory.
+    The one exception is a path into this loop's config directory (`<config>/projects/...`,
+    where oversized results are filed): that is a host path, read straight off the host.
     """
+    from app.loop.tools.result_storage import config_home
+
+    expanded = os.path.expanduser(raw_path)
+    config_dir = posixpath.normpath(str(config_home()))
+    if posixpath.isabs(expanded) and posixpath.normpath(expanded).startswith(config_dir + "/"):
+        return posixpath.normpath(expanded)
     return posixpath.normpath(posixpath.join(cwd, raw_path.replace("\\", "/").lstrip("/")))
 
 
@@ -448,7 +617,32 @@ def check_file_write_permissions() -> Any:
     return check
 
 
+def check_file_read_permissions(path_key: str) -> Any:
+    """
+    Build the `check_permissions` callable of a file-reading tool. `getPath` defaults to the
+    working directory when the tool's path argument is absent (`ReadFile`'s `file_path`,
+    `Glob`'s and `Grep`'s `path`).
+    """
+    from app.loop.permissions.rules import extract_permission_context
+
+    def check(input_args: dict[str, Any], context: ToolContext) -> PermissionResult:
+        cwd = permission_cwd(context)
+        raw = str(input_args.get(path_key) or "")
+        target = workspace_absolute_path(raw, cwd) if raw else cwd
+        return check_read_permission_for_tool(target, input_args, extract_permission_context(context), cwd)
+
+    return check
+
+
 __all__ = [
+    "check_file_read_permissions",
+    "check_read_permission_for_tool",
+    "check_readable_internal_path",
+    "get_file_read_ignore_patterns",
+    "is_project_dir_path",
+    "normalize_pattern_to_path",
+    "normalize_patterns_to_path",
+    "read_deny_ignore_globs",
     "DANGEROUS_DIRECTORIES",
     "DANGEROUS_FILES",
     "FILE_EDIT_TOOL_NAME",

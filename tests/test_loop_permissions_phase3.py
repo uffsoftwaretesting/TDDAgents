@@ -520,10 +520,12 @@ def test_hook_allow_with_and_without_updated_input(caplog):
     res, _ = _run({"behavior": "allow", "updatedInput": {"command": "safe"}})
     assert (res.behavior, res.updated_input, res.decision_reason) == (
         ALLOW, {"command": "safe"}, {"type": "hook", "hookName": "PermissionRequest"})
-    with caplog.at_level(logging.WARNING, logger="TDDOrchestrator.Permissions"):
-        res, _ = _run({"behavior": "allow", "updatedInput": "bad", "updatedPermissions": [{"x": 1}]})
+    res, _ = _run({"behavior": "allow", "updatedInput": "bad"})
     assert res.updated_input == {"command": "c"}
-    assert "Ignoring updatedPermissions from a PermissionRequest hook: nothing persists them here." in [
+    with caplog.at_level(logging.WARNING, logger="TDDOrchestrator.Permissions"):
+        res, _ = _run({"behavior": "allow", "updatedPermissions": [{"x": 1}]})
+    assert res is None  # malformed updatedPermissions: no decision at all, as upstream's Zod parse
+    assert "Ignoring a PermissionRequest decision with malformed updatedPermissions." in [
         r.getMessage() for r in caplog.records]
 
 

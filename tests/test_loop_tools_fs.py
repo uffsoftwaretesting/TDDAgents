@@ -1288,3 +1288,68 @@ def test_grep_count_pagination_reports_offset(monkeypatch):
 def test_tool_prompt_is_its_markdown_body(builder, filename):
     body = get_prompt(filename, "")
     assert body and builder().prompt == body
+
+
+# ── Read(...) rules: checkReadPermissionForTool and the ripgrep exclude globs ──
+
+def _deny_reads(ws, *patterns):
+    from app.loop.permissions.types import PermissionBehavior, PermissionRule, PermissionRuleSource
+
+    rules = tuple(PermissionRule("Read", PermissionBehavior.DENY, p, PermissionRuleSource.PROJECT_SETTINGS)
+                  for p in patterns)
+    return tool_context_for(AppStateStore(), workspace=ws, permission_context=ToolPermissionContext(
+        always_deny_rules=rules, mode=PermissionMode.ACCEPT_EDITS))
+
+
+def test_read_denied_file_is_refused_before_any_io(local_ws, tmp_path):
+    make_tree(tmp_path, {"secret/k.txt": "key", "open.txt": "ok"})
+    ctx = _deny_reads(local_ws, "secret/**")
+    res = validate(build_read_file_tool, {"file_path": "secret/k.txt"}, ctx)
+    assert (res.valid, res.message, res.error_code) == (
+        False, "File is in a directory that is denied by your permission settings.", 1)
+    assert validate(build_read_file_tool, {"file_path": "open.txt"}, ctx).valid is True
+    msg = via_pipeline(build_read_file_tool, {"file_path": "secret/k.txt"}, ctx)
+    assert msg.status == "error" and "denied by your permission settings" in msg.content
+
+
+def test_glob_and_grep_hide_read_denied_files(local_ws, tmp_path):
+    make_tree(tmp_path, {"src/a.py": "hit", "src/secret.env": "hit", "keys/k.py": "hit", "deep/x/keys/z.py": "hit"})
+    ctx = _deny_reads(local_ws, "*.env", "/keys/**")
+    globbed = run(build_glob_tool().call({"pattern": "**/*"}, ctx)).content.splitlines()
+    assert sorted(globbed) == ["deep/x/keys/z.py", "src/a.py"]
+    grepped = run(build_grep_tool().call({"pattern": "hit"}, ctx)).content
+    assert "src/a.py" in grepped and "deep/x/keys/z.py" in grepped
+    assert "secret.env" not in grepped and "keys/k.py\n" not in grepped + "\n" and not grepped.startswith("keys/")
+
+
+def test_glob_and_grep_refuse_a_read_denied_search_root(local_ws, tmp_path):
+    make_tree(tmp_path, {"keys/k.py": "hit"})
+    ctx = _deny_reads(local_ws, "keys/**")
+    for builder, args in ((build_glob_tool, {"pattern": "*", "path": "keys"}),
+                          (build_grep_tool, {"pattern": "hit", "path": "keys"})):
+        msg = via_pipeline(builder, args, ctx)
+        assert msg.status == "error" and "has been denied" in msg.content
+
+
+def test_build_grep_args_appends_the_ignore_globs():
+    assert fs.build_grep_args({"pattern": "x"}, ["--glob", "!**/a"])[-2:] == ["--glob", "!**/a"]
+    assert fs.build_grep_args({"pattern": "x"}) == fs.build_grep_args({"pattern": "x"}, [])
+
+
+def test_reading_a_persisted_result_of_this_project(tmp_path, monkeypatch):
+    from app.loop.tools.result_storage import sanitize_path
+
+    local_ws = LocalWorkspace(str(tmp_path / "ws"))
+    monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
+    stored = tmp_path / "cfg" / "projects" / sanitize_path(str(local_ws.root)) / "run" / "tool-results" / "r.txt"
+    stored.parent.mkdir(parents=True)
+    stored.write_text("big output")
+    ctx = tool_context_for(AppStateStore(), workspace=local_ws,
+                           permission_context=ToolPermissionContext(should_avoid_permission_prompts=True))
+    msg = via_pipeline(build_read_file_tool, {"file_path": str(stored)}, ctx)
+    assert msg.status == "success" and "big output" in msg.content
+    other = tmp_path / "cfg" / "projects" / "elsewhere" / "run" / "tool-results" / "r.txt"
+    other.parent.mkdir(parents=True)
+    other.write_text("not ours")
+    msg = via_pipeline(build_read_file_tool, {"file_path": str(other)}, ctx)
+    assert msg.status == "error" and "not ours" not in msg.content

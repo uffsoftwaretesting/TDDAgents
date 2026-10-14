@@ -189,10 +189,17 @@ runs for every TDD context, because the phase gate — like the classifier it wa
 cannot see where an interpreter writes; `Bash(python:*)` and `Bash(python -m pytest:*)` are
 stripped from the shipped allow list at load. PermissionRequest hooks run before the
 headless deny (`runPermissionRequestHooksForHeadlessAgent`); they are reached only by an
-'ask', so a phase deny never reaches them. *Divergences:* a policy or flag allow for an
-interpreter survives, as upstream's source filter dictates; a PermissionRequest hook may
-approve a call no rule covers (operator configuration); `updatedPermissions` are logged,
-not persisted; `Read(...)` rules are not yet checked by `ReadFile`.
+'ask', so a phase deny never reaches them.
+
+*Phase 3 follow-up (2026-10-14), from a source-verified research pass:* `resolveHookPermissionDecision`
+is ported exactly (a PreToolUse allow is re-checked by `checkRuleBasedPermissions`, which
+carries the TDD tier; a hook ask meets the TDD tier and deny rules before it is handled as an
+ask); `checkReadPermissionForTool` guards `ReadFile`/`Glob`/`Grep`, with Read-deny exclude
+globs for ripgrep; a PermissionRequest hook's `updatedPermissions` are applied and persisted
+(`applyPermissionUpdate`, `persistPermissionUpdate`, `updateSettingsForSource`). TDD guards,
+each chosen by the user: a hook's `updatedInput` is re-checked by the phase tier and deny
+rules (as v2.1.110 later does upstream); applied updates are re-stripped of dangerous allows;
+`setMode` stays unguarded and policy/flag dangerous allows survive, both as v2.1.88.
 
 ### Phase 4 — Hooks rebuilt against the loop
 

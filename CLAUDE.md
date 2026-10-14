@@ -89,10 +89,11 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `tools/pool.py` | `assemble_tool_pool` with partition-sorting, prompt-cache stability, and phase-derived deny rules (B8 & D3) |
 | `tools/run_tests.py` | `RunTests` loop tool, ground truth test execution, `SuiteExecutionResult`, updating authoritative ledger, workspace execution (D2 & G) |
 | `permissions/types.py` | `PermissionMode`, `PermissionBehavior`, `PermissionRule`, `ToolPermissionContext`, ladder cycling (C1) |
-| `permissions/rules.py` | `rule_matches`, rule lookups, `extract_permission_context`, `check_rule_based_permissions` (C2) |
+| `permissions/rules.py` | `rule_matches`, rule lookups, `extract_permission_context`, `tdd_phase_denial` (the TDD tier, fail-closed), upstream `checkRuleBasedPermissions` with the TDD tier first (C2, Phase 3) |
+| `permissions/updates.py` | `PermissionUpdate` schema, `applyPermissionUpdate(s)`, `persistPermissionUpdate(s)`, `addPermissionRulesToSettings`, `updateSettingsForSource` (Phase 3) |
 | `permissions/gate.py` | `hasPermissionsToUseTool` inner/outer step for step; TDD phase tier above step 1a, failing closed; dontAsk, headless deny after PermissionRequest hooks (C3, D4, Phase 3) |
 | `permissions/capability.py` | `is_bash_command_read_only`, `bash_is_read_only`, shell splitting, duration and wrapper handling (C4) |
-| `permissions/filesystem.py` | `matchingRuleForInput` (gitignore `Edit(...)`/`Read(...)` rules via `pathspec`), `checkPathSafetyForAutoEdit`, `isPathAllowed`, `checkWritePermissionForTool` — the `check_permissions` of `WriteFile`/`Edit` (C5, Phase 3) |
+| `permissions/filesystem.py` | `matchingRuleForInput` (gitignore `Edit(...)`/`Read(...)` rules via `pathspec`), `checkPathSafetyForAutoEdit`, `isPathAllowed`, `checkWritePermissionForTool` (`WriteFile`/`Edit`), `checkReadPermissionForTool` + Read-deny ripgrep globs (`ReadFile`/`Glob`/`Grep`) (C5, Phase 3) |
 | `permissions/settings.py` | Five settings sources (user, project, local, flag, policy + `managed-settings.d`), `allowManagedPermissionRulesOnly`, `initialPermissionModeFromCLI`, `initializeToolPermissionContext`, `build_tool_permission_context` (Phase 3) |
 | `permissions/dangerous.py` | `DANGEROUS_BASH_PATTERNS`, `isDangerousBashPermission`, `stripDangerousPermissionsForAutoMode` run for **every** TDD context — the TDD managed tier (Phase 3) |
 | `permissions/permission_request.py` | `runPermissionRequestHooksForHeadlessAgent` over `ToolContext.hook_dispatcher` (Phase 3) |
@@ -221,16 +222,32 @@ Permissions and settings are wired at runtime. The user's direction for every ch
   where it writes. So `isDangerousBashPermission` strips such allows from editable sources
   for every run. The shipped `Bash(python:*)` and `Bash(python -m pytest:*)` are stripped at
   load; `pytest:*` survives.
-- **PermissionRequest hooks** run before the headless deny. Only an 'ask' reaches them, so
-  a phase deny can never be overturned by one. `app/hooks/` parses
-  `hookSpecificOutput.decision` for that event.
+- **PermissionRequest hooks** run before the headless deny, and a hook `allow` approves a
+  call no rule covers (upstream v2.1.88). Its `updatedPermissions` are persisted to the
+  editable settings files and applied to `AppState` (`permissions/updates.py`, ports of
+  `applyPermissionUpdate`/`persistPermissionUpdate`/`updateSettingsForSource`). Two TDD
+  guards sit on top, at the user's direction: a hook's **`updatedInput` is re-checked** by
+  the phase tier and deny rules (the re-check upstream added in v2.1.110), and the applied
+  context is **re-stripped** of dangerous allows, so `addRules: Bash(python:*)` cannot
+  re-open the interpreter loophole. `setMode` stays unguarded, as v2.1.88.
+- **A PreToolUse hook `allow` is re-checked by `check_rule_based_permissions` only**
+  (upstream `resolveHookPermissionDecision`): the TDD tier, deny/ask rules, the tool's deny,
+  content ask rules and safety checks. With no objection the hook's allow stands, so it
+  skips an 'ask' no rule produced, headless included. A **hook `ask`** (upstream's
+  `forceDecision`, which skips the gate) first meets the TDD tier and deny rules — the TDD
+  barrier, and v2.1.101's "ask no longer overrides deny" — and is then handled as an ask by
+  `resolve_ask_without_prompt` (dontAsk deny, PermissionRequest hooks, headless deny).
+- **`ReadFile`, `Glob` and `Grep` check `Read(...)` rules** (`checkReadPermissionForTool`):
+  reads in the workspace and additional dirs are allowed in any mode, this project's
+  `<config>/projects/<cwd>/` tree (persisted tool results) is a readable internal path,
+  anything else asks. `Glob`/`Grep` pass Read-deny patterns to ripgrep as exclude globs;
+  `ReadFile` refuses a Read-denied path in `validate_input` (errorCode 1).
 
 *Divergences, all recorded:* a dangerous allow in **policy or flag** settings survives, as
-upstream's `isPermissionUpdateDestination` filter dictates. A PermissionRequest hook may
-approve a call no rule covers, which is operator configuration. `updatedPermissions` are
-logged, not persisted. `ReadFile` does not yet check `Read(...)` rules. The editable
-internal paths, the `.claude/**` session carve-out and the sandbox write allowlist have no
-equivalent here.
+upstream's `isPermissionUpdateDestination` filter dictates (kept at the user's direction).
+Additional directories carry no source; the local settings file is not added to
+`.gitignore`; the editable internal paths, the `.claude/**` session carve-out, the sandbox
+write allowlist and `requireCanUseTool` have no equivalent here.
 
 **Phase 3 is measured under `paths_to_mutate` = `permissions/{gate,settings,filesystem,
 dangerous,messages,permission_request}`, `runner` and clears the bar**, at 4991 tests:
@@ -262,6 +279,31 @@ deleted. The 100 survivors are equivalent:
 - the macOS `/private` case folds (later lowercased);
 - `load_permission_rules`' managed dir (absent on the test host);
 - the runner's pool `phase_ledger` and `messages` mutants (Phase 0's equivalent classes).
+
+**The Phase 3 follow-up is measured under `paths_to_mutate` = `permissions/{rules,gate,
+filesystem,updates,permission_request,dangerous}`, `tools/hook_permissions` and clears the
+bar**, at 5067 tests:
+
+| | |
+|---|---|
+| Mutants | 2300 (0 timeout) |
+| Killed | 2200 |
+| Survived | 100 |
+| **Mutation score** | **95.7%** (2200 / 2300) |
+
+Triage killed real gaps in the hook resolver: nothing checked that `tool_use_id` and the
+hook's rewritten input reach the full gate and the ask handler, or that a no-opinion verdict
+reaches the full gate. It also deleted dead code: `normalizePatternToPath`'s third branch
+cannot succeed (a root inside the reference root always takes the second), and a redundant
+`join("/", …)`. The 100 survivors are the recorded equivalent classes:
+- `"read"`/`"ask"` string mutations where only `== "edit"` or the `else` branch is tested;
+- the dataclass-default `behavior=ALLOW`;
+- the same candidate list passed either way;
+- `apply_permission_update`'s `and`→`or` guards (the parser never yields a `setMode` without
+  a mode, or a rule update without a behavior) and its debug-log arguments;
+- default arguments, codec aliases and log wording;
+- the POSIX-unreachable backslash UNC branch (a `\\server` path is relative and joined onto
+  the cwd first, as upstream's `expandPath` does).
 
 ### The three things that change most
 

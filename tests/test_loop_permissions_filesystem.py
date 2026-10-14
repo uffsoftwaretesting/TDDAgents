@@ -402,3 +402,178 @@ def test_fs_tools_carry_the_write_check():
         res = asyncio.run(build().check_permissions({"file_path": "a.py"}, ctx))
         assert res.behavior == ASK
         assert res.message == "The agent requested permissions to write to /ws/a.py, but you haven't granted it yet."
+
+
+# ── checkReadPermissionForTool and its tools ─────────────────────────────────
+
+from app.loop.permissions.filesystem import (  # noqa: E402
+    check_file_read_permissions,
+    check_read_permission_for_tool,
+    check_readable_internal_path,
+    get_file_read_ignore_patterns,
+    is_project_dir_path,
+    normalize_pattern_to_path,
+    normalize_patterns_to_path,
+    read_deny_ignore_globs,
+)
+
+
+def read_rule(content, behavior=DENY, source=PROJECT):
+    return edit_rule(content, behavior, source, tool=FILE_READ_TOOL_NAME)
+
+
+def test_read_unc_and_suspicious_paths_ask_with_other_reasons():
+    res = check_read_permission_for_tool("//server/share/x", {}, ToolPermissionContext(), CWD)
+    unc_reason = {"type": "other", "reason": "UNC path detected (defense-in-depth check)"}
+    assert (res.behavior, res.decision_reason) == (ASK, unc_reason)
+    assert res.message == ("The agent requested permissions to read from //server/share/x, which appears to be a "
+                           "UNC path that could access network resources.")
+    res = check_read_permission_for_tool(f"{CWD}/GIT~1/x", {}, ToolPermissionContext(), CWD)
+    reason = res.decision_reason or {}
+    assert res.behavior == ASK and reason["type"] == "other"
+    assert res.message.endswith("contains a suspicious Windows path pattern that requires manual approval.")
+    assert reason["reason"].startswith("Path contains suspicious Windows-specific patterns")
+
+
+def test_read_deny_beats_edit_access_and_the_working_dir():
+    deny = read_rule("secret/**")
+    ctx = ctx_with(deny, edit_rule("secret/**", ALLOW), mode=PermissionMode.ACCEPT_EDITS)
+    res = check_read_permission_for_tool(f"{CWD}/secret/k", {}, ctx, CWD)
+    assert (res.behavior, res.message, res.decision_reason) == (
+        DENY, f"Permission to read {CWD}/secret/k has been denied.", {"type": "rule", "rule": deny})
+
+
+def test_read_ask_rule_asks_before_implicit_allows():
+    ask = read_rule("notes/**", ASK)
+    res = check_read_permission_for_tool(f"{CWD}/notes/a", {}, ctx_with(ask), CWD)
+    assert (res.behavior, res.message, res.decision_reason) == (
+        ASK, f"The agent requested permissions to read from {CWD}/notes/a, but you haven't granted it yet.",
+        {"type": "rule", "rule": ask})
+
+
+def test_read_edit_access_implies_read_access_but_only_its_allow():
+    allow = edit_rule("//outside/**", ALLOW)
+    res = check_read_permission_for_tool("/outside/f", {"a": 1}, ctx_with(allow), CWD)
+    assert (res.behavior, res.decision_reason) == (ALLOW, {"type": "rule", "rule": allow})
+    # A safety-checked path is not blocked for reading: the edit check's ask is discarded.
+    res = check_read_permission_for_tool(f"{CWD}/.git/config", {}, ToolPermissionContext(), CWD)
+    assert (res.behavior, res.decision_reason) == (ALLOW, {"type": "mode", "mode": PermissionMode.DEFAULT})
+
+
+def test_read_inside_working_dirs_in_any_mode():
+    for mode in (PermissionMode.DEFAULT, PermissionMode.PLAN, PermissionMode.DONT_ASK):
+        res = check_read_permission_for_tool(f"{CWD}/a.py", {"x": 1}, ToolPermissionContext(mode=mode), CWD)
+        assert (res.behavior, res.updated_input, res.decision_reason) == (
+            ALLOW, {"x": 1}, {"type": "mode", "mode": PermissionMode.DEFAULT})
+    extra = ToolPermissionContext(additional_working_directories=("/extra",))
+    assert check_read_permission_for_tool("/extra/b", {}, extra, CWD).behavior == ALLOW
+
+
+def test_read_project_dir_is_an_internal_readable_path(tmp_path, monkeypatch):
+    from app.loop.tools.result_storage import sanitize_path
+
+    monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
+    project = tmp_path / "cfg" / "projects" / sanitize_path(CWD)
+    inside = f"{project}/run/tool-results/x.txt"
+    assert is_project_dir_path(inside, CWD)
+    assert not is_project_dir_path(str(project), CWD)
+    assert not is_project_dir_path(f"{tmp_path}/cfg/projects/other/run/x", CWD)
+    assert not is_project_dir_path(f"{project}-evil/x", CWD)
+    res = check_read_permission_for_tool(inside, {"q": 1}, ToolPermissionContext(), CWD)
+    assert (res.behavior, res.updated_input, res.decision_reason) == (
+        ALLOW, {"q": 1}, {"type": "other", "reason": "Project directory files are allowed for reading"})
+    assert check_readable_internal_path("/elsewhere", {}, CWD).behavior == PermissionBehavior.PASSTHROUGH
+
+
+def test_read_allow_rule_then_working_dir_ask():
+    allow = read_rule("//opt/data/**", ALLOW)
+    res = check_read_permission_for_tool("/opt/data/x", {"y": 2}, ctx_with(allow), CWD)
+    assert (res.behavior, res.updated_input, res.decision_reason) == (ALLOW, {"y": 2}, {"type": "rule", "rule": allow})
+    res = check_read_permission_for_tool("/etc/passwd", {}, ToolPermissionContext(), CWD)
+    assert (res.behavior, res.message, res.decision_reason) == (
+        ASK, "The agent requested permissions to read from /etc/passwd, but you haven't granted it yet.",
+        {"type": "workingDir", "reason": "Path is outside allowed working directories"})
+
+
+def test_read_rules_check_the_resolved_path(tmp_path):
+    ws = tmp_path / "ws"
+    (ws / "secret").mkdir(parents=True)
+    (ws / "alias").symlink_to(ws / "secret")
+    deny = read_rule("secret/**")
+    res = check_read_permission_for_tool(str(ws / "alias" / "k"), {}, ctx_with(deny), str(ws))
+    assert res.behavior == DENY
+    ask = read_rule("secret/**", ASK)
+    assert check_read_permission_for_tool(str(ws / "alias" / "k"), {}, ctx_with(ask), str(ws)).behavior == ASK
+
+
+def test_workspace_absolute_path_keeps_config_paths_on_the_host(tmp_path, monkeypatch):
+    monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
+    host = f"{tmp_path}/cfg/projects/p/r/tool-results/a.txt"
+    assert workspace_absolute_path(host, "/ws") == host
+    assert workspace_absolute_path(f"{tmp_path}/cfgx/a", "/ws") == f"/ws{tmp_path}/cfgx/a"
+    assert workspace_absolute_path("cfg/a", "/ws") == "/ws/cfg/a"
+
+
+def test_check_file_read_permissions_defaults_to_the_working_dir(tmp_path):
+    deny = read_rule("locked/**")
+    perm = ToolPermissionContext(always_deny_rules=(deny,))
+    ctx = tool_context_for(AppStateStore(state=AppState(tool_permission_context=perm)),
+                           workspace=SimpleNamespace(root=str(tmp_path)))
+    by_path = check_file_read_permissions("path")
+    assert by_path({}, ctx).behavior == ALLOW
+    assert by_path({"path": "locked/x"}, ctx).behavior == DENY
+    assert check_file_read_permissions("file_path")({"file_path": "../out.txt"}, ctx).decision_reason == {
+        "type": "workingDir", "reason": "Path is outside allowed working directories"}
+
+
+def test_read_ignore_patterns_and_normalization():
+    floating, rooted, user = read_rule("*.env"), read_rule("/secrets/**"), read_rule("/k", source=USER)
+    ctx = ctx_with(floating, rooted, user, settings_roots={USER: "/home/u/.tddagents"})
+    assert get_file_read_ignore_patterns(ctx, CWD) == {None: ["*.env"], CWD: ["/secrets/**"],
+                                                       "/home/u/.tddagents": ["/k"]}
+    assert normalize_patterns_to_path(get_file_read_ignore_patterns(ctx, CWD), CWD) == ["*.env", "/secrets/**"]
+    assert normalize_pattern_to_path(CWD, "x", CWD) == "/x"
+    assert normalize_pattern_to_path("/", "work/ws/sub/x", CWD) == "/sub/x"
+    assert normalize_pattern_to_path(f"{CWD}/sub", "x", CWD) == "/sub/x"
+    assert normalize_pattern_to_path(f"{CWD}/sub", "/x", CWD) == "/sub/x"
+    assert normalize_pattern_to_path("/other", "x", CWD) is None
+    assert normalize_pattern_to_path("/work", "x", CWD) is None
+    assert normalize_patterns_to_path({None: ["a", "a"], CWD: ["a"]}, CWD) == ["a", "/a"]
+
+
+def test_read_deny_ignore_globs_per_tool_shape():
+    ctx = ctx_with(read_rule("*.env"), read_rule("/secrets/**"))
+    assert read_deny_ignore_globs(ctx, CWD, anchor_floating=False) == [
+        "--glob", "!*.env", "--glob", "!/secrets/**"]
+    assert read_deny_ignore_globs(ctx, CWD, anchor_floating=True) == [
+        "--glob", "!**/*.env", "--glob", "!/secrets/**"]
+    assert read_deny_ignore_globs(ToolPermissionContext(), CWD, anchor_floating=True) == []
+
+
+# ── mutation-driven pins (read check, ignore globs) ──────────────────────────
+
+def test_read_the_full_suspicious_reason():
+    res = check_read_permission_for_tool(f"{CWD}/a...", {}, ToolPermissionContext(), CWD)
+    assert (res.decision_reason or {})["reason"] == (
+        "Path contains suspicious Windows-specific patterns (alternate data streams, short names, long path "
+        "prefixes, or three or more consecutive dots) that require manual verification")
+
+
+def test_read_relative_paths_resolve_against_the_working_dir():
+    assert check_read_permission_for_tool("a.py", {}, ToolPermissionContext(), CWD).behavior == ALLOW
+
+
+def test_read_edit_implied_allow_keeps_the_input():
+    allow = edit_rule("//outside/**", ALLOW)
+    res = check_read_permission_for_tool("/outside/f", {"a": 1}, ctx_with(allow), CWD)
+    assert res.updated_input == {"a": 1}
+
+
+def test_rooted_pattern_strips_only_its_leading_slash():
+    assert normalize_pattern_to_path(f"{CWD}/sub", "/Xa", CWD) == "/sub/Xa"
+
+
+def test_every_floating_deny_pattern_becomes_a_glob():
+    ctx = ctx_with(read_rule("*.env"), read_rule("*.key"))
+    assert read_deny_ignore_globs(ctx, CWD, anchor_floating=True) == [
+        "--glob", "!**/*.env", "--glob", "!**/*.key"]

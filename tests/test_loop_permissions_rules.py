@@ -5,6 +5,7 @@ Tests for rule-based permissions evaluation (Part C2).
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from types import SimpleNamespace
 
 import pytest
@@ -119,7 +120,7 @@ class TestCheckRuleBasedPermissions:
             res = await check_rule_based_permissions(tool, {}, ctx)
             assert res is not None
             assert res.behavior == PermissionBehavior.ASK
-            assert "requires confirmation" in res.message
+            assert res.message == "The agent requested permissions to use Careful, but you haven't granted it yet."
             assert res.decision_reason == {"type": "rule", "rule": ask_rule}
 
         asyncio.run(go())
@@ -186,52 +187,50 @@ class TestCheckRuleBasedPermissions:
 
         asyncio.run(go())
 
-    def test_requires_user_interaction_in_check_rule_based_permissions(self):
+    def test_requires_user_interaction_is_left_to_the_caller(self):
+        """Upstream: "Caller must pre-check tool.requiresUserInteraction() — step 1e is not replicated"."""
         async def go():
-            # 1. requires_user_interaction with input args returning True when behavior is ASK
-            tool1 = build_tool(
+            tool = build_tool(
                 name="PromptUser",
                 prompt="p",
                 call=lambda a, c: ToolResult(content="ok"),
                 check_permissions=lambda a, c: PermissionResult(behavior="ask", message="needs input"),
-                requires_user_interaction=lambda args: args.get("interactive") is True,
+                requires_user_interaction=lambda args: True,
             )
             ctx = tool_context_for(AppStateStore())
-            res1 = await check_rule_based_permissions(tool1, {"interactive": True}, ctx)
-            assert res1 is not None
-            assert res1.behavior == PermissionBehavior.ASK
-            assert res1.message == "needs input"
-
-            # 2. When interactive is False -> returns None
-            res1_no = await check_rule_based_permissions(tool1, {"interactive": False}, ctx)
-            assert res1_no is None
-
-            # 3. When requires_user_interaction takes 0 args (TypeError fallback)
-            tool2 = build_tool(
-                name="ZeroArg",
-                prompt="p",
-                call=lambda a, c: ToolResult(content="ok"),
-                check_permissions=lambda a, c: PermissionResult(behavior="ask", message="needs zero"),
-                requires_user_interaction=lambda: True,
-            )
-            res2 = await check_rule_based_permissions(tool2, {}, ctx)
-            assert res2 is not None
-            assert res2.behavior == PermissionBehavior.ASK
-
-            # 4. When behavior is ALLOW, even if requires_user_interaction is True, does not return ask
-            tool3 = build_tool(
-                name="AllowTool",
-                prompt="p",
-                call=lambda a, c: ToolResult(content="ok"),
-                check_permissions=lambda a, c: PermissionResult(behavior="allow"),
-                requires_user_interaction=lambda: True,
-            )
-            res3 = await check_rule_based_permissions(tool3, {}, ctx)
-            assert res3 is None
+            assert await check_rule_based_permissions(tool, {}, ctx) is None
 
         asyncio.run(go())
 
-    def test_exception_in_check_permissions_fails_closed(self):
+    def test_plain_ask_and_passthrough_and_updated_input_are_no_objection(self):
+        async def go():
+            ctx = tool_context_for(AppStateStore())
+            for result in (
+                PermissionResult(behavior="ask", message="m"),
+                PermissionResult(behavior="ask", decision_reason={"type": "workingDir", "reason": "x"}),
+                PermissionResult(behavior="passthrough"),
+                PermissionResult(behavior="allow", updated_input={"x": 1}),
+            ):
+                def check(a: Any, c: Any, r: PermissionResult = result) -> PermissionResult:
+                    return r
+
+                tool = build_tool(name="T", prompt="p", call=lambda a, c: ToolResult(content="ok"),
+                                  check_permissions=check)
+                assert await check_rule_based_permissions(tool, {}, ctx) is None, result
+
+        asyncio.run(go())
+
+    def test_rule_reason_from_a_non_ask_rule_is_no_objection(self):
+        async def go():
+            allow_rule = PermissionRule(tool_name="Bash", rule_content="x", rule_behavior=PermissionBehavior.ALLOW)
+            tool = build_tool(name="Bash", prompt="p", call=lambda a, c: ToolResult(content="ok"),
+                              check_permissions=lambda a, c: PermissionResult(
+                                  behavior="ask", decision_reason={"type": "rule", "rule": allow_rule}))
+            assert await check_rule_based_permissions(tool, {}, tool_context_for(AppStateStore())) is None
+
+        asyncio.run(go())
+
+    def test_exception_in_check_permissions_is_passthrough(self, caplog):
         async def go():
             def explode(a, c):
                 raise RuntimeError("database unreachable")
@@ -243,11 +242,20 @@ class TestCheckRuleBasedPermissions:
                 check_permissions=explode,
             )
             ctx = tool_context_for(AppStateStore())
+            assert await check_rule_based_permissions(tool, {}, ctx) is None
+
+        asyncio.run(go())
+
+    def test_phase_tier_runs_first(self):
+        async def go():
+            from app.loop.context import AppState
+            from app.loop.ledger import PhaseLedger, TddPhase
+
+            tool = build_tool(name="WriteImplementation", prompt="p", call=lambda a, c: ToolResult(content="ok"))
+            ctx = tool_context_for(AppStateStore(state=AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED))))
             res = await check_rule_based_permissions(tool, {}, ctx)
-            assert res is not None
-            assert res.behavior == PermissionBehavior.DENY
-            assert res.message == "Permission check raised an exception: database unreachable"
-            assert res.decision_reason == {"type": "other", "reason": "exception"}
+            assert res is not None and res.behavior == PermissionBehavior.DENY
+            assert (res.decision_reason or {})["type"] == "phase_rule"
 
         asyncio.run(go())
 

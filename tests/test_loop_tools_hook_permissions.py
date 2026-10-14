@@ -19,7 +19,9 @@ from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.types import (
     PermissionBehavior,
+    PermissionMode,
     PermissionResult,
+    PermissionRule,
     ToolPermissionContext,
 )
 from app.loop.tools.base import build_tool
@@ -182,23 +184,63 @@ def test_a_hook_ask_leaves_the_decision_to_the_gate():
     assert resolved.input == NEUTRAL_ARGS
 
 
-def test_a_hook_ask_carries_its_own_message_when_the_gate_also_asks(monkeypatch):
-    async def asking(tool, args, context, tool_use_id=""):
-        return PermissionResult(behavior=PermissionBehavior.ASK, message="gate wording")
+def _never_the_full_gate(monkeypatch):
+    async def full_gate(tool, args, context, tool_use_id=""):
+        raise AssertionError("a hook ask is a forced decision: the full gate must not run")
 
-    monkeypatch.setattr("app.loop.tools.hook_permissions.has_permissions_to_use_tool", asking)
-    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK, message="hook wording"))
-    assert resolved.decision.behavior == PermissionBehavior.ASK
-    assert resolved.decision.message == "hook wording"
+    monkeypatch.setattr("app.loop.tools.hook_permissions.has_permissions_to_use_tool", full_gate)
 
 
-def test_a_hook_ask_without_a_message_keeps_the_gates_wording(monkeypatch):
-    async def asking(tool, args, context, tool_use_id=""):
-        return PermissionResult(behavior=PermissionBehavior.ASK, message="gate wording")
+def interactive_context(ledger=None, perm=None):
+    store = AppStateStore(AppState(phase_ledger=ledger)) if ledger is not None else AppStateStore()
+    return tool_context_for(store, permission_context=perm or ToolPermissionContext())
 
-    monkeypatch.setattr("app.loop.tools.hook_permissions.has_permissions_to_use_tool", asking)
-    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK))
-    assert resolved.decision.message == "gate wording"
+
+def test_a_hook_ask_is_forced_and_carries_its_own_message(monkeypatch):
+    _never_the_full_gate(monkeypatch)
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK, message="hook wording"),
+                       context=interactive_context())
+    assert (resolved.decision.behavior, resolved.decision.message) == (PermissionBehavior.ASK, "hook wording")
+    assert resolved.decision.decision_reason == {
+        "type": "hook", "hookName": "PreToolUse:WriteFile", "reason": "hook wording"}
+
+
+def test_a_hook_ask_without_a_message_names_the_hook(monkeypatch):
+    _never_the_full_gate(monkeypatch)
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK), context=interactive_context())
+    assert resolved.decision.message == "Hook 'PreToolUse:WriteFile' requires approval for this WriteFile command"
+
+
+def test_a_hook_ask_is_denied_where_no_prompt_can_be_shown():
+    from app.loop.permissions.messages import auto_reject_message, dont_ask_reject_message
+
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK, message="m"))
+    assert (resolved.decision.behavior, resolved.decision.message) == (
+        PermissionBehavior.DENY, auto_reject_message("WriteFile"))
+    dont_ask = interactive_context(perm=ToolPermissionContext(mode=PermissionMode.DONT_ASK))
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK, message="m"), context=dont_ask)
+    assert resolved.decision.message == dont_ask_reject_message("WriteFile")
+
+
+def test_a_hook_ask_never_overrides_a_deny_rule_or_the_phase_tier():
+    rule = PermissionRule(tool_name="WriteFile", rule_behavior=PermissionBehavior.DENY)
+    ctx = interactive_context(perm=ToolPermissionContext(always_deny_rules=(rule,)))
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK), context=ctx)
+    assert resolved.decision.decision_reason == {"type": "rule", "rule": rule}
+    red = interactive_context(ledger=PhaseLedger(phase=TddPhase.RED))
+    verdict = HookPermissionVerdict(behavior=PermissionBehavior.ASK, updated_input={"file_path": "calc.py"})
+    resolved = resolve(verdict, context=red)
+    assert resolved.decision.behavior == PermissionBehavior.DENY
+    assert resolved.decision.decision_reason["type"] == "phase_rule"
+    assert resolved.input == {"file_path": "calc.py"}
+
+
+def test_a_hook_ask_reaches_permission_request_hooks_when_headless():
+    outcome = SimpleNamespace(permission_request_result={"behavior": "allow"})
+    ctx = make_context(hook_dispatcher=SimpleNamespace(run=lambda *a, **k: outcome))
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK), context=ctx)
+    assert resolved.decision.behavior == PermissionBehavior.ALLOW
+    assert resolved.decision.decision_reason == {"type": "hook", "hookName": "PermissionRequest"}
 
 
 def test_a_hook_ask_applies_to_its_rewritten_input():
@@ -269,12 +311,110 @@ def test_the_gate_is_asked_about_the_hooks_input_not_the_models():
     assert seen == [{"file_path": "tests/rewritten.py"}]
 
 
-def test_a_hook_ask_preserves_the_gates_rewritten_input(monkeypatch):
-    async def asking(tool, args, context, tool_use_id=""):
-        return PermissionResult(behavior=PermissionBehavior.ASK, message="gate",
-                                updated_input={"file_path": "tests/gate.py"})
+# ── hook allow: re-checked by rules only (upstream checkRuleBasedPermissions) ──
 
-    monkeypatch.setattr("app.loop.tools.hook_permissions.has_permissions_to_use_tool", asking)
-    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK, message="hook"))
-    assert resolved.decision.updated_input == {"file_path": "tests/gate.py"}
+def _write_tool():
+    from app.loop.tools.fs import build_write_file_tool
+
+    return build_write_file_tool()
+
+
+def test_a_hook_allow_skips_a_non_rule_ask_even_when_headless():
+    """A default-mode write is an 'ask' no rule produced: the hook's approval skips it."""
+    ws = SimpleNamespace(root="/ws")
+    ctx = make_context(workspace=ws)
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ALLOW), tool=_write_tool(), context=ctx)
+    assert resolved.decision.behavior == PermissionBehavior.ALLOW
     assert resolved.decision.decision_reason == HOOK_REASON
+
+
+def test_a_hook_allow_still_meets_an_ask_rule_and_then_the_full_gate():
+    rule = PermissionRule(tool_name="WriteFile", rule_behavior=PermissionBehavior.ASK)
+    perm = ToolPermissionContext(always_ask_rules=(rule,), should_avoid_permission_prompts=True)
+    ctx = tool_context_for(AppStateStore(), permission_context=perm)
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ALLOW), context=ctx)
+    assert resolved.decision.behavior == PermissionBehavior.DENY
+    assert resolved.decision.decision_reason["type"] == "asyncAgent"
+
+
+def test_a_hook_allow_meets_the_phase_tier_and_safety_checks():
+    red = make_context(ledger=PhaseLedger(phase=TddPhase.RED), workspace=SimpleNamespace(root="/ws"))
+    verdict = HookPermissionVerdict(behavior=PermissionBehavior.ALLOW, updated_input={"file_path": "calc.py"})
+    resolved = resolve(verdict, tool=_write_tool(), context=red)
+    assert resolved.decision.decision_reason["type"] == "phase_rule"
+    git = HookPermissionVerdict(behavior=PermissionBehavior.ALLOW, updated_input={"file_path": "tests/.git/x"})
+    resolved = resolve(git, tool=_write_tool(), context=make_context(workspace=SimpleNamespace(root="/ws")))
+    assert resolved.decision.behavior == PermissionBehavior.DENY  # safety ask -> full gate -> headless deny
+
+
+def test_an_interactive_tool_needs_the_hook_to_supply_the_input():
+    interactive = make_tool(
+        requires_user_interaction=lambda args: True,
+        check_permissions=lambda a, c: PermissionResult(behavior=PermissionBehavior.ASK, message="ask the user"),
+    )
+    resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ALLOW), tool=interactive)
+    assert resolved.decision.behavior == PermissionBehavior.DENY  # full gate, headless
+    supplied = HookPermissionVerdict(behavior=PermissionBehavior.ALLOW, updated_input={"file_path": "tests/x.py"})
+    resolved = resolve(supplied, tool=interactive)
+    assert (resolved.decision.behavior, resolved.input) == (PermissionBehavior.ALLOW, {"file_path": "tests/x.py"})
+
+
+def test_a_permission_behavior_enum_verdict_is_read_as_is():
+    verdict = verdict_from_hook_outcome(SimpleNamespace(permission_behavior=PermissionBehavior.ASK))
+    assert verdict is not None and verdict.behavior == PermissionBehavior.ASK
+
+
+# ── what the resolver hands to the gate (mutation-driven pins) ───────────────
+
+def _spy(monkeypatch, name, result):
+    seen: list[tuple[Any, ...]] = []
+
+    async def spy(*args):
+        seen.append(args)
+        return result
+
+    monkeypatch.setattr(f"app.loop.tools.hook_permissions.{name}", spy)
+    return seen
+
+
+def _resolve_with_id(verdict, tool=None, context=None):
+    return asyncio.run(resolve_hook_permission_decision(
+        verdict, tool or make_tool(), dict(NEUTRAL_ARGS), context or make_context(), "tu-9"))
+
+
+DENIED = PermissionResult(behavior=PermissionBehavior.DENY, message="no")
+REWRITE = {"file_path": "tests/rewritten.py"}
+
+
+def test_full_gate_receives_input_and_tool_use_id_on_every_branch(monkeypatch):
+    seen = _spy(monkeypatch, "has_permissions_to_use_tool", DENIED)
+    resolved = _resolve_with_id(None)
+    assert seen[-1][1:] == (NEUTRAL_ARGS, seen[-1][2], "tu-9")
+    assert resolved.input == NEUTRAL_ARGS
+    no_opinion = _resolve_with_id(HookPermissionVerdict(behavior=None))
+    assert no_opinion.decision is DENIED and len(seen) == 2
+    interactive = make_tool(requires_user_interaction=lambda args: True)
+    resolved = _resolve_with_id(HookPermissionVerdict(behavior=PermissionBehavior.ALLOW), tool=interactive)
+    assert (seen[-1][1], seen[-1][3], resolved.input) == (NEUTRAL_ARGS, "tu-9", NEUTRAL_ARGS)
+    rule = PermissionRule(tool_name="WriteFile", rule_behavior=PermissionBehavior.ASK)
+    ask_rule_ctx = tool_context_for(AppStateStore(), permission_context=ToolPermissionContext(always_ask_rules=(rule,)))
+    resolved = _resolve_with_id(HookPermissionVerdict(behavior=PermissionBehavior.ALLOW, updated_input=REWRITE),
+                                context=ask_rule_ctx)
+    assert (seen[-1][1], seen[-1][3], resolved.input) == (REWRITE, "tu-9", REWRITE)
+
+
+def test_hook_ask_handler_receives_input_and_tool_use_id(monkeypatch):
+    seen = _spy(monkeypatch, "resolve_ask_without_prompt", DENIED)
+    resolved = _resolve_with_id(HookPermissionVerdict(behavior=PermissionBehavior.ASK, updated_input=REWRITE))
+    forced, _tool, ask_input, _ctx, tool_use_id = seen[-1]
+    assert (forced.behavior, ask_input, tool_use_id, resolved.input) == (
+        PermissionBehavior.ASK, REWRITE, "tu-9", REWRITE)
+
+
+def test_check_file_read_permissions_passes_the_input_through(tmp_path):
+    from app.loop.permissions.filesystem import check_file_read_permissions
+
+    ctx = tool_context_for(AppStateStore(), permission_context=ToolPermissionContext(),
+                           workspace=SimpleNamespace(root=str(tmp_path)))
+    res = check_file_read_permissions("path")({"path": "a"}, ctx)
+    assert res.updated_input == {"path": "a"}

@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:
+    from app.loop.permissions.settings import SettingsLocations
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +136,10 @@ class ToolPermissionContext:
     #: command bypass the automated judge (`stripDangerousPermissionsForAutoMode`). Kept
     #: so the removal is visible after the fact, never consulted by the gate.
     stripped_dangerous_rules: tuple[PermissionRule, ...] = ()
+    #: Where this run's settings files live, so `persistPermissionUpdates` can write the
+    #: editable ones. Upstream finds them through process globals (cwd, home); `None` for a
+    #: context not built from settings, which then persists nothing.
+    settings_locations: SettingsLocations | None = None
 
 
 def get_next_permission_mode(

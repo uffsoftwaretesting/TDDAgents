@@ -1,5 +1,5 @@
 """
-Resolving a PreToolUse hook's verdict against the permission rules (Phase 2).
+Resolving a PreToolUse hook's verdict against the permission rules.
 
 Ported from `reference/claude-code/src/services/tools/toolHooks.ts` ->
 `resolveHookPermissionDecision`, whose own docstring states the invariant it exists for:
@@ -7,13 +7,21 @@ Ported from `reference/claude-code/src/services/tools/toolHooks.ts` ->
     Encapsulates the invariant that hook 'allow' does NOT bypass settings.json
     deny/ask rules — checkRuleBasedPermissions still applies (inc-4788 analog).
 
-So a hook's `allow` buys exactly one thing: skipping the interactive prompt. It is still
-re-checked, and a deny rule overrides it. That matters more here than upstream, because the
-TDD phase rules are evaluated inside the same gate: a PreToolUse hook that approved a write
-must not be able to put production code on disk during RED.
+* **allow** — re-checked with `check_rule_based_permissions` only (the TDD managed tier,
+  deny and ask rules, the tool's deny, content ask rules, safety checks). No objection: the
+  hook's allow stands, so it *does* skip an 'ask' no rule produced (a passthrough, a
+  default-mode write) — in headless and dontAsk runs too, exactly as upstream. A rule deny
+  wins; a rule ask goes to the full gate. A tool that requires interaction goes to the full
+  gate unless the hook supplied `updatedInput` (the hook *was* the interaction).
+* **deny** — final, on the original input.
+* **ask** — upstream's `forceDecision`, which skips `hasPermissionsToUseTool` entirely.
+  *Divergence (TDD, and v2.1.101's "ask no longer overrides deny" fix):* the TDD tier and
+  deny rules run first; only then is the hook's ask handled as an ask — denied under
+  dontAsk, offered to PermissionRequest hooks when no prompt can be shown, else returned.
+* **no verdict** — the full gate.
 
-A hook `deny` is final and is returned unchanged — upstream does not even look at its
-`updatedInput`, "since tool won't run".
+Not ported: upstream's `requireCanUseTool` context flag (speculative overlays), which this
+loop has no use for.
 """
 
 from __future__ import annotations
@@ -21,7 +29,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping
 
-from app.loop.permissions.gate import has_permissions_to_use_tool
+from app.loop.permissions.gate import has_permissions_to_use_tool, resolve_ask_without_prompt
+from app.loop.permissions.messages import create_permission_request_message
+from app.loop.permissions.rules import check_rule_based_permissions, requires_user_interaction
 from app.loop.permissions.types import PermissionBehavior, PermissionResult
 
 if TYPE_CHECKING:
@@ -53,58 +63,61 @@ async def resolve_hook_permission_decision(
     context: ToolContext,
     tool_use_id: str = "",
 ) -> ResolvedPermission:
-    """
-    Combine a hook's verdict with the rule-based gate, in upstream's order.
+    """`resolveHookPermissionDecision`: the decision and the input the tool will run on."""
+    behavior = hook_verdict.behavior if hook_verdict is not None else None
+    hook_name = f"PreToolUse:{tool.name}"
 
-    * `deny` — returned immediately, on the unchanged input.
-    * `allow` — the gate still runs. A gate `deny` wins; a gate `ask` still asks; only a
-      gate that raises no objection lets the hook's allow stand.
-    * `ask` or no verdict — the ordinary gate decides, and a hook `ask` rides along as the
-      message so the reason reaching the model is the hook's own.
-    """
-    if hook_verdict is None or hook_verdict.behavior is None:
-        return ResolvedPermission(
-            decision=await has_permissions_to_use_tool(tool, input_args, context, tool_use_id),
-            input=input_args,
-        )
-
-    if hook_verdict.behavior == PermissionBehavior.DENY:
-        return ResolvedPermission(
-            decision=PermissionResult(
-                behavior=PermissionBehavior.DENY,
-                message=hook_verdict.message or f"Permission to use {tool.name} has been denied.",
-                decision_reason={"type": "hook", "hookName": f"PreToolUse:{tool.name}"},
-            ),
-            input=input_args,
-        )
-
-    hook_input = hook_verdict.updated_input if hook_verdict.updated_input is not None else input_args
-
-    if hook_verdict.behavior == PermissionBehavior.ALLOW:
-        rule_check = await has_permissions_to_use_tool(tool, hook_input, context, tool_use_id)
-        if rule_check.behavior == PermissionBehavior.ALLOW:
-            # No objection: the hook's approval stands and the prompt is skipped.
+    if hook_verdict is not None and behavior == PermissionBehavior.ALLOW:
+        hook_input = hook_verdict.updated_input if hook_verdict.updated_input is not None else input_args
+        interaction_satisfied = hook_verdict.updated_input is not None
+        if requires_user_interaction(tool, hook_input) and not interaction_satisfied:
+            decision = await has_permissions_to_use_tool(tool, hook_input, context, tool_use_id)
+            return ResolvedPermission(decision=decision, input=hook_input)
+        rule_check = await check_rule_based_permissions(tool, hook_input, context)
+        if rule_check is None:
+            # No rule objects: the hook's approval stands and the prompt is skipped.
             return ResolvedPermission(
                 decision=PermissionResult(
                     behavior=PermissionBehavior.ALLOW,
                     updated_input=hook_input,
-                    decision_reason={"type": "hook", "hookName": f"PreToolUse:{tool.name}"},
+                    decision_reason={"type": "hook", "hookName": hook_name},
                 ),
                 input=hook_input,
             )
-        # A deny or ask from the gate overrides the hook, deliberately.
-        return ResolvedPermission(decision=rule_check, input=hook_input)
+        if rule_check.behavior == PermissionBehavior.DENY:
+            return ResolvedPermission(decision=rule_check, input=hook_input)
+        # An ask rule: the prompt is required despite the hook's approval.
+        decision = await has_permissions_to_use_tool(tool, hook_input, context, tool_use_id)
+        return ResolvedPermission(decision=decision, input=hook_input)
 
-    # `ask`: the gate decides, carrying the hook's message as the reason.
-    decision = await has_permissions_to_use_tool(tool, hook_input, context, tool_use_id)
-    if decision.behavior == PermissionBehavior.ASK and hook_verdict.message:
-        decision = PermissionResult(
-            behavior=PermissionBehavior.ASK,
-            message=hook_verdict.message,
-            updated_input=decision.updated_input,
-            decision_reason={"type": "hook", "hookName": f"PreToolUse:{tool.name}"},
+    if hook_verdict is not None and behavior == PermissionBehavior.DENY:
+        return ResolvedPermission(
+            decision=PermissionResult(
+                behavior=PermissionBehavior.DENY,
+                message=hook_verdict.message or f"Permission to use {tool.name} has been denied.",
+                decision_reason={"type": "hook", "hookName": hook_name},
+            ),
+            input=input_args,
         )
-    return ResolvedPermission(decision=decision, input=hook_input)
+
+    if hook_verdict is not None and behavior == PermissionBehavior.ASK:
+        ask_input = hook_verdict.updated_input if hook_verdict.updated_input is not None else input_args
+        rule_check = await check_rule_based_permissions(tool, ask_input, context)
+        if rule_check is not None and rule_check.behavior == PermissionBehavior.DENY:
+            return ResolvedPermission(decision=rule_check, input=ask_input)
+        forced = PermissionResult(
+            behavior=PermissionBehavior.ASK,
+            message=hook_verdict.message or create_permission_request_message(
+                tool.name, {"type": "hook", "hookName": hook_name}),
+            decision_reason={"type": "hook", "hookName": hook_name, "reason": hook_verdict.message},
+        )
+        decision = await resolve_ask_without_prompt(forced, tool, ask_input, context, tool_use_id)
+        return ResolvedPermission(decision=decision, input=ask_input)
+
+    return ResolvedPermission(
+        decision=await has_permissions_to_use_tool(tool, input_args, context, tool_use_id),
+        input=input_args,
+    )
 
 
 def verdict_from_hook_outcome(outcome: Any) -> HookPermissionVerdict | None:
