@@ -179,3 +179,120 @@ def test_the_provider_follows_the_requested_model(monkeypatch):
     model_mod.open_model_stream(state, run_config, RetryContext(model="claude-sonnet-4-6"))
     model_mod.open_model_stream(state, run_config, RetryContext(model="mystery"))
     assert asked == [("anthropic", "claude-sonnet-4-6"), ("openai", "mystery")]
+
+
+def _stream_state():
+    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.state import initial_loop_state
+
+    return initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
+
+
+def _drain_stream(state, config):
+    import asyncio
+
+    from app.loop import model as model_mod
+
+    async def go():
+        return [m async for m in model_mod.stream_call_model(state, config)]
+
+    return asyncio.run(go())
+
+
+def test_stream_call_model_passes_the_runs_retry_options(monkeypatch, caplog):
+    import dataclasses
+    import logging
+
+    from app.loop import model as model_mod
+    from app.loop.config import build_run_config
+    from app.loop.retry import RetryNotice
+
+    seen: dict = {}
+
+    async def fake_with_retry(operation, options):
+        seen["options"] = options
+
+        async def empty():
+            return
+            yield
+
+        return empty()
+
+    monkeypatch.setattr(model_mod, "with_retry", fake_with_retry)
+    config = dataclasses.replace(build_run_config("r", postgres_checkpointing=False), max_retries=3,
+                                 fallback_model="fb")
+    state = _stream_state()
+    _drain_stream(state, config)
+    options = seen["options"]
+    assert (options.model, options.max_retries, options.fallback_model) == (config.model, 3, "fb")
+    assert options.is_cancelled() is False
+    state.tool_context.cancel.cancel()
+    assert options.is_cancelled() is True
+    with caplog.at_level(logging.WARNING, logger="app.loop.model"):
+        options.on_notice(RetryNotice(attempt=2, max_retries=3, error=RuntimeError("boom"), delay_ms=0))
+    assert "Model call attempt 2/4 failed: boom" in caplog.text
+
+
+def test_a_failure_on_the_first_frame_is_retried(monkeypatch):
+    """The first item is pulled inside the retried operation, so a stream that fails before
+    emitting anything is still "before any output" and may be retried."""
+    import dataclasses
+
+    from langchain_core.messages import AIMessageChunk
+
+    from app.loop import model as model_mod
+    from app.loop import retry as retry_mod
+    from app.loop.config import build_run_config
+
+    attempts: list[int] = []
+
+    def fake_open(state, config, context):
+        attempts.append(1)
+        failing = len(attempts) == 1
+
+        async def stream():
+            if failing:
+                raise ConnectionError("reset")
+            yield AIMessageChunk(content="hello")
+
+        return stream()
+
+    real_with_retry = retry_mod.with_retry
+
+    async def no_sleep(_seconds):
+        return None
+
+    async def with_retry_no_sleep(operation, options):
+        return await real_with_retry(operation, dataclasses.replace(options, sleep=no_sleep))
+
+    monkeypatch.setattr(model_mod, "open_model_stream", fake_open)
+    monkeypatch.setattr(model_mod, "with_retry", with_retry_no_sleep)
+    out = _drain_stream(_stream_state(), build_run_config("r", postgres_checkpointing=False))
+    assert len(attempts) == 2
+    assert [m.content for m in out] == ["hello"]
+
+
+def test_a_model_without_a_config_kwarg_still_gets_the_cache_kwargs(monkeypatch):
+    from app.config.config import Config
+    from app.loop import model as model_mod
+    from app.loop.config import build_run_config
+    from app.loop.retry import RetryContext
+
+    calls: list = []
+
+    class OldModel:
+        def astream(self, messages, **kwargs):
+            calls.append(kwargs)
+            if "config" in kwargs:
+                raise TypeError("unexpected keyword argument 'config'")
+            return iter(())
+
+    monkeypatch.delenv("TDDAGENTS_DISABLE_PROMPT_CACHING", raising=False)
+    monkeypatch.setattr(Config, "CHAT_MODEL", "anthropic")
+    monkeypatch.setattr(model_mod, "get_chat_model", lambda *a, **k: OldModel())
+    monkeypatch.setattr(model_mod, "build_request_messages", lambda state, config: [
+        SystemMessage(content="s"), HumanMessage(content="hi")])
+    monkeypatch.setattr(model_mod, "request_system_texts", lambda state, config: ["s"])
+    model_mod.open_model_stream(_stream_state(), build_run_config("r", postgres_checkpointing=False),
+                                RetryContext(model="claude-sonnet-4-6"))
+    assert calls[-1] == {"cache_control": {"type": "ephemeral"}}

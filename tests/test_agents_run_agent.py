@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
 from typing import Any
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.agents.definition import AgentDefinition
@@ -212,3 +214,145 @@ def test_a_worker_inherits_the_runs_services():
     assert (ctx.run_id, ctx.hook_dispatcher, ctx.workspace) == ("run-7", dispatcher, ws)
     assert (ctx.cost_tracker, ctx.transcript_path) == (tracker, "/p/run-7.jsonl")
     assert ctx.cancel is parent.cancel
+
+
+def test_the_worker_starts_from_fresh_per_agent_state():
+    """`createSubagentContext`: fresh tracking sets and file state, the worker's own messages."""
+    parent = _parent()
+    parent.read_file_state["x.py"] = object()
+    parent.in_flight_tool_ids.add("busy")
+    parent.nested_memory_attachment_triggers.add("/t")
+    parent.loaded_nested_memory_paths.add("/l")
+    model, _ = _run(parent=parent)
+    ctx = model.seen[0].tool_context
+    assert ctx.read_file_state == {} and ctx.read_file_state is not parent.read_file_state
+    assert ctx.in_flight_tool_ids == set() and ctx.in_flight_tool_ids is not parent.in_flight_tool_ids
+    assert ctx.nested_memory_attachment_triggers == set()
+    assert ctx.loaded_nested_memory_paths == set()
+    assert [m.content for m in ctx.messages] == ["write a failing test"]
+
+
+def test_denial_tracking_is_shared_only_by_a_sync_worker():
+    from app.loop.context import DenialTrackingBox
+
+    box = DenialTrackingBox()
+    parent = dataclasses.replace(_parent(), local_denial_tracking=box)
+    model, _ = _run(parent=parent)
+    assert model.seen[0].tool_context.local_denial_tracking is box
+    model, _ = _run(parent=parent, is_async=True)
+    assert isinstance(model.seen[0].tool_context.local_denial_tracking, DenialTrackingBox)
+    assert model.seen[0].tool_context.local_denial_tracking is not box
+
+
+def test_an_async_worker_only_gets_the_async_allowed_tools():
+    tools = (_tool("ReadFile"), _tool("Probe"))
+    model, _ = _run(tools=tools, is_async=True)
+    assert [t.name for t in model.seen[0].tool_context.tools] == ["ReadFile"]
+    model, _ = _run(tools=tools)
+    assert sorted(t.name for t in model.seen[0].tool_context.tools) == ["Probe", "ReadFile"]
+
+
+def test_the_phase_denies_the_implementation_writer_in_red():
+    tools = (_tool("ReadFile"), _tool("WriteFile", impl_writer=True))
+    model, _ = _run(tools=tools)
+    assert [t.name for t in model.seen[0].tool_context.tools] == ["ReadFile"]
+
+
+def test_the_context_omissions_follow_the_definition():
+    model, _ = _run(definition=dataclasses.replace(TESTER, name="Explore", omit_claude_md=True))
+    ctx = model.seen[0].tool_context
+    assert (ctx.omit_claude_md, ctx.omit_git_status) == (True, True)
+    model, _ = _run()
+    ctx = model.seen[0].tool_context
+    assert (ctx.omit_claude_md, ctx.omit_git_status) == (False, False)
+    model, _ = _run(definition=dataclasses.replace(TESTER, name="Plan"))
+    assert model.seen[0].tool_context.omit_git_status is True
+
+
+def test_max_turns_allows_exactly_that_many_turns():
+    bounded = dataclasses.replace(TESTER, max_turns=2)
+    model = FakeModel([[asks_for("ReadFile", "c1")], [asks_for("ReadFile", "c2")], [AIMessage(content="d")]])
+    _run(definition=bounded, model=model, tools=(_tool("ReadFile"),))
+    assert len(model.seen) == 2
+
+
+def test_only_next_turns_count_toward_max_turns():
+    from app.loop.deps import StopHookResult
+    from tests.test_loop_engine import FakeStopHooks
+
+    bounded = dataclasses.replace(TESTER, max_turns=1)
+    model = FakeModel([[AIMessage(content="first")], [AIMessage(content="second")]])
+    blocking = StopHookResult(blocking_errors=(HumanMessage(content="keep going"),))
+    deps = dataclasses.replace(make_fake_deps(model), stop_hooks=FakeStopHooks([blocking]))
+    _run(definition=bounded, model=model, deps=deps)
+    assert len(model.seen) == 2
+
+
+@pytest.mark.skipif(
+    "MUTANT_UNDER_TEST" in os.environ,
+    reason="mutmut's async-generator trampoline does not forward aclose() to the wrapped generator",
+)
+def test_closing_the_worker_closes_its_loop(monkeypatch):
+    from app.loop.agents import run_agent as run_agent_mod
+
+    closed: list[bool] = []
+
+    async def fake_loop(state, config, deps):
+        try:
+            yield AIMessage(content="one")
+            yield AIMessage(content="two")
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr(run_agent_mod, "run_loop", fake_loop)
+
+    async def go():
+        gen = run_agent(agent_definition=TESTER, prompt_messages=[HumanMessage(content="p")],
+                        tool_context=_parent(), config=CONFIG, deps=make_fake_deps(FakeModel([])),
+                        available_tools=(), system_prompt=("s",))
+        first = await gen.__anext__()
+        await gen.aclose()  # type: ignore[attr-defined]
+        # Checked here: `asyncio.run` finalizes any leftover generator on its way out.
+        assert closed == [True]
+        return first
+
+    assert asyncio.run(go()).content == "one"
+
+
+def test_the_subagent_start_attachment_names_its_hook():
+    from app.loop.hooks.output import AggregatedHookResult
+    from tests.hook_doubles import ScriptedDispatcher
+
+    d = ScriptedDispatcher(script={"SubagentStart": [AggregatedHookResult(additional_contexts=("ctx",))]})
+    model, _ = _run(parent=_parent(hook_dispatcher=d))
+    attachment = model.seen[0].messages[1].additional_kwargs["attachment"]
+    assert (attachment["hookName"], attachment["hookEvent"]) == ("SubagentStart", "SubagentStart")
+    import uuid
+
+    uuid.UUID(attachment["toolUseID"])
+
+
+def test_a_compact_boundary_is_recorded_in_the_sidechain(tmp_path):
+    import json
+
+    from app.loop.compact.auto_compact import AutoCompactOutcome
+    from app.loop.compact.compact import (
+        CompactionResult,
+        create_compact_boundary_message,
+    )
+
+    result = CompactionResult(boundary_marker=create_compact_boundary_message("auto", 5),
+                              summary_messages=[HumanMessage(content="summary")], attachments=[], hook_results=[])
+    calls: list[int] = []
+
+    async def auto(messages, state, config):
+        calls.append(1)
+        if len(calls) == 1:
+            return AutoCompactOutcome(was_compacted=True, compaction_result=result, consecutive_failures=0)
+        return AutoCompactOutcome(was_compacted=False)
+
+    store = TranscriptStore("sess", tmp_path, version="v", git_branch=None)
+    deps = dataclasses.replace(make_fake_deps(FakeModel([[AIMessage(content="d")]])), autocompact=auto)
+    _run(deps=deps, agent_id="a5", transcript=store)
+    entries = [json.loads(line) for line in store.agent_transcript_path("a5").read_text().splitlines()]
+    assert any(e.get("subtype") == "compact_boundary" for e in entries)

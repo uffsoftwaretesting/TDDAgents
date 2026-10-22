@@ -187,7 +187,7 @@ instead of the {AGENT_TOOL_NAME} tool, to find the match more quickly
         f"with multiple {AGENT_TOOL_NAME} tool use content blocks. For example, if you need to launch both a "
         "build-validator agent and a test-runner agent in parallel, send a single message with both tool calls."
     )
-    return f"{shared}\n{when_not_to_use}\n{usage}{_WRITING_THE_PROMPT}\n{_EXAMPLES}"
+    return f"{shared}\n{when_not_to_use}\n\n{usage}{_WRITING_THE_PROMPT}\n\n{_EXAMPLES}"
 
 
 __all__ = [

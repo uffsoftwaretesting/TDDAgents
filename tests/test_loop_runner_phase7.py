@@ -130,3 +130,102 @@ def test_the_main_thread_has_the_agent_tool_outside_coordinator_mode(python_work
     assert "Agent" in [t.name for t in ctx.tools]
     assert ctx.agent_system_prompt is None and ctx.extra_user_context is None
     assert ctx.transcript_store is not None
+
+
+# ── mutation-gate pins (Phase 7) ────────────────────────────────────────────
+
+def _agent_file(directory, name: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{name}.md").write_text(f"---\nname: {name}\ndescription: {name} agent\n---\nYou are {name}.\n")
+
+
+def _agent_tool(tools: Any) -> Any:
+    return next(t for t in tools if t.name == "Agent")
+
+
+def test_the_agent_tool_sees_project_and_user_agents(tmp_path, monkeypatch):
+    from app.loop.config import build_run_config
+    from app.loop.factory import get_production_deps
+    from app.loop.runner import main_thread_tools
+
+    monkeypatch.delenv(COORDINATOR_MODE_ENV, raising=False)
+    _agent_file(tmp_path / "proj" / ".tddagents" / "agents", "projector")
+    _agent_file(tmp_path / "home" / ".tddagents" / "agents", "homer")
+    config = build_run_config("r", postgres_checkpointing=False)
+    tools = main_thread_tools(config, get_production_deps(), tmp_path / "proj", tmp_path / "home")
+    prompt = _agent_tool(tools).prompt
+    assert "- projector: projector agent" in prompt and "- homer: homer agent" in prompt
+
+
+def test_the_coordinators_agent_tool_has_the_coordinator_prompt(tmp_path, monkeypatch):
+    from app.loop.agents.loader import get_agent_definitions_with_overrides
+    from app.loop.agents.prompt import get_prompt
+    from app.loop.config import build_run_config
+    from app.loop.factory import get_production_deps
+    from app.loop.runner import main_thread_tools
+
+    monkeypatch.setenv(COORDINATOR_MODE_ENV, "1")
+    config = build_run_config("r", postgres_checkpointing=False)
+    (tool,) = main_thread_tools(config, get_production_deps(), tmp_path, tmp_path / "home")
+    definitions = get_agent_definitions_with_overrides(project_dir=tmp_path, user_home=tmp_path / "home")
+    assert tool.prompt == get_prompt(list(definitions.values()), True, default_agent_type=None)
+    assert tool.prompt != get_prompt(list(definitions.values()), False, default_agent_type=None)
+
+
+def test_run_memory_lives_in_the_run_dir_or_a_named_temp_dir(tmp_path):
+    from app.loop.runner import run_agent_memory_store
+
+    store, root = run_agent_memory_store(tmp_path)
+    assert (store.base_dir, root) == (tmp_path.resolve(), None)
+    store, root = run_agent_memory_store(None)
+    assert root is not None and root.name.startswith("tddagents-agent-memory-")
+    assert store.base_dir == root.resolve()
+    root.rmdir()
+
+
+def test_the_runner_wires_its_model_session_and_user_agents(make_fake_workspace, tmp_path, monkeypatch):
+    """The cost tracker prices the run's model; events carry the run id; the caller's own
+    sink still gets the real events; user agents come from the given home."""
+    from app.loop.factory import get_production_deps
+    from app.loop.runner import tdd_loop_runner
+    from app.loop.transitions import Terminated, Transition
+
+    monkeypatch.delenv(COORDINATOR_MODE_ENV, raising=False)
+    _agent_file(tmp_path / "home" / ".tddagents" / "agents", "homer")
+    seen: list[Any] = []
+    sunk: list[Any] = []
+
+    async def model(state: Any, config: Any):
+        seen.append((state, config))
+        yield AIMessage(content="d")
+
+    deps = dataclasses.replace(get_production_deps(), call_model=model, emit_event=sunk.append)
+    asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=make_fake_workspace(), deps=deps,
+                                project_root=tmp_path, home=tmp_path / "home", managed_dir=tmp_path / "etc"))
+    state, config = seen[0]
+    assert state.tool_context.cost_tracker.model == config.model
+    assert "- homer: homer agent" in _agent_tool(state.tool_context.tools).prompt
+    assert sunk and all(isinstance(e, (Transition, Terminated)) for e in sunk)
+    project = get_project_dir(str(tmp_path))
+    (transcript,) = project.glob("loop-*.jsonl")
+    events = EventLog.load_jsonl(project / transcript.stem / "events.jsonl")
+    assert {e.session_id for e in events} == {transcript.stem}
+
+
+def test_agent_memory_lives_in_the_workspaces_run_dir(make_fake_workspace, tmp_path):
+    """Part I5: the run's memory store is rooted in the workspace's run dir when it has one."""
+    from app.loop.factory import get_production_deps
+    from app.loop.runner import tdd_loop_runner
+
+    seen: list[Any] = []
+
+    async def model(state: Any, config: Any):
+        seen.append(state.tool_context.agent_memory_store.base_dir)
+        yield AIMessage(content="done")
+
+    ws = make_fake_workspace()
+    ws.run_dir = str(tmp_path / "run")  # type: ignore[attr-defined]
+    deps = dataclasses.replace(get_production_deps(), call_model=model)
+    asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=ws, deps=deps, project_root=tmp_path,
+                                home=tmp_path / "home", managed_dir=tmp_path / "etc"))
+    assert str(seen[0]) == str(tmp_path / "run")

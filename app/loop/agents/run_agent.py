@@ -107,7 +107,7 @@ def _phase_filtered_pool(
     resolved: Sequence[Tool], get_app_state: Callable[[], AppState]
 ) -> Callable[[], tuple[Any, ...]]:
     """The worker's `refresh_tools`: the resolved pool under the live phase, rebuilt only on a move."""
-    cache: dict[str, Any] = {"phase": None, "tools": ()}
+    cache: dict[str, Any] = {"phase": None}
 
     def refresh() -> tuple[Any, ...]:
         ledger = get_app_state().phase_ledger
@@ -190,7 +190,8 @@ async def run_agent(
 
     def on_event(event: Any) -> None:
         """The worker's own sink: never the parent's (sidechains are not the flow)."""
-        if isinstance(event, Terminated) or getattr(event, "reason", None) != Continue.NEXT_TURN:
+        # A `Terminated` reason is never `NEXT_TURN`, so only the next-turn transition counts.
+        if event.reason != Continue.NEXT_TURN:
             return
         turns["count"] += 1
         limit = agent_definition.max_turns

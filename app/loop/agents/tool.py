@@ -45,7 +45,6 @@ from app.loop.deps import LoopDeps
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message, tool_calls_in
 from app.loop.model_aliases import MODEL_ALIASES, get_agent_model
-from app.loop.permissions.types import PermissionResult
 from app.loop.tools.base import BuiltTool, Tool, build_tool
 from app.loop.tools.types import ToolResult
 
@@ -127,9 +126,8 @@ def finalize_agent_tool(
     if not assistants:
         raise ValueError("No assistant messages found")
     last = assistants[-1]
-    content = _text_blocks(last)
-    if not content:
-        content = next((blocks for m in reversed(assistants) if (blocks := _text_blocks(m))), ())
+    # The last assistant's text, else the most recent text before it (the walk starts at `last`).
+    content = next((blocks for m in reversed(assistants) if (blocks := _text_blocks(m))), ())
     return AgentToolResult(
         agent_id=agent_id,
         agent_type=agent_type,
@@ -238,10 +236,6 @@ def build_agent_tool(
             metadata={"agent_id": agent_id, "agent_type": agent.name, "status": "completed"},
         )
 
-    async def check_permissions(args: dict[str, Any], context: ToolContext) -> PermissionResult:
-        """`checkPermissions`: spawning is auto-approved in the external build."""
-        return PermissionResult(behavior="allow", updated_input=args)
-
     return build_tool(
         name=AGENT_TOOL_NAME,
         prompt=get_prompt(list(definitions.values()), is_coordinator, default_agent_type=None),
@@ -250,7 +244,7 @@ def build_agent_tool(
         aliases=(LEGACY_AGENT_TOOL_NAME,),
         is_read_only=lambda args: True,
         is_concurrency_safe=lambda args: True,
-        check_permissions=check_permissions,
+        # `checkPermissions` auto-approves a spawn in the external build: the default allow.
         description=lambda args: str(args.get("description", "")),
     )
 

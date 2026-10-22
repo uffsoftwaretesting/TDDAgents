@@ -282,13 +282,19 @@ def test_run_tests_is_the_only_ledger_writer():
     Agent-tool write that bypasses `transition_to`, cannot appear unnoticed.
     """
     assert _ledger_writers() == ["app/loop/agents/tool.py", "app/loop/tools/run_tests.py"]
-    import inspect
-
-    from app.loop.agents import tool
-
-    source = inspect.getsource(tool)
-    assert source.count("set_app_state(") == 1
-    assert "phase_ledger=spawn_ledger" in source and "spawn_ledger = phase_on_spawn(" in source
+    # Every Agent-tool write is the spawn ledger, which only `phase_on_spawn` produces. Checked
+    # per call site (a mutated copy of the module holds one copy per mutant).
+    tree = ast.parse((REPO / "app/loop/agents/tool.py").read_text(encoding="utf-8"))
+    # Under mutmut only the `__mutmut_orig` copy is the source; numbered copies are mutants.
+    originals = [f for f in tree.body if isinstance(f, ast.FunctionDef)
+                 and ("__mutmut_" not in f.name or f.name.endswith("__mutmut_orig"))]
+    nodes = [n for f in originals for n in ast.walk(f)]
+    writes = [ast.unparse(n) for n in nodes
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "set_app_state"]
+    assert writes and all("phase_ledger=spawn_ledger" in w for w in writes)
+    assigns = [ast.unparse(n) for n in nodes if isinstance(n, ast.Assign)
+               and any(isinstance(t, ast.Name) and t.id == "spawn_ledger" for t in n.targets)]
+    assert assigns and all(a.startswith("spawn_ledger = phase_on_spawn(") for a in assigns)
 
 
 def test_initial_state_reads_the_store_and_never_writes_it():

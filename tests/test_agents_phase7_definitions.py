@@ -349,3 +349,193 @@ class TestAgentToolPrompt:
     def test_background_notes_when_enabled(self):
         text = get_prompt(self._agents(), background_tasks_enabled=True)
         assert "- You can optionally run agents in the background using the run_in_background parameter." in text
+
+
+#: The whole non-coordinator prompt, written from upstream's `prompt.ts` with this build's tool
+#: names, fork off, the background notes on, and no worktree line (no `isolation` parameter).
+#: The text is the contract the model reads, so it is pinned verbatim.
+FULL_PROMPT = (
+    "Launch a new agent to handle complex, multi-step tasks autonomously.\n"
+    "\n"
+    "The Agent tool launches specialized agents (subprocesses) that autonomously handle complex tasks. "
+    "Each agent type has specific capabilities and tools available to it.\n"
+    "\n"
+    "Available agent types and the tools they have access to:\n"
+    "- tester: Writes tests (Tools: ReadFile)\n"
+    "- Explore: Searches (Tools: All tools except Edit)\n"
+    "\n"
+    "When using the Agent tool, specify a subagent_type parameter to select which agent type to use. "
+    "If omitted, the general-purpose agent is used.\n"
+    "\n"
+    "When NOT to use the Agent tool:\n"
+    "- If you want to read a specific file path, use the ReadFile tool or the Glob tool instead of the Agent "
+    "tool, to find the match more quickly\n"
+    "- If you are searching for a specific class definition like \"class Foo\", use the Glob tool instead, "
+    "to find the match more quickly\n"
+    "- If you are searching for code within a specific file or set of 2-3 files, use the ReadFile tool instead "
+    "of the Agent tool, to find the match more quickly\n"
+    "- Other tasks that are not related to the agent descriptions above\n"
+    "\n"
+    "\n"
+    "Usage notes:\n"
+    "- Always include a short description (3-5 words) summarizing what the agent will do\n"
+    "- Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single "
+    "message with multiple tool uses\n"
+    "- When the agent is done, it will return a single message back to you. The result returned by the agent is "
+    "not visible to the user. To show the user the result, you should send a text message back to the user with "
+    "a concise summary of the result.\n"
+    "- You can optionally run agents in the background using the run_in_background parameter. When an agent runs "
+    "in the background, you will be automatically notified when it completes — do NOT sleep, poll, or proactively "
+    "check on its progress. Continue with other work or respond to the user instead.\n"
+    "- **Foreground vs background**: Use foreground (default) when you need the agent's results before you can "
+    "proceed — e.g., research agents whose findings inform your next steps. Use background when you have "
+    "genuinely independent work to do in parallel.\n"
+    "- To continue a previously spawned agent, use SendMessage with the agent's ID or name as the `to` field. "
+    "The agent resumes with its full context preserved. Each Agent invocation starts fresh — provide a complete "
+    "task description.\n"
+    "- The agent's outputs should generally be trusted\n"
+    "- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, "
+    "web fetches, etc.), since it is not aware of the user's intent\n"
+    "- If the agent description mentions that it should be used proactively, then you should try your best to use "
+    "it without the user having to ask for it first. Use your judgement.\n"
+    "- If the user specifies that they want you to run agents \"in parallel\", you MUST send a single message with "
+    "multiple Agent tool use content blocks. For example, if you need to launch both a build-validator agent and a "
+    "test-runner agent in parallel, send a single message with both tool calls.\n"
+    "\n"
+    "## Writing the prompt\n"
+    "\n"
+    "Brief the agent like a smart colleague who just walked into the room — it hasn't seen this conversation, "
+    "doesn't know what you've tried, doesn't understand why this task matters.\n"
+    "- Explain what you're trying to accomplish and why.\n"
+    "- Describe what you've already learned or ruled out.\n"
+    "- Give enough context about the surrounding problem that the agent can make judgment calls rather than just "
+    "following a narrow instruction.\n"
+    "- If you need a short response, say so (\"report in under 200 words\").\n"
+    "- Lookups: hand over the exact command. Investigations: hand over the question — prescribed steps become dead "
+    "weight when the premise is wrong.\n"
+    "\n"
+    "Terse command-style prompts produce shallow, generic work.\n"
+    "\n"
+    "**Never delegate understanding.** Don't write \"based on your findings, fix the bug\" or \"based on the "
+    "research, implement it.\" Those phrases push synthesis onto the agent instead of doing it yourself. Write "
+    "prompts that prove you understood: include file paths, line numbers, what specifically to change.\n"
+    "\n"
+    "\n"
+    "Example usage:\n"
+    "\n"
+    "<example_agent_descriptions>\n"
+    "\"test-runner\": use this agent after you are done writing code to run tests\n"
+    "\"greeting-responder\": use this agent to respond to user greetings with a friendly joke\n"
+    "</example_agent_descriptions>\n"
+    "\n"
+    "<example>\n"
+    "user: \"Please write a function that checks if a number is prime\"\n"
+    "assistant: I'm going to use the WriteFile tool to write the following code:\n"
+    "<code>\n"
+    "function isPrime(n) {\n"
+    "  if (n <= 1) return false\n"
+    "  for (let i = 2; i * i <= n; i++) {\n"
+    "    if (n % i === 0) return false\n"
+    "  }\n"
+    "  return true\n"
+    "}\n"
+    "</code>\n"
+    "<commentary>\n"
+    "Since a significant piece of code was written and the task was completed, now use the test-runner agent to "
+    "run the tests\n"
+    "</commentary>\n"
+    "assistant: Uses the Agent tool to launch the test-runner agent\n"
+    "</example>\n"
+    "\n"
+    "<example>\n"
+    "user: \"Hello\"\n"
+    "<commentary>\n"
+    "Since the user is greeting, use the greeting-responder agent to respond with a friendly joke\n"
+    "</commentary>\n"
+    "assistant: \"I'm going to use the Agent tool to launch the greeting-responder agent\"\n"
+    "</example>\n"
+)
+
+
+def test_the_full_prompt_is_upstreams_text_verbatim():
+    agents = TestAgentToolPrompt()._agents()
+    assert get_prompt(agents, background_tasks_enabled=True) == FULL_PROMPT
+    # Defaults: not a coordinator, no background notes.
+    without_background = get_prompt(agents)
+    assert without_background.startswith(FULL_PROMPT.split("\n- You can optionally run")[0] + "\n- To continue")
+    assert get_prompt(agents, False, None) == without_background
+
+
+def test_the_tools_description_separator():
+    defn = AgentDefinition(name="a", description="w", prompt="p", tools=("A", "B", "C"), disallowed_tools=("B",))
+    assert get_tools_description(defn) == "A, C"
+
+
+class TestTriageResolution:
+    """Mutation triage (Phase 7 gate): every `continue` keeps filtering the rest of the pool."""
+
+    def test_each_skipped_or_kept_tool_does_not_end_the_filter(self):
+        later = _tool("ReadFile")
+        for first, mode in ((_tool("mcp__s__x"), None), (_tool("ExitPlanMode"), "plan"), (_tool("Agent"), None)):
+            kept = filter_tools_for_agent([first, later], is_built_in=False, permission_mode=mode)
+            assert later in kept
+        kept = filter_tools_for_agent([_tool("Other"), later], is_built_in=True, is_async=True)
+        assert [t.name for t in kept] == ["ReadFile"]
+
+    def test_the_definitions_mode_reaches_the_filter(self):
+        defn = AgentDefinition(name="w", description="d", prompt="p", permission_mode="plan")
+        res = resolve_agent_tools(defn, [_tool("ExitPlanMode"), _tool("ReadFile")])
+        assert [t.name for t in res.resolved_tools] == ["ExitPlanMode", "ReadFile"]
+
+    def test_the_wildcard_result_has_empty_lists_and_an_explicit_one_is_not_a_wildcard(self):
+        tools = [_tool("ReadFile")]
+        wildcard = resolve_agent_tools(AgentDefinition(name="w", description="d", prompt="p"), tools)
+        assert (wildcard.valid_tools, wildcard.invalid_tools) == ((), ())
+        explicit = resolve_agent_tools(
+            AgentDefinition(name="w", description="d", prompt="p", tools=("ReadFile",)), tools)
+        assert explicit.has_wildcard is False
+
+
+class TestTriageLoader:
+    def test_every_placeholder_form_is_rendered(self):
+        from app.loop.agents.loader import render_prompt
+
+        assert render_prompt("{{A}} ${B} {C}", {"A": "1", "B": "2", "C": "3"}) == "1 2 3"
+
+    @pytest.mark.parametrize(("raw", "expected"), [(True, None), (False, None), (3.0, 3), (3.5, None), (1, 1),
+                                                   ("2 turns", 2), (0, None)])
+    def test_max_turns_follows_parse_positive_int(self, raw, expected):
+        assert _load(_md(name="a", description="d", maxTurns=raw)).max_turns == expected
+
+    def test_a_non_string_description_is_not_an_agent(self):
+        assert load_agent_definition(_md(name="a", description=123)) is None
+
+    def test_only_markdown_files_and_agent_dirs_are_scanned(self, tmp_path):
+        from app.loop.agents.loader import _scan_agent_dir
+
+        (tmp_path / "README.md").write_text(_md(name="readme", description="d"))
+        (tmp_path / "notes.txt").write_text(_md(name="notes", description="d"))
+        (tmp_path / "real.md").write_text(_md(name="real", description="d"))
+        assert list(_scan_agent_dir(tmp_path, "project")) == ["real"]
+
+    def test_html_comment_frontmatter_is_not_frontmatter(self):
+        """Upstream's `FRONTMATTER_REGEX` accepts `---` fences only."""
+        from app.loop.agents.loader import parse_markdown_frontmatter
+
+        assert parse_markdown_frontmatter("<!--\nname: a\n-->\nbody") == ({}, "<!--\nname: a\n-->\nbody")
+        assert parse_markdown_frontmatter("---\nname: a\n---\n body ") == ({"name": "a"}, "body")
+        assert parse_markdown_frontmatter("---\n[unclosed\n---\nbody") == ({}, "body")
+        assert parse_markdown_frontmatter("---\n- a list\n---\nbody") == ({}, "body")
+
+
+class TestTriageFork:
+    def test_messages_without_tool_calls_or_with_text_blocks_yield_no_ids(self):
+        from langchain_core.messages import HumanMessage
+
+        from app.loop.agents.fork import (
+            _get_tool_result_ids_from_message,
+            _get_tool_use_ids_from_assistant,
+        )
+
+        assert _get_tool_use_ids_from_assistant(HumanMessage(content="x")) == []
+        assert _get_tool_result_ids_from_message(HumanMessage(content=["plain", {"type": "text", "text": "t"}])) == []

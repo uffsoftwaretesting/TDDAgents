@@ -338,7 +338,8 @@ async def _run_with_hooks(
     mode = str(store.get().tool_permission_context.mode)
     prompt = await process_user_prompt_submit_hooks(ctx, sub_req, mode)
     if not prompt.should_query:
-        reason = prompt.blocked_message or prompt.stopped_message or ""
+        # A stopped UserPromptSubmit always carries one of the two messages.
+        reason = prompt.blocked_message or prompt.stopped_message
         logger.info("Loop %s not started: UserPromptSubmit hook stopped it: %s", run_id, reason)
         final = store.get().phase_ledger
         return PlanItemResult(

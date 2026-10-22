@@ -235,3 +235,105 @@ def test_run_memory_needs_the_runs_store():
         _call(_tool(definitions=defs), ARGS, ctx)
     # An agent without memory needs no store.
     _call(_tool(definitions={"tester": dataclasses.replace(TESTER, memory="none")}), ARGS, ctx)
+
+
+class TestCallWiring:
+    def test_the_description_and_alias_are_upstreams(self):
+        tool = _tool()
+        assert tool.description(ARGS) == "write the test"
+        assert tool.description({}) == ""
+        assert tool.aliases == ("Task",)
+
+    def test_a_coordinator_gets_the_slim_prompt(self):
+        from app.loop.agents.prompt import get_prompt
+
+        coordinator = _tool(is_coordinator=True).prompt
+        assert coordinator == get_prompt(list(DEFS.values()), True, default_agent_type=None)
+        assert coordinator != _tool().prompt
+
+    def test_the_model_override_reaches_the_worker_and_its_env(self):
+        from types import SimpleNamespace
+
+        model = FakeModel([[AIMessage(content="r")]])
+        store = AppStateStore(AppState())
+        ctx = tool_context_for(store, workspace=SimpleNamespace(root="/proj"))
+        _call(_tool(model), {**ARGS, "model": "haiku"}, ctx)
+        from app.loop.model_aliases import parse_user_specified_model
+
+        assert model.seen_configs[0].model == parse_user_specified_model("haiku")
+        system = model.seen[0].tool_context.agent_system_prompt
+        assert system is not None
+        assert system[-1].endswith(f"You are powered by the model {parse_user_specified_model('haiku')}.")
+        assert "Working directory: /proj" in system[-1]
+
+    def test_the_definition_model_and_the_run_model_resolve(self):
+        model = FakeModel([[AIMessage(content="r")]])
+        defs = {"tester": dataclasses.replace(TESTER, model="sonnet")}
+        _, ctx = _ctx()
+        _call(_tool(model, definitions=defs), ARGS, ctx)
+        system = model.seen[0].tool_context.agent_system_prompt
+        assert system is not None and system[-1].endswith("You are powered by the model claude-sonnet-4-6.")
+        model = FakeModel([[AIMessage(content="r")]])
+        _call(_tool(model), ARGS, ctx)
+        system = model.seen[0].tool_context.agent_system_prompt
+        assert system is not None and system[-1].endswith(f"You are powered by the model {CONFIG.model}.")
+
+    def test_the_reported_agent_id_is_the_workers(self):
+        model = FakeModel([[AIMessage(content="r")]])
+        _, ctx = _ctx()
+        result = _call(_tool(model), ARGS, ctx)
+        agent_id = model.seen[0].tool_context.agent_id
+        assert agent_id and result.metadata["agent_id"] == agent_id
+        assert f"agentId: {agent_id} " in result.content
+
+    def test_a_one_shot_agent_gets_no_trailer(self):
+        _, ctx = _ctx()
+        result = _call(_tool(FakeModel([[AIMessage(content="found")]])), {**ARGS, "subagent_type": "Explore"}, ctx)
+        assert result.content == "found"
+
+    def test_a_worker_that_says_nothing_is_an_error(self):
+        _, ctx = _ctx()
+        with pytest.raises(ValueError, match="^No assistant messages found$"):
+            _call(_tool(FakeModel([[]])), ARGS, ctx)
+
+    def test_a_worker_error_before_any_answer_propagates(self):
+        class BrokenStore:
+            def record_sidechain_transcript(self, messages, agent_id, starting_parent_uuid=None):
+                raise OSError("disk full")
+
+        _, ctx = _ctx()
+        ctx = dataclasses.replace(ctx, transcript_store=BrokenStore())
+        with pytest.raises(OSError, match="^disk full$"):
+            _call(_tool(FakeModel([[AIMessage(content="r")]])), ARGS, ctx)
+
+    def test_a_worker_error_after_an_answer_keeps_the_partial_result(self):
+        class FlakyStore:
+            calls = 0
+
+            def record_sidechain_transcript(self, messages, agent_id, starting_parent_uuid=None):
+                FlakyStore.calls += 1
+                if FlakyStore.calls > 2:
+                    raise OSError("disk full")
+
+        _, ctx = _ctx()
+        ctx = dataclasses.replace(ctx, transcript_store=FlakyStore())
+        model = FakeModel([[AIMessage(content="partial findings"), AIMessage(content="more")]])
+        result = _call(_tool(model), ARGS, ctx)
+        assert result.content.startswith("partial findings\n")
+
+    def test_a_cancelled_run_is_an_abort(self):
+        from app.loop.agents.tool import AbortError
+
+        _, ctx = _ctx()
+        ctx.cancel.cancel()
+        with pytest.raises(AbortError):
+            _call(_tool(FakeModel([[AIMessage(content="r")]])), ARGS, ctx)
+
+
+def test_finalize_edges():
+    no_text = finalize_agent_tool([asks_for("ReadFile", "c")], "a", "t", 0.0, now=0.0)
+    assert no_text.content == ()
+    timed = finalize_agent_tool([AIMessage(content="x")], "a", "t", 10.0, now=10.25)
+    assert timed.total_duration_ms == 250
+    untexted = AIMessage(content=[{"type": "text"}, {"type": "text", "text": "y"}])
+    assert finalize_agent_tool([untexted], "a", "t", 0.0, now=0.0).content == ("", "y")

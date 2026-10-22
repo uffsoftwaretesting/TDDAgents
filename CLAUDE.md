@@ -708,6 +708,44 @@ source and architecture, while enforcing the TDD cycle".
   progress UI and auto-backgrounding.
 - `app/loop/prompts/loader.py` still holds an older duplicate agent parser, left for Phase 10.
 
+**Pre-push gate, Phase 7 (2026-10-22).** Measured under `paths_to_mutate` = `agents/{run_agent,
+tool,resolution,loader,prompt,fork}.py`, `coordinator.py`, `model_aliases.py`, `ledger.py`,
+`context/assembly.py`, `model.py`, `runner.py`, at 5770 tests:
+
+| | |
+|---|---|
+| Mutants | 2387 first run (113 timeout); 2330 after triage removed dead code (33 timeout) |
+| Killed (gate run) | 1954 — **85.9%** |
+| Killed after triage (confirmed by a second full run, plus 5 verified in `mutants/`) | 2177 — **94.8%** (2177 / 2297) |
+| flake8 / ruff / mypy | 0 / 0 / 0 (strict, 310 files) |
+
+- **One real bug:** the Agent tool prompt had two newlines at two seams where upstream's
+  `getPrompt` has three. The prompt is now pinned verbatim against `prompt.ts`.
+- **Dead code removed:**
+  - the `<!--` frontmatter branch (upstream's `FRONTMATTER_REGEX` takes `---` only);
+  - a redundant `"*"` normalization;
+  - the Agent tool's custom `check_permissions` (identical to the default allow);
+  - `finalize_agent_tool`'s duplicate first scan, `run_agent`'s unread pool-cache seed and
+    redundant `Terminated` check, and the runner's unreachable `or ""`.
+- **Gotcha:** `mutmut results` without `--all true` lists timeouts as survivors. The first run
+  showed 126 runner "survivors", of which 107 were timeouts.
+- **Gotcha:** a test that reads a module's *source* (`ast`/`inspect`) sees every mutant copy
+  under mutmut. `test_run_tests_is_the_only_ledger_writer` therefore inspects only the
+  `__mutmut_orig` (or unmutated) functions, or stats collection fails and nothing is measured.
+- **Gotcha:** mutmut's async-generator trampoline does not forward `aclose()`, so
+  `test_closing_the_worker_closes_its_loop` skips under `MUTANT_UNDER_TEST`. Its six
+  `run_agent` mutants are unverifiable there and pinned by the repo run.
+- **Remaining survivors are the recorded equivalent classes:**
+  - log wording and arguments (runner 32, `run_agent` 9, loader 17);
+  - default arguments;
+  - codec aliases;
+  - the Phase 0 pool `phase_ledger`/`messages` classes;
+  - `rmtree(ignore_errors=…)` on a directory that always exists;
+  - `user_input` (no ported source reads it);
+  - the unreachable CUSTOM-disallowed check (equal to ALL, as upstream);
+  - the `"settings"` deny-rule fallback, which upstream keeps too;
+  - messages the engine overwrites before every model call.
+
 ### The three things that change most
 
 1. **Routing by `status` string literals is replaced** by a closed vocabulary of seven

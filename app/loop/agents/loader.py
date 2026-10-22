@@ -78,36 +78,20 @@ def render_prompt(
 
 def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """
-    Parse YAML frontmatter delimited by leading '---' or '<!--'.
-
-    Returns (frontmatter_dict, markdown_body).
+    `frontmatterParser.ts` -> `parseFrontmatter`: YAML between leading `---` fences (upstream's
+    `FRONTMATTER_REGEX` accepts nothing else). Returns (frontmatter, body).
     """
     stripped = content.lstrip()
     if stripped.startswith("---"):
         parts = stripped.split("---", 2)
         if len(parts) >= 3:
-            raw_fm = parts[1]
-            body = parts[2]
             try:
-                data = yaml.safe_load(raw_fm)
+                data = yaml.safe_load(parts[1])
                 fm = data if isinstance(data, dict) else {}
             except yaml.YAMLError as e:
                 logger.warning("Failed to parse YAML frontmatter: %s", e)
                 fm = {}
-            return fm, body.strip()
-    elif stripped.startswith("<!--"):
-        parts = stripped.split("-->", 1)
-        if len(parts) >= 2:
-            raw_fm = parts[0][4:]
-            body = parts[1]
-            try:
-                data = yaml.safe_load(raw_fm)
-                fm = data if isinstance(data, dict) else {}
-            except yaml.YAMLError as e:
-                logger.warning("Failed to parse HTML comment frontmatter: %s", e)
-                fm = {}
-            return fm, body.strip()
-
+            return fm, parts[2].strip()
     return {}, content.strip()
 
 
@@ -139,8 +123,7 @@ def _parse_tool_list(value: Any) -> list[str] | None:
         items = []
     if not items:
         return []
-    parsed = parse_tool_list_from_cli(items)
-    return ["*"] if "*" in parsed else parsed
+    return parse_tool_list_from_cli(items)
 
 
 def parse_agent_tools_from_frontmatter(value: Any) -> tuple[str, ...] | None:

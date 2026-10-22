@@ -167,3 +167,78 @@ def test_tool_context_defaults_keep_todays_behavior():
     ctx = tool_context_for(AppStateStore())
     assert (ctx.agent_system_prompt, ctx.omit_claude_md, ctx.omit_git_status, ctx.extra_user_context) == (
         None, False, False, None)
+
+
+class _ExecWs:
+    """A workspace whose commands answer from a table; anything else fails."""
+
+    def __init__(self, answers: dict[str, str], root: str | None = "/r") -> None:
+        self.answers = answers
+        if root is not None:
+            self.root = root
+
+    def execute(self, cmd):
+        from types import SimpleNamespace
+
+        if cmd in self.answers:
+            return SimpleNamespace(exit_code=0, stdout=self.answers[cmd] + "\n")
+        raise RuntimeError("no such command")
+
+
+def test_compute_env_info_runs_its_commands_in_the_workspace():
+    ws = _ExecWs({"uname -s": "Darwin", "uname -sr": "Darwin 23.1", "git rev-parse --is-inside-work-tree": "true"})
+    out = compute_env_info(ws, "m")
+    assert "Working directory: /r\nIs directory a git repo: Yes\nPlatform: darwin\n" in out
+    assert "OS Version: Darwin 23.1\n" in out
+
+
+def test_compute_env_info_reports_failures_as_unknown():
+    out = compute_env_info(_ExecWs({}, root=None), "m")
+    expected = ("Working directory: .\nIs directory a git repo: No\nPlatform: unknown\nShell: bash\n"
+                "OS Version: unknown\n")
+    assert expected in out
+
+
+def test_compute_env_info_without_a_workspace():
+    assert compute_env_info(None, "m") == (
+        "Here is useful information about the environment you are running in:\n"
+        "<env>\n"
+        "Working directory: .\n"
+        "Is directory a git repo: No\n"
+        "Platform: unknown\n"
+        "Shell: bash\n"
+        "OS Version: unknown\n"
+        "</env>\n"
+        "You are powered by the model m."
+    )
+
+
+def test_omissions_tolerate_a_context_without_the_key(_session):
+    _session.system_context.pop("gitStatus")
+    _session.user_context.pop("claudeMd")
+    state = _state(omit_git_status=True, omit_claude_md=True)
+    assert request_system_context(state, CONFIG) == {}
+    assert request_user_context(state, CONFIG) == {"currentDate": "Today's date is 2026-10-22."}
+
+
+def test_a_fresh_run_reads_its_context_from_the_contexts_workspace(monkeypatch):
+    seen: list[Any] = []
+    monkeypatch.setattr(assembly, "_SESSIONS", {})
+
+    def user(ws):
+        seen.append(("user", ws))
+        return {}
+
+    def system(ws):
+        seen.append(("system", ws))
+        return {}
+
+    monkeypatch.setattr(assembly, "get_user_context", user)
+    monkeypatch.setattr(assembly, "get_system_context", system)
+    ws = object()
+    request_user_context(_state(workspace=ws), CONFIG)
+    assert seen == [("user", ws), ("system", ws)]
+    monkeypatch.setattr(assembly, "_SESSIONS", {})
+    seen.clear()
+    request_system_context(_state(workspace=ws), CONFIG)
+    assert seen == [("user", ws), ("system", ws)]
