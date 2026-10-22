@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeGuard
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.loop.hooks.messages import ATTACHMENT_KEY
 from app.loop.messages import Message
@@ -80,34 +80,34 @@ class DeserializeResult:
 _NONE = TurnInterruptionState(kind="none", message=None)
 
 
-def _flag(message: Any, key: str) -> bool:
-    kwargs = getattr(message, "additional_kwargs", None)
-    return isinstance(kwargs, Mapping) and kwargs.get(key) is True
+def _flag(message: Message, key: str) -> bool:
+    return message.additional_kwargs.get(key) is True
 
 
-def _kind(message: Any) -> str | None:
+def _kind(message: Message) -> str | None:
     """Upstream's `type`, with an attachment-carrying message as `attachment`."""
-    kwargs = getattr(message, "additional_kwargs", None)
-    if isinstance(kwargs, Mapping) and isinstance(kwargs.get(ATTACHMENT_KEY), Mapping):
+    if isinstance(message.additional_kwargs.get(ATTACHMENT_KEY), Mapping):
         return "attachment"
     return entry_type_of(message)
 
 
-def _assistant_blocks(message: Any) -> list[dict[str, Any]]:
-    """An assistant's content blocks: its content, then any tool call not already a block."""
+def _assistant_blocks(message: AIMessage) -> list[dict[str, Any]]:
+    """
+    An assistant's content blocks: its content, then a `tool_use` block per tool call.
+
+    A provider that also keeps the call in `content` yields it twice; every reader asks
+    only about block types or the set of ids, so the duplicate changes no decision.
+    """
     content = message.content
     if isinstance(content, str):
         blocks: list[dict[str, Any]] = [{"type": "text", "text": content}] if content else []
     else:
         blocks = [{"type": "text", "text": b} if isinstance(b, str) else dict(b) for b in content]
-    present = {b.get("id") for b in blocks if b.get("type") == "tool_use"}
-    for tool_call in getattr(message, "tool_calls", None) or []:
-        if tool_call.get("id") not in present:
-            blocks.append({"type": "tool_use", "id": tool_call.get("id"), "name": tool_call.get("name")})
+    blocks.extend({"type": "tool_use", "id": call["id"]} for call in message.tool_calls)
     return blocks
 
 
-def _tool_use_ids(message: Any) -> list[str]:
+def _tool_use_ids(message: AIMessage) -> list[str]:
     return [str(b.get("id")) for b in _assistant_blocks(message) if b.get("type") == "tool_use"]
 
 
@@ -116,16 +116,16 @@ def filter_unresolved_tool_uses(messages: list[Message]) -> list[Message]:
     tool_use_ids: set[str] = set()
     tool_result_ids: set[str] = set()
     for message in messages:
-        if message.type == "ai":
+        if isinstance(message, AIMessage):
             tool_use_ids.update(_tool_use_ids(message))
-        elif message.type == "tool":
-            tool_result_ids.add(str(getattr(message, "tool_call_id", "")))
+        elif isinstance(message, ToolMessage):
+            tool_result_ids.add(message.tool_call_id)
     unresolved = tool_use_ids - tool_result_ids
     if not unresolved:
         return messages
 
     def keep(message: Message) -> bool:
-        if message.type != "ai":
+        if not isinstance(message, AIMessage):
             return True
         ids = _tool_use_ids(message)
         return not ids or not all(i in unresolved for i in ids)
@@ -137,13 +137,13 @@ def filter_orphaned_thinking_only_messages(messages: list[Message]) -> list[Mess
     """`filterOrphanedThinkingOnlyMessages`: thinking-only blocks with no same-id partner go."""
     ids_with_content: set[str] = set()
     for message in messages:
-        if message.type != "ai":
+        if not isinstance(message, AIMessage):
             continue
         if any(b.get("type") not in _THINKING for b in _assistant_blocks(message)) and message.id:
             ids_with_content.add(message.id)
 
     def keep(message: Message) -> bool:
-        if message.type != "ai":
+        if not isinstance(message, AIMessage):
             return True
         blocks = _assistant_blocks(message)
         if not blocks or not all(b.get("type") in _THINKING for b in blocks):
@@ -190,7 +190,7 @@ def filter_whitespace_only_assistant_messages(messages: list[Message]) -> list[M
     """`filterWhitespaceOnlyAssistantMessages`, then merge the users it leaves adjacent."""
     filtered = [
         m for m in messages
-        if m.type != "ai" or not _has_only_whitespace_text(_assistant_blocks(m))
+        if not isinstance(m, AIMessage) or not _has_only_whitespace_text(_assistant_blocks(m))
     ]
     if len(filtered) == len(messages):
         return messages
@@ -208,8 +208,8 @@ def _is_terminal_tool_result(message: Message, messages: Sequence[Message], inde
     return False
 
 
-def _detect_turn_interruption(messages: list[Message]) -> str | TurnInterruptionState:
-    """`detectTurnInterruption`: `"interrupted_turn"` or a final state."""
+def _detect_turn_interruption(messages: list[Message]) -> TurnInterruptionState | None:
+    """`detectTurnInterruption`: a final state, or `None` for upstream's `interrupted_turn`."""
     index = len(messages) - 1
     while index >= 0:
         candidate = messages[index]
@@ -221,13 +221,13 @@ def _detect_turn_interruption(messages: list[Message]) -> str | TurnInterruption
     last = messages[index]
     kind = _kind(last)
     if kind == "attachment":
-        return "interrupted_turn"
+        return None
     if kind != "user":
         return _NONE
     if _flag(last, "is_meta") or _flag(last, "is_compact_summary"):
         return _NONE
     if last.type == "tool":
-        return _NONE if _is_terminal_tool_result(last, messages, index) else "interrupted_turn"
+        return _NONE if _is_terminal_tool_result(last, messages, index) else None
     return TurnInterruptionState(kind="interrupted_prompt", message=last)
 
 
@@ -237,7 +237,7 @@ def deserialize_messages_with_interrupt_detection(messages: Sequence[Message]) -
         filter_orphaned_thinking_only_messages(filter_unresolved_tool_uses(list(messages)))
     ))
     detected = _detect_turn_interruption(filtered)
-    if isinstance(detected, TurnInterruptionState):
+    if detected is not None:
         state = detected
     else:
         continuation = HumanMessage(content=CONTINUATION_MESSAGE, additional_kwargs={"is_meta": True})

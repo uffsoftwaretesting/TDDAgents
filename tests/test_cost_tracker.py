@@ -167,3 +167,29 @@ def test_the_context_carries_the_runs_tracker_and_a_worker_inherits_it():
     assert parent.cost_tracker is tracker
     worker = create_subagent(AgentDefinition(name="tester", description="d", prompt="p"), parent, directive="go")
     assert worker.context.cost_tracker is tracker
+
+
+def test_a_missing_input_count_is_zero():
+    assert usage_from_langchain({"output_tokens": 5}) == Usage(0, 5)
+
+
+def test_a_non_chat_generation_adds_nothing():
+    from langchain_core.outputs import Generation
+
+    tracker = CostTracker(model="claude-haiku-4-5")
+    tracker.on_llm_end(LLMResult(generations=[[Generation(text="x")]]), run_id=uuid4())
+    assert tracker.model_usage() == {}
+
+
+def test_web_search_requests_accumulate():
+    tracker = CostTracker(model="m")
+    for _ in range(2):
+        tracker.add_to_total_session_cost(Usage(input_tokens=0, output_tokens=0, web_search_requests=2), "m")
+    assert tracker.model_usage()["m"].web_search_requests == 4
+
+
+def test_half_a_dollar_keeps_four_decimals():
+    from app.loop.cost.tracker import format_cost
+
+    assert format_cost(0.5) == "$0.5000"
+    assert format_cost(0.51) == "$0.51"

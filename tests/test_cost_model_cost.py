@@ -113,3 +113,16 @@ def test_format_model_pricing():
     assert format_model_pricing(COST_TIER_3_15) == "$3/$15 per Mtok"
     assert format_model_pricing(COST_HAIKU_35) == "$0.80/$4 per Mtok"
     assert format_model_pricing(ModelCosts(22.5, 1.1, 0, 0, 0)) == "$22.50/$1.10 per Mtok"
+
+
+def test_tokens_are_priced_per_exact_million():
+    costs = ModelCosts(1, 2, 3, 4, 0)
+    assert tokens_to_usd_cost(costs, Usage(input_tokens=1_000_000, output_tokens=0)) == 1.0
+    assert tokens_to_usd_cost(costs, Usage(input_tokens=0, output_tokens=1_000_000)) == 2.0
+    assert tokens_to_usd_cost(costs, Usage(0, 0, cache_read_input_tokens=1_000_000)) == 4.0
+    assert tokens_to_usd_cost(costs, Usage(0, 0, cache_creation_input_tokens=1_000_000)) == 3.0
+
+
+def test_only_the_last_path_segment_names_an_openai_model():
+    assert get_canonical_name("gateway/openai/o4-mini") == "o4-mini"
+    assert get_canonical_name("") == ""

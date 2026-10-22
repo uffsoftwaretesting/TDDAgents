@@ -265,3 +265,49 @@ def test_a_completed_conversation_resumes_as_is(tmp_path):
 def test_a_missing_transcript_is_not_found(tmp_path):
     assert load_conversation_for_resume(tmp_path / "absent.jsonl") is None
     assert load_conversation_for_resume(tmp_path) is None
+
+
+# ── Phase 6 gate: mutation triage ───────────────────────────────────────────
+
+
+def test_string_blocks_in_list_content_are_text():
+    kept = AIMessage(content=["real words"])
+    assert filter_whitespace_only_assistant_messages([HumanMessage(content="q"), kept]) == [
+        HumanMessage(content="q"), kept]
+
+
+def test_a_text_block_without_text_is_whitespace():
+    empty = AIMessage(content=[{"type": "text"}])
+    assert filter_whitespace_only_assistant_messages([HumanMessage(content="q"), empty]) == [HumanMessage(content="q")]
+
+
+def test_a_thinking_partner_is_found_past_a_non_assistant():
+    text = AIMessage(content="answer", id="m1")
+    thinking = AIMessage(content=[THINK], id="m1")
+    msgs = [HumanMessage(content="q"), text, thinking]
+    assert filter_orphaned_thinking_only_messages(msgs) == msgs
+
+
+def test_merging_keeps_every_block_of_the_left_message():
+    a = HumanMessage(content=[{"type": "text", "text": "one"}, {"type": "text", "text": "two"}])
+    b = HumanMessage(content="three")
+    gap = AIMessage(content="  ")
+    (merged,) = filter_whitespace_only_assistant_messages([a, gap, b])
+    assert merged.content == [{"type": "text", "text": "one"}, {"type": "text", "text": "two\n"},
+                              {"type": "text", "text": "three"}]
+
+
+def test_a_seam_block_without_text_gets_only_the_newline():
+    a = HumanMessage(content=[{"type": "text"}])
+    (merged,) = filter_whitespace_only_assistant_messages([a, AIMessage(content=" "), HumanMessage(content="b")])
+    assert merged.content[0] == {"type": "text", "text": "\n"}
+
+
+def test_trailing_system_messages_are_skipped_one_by_one():
+    """The last turn-relevant message is the assistant, not an earlier prompt."""
+    msgs = [HumanMessage(content="p0"), HumanMessage(content="p1"), AIMessage(content="ok"),
+            SystemMessage(content="s")]
+    assert deserialize_messages_with_interrupt_detection(msgs).turn_interruption_state == TurnInterruptionState(
+        kind="none", message=None)
+    short = [HumanMessage(content="p0"), AIMessage(content="ok"), SystemMessage(content="s")]
+    assert deserialize_messages_with_interrupt_detection(short).turn_interruption_state.kind == "none"

@@ -118,3 +118,25 @@ def test_an_entry_without_a_message_payload_is_not_a_message():
 def test_the_timestamp_is_utc_iso_with_milliseconds():
     stamp = entries.iso_timestamp(0.0)
     assert stamp == "1970-01-01T00:00:00.000Z"
+
+
+def test_objects_without_message_fields_are_handled():
+    thing = object()
+    assert message_uuid(thing) is None
+    assert entry_type_of(thing) is None
+    assert is_loggable_message(thing) is True
+
+
+def test_the_opt_in_env_is_case_insensitive(monkeypatch):
+    monkeypatch.setenv("TDDAGENTS_SAVE_HOOK_ADDITIONAL_CONTEXT", "TRUE")
+    hook = HumanMessage(content="r", additional_kwargs={"attachment": {"type": "hook_additional_context"}})
+    assert is_loggable_message(hook) is True
+
+
+def test_the_top_level_uuid_is_authoritative():
+    """Upstream's `uuid` is a top-level field; the payload copy is not relied on."""
+    from langchain_core.messages import message_to_dict
+
+    entry = {"type": "user", "message": message_to_dict(HumanMessage(content="x")), "uuid": "u-top"}
+    message = entry_to_message(entry)
+    assert message is not None and message_uuid(message) == "u-top"

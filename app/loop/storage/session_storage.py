@@ -37,6 +37,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from langchain_core.messages import ToolMessage
+
 from app.loop.messages import Message, tool_calls_in
 from app.loop.storage.entries import (
     EntryStamp,
@@ -144,12 +146,10 @@ class TranscriptStore:
         parent = starting_parent
         if not self._materialized and any(getattr(m, "type", "") in ("human", "tool", "ai") for m in messages):
             self._materialize()
-        target = self.agent_transcript_path(agent_id) if is_sidechain and agent_id is not None else self.path
-        last: str | None = None
+        # Only a sidechain names an agent, so the agent id alone picks the file.
+        target = self.agent_transcript_path(agent_id) if agent_id is not None else self.path
         for message in messages:
-            uid = ensure_message_uuid(message, self._uuid)
-            source = self._tool_sources.get(str(getattr(message, "tool_call_id", ""))) \
-                if getattr(message, "type", "") == "tool" else None
+            source = self._tool_sources.get(message.tool_call_id) if isinstance(message, ToolMessage) else None
             entry = build_entry(
                 message,
                 source if source is not None else parent,
@@ -160,10 +160,11 @@ class TranscriptStore:
                 source_tool_assistant_uuid=source,
             )
             self._append_entry(target, entry, is_sidechain)
+            # Both callers assigned every uuid before chaining, so the entry carries it.
+            uid: str = entry["uuid"]
             self._remember_tool_calls(message, uid)
             parent = uid
-            last = uid
-        return last
+        return parent
 
     def _remember_tool_calls(self, message: Message, uid: str) -> None:
         for call in tool_calls_in(message):

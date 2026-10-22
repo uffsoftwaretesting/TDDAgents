@@ -107,3 +107,17 @@ def test_the_events_file_lives_in_the_session_directory(tmp_path, monkeypatch):
     from app.loop.tools.result_storage import sanitize_path
 
     assert events_path("s1", "/w/x") == tmp_path / "projects" / sanitize_path("/w/x") / "s1" / "events.jsonl"
+
+
+def test_missing_parent_directories_are_created(tmp_path):
+    path = tmp_path / "a" / "b" / "events.jsonl"
+    TransitionEventRecorder(AppStateStore(AppState()), path, session_id="s", plan_index=0)(
+        Transition(reason=Continue.NEXT_TURN))
+    assert path.is_file()
+
+
+def test_non_ascii_is_written_as_is(tmp_path):
+    store = AppStateStore(AppState(last_test_run=TestRunRecord(test_path="tests/test_ação.py", exit_code=1)))
+    rec = _recorder(tmp_path, store)
+    rec(Transition(reason=Continue.NEXT_TURN))
+    assert "test_ação.py" in (tmp_path / "events.jsonl").read_text(encoding="utf-8")

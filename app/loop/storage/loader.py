@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -58,19 +59,19 @@ class LoadedTranscript:
 
 
 def _parse_time(timestamp: Any) -> float | None:
-    """`Date.parse`: milliseconds since the epoch, `None` for upstream's `NaN`."""
+    """`Date.parse`, in seconds (only the order matters); `None` for upstream's `NaN`."""
     if not isinstance(timestamp, str):
         return None
     try:
-        return datetime.fromisoformat(timestamp).timestamp() * 1000
+        return datetime.fromisoformat(timestamp).timestamp()
     except ValueError:
         return None
 
 
-def _find_latest(entries: Iterable[Entry], predicate: Callable[[Entry], bool], floor: float) -> Entry | None:
+def _find_latest(entries: Iterable[Entry], predicate: Callable[[Entry], bool]) -> Entry | None:
     """`findLatestMessage`: the strictly newest match; ties keep the first, `NaN` never wins."""
     latest: Entry | None = None
-    max_time = floor
+    max_time = -math.inf
     for entry in entries:
         if not predicate(entry):
             continue
@@ -112,15 +113,14 @@ def _leaf_uuids(messages: Mapping[str, Entry]) -> frozenset[str]:
             if current["type"] in ("user", "assistant"):
                 leaves.add(current["uuid"])
                 break
-            current = messages.get(current.get("parentUuid") or "")
+            parent = current.get("parentUuid")
+            current = messages.get(parent) if parent else None
     return frozenset(leaves)
 
 
 def _main_leaf(messages: Mapping[str, Entry], leaves: frozenset[str]) -> Entry | None:
     """`loadMessagesFromJsonlPath`'s tip: the newest non-sidechain leaf."""
-    return _find_latest(
-        messages.values(), lambda e: not e.get("isSidechain") and e["uuid"] in leaves, 0.0
-    )
+    return _find_latest(messages.values(), lambda e: not e.get("isSidechain") and e["uuid"] in leaves)
 
 
 def load_transcript_file(path: str | Path) -> LoadedTranscript:
@@ -156,7 +156,7 @@ def _provider_id(entry: Entry) -> str | None:
     """The assistant's `message.id` — shared by every block of one API response."""
     data = (entry.get("message") or {}).get("data") or {}
     value = data.get("id")
-    return value if isinstance(value, str) and value else None
+    return value if isinstance(value, str) else None
 
 
 def _is_tool_result(entry: Entry) -> bool:
@@ -186,14 +186,14 @@ def _recover_orphaned_parallel_tool_results(
         elif _is_tool_result(entry) and entry.get("parentUuid"):
             results_by_assistant.setdefault(entry["parentUuid"], []).append(entry)
 
-    processed: set[str] = set()
+    # A group is visited once per on-chain member; after the first visit everything it
+    # recovered is in `seen`, so a later visit finds nothing orphaned and adds nothing.
     inserts: dict[str, list[Entry]] = {}
     for assistant in chain_assistants:
         provider_id = _provider_id(assistant)
-        if not provider_id or provider_id in processed:
+        if not provider_id:
             continue
-        processed.add(provider_id)
-        group = siblings_by_id.get(provider_id, [assistant])
+        group = siblings_by_id[provider_id]
         orphaned_siblings = [s for s in group if s["uuid"] not in seen]
         orphaned_results = [
             r for member in group for r in results_by_assistant.get(member["uuid"], []) if r["uuid"] not in seen
@@ -237,7 +237,7 @@ def get_agent_transcript(path: str | Path, agent_id: str | None = None) -> list[
         if e.get("isSidechain") and (agent_id is None or e.get("agentId") == agent_id)
     ]
     parents = {e.get("parentUuid") for e in agent_messages}
-    leaf = _find_latest(agent_messages, lambda e: e["uuid"] not in parents, float("-inf"))
+    leaf = _find_latest(agent_messages, lambda e: e["uuid"] not in parents)
     if leaf is None:
         return []
     owner = leaf.get("agentId")

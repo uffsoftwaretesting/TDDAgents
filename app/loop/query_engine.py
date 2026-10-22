@@ -108,7 +108,8 @@ def _last_content_type(message: AIMessage) -> str:
     last = content[-1]
     if isinstance(last, dict):
         return str(last.get("type", "none"))
-    return "text" if isinstance(last, str) else "none"
+    # A LangChain content list holds only `str` and `dict` items: a bare string is text.
+    return "text"
 
 
 def is_result_successful(message: Message | None, stop_reason: str | None = None) -> bool:

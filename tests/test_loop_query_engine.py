@@ -251,3 +251,70 @@ def test_the_recorded_run_resumes_as_the_same_conversation(tmp_path):
     assert [m.content for m in loaded.messages] == [task.content, "", tool_result.content, "done"]
     assert isinstance(loaded.messages[1], AIMessage) and loaded.messages[1].tool_calls == ask.tool_calls
     assert loaded.turn_interruption_state.kind == "none"
+
+
+class TestResultDetails:
+    """Pins left open by the Phase 6 mutation run."""
+
+    @staticmethod
+    def _bare(times=(100.0, 102.0)) -> QueryEngine:
+        it = iter(times)
+        return QueryEngine(CONFIG, make_fake_deps(FakeModel([])), transcript=FakeTranscript(), session_id="s",
+                           now=lambda: next(it), uuid=lambda: "u")
+
+    def test_nothing_is_known_before_a_submit(self):
+        engine = self._bare()
+        assert (engine.terminal, engine.result) == (None, None)
+
+    def test_duration_is_in_milliseconds(self):
+        result = self._bare(times=(102.0,))._build_result(100.0, 1, None, AIMessage(content="x"))
+        assert result.duration_ms == 2000
+
+    def test_without_a_terminal_the_reason_is_empty(self):
+        assert self._bare()._build_result(100.0, 1, None, AIMessage(content="x")).terminal_reason == ""
+
+    def test_a_prompt_with_end_turn_is_a_success(self):
+        result = self._bare()._build_result(100.0, 1, "end_turn", HumanMessage(content="p"))
+        assert (result.subtype, result.result, result.is_error) == ("success", "", False)
+
+    def test_a_prompt_without_end_turn_is_a_user_diagnostic(self):
+        result = self._bare()._build_result(100.0, 1, None, HumanMessage(content="p"))
+        assert result.errors == ("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=None",)
+
+    def test_no_message_at_all_is_undefined(self):
+        events = _run(_engine(FakeModel([[]])), _state())
+        assert events[-1].errors == (
+            "[ede_diagnostic] result_type=undefined last_content_type=n/a stop_reason=None",)
+
+    def test_a_tool_result_end_has_no_text_and_no_error(self):
+        result = self._bare()._build_result(100.0, 1, None, ToolMessage(content="r", tool_call_id="c"))
+        assert (result.subtype, result.result, result.is_error) == ("success", "", False)
+
+
+class TestContentShapes:
+    def test_last_content_type(self):
+        from app.loop.query_engine import _last_content_type
+
+        calls = [{"name": "A", "args": {}, "id": "1"}]
+        assert _last_content_type(AIMessage(content="", tool_calls=calls)) == "tool_use"
+        assert _last_content_type(AIMessage(content=[])) == "none"
+        assert _last_content_type(AIMessage(content=[{"text": "untyped"}])) == "none"
+        assert _last_content_type(AIMessage(content=["plain"])) == "text"
+        assert _last_content_type(AIMessage(content=[{"type": "thinking", "thinking": "t"}])) == "thinking"
+
+    def test_text_result_reads_only_a_final_text_block(self):
+        from app.loop.query_engine import _text_result
+
+        two: list[str | dict[Any, Any]] = [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+        assert _text_result(AIMessage(content=two)) == "b"
+        assert _text_result(AIMessage(content=[{"type": "text"}])) == ""
+        assert _text_result(AIMessage(content=[{"type": "thinking", "thinking": "t"}])) == ""
+        assert _text_result(AIMessage(content=["plain"])) == ""
+        assert _text_result(AIMessage(content=[{"type": "text", "text": "a"}, {"type": "thinking"}])) == ""
+
+    def test_a_thinking_end_is_a_success_with_empty_text(self):
+        result = _run(_engine(FakeModel([[AIMessage(content=[{"type": "thinking", "thinking": "t"}])]])), _state())[-1]
+        assert (result.subtype, result.result) == ("success", "")
+
+    def test_a_message_without_metadata_has_no_stop_reason(self):
+        assert normalize_stop_reason(object()) is None

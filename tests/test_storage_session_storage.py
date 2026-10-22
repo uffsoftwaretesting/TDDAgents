@@ -282,3 +282,64 @@ def test_the_default_uuid_is_a_uuid4():
     import uuid
 
     assert uuid.UUID(message_uuid(m) or "").version == 4
+
+
+def test_a_resumed_store_chains_a_tool_result_to_an_assistant_recorded_earlier():
+    """The recorded prefix still teaches the store which assistant asked for which call."""
+    first = make_store()
+    ask = AIMessage(content="", tool_calls=[{"name": "RunTests", "args": {}, "id": "c1"}])
+    note = HumanMessage(content="meanwhile")
+    first.record_transcript([ask, note])
+    resumed = make_store(uuid=lambda: "u9")
+    result = ToolMessage(content="ok", tool_call_id="c1")
+    resumed.record_transcript([ask, note, result])
+    entry = read(resumed.path)[-1]
+    assert (entry["parentUuid"], entry["sourceToolAssistantUUID"]) == (message_uuid(ask), message_uuid(ask))
+
+
+def test_a_tool_result_in_the_same_batch_chains_to_its_assistant():
+    store = make_store()
+    ask = AIMessage(content="", tool_calls=[{"name": "RunTests", "args": {}, "id": "c1"}])
+    store.record_transcript([ask, HumanMessage(content="between"), ToolMessage(content="ok", tool_call_id="c1")])
+    entry = read(store.path)[-1]
+    assert (entry["parentUuid"], entry["sourceToolAssistantUUID"]) == ("u1", "u1")
+
+
+def test_a_tool_result_alone_materializes_the_file():
+    store = make_store()
+    store.record_transcript([ToolMessage(content="ok", tool_call_id="c1")])
+    assert [e["type"] for e in read(store.path)] == ["user"]
+
+
+def test_a_sidechain_drops_attachments_too():
+    store = make_store()
+    att = HumanMessage(content="r", additional_kwargs={"attachment": {"type": "tdd_state"}})
+    store.record_sidechain_transcript([HumanMessage(content="go"), att], agent_id="a1")
+    assert [e["message"]["data"]["content"] for e in read(store.agent_transcript_path("a1"))] == ["go"]
+
+
+def test_the_env_skip_is_case_insensitive(monkeypatch):
+    monkeypatch.setenv("TDDAGENTS_SKIP_PROMPT_HISTORY", "TRUE")
+    store = make_store()
+    store.record_transcript([HumanMessage(content="a")])
+    assert not store.path.exists()
+
+
+def test_the_version_is_this_checkouts_head(monkeypatch):
+    calls: list[tuple[Any, ...]] = []
+
+    def fake_git(args, cwd):
+        calls.append((tuple(args), cwd))
+        return "abc"
+
+    monkeypatch.setattr(session_storage, "_git", fake_git)
+    TranscriptStore("s1", "/w", uuid=lambda: "x", now=lambda: 0.0, git_branch=None).record_transcript(
+        [HumanMessage(content="a")])
+    assert calls == [(("rev-parse", "--short", "HEAD"), session_storage._APP_ROOT)]
+
+
+def test_a_failed_git_is_none_even_with_output(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout="junk"))
+    assert session_storage._git(["status"], "/") is None

@@ -617,6 +617,40 @@ not deduplicated (as upstream); `version` is this checkout's short git sha; no
 metadata entries and skill-state restore; brief-mode terminal tool results have no TDDAgents
 tool (hook point kept).
 
+**Pre-push gate, Phase 6 (2026-10-22).** Measured under `paths_to_mutate` =
+`storage/`, `cost/`, `events.py`, `query_engine.py`, at 5664 tests:
+
+| | |
+|---|---|
+| Mutants | 1690 first run (7 timeout); 1569 after triage removed dead code (3 timeout) |
+| Killed (gate run) | 1496 — **88.9%** |
+| Killed after triage (confirmed by a second full run) | 1532 — **97.8%** (1532 / 1566) |
+| flake8 / ruff / mypy | 0 / 0 / 0 (strict, 302 files) |
+
+Triage killed ~110 mutants and deleted ~46 by simplifying code, each kill verified inside
+`mutants/` against the `MUTANT_UNDER_TEST=""` baseline.
+- **Two real bugs in `storage/loader.py`:**
+  - a non-message entry whose `parentUuid` pointed at a missing entry crashed the leaf walk;
+  - the main-leaf search started from `0.0` instead of upstream's `-Infinity`
+    (`findLatestMessage`), so an entry stamped before the epoch could never be the tip.
+- **Dead code removed:**
+  - `_last_content_type`'s unreachable `"none"` branch;
+  - `recoverOrphanedParallelToolResults`' redundant `processed` set;
+  - `_assistant_blocks`' dedup;
+  - the `getattr` defaults on LangChain fields that always exist;
+  - `_insert_message_chain`'s duplicate uuid assignment and its `last` variable.
+- **Remaining 34 are the recorded equivalent classes:**
+  - codec aliases;
+  - log wording;
+  - `False`→`None`;
+  - default arguments;
+  - `getattr`/env defaults that miss the same way;
+  - `_git`'s `check` (the raised error is caught to the same `None`);
+  - `rsplit` maxsplit;
+  - `>= 0` → `> 0` on an index whose message the loop skips anyway;
+  - the arguments to the brief-mode hook point `_is_terminal_tool_result`, which always
+    returns `False`.
+
 ### The three things that change most
 
 1. **Routing by `status` string literals is replaced** by a closed vocabulary of seven
