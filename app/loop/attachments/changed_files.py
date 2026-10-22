@@ -56,7 +56,8 @@ def get_snippet_for_two_file_diff(before: str, after: str) -> str:
     full = "\n...\n".join(hunks)
     if len(full) <= DIFF_SNIPPET_MAX_BYTES:
         return full
-    cutoff = full.rfind("\n", 0, DIFF_SNIPPET_MAX_BYTES)
+    # `lastIndexOf('\n', DIFF_SNIPPET_MAX_BYTES + 1)` searches up to and including that index.
+    cutoff = full.rfind("\n", 0, DIFF_SNIPPET_MAX_BYTES + 1)
     kept_text = full[:cutoff] if cutoff > 0 else full[:DIFF_SNIPPET_MAX_BYTES]
     remaining = full.count("\n", len(kept_text)) + 1
     return f"{kept_text}\n\n... [{remaining} lines truncated] ..."

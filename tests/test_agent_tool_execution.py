@@ -2,6 +2,8 @@
 Unit tests for I3: Agent tool execution, worker pool assembly, and phase invariants.
 """
 
+import atexit
+import shutil
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -38,6 +40,11 @@ def _make_dummy_tool(name: str) -> Tool:
     )
 
 
+#: One run-memory root for this module's contexts, removed when the test process exits.
+_MEMORY_ROOT = tempfile.mkdtemp(prefix="agent-mem-")
+atexit.register(shutil.rmtree, _MEMORY_ROOT, True)
+
+
 def _make_context(
     messages: Sequence[Message] = (),
     tools: Sequence[Tool] = (),
@@ -52,7 +59,7 @@ def _make_context(
         messages=tuple(messages),
         tools=tuple(tools),
         run_id="loop-test",
-        agent_memory_store=AgentMemoryStore(base_dir=tempfile.mkdtemp(prefix="agent-mem-")),
+        agent_memory_store=AgentMemoryStore(base_dir=_MEMORY_ROOT),
     )
 
 

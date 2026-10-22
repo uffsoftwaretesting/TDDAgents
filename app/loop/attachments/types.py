@@ -17,7 +17,7 @@ messages.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -218,16 +218,6 @@ def attachment_of(message: Any) -> Mapping[str, Any] | None:
     return attachment if isinstance(attachment, Mapping) else None
 
 
-def attachments_in(messages: Sequence[Message]) -> list[Mapping[str, Any]]:
-    """Every attachment carried by `messages`, in order."""
-    out: list[Mapping[str, Any]] = []
-    for message in messages:
-        attachment = attachment_of(message)
-        if attachment is not None:
-            out.append(attachment)
-    return out
-
-
 __all__ = [
     "AUTO_MODE_FULL_INSTRUCTIONS",
     "AUTO_MODE_SPARSE_INSTRUCTIONS",
@@ -235,7 +225,6 @@ __all__ = [
     "TODO_REMINDER_TEXT",
     "Attachment",
     "attachment_of",
-    "attachments_in",
     "create_attachment_messages",
     "normalize_attachment_for_api",
     "tdd_state_lines",

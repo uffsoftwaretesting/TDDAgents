@@ -539,6 +539,34 @@ Context assembly, attachments and compaction, ported test-first. The user's dire
   - the global cache scope;
   - the attachment sources whose subsystems this build lacks.
 
+**Pre-push gate, Phase 5 (2026-10-22).** Measured under `paths_to_mutate` =
+`attachments/`, `compact/`, `context/{tokens,cache}.py`, `tools/result_storage.py`,
+`agents/memory.py`, `engine.py`, `factory.py`, at 5448 tests:
+
+| | |
+|---|---|
+| Mutants | 4934 (9 timeout) |
+| Killed (gate run) | 3978 — **80.8%** |
+| Killed after triage | 4693 — **95.4%** (4693 / 4917; 8 dead-code mutants deleted) |
+| flake8 / ruff / mypy | 0 / 0 / 0 (strict, 284 files) |
+
+Triage killed 715 mutants, each verified inside `mutants/` against the
+`MUTANT_UNDER_TEST=""` baseline.
+- **One real bug**, in `attachments/changed_files.py`: the snippet cutoff searched
+  `rfind("\n", 0, 8192)`, excluding index 8192, where upstream's `lastIndexOf(..., 8192)`
+  includes it.
+- **Dead code deleted:** `attachments_in`, and `load_memory_prompt`'s unreachable fallback.
+- **Remaining survivors** are the recorded equivalent classes: log wording, defaults,
+  codec aliases, `False`→`None`, `getattr` defaults on attributes that always exist,
+  memory-type labels only the `AutoMem` check reads, model-table branches equal to the
+  default, and the run loop's mutually covering prompt-too-long / max-output-tokens
+  detection.
+
+**Gotcha — mutmut and `/tmp`:** under mutmut each forked test child rebuilds the session
+venv in a fresh pytest temp dir, which filled the 9.8G `/tmp` tmpfs mid-run ("No space left
+on device", every remaining mutant "not checked"). Run mutmut with
+`TMPDIR=<a directory on disk>` and clear it afterwards.
+
 ### The three things that change most
 
 1. **Routing by `status` string literals is replaced** by a closed vocabulary of seven

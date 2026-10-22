@@ -118,7 +118,7 @@ class AgentMemoryStore:
             "local": "local-scoped (persisted on this machine, untracked by VCS)",
             "project": "project-scoped (shared via version control)",
             "user": "user-scoped (universal across all projects on this machine)",
-        }.get(norm_scope, norm_scope)
+        }[norm_scope]
 
         memory_block = [
             "# Agent Persistent Memory",
