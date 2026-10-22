@@ -131,3 +131,58 @@ def test_capture_with_no_files(tmp_path):
     snap = capture_hooks_config_snapshot(_locations(tmp_path))
     assert dict(snap.hooks) == {}
     assert (snap.managed_only, snap.disable_all) == (False, False)
+
+
+# ── an invalid hooks block invalidates its whole settings file (upstream) ─────
+
+def test_an_invalid_hook_discards_the_whole_settings_file(tmp_path, caplog):
+    """
+    `parseSettingsFileUncached`: `SettingsSchema().safeParse` failing returns `settings: null`,
+    so the file's hooks, permission rules and `defaultMode` are all ignored.
+    """
+    import json as _json
+    import logging as _logging
+
+    from app.loop.permissions.settings import (
+        SettingsLocations,
+        load_permission_rules,
+        parse_settings_file,
+    )
+    from app.loop.hooks.config import capture_hooks_config_snapshot
+
+    proj = tmp_path / "proj"
+    (proj / ".tddagents").mkdir(parents=True)
+    path = proj / ".tddagents" / "settings.json"
+    path.write_text(_json.dumps({
+        "permissions": {"deny": ["Bash(rm:*)"], "defaultMode": "acceptEdits"},
+        "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": 42}]}]},
+    }))
+    with caplog.at_level(_logging.WARNING):
+        assert parse_settings_file(path) is None
+    assert any("Invalid settings" in r.getMessage() for r in caplog.records)
+    locations = SettingsLocations(project_root=proj, home=tmp_path / "home", managed_dir=tmp_path / "etc")
+    assert capture_hooks_config_snapshot(locations).hooks == {}
+    assert load_permission_rules(proj, tmp_path / "home") == []
+
+
+def test_each_hook_schema_violation_invalidates_the_file(tmp_path):
+    import json as _json
+
+    from app.loop.permissions.settings import parse_settings_file
+
+    bad_documents = [
+        {"hooks": {"NoSuchEvent": []}},
+        {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "timeout": None}]}]}},
+        {"hooks": {"Stop": [{"matcher": 3, "hooks": []}]}},
+        {"hooks": {"Stop": [{"hooks": [{"type": "nope"}]}]}},
+        {"hooks": []},
+    ]
+    for i, document in enumerate(bad_documents):
+        path = tmp_path / f"s{i}.json"
+        path.write_text(_json.dumps(document))
+        assert parse_settings_file(path) is None, document
+    good = tmp_path / "good.json"
+    good.write_text(_json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "extra": 1}]}]}}))
+    assert parse_settings_file(good) == {
+        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "extra": 1}]}]}
+    }

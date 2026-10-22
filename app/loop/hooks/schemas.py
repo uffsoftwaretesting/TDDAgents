@@ -248,6 +248,54 @@ def parse_hook_matcher(raw: Any, where: str = "") -> HookMatcher | None:
     return HookMatcher(hooks=tuple(hooks), matcher=matcher)
 
 
+#: Every field a hook definition may carry; Zod's `.optional()` rejects an explicit `null`.
+_HOOK_FIELDS = frozenset(
+    {"type", "command", "if", "shell", "timeout", "statusMessage", "once", "async", "asyncRewake",
+     "prompt", "model", "url", "headers", "allowedEnvVars"}
+)
+
+
+def hooks_schema_errors(raw: Any) -> list[str]:
+    """
+    `HooksSchema().safeParse` issues, each as `path: message`; empty when valid. Unknown keys
+    inside a hook are stripped (not an error), as Zod strips them; an unknown event, a wrong
+    type or an explicit `null` is an error.
+    """
+    if not isinstance(raw, Mapping):
+        return ["hooks: Expected object"]
+    errors: list[str] = []
+    for event, matchers in raw.items():
+        if not isinstance(event, str) or not is_hook_event(event):
+            errors.append(f"hooks.{event}: Invalid key in record")
+            continue
+        if not isinstance(matchers, list):
+            errors.append(f"hooks.{event}: Expected array")
+            continue
+        for i, matcher in enumerate(matchers):
+            where = f"hooks.{event}.{i}"
+            if not isinstance(matcher, Mapping):
+                errors.append(f"{where}: Expected object")
+                continue
+            if "matcher" in matcher and not isinstance(matcher["matcher"], str):
+                errors.append(f"{where}.matcher: Expected string")
+            hooks = matcher.get("hooks")
+            if not isinstance(hooks, list):
+                errors.append(f"{where}.hooks: Expected array")
+                continue
+            for j, hook in enumerate(hooks):
+                hook_where = f"{where}.hooks.{j}"
+                if isinstance(hook, Mapping):
+                    nulls = sorted(k for k in hook if k in _HOOK_FIELDS and hook[k] is None)
+                    errors.extend(f"{hook_where}.{k}: Expected value, received null" for k in nulls)
+                    if nulls:
+                        continue
+                try:
+                    parse_hook_command(hook)
+                except HookSchemaError as exc:
+                    errors.append(f"{hook_where}: {exc}")
+    return errors
+
+
 def parse_hooks_settings(raw: Any, origin: str = "") -> dict[str, tuple[HookMatcher, ...]]:
     """`HooksSchema().parse`, leniently: unknown events and invalid entries are dropped."""
     if raw is None:
@@ -278,6 +326,7 @@ __all__ = [
     "HookMatcher",
     "HookSchemaError",
     "HooksSettings",
+    "hooks_schema_errors",
     "HttpHook",
     "PromptHook",
     "parse_hook_command",

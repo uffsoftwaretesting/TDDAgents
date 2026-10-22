@@ -99,6 +99,30 @@ async def run_tool_use(
     """
     Execute a single tool call (Part B4): resolve -> validate -> check permissions -> call -> map result.
     """
+    try:
+        return await _run_tool_use(tool_call, assistant_message, context, tools)
+    except Exception as exc:
+        # `runToolUse`'s outer `catch`: anything thrown outside the tool's own call —
+        # validation, hooks, the permission gate (an auto-mode `AbortError`) — becomes the
+        # call's error result. The turn goes on.
+        # Upstream names the tool, which always resolved: an unknown tool returns earlier.
+        detailed = f"Error calling tool ({tool_call.get('name')}): {exc}"
+        msg = ToolMessage(
+            content=f"<tool_use_error>{detailed}</tool_use_error>",
+            tool_call_id=str(tool_call.get("id") or ""),
+            status="error",
+            additional_kwargs={"is_error": True, "tool_use_result": detailed},
+        )
+        return ToolExecutionOutcome(message=msg)
+
+
+async def _run_tool_use(
+    tool_call: ToolCall,
+    assistant_message: Message,
+    context: ToolContext,
+    tools: Sequence[Tool],
+) -> ToolExecutionOutcome:
+    """`streamedCheckPermissionsAndCallTool` and the unknown-tool/cancel checks before it."""
     call_id = str(tool_call.get("id") or "")
     tool_name = str(tool_call.get("name") or "")
     tool_args = tool_call.get("args") or {}

@@ -251,8 +251,8 @@ writes discarded, so it can never move the ledger. `app/hooks/` and `app/tools/`
   default stays `acceptEdits`.
 
 *Phase 4b outcome (2026-10-22):* built as specified. `permissions/auto_mode.py` ports the auto
-branch step for step (fail-closed, `DENIAL_LIMITS` 3/20 with a headless abort mapped to the
-cancel token), and `permissions/yolo_classifier.py` ports the classifier with upstream's
+branch step for step (fail-closed, `DENIAL_LIMITS` 3/20; a headless abort raises upstream's
+`AbortError`, which the tool pipeline's outer handler reports as the call's error), and `permissions/yolo_classifier.py` ports the classifier with upstream's
 external defaults. The two-stage XML path is reachable only through `ClassifierOptions`
 (upstream's switch is GrowthBook). The prompt and default rules under `app/prompts/permissions/`
 ship as reconstructed. A test pins that RED denies a production write before the classifier is

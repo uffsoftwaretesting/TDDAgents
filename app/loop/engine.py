@@ -79,20 +79,23 @@ def _has_hook_stopped(message: Message) -> bool:
     return is_hook_stopped_continuation(message)
 
 
-async def _stop_failure(context: Any, last: Message | None, messages: tuple[Message, ...]) -> None:
+def _stop_failure(context: Any, last: Message | None, messages: tuple[Message, ...]) -> None:
     """
-    `executeStopFailureHooks` for a turn that ended on an API error. Upstream fires it
-    without awaiting; here it is awaited, because the run's event loop may close before a
-    detached task finishes and the hook would silently never run.
+    `void executeStopFailureHooks(lastMessage, toolUseContext)`: fired for a turn that ended
+    on an API error, without waiting. The dispatcher holds the task, and the runner drains it
+    before the run ends, so it still runs to completion.
     """
+    dispatcher = dispatcher_of(context)
+    if dispatcher is None:
+        return
     error = None
     details = None
     if last is not None:
         kwargs = getattr(last, "additional_kwargs", None) or {}
         error = kwargs.get("api_error") if isinstance(kwargs, dict) else None
         details = kwargs.get("error_details") if isinstance(kwargs, dict) else None
-    await execute_stop_failure_hooks(
-        context, str(error) if error else None, str(details) if details else None, messages
+    dispatcher.spawn_background(
+        execute_stop_failure_hooks(context, str(error) if error else None, str(details) if details else None, messages)
     )
 
 
@@ -335,7 +338,7 @@ async def run_loop(
             for wm in withheld_messages:
                 yield wm
             surfaced = [*assistant_messages, *withheld_messages]
-            await _stop_failure(
+            _stop_failure(
                 state.tool_context, surfaced[-1] if surfaced else None, (*messages_for_query, *assistant_messages)
             )
             term = Terminated(reason=Terminal.PROMPT_TOO_LONG)
@@ -383,7 +386,7 @@ async def run_loop(
             # reporting a provider outage that way would claim a TDD cycle nobody observed.
             # The guard's actual fix — never let stop hooks see an API error — is kept whole.
             if assistant_messages and is_api_error_message(assistant_messages[-1]):
-                await _stop_failure(
+                _stop_failure(
                     state.tool_context, assistant_messages[-1], (*messages_for_query, *assistant_messages)
                 )
                 term = Terminated(reason=Terminal.MODEL_ERROR)

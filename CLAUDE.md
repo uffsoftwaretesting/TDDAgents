@@ -334,15 +334,17 @@ architecture"**.
   - PermissionRequest at the headless ask.
   - Stop, or SubagentStop when the context has an `agent_id`. Workers now carry
     `agent_id` and `agent_type`.
-  - StopFailure at the API-error and prompt-too-long exits.
+  - StopFailure at the API-error and prompt-too-long exits, fire-and-forget as upstream's
+    `void`: the dispatcher holds the task and the runner drains it before SessionEnd.
   - SessionStart (`startup`), UserPromptSubmit and SessionEnd (`other`) in the runner. A
     blocking or `continue: false` UserPromptSubmit ends the run `hook_stopped` before any
     model call.
   - PreCompact, SessionStart (`compact`) and PostCompact in reactive compaction.
   - Async and `asyncRewake` hooks are delivered after a turn's tools.
 - **`if` conditions** use a new per-tool `prepare_permission_matcher`. File tools match on
-  `file_path`, Glob and Grep on `pattern`. Bash matches if *any* subcommand matches, and an
-  unparseable command always runs the hook.
+  `file_path`, Glob and Grep on `pattern`. Bash follows the external build: without
+  `TREE_SITTER_BASH`, `parseForSecurity` is `parse-unavailable`, so every content condition
+  matches and the hook always runs (fail safe — more hook runs can only add blocks).
 - **Barrier 3 is finally wired in production.** `production_stop_hooks` used to be a no-op;
   `build_stop_hooks_runner` runs `tdd_phase_incomplete_hook` first, configured hooks can
   only *add* blocks, and a configured `continue: false` ends the run `stop_hook_prevented`,
@@ -357,13 +359,18 @@ architecture"**.
 *Divergences, all recorded:*
 - **The agent-hook verifier's app-state writes are discarded** (TDD: only the workers'
   `RunTests` moves the ledger).
-- StopFailure is awaited, not fire-and-forget.
-- Invalid hook entries are dropped one by one, rather than invalidating the whole settings
-  file.
-- `null`-valued JSON fields are ignored.
+- `null`-valued fields in a hook's *output* JSON are ignored.
 - `file_path` is matched as written, with no `backfillObservableInput`.
-- The Bash `if` matcher uses the legacy splitter instead of tree-sitter.
 - The async registry is per run.
+
+*Resolved toward upstream (2026-10-22, each test-first):*
+- an invalid `hooks` block now discards its whole settings file (`parseSettingsFileUncached`:
+  `settings: null`), its permission rules and `defaultMode` included. The TDD tier lives in
+  code and is unaffected;
+- StopFailure is fire-and-forget;
+- the Bash `if` matcher is the external build's;
+- any exception outside the tool's own call (validation, hooks, the gate) becomes the call's
+  `<tool_use_error>Error calling tool (X): …</tool_use_error>` — `runToolUse`'s outer `catch`.
 - Not ported:
   - plugins and their environment variables;
   - `CLAUDE_ENV_FILE`, `CLAUDE_CODE_SHELL_PREFIX` and the prompt-request protocol;
@@ -432,8 +439,9 @@ The auto-mode ("YOLO") classifier, added to the plan by the user and ported whol
 - **The system prompt and default rules are TDDAgents-authored**
   (`app/prompts/permissions/`), reconstructed from the code's markers because upstream's
   `.txt` files were compiled out. The rules ship as reconstructed, at the user's direction.
-- A headless abort (`AbortError` upstream) fires the cancel token and denies, so the run
-  ends `aborted_tools`.
+- *(Resolved 2026-10-22.)* A headless abort raises `AutoModeAbortError`, upstream's
+  `AbortError`. `run_tool_use`'s outer handler reports it as the call's error result and the
+  turn goes on, exactly as upstream; the stop hook still guards termination.
 - Per-tool classifier projections live in a table keyed by our tool names.
 - The production caller does not forward temperature or max_tokens.
 - Not ported: the PowerShell guard, `plan` mode with auto active, debug dumps, and the Bash

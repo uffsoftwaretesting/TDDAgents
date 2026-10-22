@@ -24,10 +24,10 @@ be shown. In order:
 write is already a deny when this branch would see it, so no classifier verdict — and no
 fast path — can open one.
 
-*Divergence:* upstream throws `AbortError` to abort a headless run (too many denials, or a
-transcript the classifier cannot read). This loop has no exception path for that, so the
-run's cancel token is fired and the call is denied with the same message; the loop then ends
-`aborted_tools`, upstream's terminal for an abort during tools. Not ported: the PowerShell
+A headless run that hits the denial limits, or whose transcript the classifier cannot read,
+raises `AutoModeAbortError` — upstream's `AbortError`. As upstream, `run_tool_use`'s outer
+handler turns it into the call's `<tool_use_error>`, and the loop continues (the stop hook
+still guards termination). Not ported: the PowerShell
 guard (no PowerShell tool), `plan` mode with auto active (`autoModeState`; a headless run
 never transitions modes), the ant-only error-dump notification, analytics.
 """
@@ -107,14 +107,12 @@ def reset_denials_on_allow(context: ToolContext, perm_ctx: ToolPermissionContext
         persist_denial_state(context, record_success(current))
 
 
-def _abort(context: ToolContext, message: str) -> PermissionResult:
-    """Upstream's `AbortError` in a headless run: stop the run and refuse the call."""
-    context.cancel.cancel()
-    return PermissionResult(
-        behavior=PermissionBehavior.DENY,
-        message=message,
-        decision_reason={"type": "other", "reason": message},
-    )
+class AutoModeAbortError(Exception):
+    """
+    Upstream's `AbortError` thrown from `hasPermissionsToUseTool` in a headless run. Like
+    upstream's, it is caught by the tool pipeline's outer handler (`runToolUse`'s `catch`),
+    which reports it as the call's `<tool_use_error>`; the turn goes on.
+    """
 
 
 def _with_accept_edits(context: ToolContext) -> ToolContext:
@@ -152,7 +150,7 @@ def handle_denial_limit_exceeded(
             "Please review the transcript before continuing."
         )
     if perm_ctx.should_avoid_permission_prompts:
-        return _abort(context, DENIAL_LIMIT_ABORT)
+        raise AutoModeAbortError(DENIAL_LIMIT_ABORT)
     logger.warning("Classifier denial limit exceeded, falling back to prompting: %s", warning)
     if hit_total:
         persist_denial_state(context, replace(denial_state, total_denials=0, consecutive_denials=0))
@@ -233,7 +231,7 @@ async def auto_mode_decision(
     if verdict.should_block:
         if verdict.transcript_too_long:
             if perm_ctx.should_avoid_permission_prompts:
-                return _abort(context, TRANSCRIPT_TOO_LONG_ABORT)
+                raise AutoModeAbortError(TRANSCRIPT_TOO_LONG_ABORT)
             logger.warning("Auto mode classifier transcript too long, falling back to normal permission handling")
             return replace(result, decision_reason={"type": "other", "reason": TRANSCRIPT_TOO_LONG_REASON})
         if verdict.unavailable:
@@ -265,6 +263,7 @@ async def auto_mode_decision(
 
 __all__ = [
     "DENIAL_LIMIT_ABORT",
+    "AutoModeAbortError",
     "SAFETY_CHECK_HEADLESS_REASON",
     "TRANSCRIPT_TOO_LONG_ABORT",
     "TRANSCRIPT_TOO_LONG_REASON",

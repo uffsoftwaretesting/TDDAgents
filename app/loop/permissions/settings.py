@@ -258,6 +258,15 @@ def parse_settings_file(path: Path) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         logger.warning("Ignoring malformed settings at %s: not a JSON object", path)
         return None
+    if "hooks" in data:
+        # `parseSettingsFileUncached`: a document failing `SettingsSchema` yields
+        # `settings: null` — the whole file (its hooks, rules and `defaultMode`) is ignored.
+        from app.loop.hooks.schemas import hooks_schema_errors
+
+        errors = hooks_schema_errors(data["hooks"])
+        if errors:
+            logger.warning("Invalid settings at %s, file ignored:\n%s", path, "\n".join(errors))
+            return None
     return data
 
 

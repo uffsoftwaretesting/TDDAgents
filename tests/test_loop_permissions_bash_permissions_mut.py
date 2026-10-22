@@ -156,8 +156,8 @@ def test_redirection_deny_rule_and_safety_reasons(tmp_path):
     reason = f"The agent requested permissions to edit {cwd}/.git/config which is a sensitive file."
     res = bp.validate_output_redirections((OutputRedirection(".git/config", ">"),), cwd,
                                           ctx(mode=PermissionMode.ACCEPT_EDITS))
-    assert res == PermissionResult(behavior=ASK, message=reason,
-                                   decision_reason={"type": "safetyCheck", "reason": reason})
+    assert res == PermissionResult(behavior=ASK, message=reason, decision_reason={
+        "type": "safetyCheck", "reason": reason, "classifierApprovable": True})
 
 
 def test_process_substitution_and_dangerous_redirection_results(tmp_path):
@@ -401,7 +401,8 @@ def test_validate_command_paths_scans_every_path_and_keeps_reasons(tmp_path):
     assert res.behavior == ASK and "/etc/x" in res.message
     reason = f"The agent requested permissions to edit {cwd}/.git/x which is a sensitive file."
     assert pv.validate_command_paths("touch", [".git/x"], cwd, accept) == PermissionResult(
-        behavior=ASK, message=reason, decision_reason={"type": "safetyCheck", "reason": reason})
+        behavior=ASK, message=reason,
+        decision_reason={"type": "safetyCheck", "reason": reason, "classifierApprovable": True})
     assert pv.validate_command_paths("mkdir", ["d"], cwd, ctx(), True) == PermissionResult(
         behavior=ASK, message=CD_WRITE_MSG,
         decision_reason={"type": "other", "reason": "Compound command contains cd with write operation - manual "

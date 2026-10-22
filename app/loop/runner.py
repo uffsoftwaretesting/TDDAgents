@@ -232,6 +232,7 @@ async def tdd_loop_runner(
     finally:
         from app.loop.hooks.execute import execute_session_end_hooks
 
+        await hook_dispatcher.drain_background()
         await execute_session_end_hooks(hook_dispatcher, "other")
         await hook_dispatcher.registry.finalize_pending()
 

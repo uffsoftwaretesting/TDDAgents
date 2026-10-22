@@ -483,3 +483,96 @@ def test_the_request_builder_reorders_hook_messages_after_tool_results(monkeypat
     body = [m for m in request[1:] if not (getattr(m, "additional_kwargs", {}) or {}).get("tdd_state")]
     kinds = [getattr(m, "tool_call_id", None) or m.content for m in body[:5]]
     assert kinds == ["t", "", "a", "b", "n"]
+
+
+# ── Phase 4 divergences resolved toward upstream ─────────────────────────────
+
+def test_an_exception_in_the_permission_phase_becomes_a_tool_use_error_and_the_run_goes_on():
+    """
+    `runToolUse`'s outer `catch`: the `AbortError` `hasPermissionsToUseTool` throws when a
+    headless auto-mode run hits the denial limit is reported as the call's error result. It
+    does not cancel the run.
+    """
+    import asyncio as _asyncio
+    import dataclasses
+
+    from langchain_core.messages import AIMessage as _AI
+
+    from app.loop.context import AppState, AppStateStore as _Store, tool_context_for as _ctx
+    from app.loop.permissions.denial_tracking import DenialTrackingState
+    from app.loop.permissions.types import (
+        PermissionBehavior,
+        PermissionMode,
+        PermissionResult,
+        ToolPermissionContext,
+    )
+    from app.loop.permissions.yolo_classifier import YoloClassifierResult
+    from app.loop.tools.base import build_tool as _build
+    from app.loop.tools.execution import run_tool_use as _run
+    from app.loop.tools.types import ToolResult as _Result
+
+    async def block(*args, **kwargs):
+        return YoloClassifierResult(should_block=True, reason="risky", model="m")
+
+    tool = _build(
+        name="Bash", prompt="p", call=lambda a, c: _Result(content="ran"),
+        check_permissions=lambda a, c: PermissionResult(behavior=PermissionBehavior.ASK, message="ask?"),
+    )
+    perm = ToolPermissionContext(mode=PermissionMode.AUTO, should_avoid_permission_prompts=True)
+    store = _Store(AppState(tool_permission_context=perm, denial_tracking=DenialTrackingState(2, 2)))
+    ctx = dataclasses.replace(_ctx(store), auto_mode_classifier=block)
+    call = {"id": "c1", "name": "Bash", "args": {"command": "x"}}
+    outcome = _asyncio.run(_run(call, _AI(content=""), ctx, [tool]))  # type: ignore[arg-type]
+    assert outcome.message.content == (
+        "<tool_use_error>Error calling tool (Bash): "
+        "Agent aborted: too many classifier denials in headless mode</tool_use_error>"
+    )
+    assert outcome.message.additional_kwargs == {
+        "is_error": True,
+        "tool_use_result": "Error calling tool (Bash): Agent aborted: too many classifier denials in headless mode",
+    }
+    assert ctx.cancel.cancelled is False
+
+
+def test_stop_failure_hooks_are_fire_and_forget_but_finish_before_the_run_ends():
+    """`void executeStopFailureHooks(...)`: the turn ends without waiting; the dispatcher's
+    background work is drained when the run finalizes."""
+    import asyncio as _asyncio
+
+    from langchain_core.messages import AIMessage as _AI, HumanMessage as _Human
+
+    from app.loop.config import build_run_config
+    from app.loop.context import AppStateStore as _Store, tool_context_for as _ctx
+    from app.loop.engine import drain, run_loop
+    from app.loop.state import initial_loop_state
+    from app.loop.transitions import Terminal
+    from tests.hook_doubles import ScriptedDispatcher
+
+    class SlowOutside(ScriptedDispatcher):
+        def __init__(self) -> None:
+            super().__init__()
+            self.finished = False
+
+        async def execute_hooks_outside_repl(self, hook_input, **kwargs):
+            await _asyncio.sleep(0.2)
+            self.finished = True
+            return []
+
+    async def model(state, config):
+        yield _AI(content="", additional_kwargs={"is_api_error_message": True, "api_error": "overloaded"})
+
+    async def go():
+        dispatcher = SlowOutside()
+        ctx = _ctx(_Store(), hook_dispatcher=dispatcher)
+        state = initial_loop_state((_Human(content="t"),), ctx)
+        from app.loop.factory import get_production_deps
+        import dataclasses
+
+        deps = dataclasses.replace(get_production_deps(), call_model=model)
+        terminal = await drain(run_loop(state, build_run_config("r", postgres_checkpointing=False), deps))
+        assert terminal.reason == Terminal.MODEL_ERROR
+        assert dispatcher.finished is False  # the turn did not wait for it
+        await dispatcher.drain_background()
+        assert dispatcher.finished is True
+
+    _asyncio.run(go())

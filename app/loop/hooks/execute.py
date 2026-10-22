@@ -92,6 +92,27 @@ class HookDispatcher:
     http_executor: HttpHookExecutor | None = None
     #: Session-scoped matchers (an agent's or skill's frontmatter hooks), by event.
     session_matchers: dict[str, list[HookMatcher]] = field(default_factory=dict)
+    #: Hook work started fire-and-forget (upstream's `void executeStopFailureHooks(...)`),
+    #: kept so it is not garbage-collected and can be drained before the run ends.
+    background: set[asyncio.Future[Any]] = field(default_factory=set)
+
+    def spawn_background(self, work: Awaitable[Any]) -> None:
+        """Start `work` without waiting for it (upstream's `void`)."""
+        task = asyncio.ensure_future(work)
+        self.background.add(task)
+        task.add_done_callback(self.background.discard)
+
+    async def drain_background(self) -> None:
+        """
+        Wait for fire-and-forget hook work. Upstream's process outlives the turn, so a detached
+        hook finishes; here the run's event loop closes when the run ends, so the runner drains
+        this first. A failure is logged, never raised.
+        """
+        while self.background:
+            results = await asyncio.gather(*list(self.background), return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException):
+                    logger.warning("Background hook work failed: %s", result)
 
     # ── inputs ───────────────────────────────────────────────────────────────
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.context import AppState, AppStateStore, DenialTrackingBox, tool_context_for
@@ -12,6 +13,7 @@ from app.loop.hooks.output import AggregatedHookResult
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.auto_mode import (
     DENIAL_LIMIT_ABORT,
+    AutoModeAbortError,
     SAFETY_CHECK_HEADLESS_REASON,
     TRANSCRIPT_TOO_LONG_ABORT,
     TRANSCRIPT_TOO_LONG_REASON,
@@ -119,9 +121,9 @@ def test_an_unavailable_classifier_fails_closed():
 
 def test_a_transcript_too_long_aborts_headless_and_falls_back_interactively():
     ctx, _ = ctx_for(classifier=FakeClassifier(verdict(True, "x", transcript_too_long=True)))
-    res = gate(AskTool(), ctx)
-    assert (res.behavior, res.message) == (DENY, TRANSCRIPT_TOO_LONG_ABORT)
-    assert ctx.cancel.cancelled is True
+    with pytest.raises(AutoModeAbortError, match="^" + TRANSCRIPT_TOO_LONG_ABORT + "$"):
+        gate(AskTool(), ctx)
+    assert ctx.cancel.cancelled is False
     ctx, _ = ctx_for(perm=AUTO_INTERACTIVE, classifier=FakeClassifier(verdict(True, "x", transcript_too_long=True)))
     res = gate(AskTool(), ctx)
     assert res.behavior == ASK
@@ -131,9 +133,9 @@ def test_a_transcript_too_long_aborts_headless_and_falls_back_interactively():
 
 def test_the_third_consecutive_denial_aborts_a_headless_run():
     ctx, store = ctx_for(classifier=FakeClassifier(verdict(True, "bad")), denial=DenialTrackingState(2, 2))
-    res = gate(AskTool(), ctx)
-    assert (res.behavior, res.message) == (DENY, DENIAL_LIMIT_ABORT)
-    assert ctx.cancel.cancelled is True
+    with pytest.raises(AutoModeAbortError, match="^" + DENIAL_LIMIT_ABORT + "$"):
+        gate(AskTool(), ctx)
+    assert ctx.cancel.cancelled is False
     assert store.get().denial_tracking == DenialTrackingState(3, 3)
 
 
