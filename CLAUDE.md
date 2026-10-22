@@ -727,14 +727,29 @@ tool,resolution,loader,prompt,fork}.py`, `coordinator.py`, `model_aliases.py`, `
   - the Agent tool's custom `check_permissions` (identical to the default allow);
   - `finalize_agent_tool`'s duplicate first scan, `run_agent`'s unread pool-cache seed and
     redundant `Terminated` check, and the runner's unreachable `or ""`.
-- **Gotcha:** `mutmut results` without `--all true` lists timeouts as survivors. The first run
-  showed 126 runner "survivors", of which 107 were timeouts.
-- **Gotcha:** a test that reads a module's *source* (`ast`/`inspect`) sees every mutant copy
-  under mutmut. `test_run_tests_is_the_only_ledger_writer` therefore inspects only the
-  `__mutmut_orig` (or unmutated) functions, or stats collection fails and nothing is measured.
-- **Gotcha:** mutmut's async-generator trampoline does not forward `aclose()`, so
-  `test_closing_the_worker_closes_its_loop` skips under `MUTANT_UNDER_TEST`. Its six
-  `run_agent` mutants are unverifiable there and pinned by the repo run.
+- **Fixed: counting survivors by line.** `mutmut results` prints every *non-killed* mutant,
+  timeouts included, each with its status. Grouping those lines without filtering on the
+  status turned 107 runner timeouts into "survivors" (126 shown, 19 real). The score now comes
+  from `scripts/mutmut_score.py`, which reads `mutmut results --all true`, counts by status,
+  computes `killed / (total − timeout)`, refuses a run with `not checked` mutants, and lists the
+  not-killed mutants by function.
+- **Fixed: source-reading tests under mutmut.** A test that reads a module's source sees every
+  mutant copy inside `mutants/`. The ledger-writer pin broke stats collection twice that way,
+  so two runs measured nothing. Source scans now go through `tests/source_scan.py`
+  (`original_nodes`), which keeps unmutated code and the `__mutmut_orig` copies only.
+- **Fixed: `run_agent` under mutmut.** mutmut wraps a top-level async generator as
+  `async for i in trampoline(...): yield i`, which never forwards `aclose()`, so the worker's
+  cleanup could not be verified there. `run_agent` is now a plain function returning its
+  (nested) async generator: the trampoline hands back the real generator, and
+  `test_closing_the_worker_closes_its_loop` runs under mutmut too. **Any new top-level async
+  generator whose cleanup matters needs the same shape.**
+- **Follow-up gate (2026-10-22)** over `agents/run_agent.py` and `agents/tool.py` after these
+  fixes, scored by `scripts/mutmut_score.py`: 497 mutants, 0 timeouts, 480 killed —
+  **96.6%**. The former `aclose` group is now killed under mutmut. The 17 survivors are the
+  recorded equivalent classes: log wording (9), default arguments (2), engine-overwritten
+  messages (2), `continue`→`break` on the always-last `Terminated`, the `"settings"`
+  deny-rule fallback (2), and `getattr(events, "aclose")` losing its default on a generator
+  that always has it.
 - **Remaining survivors are the recorded equivalent classes:**
   - log wording and arguments (runner 32, `run_agent` 9, loader 17);
   - default arguments;
@@ -796,7 +811,7 @@ $P/mypy
 
 # 4. Mutation testing — do the tests actually assert anything?
 $P/mutmut run          # NOT `python -m mutmut`; see the note below
-$P/mutmut results
+$P/python scripts/mutmut_score.py   # the gate score by status, and the triage list
 ```
 
 **Step 1 — write the tests with the code.** A module that sits behind a protocol seam is
@@ -1046,7 +1061,8 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
 ### Gotchas
 
 - **`also_copy` must name every non-code file a test reads**, in *directory* form:
-  `["app/", "requirements.txt", ".tddagents/", "docs/"]`. mutmut copies with
+  `["app/", "requirements.txt", ".tddagents/", "docs/", "scripts/"]` (`scripts/` since
+  `tests/test_mutmut_score.py` loads `scripts/mutmut_score.py`). mutmut copies with
   `shutil.copy2`, which does not create parent directories, so `.tddagents/settings.json`
   silently fails to copy; any missing file makes stats collection die with
   "failed to collect stats" and every mutant reports "not checked".

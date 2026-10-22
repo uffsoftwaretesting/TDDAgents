@@ -224,7 +224,7 @@ def test_agent_memory_lives_in_the_workspaces_run_dir(make_fake_workspace, tmp_p
         yield AIMessage(content="done")
 
     ws = make_fake_workspace()
-    ws.run_dir = str(tmp_path / "run")  # type: ignore[attr-defined]
+    ws.run_dir = str(tmp_path / "run")
     deps = dataclasses.replace(get_production_deps(), call_model=model)
     asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=ws, deps=deps, project_root=tmp_path,
                                 home=tmp_path / "home", managed_dir=tmp_path / "etc"))

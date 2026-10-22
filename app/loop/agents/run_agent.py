@@ -142,7 +142,7 @@ def _is_recordable(message: Any) -> bool:
     return isinstance(message, (AIMessage, HumanMessage, ToolMessage)) or is_compact_boundary_message(message)
 
 
-async def run_agent(
+def run_agent(
     *,
     agent_definition: AgentDefinition,
     prompt_messages: Sequence[Message],
@@ -156,70 +156,83 @@ async def run_agent(
     agent_id: str | None = None,
     transcript: Any = None,
 ) -> AsyncIterator[Message]:
-    """`runAgent`: yield the worker's messages as its loop produces them."""
-    parent = tool_context
-    agent_id = agent_id or create_agent_id()
-    agent_type = agent_definition.name
-    worker_config = replace(config, model=get_agent_model(agent_definition.model, config.model, model_override))
+    """
+    `runAgent`: the worker's messages, as its loop produces them.
 
-    initial: list[Message] = [*prompt_messages, *await _subagent_start_context(parent, agent_id, agent_type)]
+    A plain function returning the worker's async generator rather than an async generator
+    itself, so `aclose()` on the result always reaches the generator that owns the cleanup —
+    including under mutmut, whose trampoline for a top-level async generator re-yields from
+    an inner one (`async for i in ...: yield i`) and never forwards `aclose()`.
+    """
 
-    get_app_state = _agent_get_app_state(parent.get_app_state, agent_definition.permission_mode, is_async)
-    resolved = resolve_agent_tools(agent_definition, available_tools, is_async=is_async).resolved_tools
-    refresh_tools = _phase_filtered_pool(resolved, get_app_state)
-    worker = replace(
-        parent,
-        get_app_state=get_app_state,
-        set_app_state=discard_app_state_update if is_async else parent.set_app_state,
-        local_denial_tracking=DenialTrackingBox() if is_async else parent.local_denial_tracking,
-        messages=tuple(initial),
-        in_flight_tool_ids=set(),
-        tools=refresh_tools(),
-        refresh_tools=refresh_tools,
-        read_file_state={},
-        nested_memory_attachment_triggers=set(),
-        loaded_nested_memory_paths=set(),
-        agent_id=agent_id,
-        agent_type=agent_type,
-        agent_system_prompt=tuple(system_prompt),
-        omit_claude_md=agent_definition.omit_claude_md,
-        omit_git_status=agent_type in _NO_GIT_STATUS_AGENT_TYPES,
-    )
+    worker_id = agent_id or create_agent_id()
 
-    turns = {"count": 1}
+    async def worker_run() -> AsyncIterator[Message]:
+        parent = tool_context
+        agent_id = worker_id
+        agent_type = agent_definition.name
+        worker_config = replace(config, model=get_agent_model(agent_definition.model, config.model, model_override))
 
-    def on_event(event: Any) -> None:
-        """The worker's own sink: never the parent's (sidechains are not the flow)."""
-        # A `Terminated` reason is never `NEXT_TURN`, so only the next-turn transition counts.
-        if event.reason != Continue.NEXT_TURN:
-            return
-        turns["count"] += 1
-        limit = agent_definition.max_turns
-        if limit is not None and turns["count"] > limit:
-            raise _MaxTurnsReached
+        initial: list[Message] = [*prompt_messages, *await _subagent_start_context(parent, agent_id, agent_type)]
 
-    worker_deps = replace(deps, emit_event=on_event)
-    store = transcript if transcript is not None else parent.transcript_store
-    last_uuid = store.record_sidechain_transcript(initial, agent_id) if store is not None else None
+        get_app_state = _agent_get_app_state(parent.get_app_state, agent_definition.permission_mode, is_async)
+        resolved = resolve_agent_tools(agent_definition, available_tools, is_async=is_async).resolved_tools
+        refresh_tools = _phase_filtered_pool(resolved, get_app_state)
+        worker = replace(
+            parent,
+            get_app_state=get_app_state,
+            set_app_state=discard_app_state_update if is_async else parent.set_app_state,
+            local_denial_tracking=DenialTrackingBox() if is_async else parent.local_denial_tracking,
+            messages=tuple(initial),
+            in_flight_tool_ids=set(),
+            tools=refresh_tools(),
+            refresh_tools=refresh_tools,
+            read_file_state={},
+            nested_memory_attachment_triggers=set(),
+            loaded_nested_memory_paths=set(),
+            agent_id=agent_id,
+            agent_type=agent_type,
+            agent_system_prompt=tuple(system_prompt),
+            omit_claude_md=agent_definition.omit_claude_md,
+            omit_git_status=agent_type in _NO_GIT_STATUS_AGENT_TYPES,
+        )
 
-    events = run_loop(initial_loop_state(tuple(initial), worker), worker_config, worker_deps)
-    try:
-        async for event in events:
-            if isinstance(event, Terminated):
-                continue
-            if store is not None and _is_recordable(event):
-                last_uuid = store.record_sidechain_transcript([event], agent_id, last_uuid)
-            yield event
-    except _MaxTurnsReached:
-        logger.info("[Agent: %s] Reached max turns limit (%s)", agent_type, agent_definition.max_turns)
-    finally:
-        # `run_loop` is an async generator; closing it runs its cleanup (history repair).
-        close = getattr(events, "aclose", None)
-        if close is not None:
-            await close()
-        worker.read_file_state.clear()
-        parent.set_app_state(lambda s: s if agent_id not in s.todos else replace(
-            s, todos={k: v for k, v in s.todos.items() if k != agent_id}))
+        turns = {"count": 1}
+
+        def on_event(event: Any) -> None:
+            """The worker's own sink: never the parent's (sidechains are not the flow)."""
+            # A `Terminated` reason is never `NEXT_TURN`, so only the next-turn transition counts.
+            if event.reason != Continue.NEXT_TURN:
+                return
+            turns["count"] += 1
+            limit = agent_definition.max_turns
+            if limit is not None and turns["count"] > limit:
+                raise _MaxTurnsReached
+
+        worker_deps = replace(deps, emit_event=on_event)
+        store = transcript if transcript is not None else parent.transcript_store
+        last_uuid = store.record_sidechain_transcript(initial, agent_id) if store is not None else None
+
+        events = run_loop(initial_loop_state(tuple(initial), worker), worker_config, worker_deps)
+        try:
+            async for event in events:
+                if isinstance(event, Terminated):
+                    continue
+                if store is not None and _is_recordable(event):
+                    last_uuid = store.record_sidechain_transcript([event], agent_id, last_uuid)
+                yield event
+        except _MaxTurnsReached:
+            logger.info("[Agent: %s] Reached max turns limit (%s)", agent_type, agent_definition.max_turns)
+        finally:
+            # `run_loop` is an async generator; closing it runs its cleanup (history repair).
+            close = getattr(events, "aclose", None)
+            if close is not None:
+                await close()
+            worker.read_file_state.clear()
+            parent.set_app_state(lambda s: s if agent_id not in s.todos else replace(
+                s, todos={k: v for k, v in s.todos.items() if k != agent_id}))
+
+    return worker_run()
 
 
 __all__ = ["create_agent_id", "run_agent"]

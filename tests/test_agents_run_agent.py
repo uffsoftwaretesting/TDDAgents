@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import os
 from typing import Any
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.agents.definition import AgentDefinition
@@ -288,10 +286,6 @@ def test_only_next_turns_count_toward_max_turns():
     assert len(model.seen) == 2
 
 
-@pytest.mark.skipif(
-    "MUTANT_UNDER_TEST" in os.environ,
-    reason="mutmut's async-generator trampoline does not forward aclose() to the wrapped generator",
-)
 def test_closing_the_worker_closes_its_loop(monkeypatch):
     from app.loop.agents import run_agent as run_agent_mod
 

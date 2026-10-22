@@ -38,6 +38,7 @@ from app.workspace.pyenv import (
     SessionPythonError,
     ensure_session_python,
 )
+from tests.source_scan import calls_to, original_nodes
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -262,16 +263,13 @@ def test_sandbox_requires_the_key_only_when_used(monkeypatch):
 def _ledger_writers() -> list[str]:
     """Every app/ file holding a set_app_state call whose updater touches phase_ledger.
 
-    A set, not a list: under mutmut a module carries one copy of each function per mutant.
+    Scanned through `tests/source_scan.py`, so mutmut's mutant copies are never read.
     """
-    hits = set()
-    for path in sorted((REPO / "app").rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "set_app_state" and "phase_ledger" in ast.unparse(node)):
-                hits.add(path.relative_to(REPO).as_posix())
-    return sorted(hits)
+    return sorted(
+        path.relative_to(REPO).as_posix()
+        for path in (REPO / "app").rglob("*.py")
+        if any("phase_ledger" in call for call in calls_to(original_nodes(path), "set_app_state"))
+    )
 
 
 def test_run_tests_is_the_only_ledger_writer():
@@ -282,15 +280,8 @@ def test_run_tests_is_the_only_ledger_writer():
     Agent-tool write that bypasses `transition_to`, cannot appear unnoticed.
     """
     assert _ledger_writers() == ["app/loop/agents/tool.py", "app/loop/tools/run_tests.py"]
-    # Every Agent-tool write is the spawn ledger, which only `phase_on_spawn` produces. Checked
-    # per call site (a mutated copy of the module holds one copy per mutant).
-    tree = ast.parse((REPO / "app/loop/agents/tool.py").read_text(encoding="utf-8"))
-    # Under mutmut only the `__mutmut_orig` copy is the source; numbered copies are mutants.
-    originals = [f for f in tree.body if isinstance(f, ast.FunctionDef)
-                 and ("__mutmut_" not in f.name or f.name.endswith("__mutmut_orig"))]
-    nodes = [n for f in originals for n in ast.walk(f)]
-    writes = [ast.unparse(n) for n in nodes
-              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "set_app_state"]
+    nodes = original_nodes(REPO / "app/loop/agents/tool.py")
+    writes = calls_to(nodes, "set_app_state")
     assert writes and all("phase_ledger=spawn_ledger" in w for w in writes)
     assigns = [ast.unparse(n) for n in nodes if isinstance(n, ast.Assign)
                and any(isinstance(t, ast.Name) and t.id == "spawn_ledger" for t in n.targets)]
