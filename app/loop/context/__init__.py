@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.loop.context.file_state import FileState
-from app.loop.ledger import PhaseLedger
+from app.loop.ledger import PhaseLedger, TestRunRecord
 from app.loop.messages import Message
 from app.loop.permissions.denial_tracking import DenialTrackingState
 from app.loop.permissions.types import ToolPermissionContext
@@ -80,6 +80,9 @@ class AppState:
     #: Upstream `appState.denialTracking`: the auto-mode classifier's denial streak and total
     #: (`permissions/denial_tracking.py`), `None` until auto mode first records one.
     denial_tracking: DenialTrackingState | None = None
+    #: The last test run the ledger observed (`ledger.TestRunRecord`), written by `RunTests`
+    #: together with the ledger; the TDD state is re-attached from it after a compaction.
+    last_test_run: TestRunRecord | None = None
 
 
 @dataclass(slots=True)
@@ -166,6 +169,28 @@ class ToolContext:
     #: The auto-mode classifier to call (`classify_yolo_action`'s signature); `None` means the
     #: production classifier. A seam for tests, which must never reach a live model.
     auto_mode_classifier: Callable[..., Any] | None = None
+    #: Upstream `contentReplacementState`: which tool results the per-message budget has
+    #: already seen, and the preview each replaced one became. Mutable and carried across
+    #: turns, so a decision once made is replayed byte-identically (prompt-cache stability).
+    #: `None` means the budget is off — upstream provisions it only behind a GrowthBook flag
+    #: that is off in the external build (`provision_content_replacement_state`).
+    content_replacement_state: ContentReplacementState | None = None
+    #: The run's agent-memory store (`agents/memory.py`), owned by the runner: rooted outside
+    #: the workspace, and its run-scoped memory discarded when the run ends (Part I5).
+    agent_memory_store: Any = None
+    #: Upstream `nestedMemoryAttachmentTriggers`: paths `ReadFile` read this turn, whose
+    #: nested `TDDAGENTS.md` / conditional rules the `nested_memory` attachment loads next.
+    nested_memory_attachment_triggers: set[str] = field(default_factory=set)
+    #: Upstream `loadedNestedMemoryPaths`: memory files already attached, never sent twice.
+    loaded_nested_memory_paths: set[str] = field(default_factory=set)
+
+
+@dataclass
+class ContentReplacementState:
+    """`ContentReplacementState`: `seenIds` and `replacements` (tool_use_id -> preview)."""
+
+    seen_ids: set[str] = field(default_factory=set)
+    replacements: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -187,6 +212,7 @@ def tool_context_for(
     run_id: str = "",
     agent_id: str | None = None,
     agent_type: str | None = None,
+    agent_memory_store: Any = None,
 ) -> ToolContext:
     """
     Build a context wired to a store, which is what the main loop wants.
@@ -208,15 +234,11 @@ def tool_context_for(
         run_id=run_id,
         agent_id=agent_id,
         agent_type=agent_type,
+        agent_memory_store=agent_memory_store,
     )
 
 
 # Re-exports for Part E Context Systems
-from app.loop.context.attachments import (  # noqa: E402
-    AgentListingDelta,
-    DeltaManager,
-    McpInstructionsDelta,
-)
 from app.loop.context.cache import (  # noqa: E402
     MAX_CACHE_BREAKPOINTS,
     CacheBlock,
@@ -227,13 +249,6 @@ from app.loop.context.cache import (  # noqa: E402
 )
 from app.loop.context.cleanup import (  # noqa: E402
     invalidate_context_caches,
-    notify_compaction,
-)
-from app.loop.context.compact import (  # noqa: E402
-    apply_tool_result_budget,
-    compact_conversation,
-    microcompact_tool_results,
-    try_reactive_compact,
 )
 from app.loop.context.instructions import (  # noqa: E402
     InstructionFile,
@@ -259,24 +274,19 @@ from app.loop.context.tokens import (  # noqa: E402
 
 __all__ = [
     "MAX_CACHE_BREAKPOINTS",
-    "AgentListingDelta",
     "AppState",
     "AppStateStore",
     "CacheBlock",
     "CacheLatchError",
     "CancelToken",
-    "DeltaManager",
     "FileState",
     "InstructionFile",
-    "McpInstructionsDelta",
     "SessionLatches",
     "TokenCounter",
     "TokenWarningState",
     "ToolContext",
-    "apply_tool_result_budget",
     "build_system_prompt_blocks",
     "calculate_token_warning_state",
-    "compact_conversation",
     "count_messages_tokens",
     "discard_app_state_update",
     "estimate_block_tokens",
@@ -287,12 +297,9 @@ __all__ = [
     "is_assistant_message",
     "is_user_message",
     "load_instruction_file",
-    "microcompact_tool_results",
-    "notify_compaction",
     "slice_messages_head",
     "strip_html_comments",
     "tool_context_for",
-    "try_reactive_compact",
     "validate_api_invariants",
     "validate_cache_breakpoints_budget",
 ]

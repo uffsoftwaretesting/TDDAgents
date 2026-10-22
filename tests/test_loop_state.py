@@ -9,7 +9,7 @@ exist yet; the point is that it cannot be built wrong later.
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, MISSING, fields, replace
+from dataclasses import MISSING, FrozenInstanceError, fields, replace
 from typing import Any
 
 import pytest
@@ -22,16 +22,16 @@ from app.loop.state import CompactionTracking, LoopState, initial_loop_state
 
 def make_state(**overrides: Any) -> LoopState:
     """A complete record, so a test can vary exactly one thing about it."""
-    base: dict[str, Any] = dict(
-        messages=(HumanMessage(content="spec"),),
-        tool_context=tool_context_for(AppStateStore()),
-        phase_ledger=PhaseLedger(),
-        compaction_tracking=None,
-        has_attempted_reactive_compact=False,
-        stop_hook_active=None,
-        turn_count=1,
-        transition=None,
-    )
+    base: dict[str, Any] = {
+        "messages": (HumanMessage(content="spec"),),
+        "tool_context": tool_context_for(AppStateStore()),
+        "phase_ledger": PhaseLedger(),
+        "compaction_tracking": None,
+        "has_attempted_reactive_compact": False,
+        "stop_hook_active": None,
+        "turn_count": 1,
+        "transition": None,
+    }
     base.update(overrides)
     return LoopState(**base)
 
@@ -136,19 +136,26 @@ class TestCompactionTracking:
         tracking = CompactionTracking(compacted=True, turn_id="turn-1", turn_counter=2)
         assert (tracking.compacted, tracking.turn_id, tracking.turn_counter) == (True, "turn-1", 2)
 
-    def test_it_does_not_count_failures(self):
+    def test_it_counts_failures_as_upstream_does(self):
         """
-        Upstream's `consecutiveFailures` feeds one circuit-breaker comparison and nothing
-        else. With no ceiling there is no reader, and a field nothing reads is how a bound
-        gets quietly reintroduced later.
+        `AutoCompactTrackingState` in full: `consecutiveFailures` feeds the autocompact
+        circuit breaker, a ceiling upstream has (Phase 5; "ceilings follow claude-code").
         """
         assert [f.name for f in fields(CompactionTracking)] == [
             "compacted",
             "turn_id",
             "turn_counter",
+            "consecutive_failures",
         ]
 
     def test_it_is_frozen(self):
         tracking = CompactionTracking(compacted=False, turn_id="turn-1", turn_counter=0)
         with pytest.raises(FrozenInstanceError):
             tracking.turn_counter = 1  # type: ignore[misc]
+
+
+def test_compaction_tracking_carries_upstreams_failure_count():
+    """`AutoCompactTrackingState.consecutiveFailures?: number` — the circuit breaker's input."""
+    assert CompactionTracking(compacted=False, turn_id="", turn_counter=0).consecutive_failures is None
+    tracking = CompactionTracking(compacted=False, turn_id="", turn_counter=0, consecutive_failures=2)
+    assert tracking.consecutive_failures == 2

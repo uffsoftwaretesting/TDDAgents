@@ -12,9 +12,10 @@ needs none for this.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -224,8 +225,12 @@ class TestTheModelAsksForTools:
         events = collect(FakeModel([[asked], [answered]]), FakeTools(), start())
         assert events[0] is asked
         assert isinstance(events[1], ToolMessage)
-        assert events[2] is answered
-        assert events[3] == Terminated(reason=Terminal.COMPLETED)
+        # Phase 5: the turn's attachments follow its results (first announcement of the ledger).
+        attachment = events[2]
+        assert isinstance(attachment, HumanMessage)
+        assert attachment.additional_kwargs["attachment"]["type"] == "tdd_state"
+        assert events[3] is answered
+        assert events[4] == Terminated(reason=Terminal.COMPLETED)
 
     def test_calls_from_several_assistant_messages_are_collected_together(self):
         model = FakeModel(
@@ -277,9 +282,11 @@ class TestTheNextTurnSite:
 
     def test_the_conversation_grows_by_the_answer_and_the_results(self):
         seen = self.two_turns().seen
-        assert len(seen[1].messages) == len(seen[0].messages) + 2
+        # The answer, its result, and the attachments that turn produced (Phase 5).
+        assert len(seen[1].messages) == len(seen[0].messages) + 3
         assert seen[1].messages[: len(seen[0].messages)] == seen[0].messages
-        assert isinstance(seen[1].messages[-1], ToolMessage)
+        assert isinstance(seen[1].messages[-2], ToolMessage)
+        assert seen[1].messages[-1].additional_kwargs["attachment"]["type"] == "tdd_state"
 
     def test_the_reactive_compact_guard_is_cleared(self):
         """A round of tool calls may have changed the context enough to retry."""
@@ -295,9 +302,13 @@ class TestTheNextTurnSite:
         ledger = PhaseLedger(phase="GREEN", red_confirmed=True)
         assert self.two_turns(phase_ledger=ledger).seen[1].phase_ledger == ledger
 
-    def test_compaction_tracking_is_preserved(self):
+    def test_compaction_tracking_advances_its_turn_counter(self):
+        """`query.ts`: `if (tracking?.compacted) tracking.turnCounter++` before `next_turn`."""
         tracking = CompactionTracking(compacted=True, turn_id="t1", turn_counter=2)
-        assert self.two_turns(compaction_tracking=tracking).seen[1].compaction_tracking == tracking
+        advanced = CompactionTracking(compacted=True, turn_id="t1", turn_counter=3)
+        assert self.two_turns(compaction_tracking=tracking).seen[1].compaction_tracking == advanced
+        idle = CompactionTracking(compacted=False, turn_id="t1", turn_counter=2)
+        assert self.two_turns(compaction_tracking=idle).seen[1].compaction_tracking == idle
 
     def test_the_state_is_replaced_rather_than_edited(self):
         seen = self.two_turns().seen
@@ -625,10 +636,10 @@ class TestResetPreserveMatrix:
         collect(model, tools, state=initial)
 
         next_state = model.seen[1]
-        assert len(next_state.messages) == len(initial.messages) + 2
+        assert len(next_state.messages) == len(initial.messages) + 3
         assert next_state.tool_context.messages == next_state.messages
         assert next_state.phase_ledger == initial.phase_ledger
-        assert next_state.compaction_tracking == initial.compaction_tracking
+        assert next_state.compaction_tracking == CompactionTracking(compacted=True, turn_id="t0", turn_counter=2)
         assert next_state.has_attempted_reactive_compact is False
         assert next_state.stop_hook_active is True
         assert next_state.turn_count == 2

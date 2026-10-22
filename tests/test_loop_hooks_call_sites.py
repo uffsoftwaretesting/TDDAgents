@@ -18,14 +18,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.loop.config import build_run_config
 from app.loop.context import AppStateStore, tool_context_for
-from app.loop.context.compact import (
-    COMPACT_TRIGGER,
-    merge_hook_instructions,
-    try_reactive_compact,
-)
 from app.loop.deps import CompactionResult, LoopDeps, StopHookResult
 from app.loop.engine import drain, run_loop
-from app.loop.hooks.execute import HookOutsideReplResult
 from app.loop.hooks.messages import HookBlockingError
 from app.loop.hooks.output import AggregatedHookResult
 from app.loop.permissions.types import ToolPermissionContext
@@ -38,6 +32,12 @@ from app.loop.transitions import Terminal
 from tests.hook_doubles import ScriptedDispatcher
 
 CONFIG = build_run_config("sites", postgres_checkpointing=False)
+
+#: The first TDD-state announcement a fresh run attaches after the prompt (Phase 5).
+INITIAL_TDD_STATE = (
+    "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
+    "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n</system-reminder>"
+)
 
 
 def reminder(text: str) -> str:
@@ -269,12 +269,18 @@ def test_async_hook_responses_and_rewake_notes_follow_the_tool_results():
         return model, events
 
     model, events = asyncio.run(go())
-    second = model.seen[1].messages
-    assert isinstance(second[-3], ToolMessage)
-    assert second[-2].content == reminder("bg done")
-    assert second[-2].additional_kwargs["attachment"]["processId"] == "p1"
-    assert second[-1].content == reminder('Stop hook blocking error from command "Stop": wake up')
-    assert second[-1].additional_kwargs == {"is_meta": True, "attachment": {"type": "queued_command"}}
+    second = list(model.seen[1].messages)
+    last_result = max(i for i, m in enumerate(second) if isinstance(m, ToolMessage))
+    after = second[last_result + 1:]
+    by_type = {m.additional_kwargs["attachment"]["type"]: m for m in after}
+    # Both are attachments of the turn, after its results (`getAttachmentMessages`).
+    assert by_type["async_hook_response"].content == reminder("bg done")
+    assert by_type["async_hook_response"].additional_kwargs["attachment"]["processId"] == "p1"
+    queued = by_type["queued_command"]
+    assert 'Stop hook blocking error from command "Stop": wake up' in str(queued.content)
+    assert queued.additional_kwargs["attachment"]["commandMode"] == "task-notification"
+    # Upstream's order: queued commands come before async hook responses.
+    assert after.index(queued) < after.index(by_type["async_hook_response"])
     assert events[-1].reason == Terminal.COMPLETED
 
 
@@ -282,7 +288,10 @@ def test_no_dispatcher_delivers_nothing_extra():
     model = Model([[asks()], [AIMessage(content="done")]])
     state = initial_loop_state((HumanMessage(content="t"),), tool_context_for(AppStateStore()))
     asyncio.run(drain(run_loop(state, CONFIG, deps(model))))
-    assert isinstance(model.seen[1].messages[-1], ToolMessage)
+    second = list(model.seen[1].messages)
+    last_result = max(i for i, m in enumerate(second) if isinstance(m, ToolMessage))
+    kinds = [m.additional_kwargs["attachment"]["type"] for m in second[last_result + 1:]]
+    assert kinds == ["tdd_state"]  # no hook output, only the ledger's first announcement
 
 
 def test_stop_failure_fires_on_an_api_error():
@@ -354,6 +363,7 @@ def test_runner_places_hook_messages_around_the_prompt(monkeypatch, tmp_path):
         "hello",
         "build it",
         reminder("UserPromptSubmit hook additional context: prompt ctx"),
+        INITIAL_TDD_STATE,
     ]
     assert model.seen[0].tool_context.messages == first
     assert d.payload("SessionStart")["source"] == "startup"
@@ -367,7 +377,7 @@ def test_runner_places_hook_messages_around_the_prompt(monkeypatch, tmp_path):
 def test_runner_without_hook_output_starts_from_the_prompt(monkeypatch, tmp_path):
     model = Model([[AIMessage(content="done")]])
     run_runner(monkeypatch, tmp_path, ScriptedDispatcher(), model)
-    assert [m.content for m in model.seen[0].messages] == ["build it"]
+    assert [m.content for m in model.seen[0].messages] == ["build it", INITIAL_TDD_STATE]
 
 
 def test_a_blocked_prompt_never_reaches_the_model(monkeypatch, tmp_path):
@@ -404,54 +414,6 @@ def test_run_settings_locations(tmp_path):
         managed_dir=tmp_path / "etc")
     assert run_settings_locations(CONFIG, tmp_path) == SettingsLocations(
         project_root=tmp_path, home=None, flag_settings_path=None, managed_dir=Path(MANAGED_DIR))
-
-
-# ── compaction ──────────────────────────────────────────────────────────────
-
-def test_merge_hook_instructions():
-    assert merge_hook_instructions(None, None) is None
-    assert merge_hook_instructions("", "") is None
-    assert merge_hook_instructions("user", None) == "user"
-    assert merge_hook_instructions(None, "hook") == "hook"
-    assert merge_hook_instructions("user", "hook") == "user\n\nhook"
-    assert COMPACT_TRIGGER == "auto"
-
-
-def _compact(d: Any) -> tuple[list[str], Any]:
-    prompts: list[str] = []
-
-    async def summarize(prompt: str) -> str:
-        prompts.append(prompt)
-        return "the summary"
-
-    msgs = (HumanMessage(content="a"), AIMessage(content="b"), HumanMessage(content="c"), AIMessage(content="d"))
-    state = initial_loop_state(msgs, ctx(d))
-    return prompts, asyncio.run(try_reactive_compact(state, CONFIG, summarize))
-
-
-def test_compaction_runs_pre_session_start_and_post_compact_hooks():
-    d = ScriptedDispatcher(
-        script={"SessionStart": [AggregatedHookResult(additional_contexts=("re-read the ledger",))]},
-        outside={"PreCompact": [HookOutsideReplResult(command="c", succeeded=True, output=" keep tests ",
-                                                      blocked=False)]},
-    )
-    prompts, result = _compact(d)
-    assert prompts[0].endswith("next steps.\n\nAdditional Instructions:\nkeep tests")
-    assert result.messages[-1].content == reminder("SessionStart hook additional context: re-read the ledger")
-    pre = d.payload("PreCompact")
-    assert (pre["trigger"], pre["custom_instructions"]) == ("auto", None)
-    assert d.payload("SessionStart")["source"] == "compact"
-    assert d.payload("SessionStart")["model"] == CONFIG.model
-    post = d.payload("PostCompact")
-    assert (post["trigger"], post["compact_summary"]) == ("auto", "the summary")
-    assert [e for e, _ in d.seen] == ["PreCompact", "SessionStart", "PostCompact"]
-
-
-def test_compaction_without_hook_output_adds_no_instructions():
-    prompts, result = _compact(ScriptedDispatcher())
-    assert "Additional Instructions" not in prompts[0]
-    assert prompts[0].endswith("next steps.")
-    assert result.messages[-1].content == "d"
 
 
 # ── workers and the request builder ─────────────────────────────────────────

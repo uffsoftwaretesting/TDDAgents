@@ -52,7 +52,7 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `config.py` | `RunConfig` + `Gates`, snapshotted once at entry by `build_run_config()` |
 | `state.py` | `LoopState` (frozen, tuples, **no field has a default**), `CompactionTracking`, `initial_loop_state()` |
 | `context/` | Subpackage providing `AppState`, `AppStateStore`, `CancelToken`, `ToolContext` (with `workspace`), `discard_app_state_update` |
-| `context/tokens.py` | Fast heuristic token counter (`(len+3)//4`), block/message/sequence token estimators, `TokenWarningState`, `TokenCounter` (E1) |
+| `context/tokens.py` | Fast heuristic token counter (`(len+3)//4`), block/message/sequence token estimators, `TokenWarningState`, `TokenCounter` (E1); `token_count_with_estimation`, model context window / max output (200k / 32k for an unknown model), effective window (Phase 5) |
 | `context/slicing.py` | Head-slicing enforcing all 3 hard invariants (user-first, unbroken tool pairs, non-orphaned thinking), `find_safe_truncation_index`, `slice_messages_head` (E2) |
 | `context/instructions.py` | Iterative HTML comment cleaner and `load_instruction_file`, used by the prompt/agent/skill loaders (E3) |
 | `context/memory.py` | Port of `utils/claudemd.ts`: Managed → User → Project → rules → Local memory files (`TDDAGENTS.md`, `.tddagents/`), `@include`, conditional `paths:` rules, block-level comment stripping, `getClaudeMds`; AutoMem off unless `TDDAGENTS_ENABLE_AUTO_MEMORY` (Part I5) |
@@ -72,10 +72,10 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `tools/bash.py`, `permissions/bash_*.py` | Bash tool and the port of `bashSecurity.ts`'s validator battery + `bashToolHasPermission`; no LLM classifier |
 | `prompts/loader.py` | Markdown frontmatter parser, visible placeholder rendering (`{{VAR}}`), agent loader enforcing 4-rule discipline and loud phase validation (E4) |
 | `prompts/sections.py` | `systemPromptSection` (memoized), `DANGEROUS_uncachedSystemPromptSection` (volatile with required reason), `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`, run-scoped `PromptSectionCache` (E4b) |
-| `context/cache.py` | `SessionLatches` (`CacheLatchError` on mid-session flip), `build_system_prompt_blocks` with ephemeral `cache_control` on static Block 3, `validate_cache_breakpoints_budget` (E5) |
-| `context/attachments.py` | `AgentListingDelta`, `McpInstructionsDelta`, `DeltaManager` for dynamic roster diffing as message attachments (E6) |
-| `context/compact.py` | Graduated context management: `apply_tool_result_budget`, `microcompact_tool_results`, `compact_conversation`, `try_reactive_compact` (E7) |
-| `context/cleanup.py` | `invalidate_context_caches` clearing run cache and latches without two-layer trap, `notify_compaction` (E8) |
+| `context/cache.py` | `SessionLatches` (`CacheLatchError` on mid-session flip), `validate_cache_breakpoints_budget` (E5); `prepare_cached_request` — upstream's two breakpoints (system block + last message) for Anthropic, nothing for OpenAI (Phase 5) |
+| `context/cleanup.py` | `invalidate_context_caches` clearing run cache and latches without two-layer trap (E8) |
+| `app/loop/attachments/` | `getAttachments` / `getAttachmentMessages`: per-turn sources persisted into `state.messages` — queued commands, date change, changed files, nested memory, todo and auto-mode reminders, agent/MCP deltas, async hook responses, token usage, **TDD state** (+ `create_tdd_state_attachment_message` for the post-compaction re-attach) (Phase 5) |
+| `app/loop/compact/` | `compactConversation` (no kept tail, file restoration, PTL retry, boundary), `autoCompactIfNeeded` (window arithmetic, circuit breaker 3), the compact prompt + **TDD sections**, post-compact cleanup, microcompact (time-based, off externally), the summarizer seam (Phase 5) |
 | `app/prompts/` | Complete composition roster: 7 static system instructions + dynamic, 7 core tools, and 6 TDD agents (`tester`, `developer`, `refactorer` + catalogue, `verification`, `explore`, `plan`) |
 | `transitions.py` | `Continue` / `Terminal` `StrEnum`s, `Transition`, `Terminated` |
 | `deps.py` | `LoopDeps` — the injected 7-member DI seam (A4), plus `CompactionResult` and `StopHookResult` |
@@ -476,6 +476,68 @@ The remaining survivors are the recorded equivalent classes:
 **Ruff** joins the lint step with its 0.17 defaults. `[tool.ruff.lint] external` lists
 flake8's codes, so ruff does not strip flake8's `# noqa` markers. Deliberate catch-alls
 carry `# noqa: BLE001` with their reason.
+
+### What Phase 5 changed (2026-10-22)
+
+Context assembly, attachments and compaction, ported test-first. The user's direction:
+"follow claude-code's source and architecture".
+
+- **The pre-model pipeline is upstream's, on stored history** (`engine.py`, `query.ts`):
+  1. messages after the last compact boundary;
+  2. the tool-result budget (off: upstream gates it on GrowthBook `tengu_hawthorn_steeple`,
+     which the external build leaves off);
+  3. microcompact (time-based, disabled by its external default config);
+  4. autocompact (`LoopDeps.autocompact`);
+  5. the blocking-limit precheck, which defers to reactive compaction exactly as
+     `query.ts` does.
+
+  What these return is what the iteration sends *and* what the next one starts from.
+  `model.py` no longer compacts or attaches per request; its prefix is byte-stable.
+- **Attachments are persisted** (`app/loop/attachments/`): user-input attachments at the
+  runner's first turn (`processUserInput`), and turn attachments after the tools
+  (`getAttachmentMessages`). This fixes the TDD state being re-sent on every request: it is
+  announced once per ledger change. Todos go through `todo_reminders` (upstream cadence).
+  Every source whose subsystem exists here is ported; each skipped source is recorded in
+  `attachments/__init__.py`.
+- **Compaction follows upstream** (`app/loop/compact/`):
+  - the whole history is summarized, with no kept tail;
+  - the 5 most recent files are re-read (50k / 5k token budgets);
+  - SessionStart(`compact`), PreCompact and PostCompact hooks run;
+  - the boundary record (never sent to the model) is written;
+  - autocompact fires at 167k for an unknown model;
+  - `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3`, so `CompactionTracking.consecutive_failures`
+    is back;
+  - the reactive path (`production_compact`) uses the same `compact_conversation`.
+- **TDD state survives compaction from authoritative state** (the one forced divergence).
+  The summary prompt gains TDD sections (ledger, latest failing evidence, test paths,
+  sub-requirement). After the boundary, `factory.post_compact_attachments` re-attaches the
+  ledger and the last `RunTests` record (`AppState.last_test_run`, written by `RunTests`
+  with the ledger) — never the summary. A test drives a compaction whose summary *lies*
+  ("all tests pass") and pins that the run still cannot terminate `completed`.
+- **Prompt-cache breakpoints** for Anthropic: one `org`-scoped system block plus the
+  last-message marker (langchain-anthropic's `cache_control` kwarg). The global scope is a
+  first-party beta this transport does not send. OpenAI caches prefixes unaided.
+- **Memory:**
+  - `extract_session_memory` / `update_auto_memory` (keyword-grep inventions) are deleted.
+  - **Run memory is per sub-requirement** (Part I5): the runner owns one store rooted
+    outside the workspace and discards it at the end.
+  - A run-scoped dir needs a run id; there is no shared `default_run`.
+  - The Agent tool no longer purges per spawn.
+- `nested_memory` triggers: `ReadFile` records what it reads (`nestedMemoryAttachmentTriggers`).
+
+*Divergences, all recorded:*
+- `changed_files` compares content, not mtime (the workspace has no mtime).
+- Restore order is `read_file_state` insertion order (no read timestamps).
+- The summarizer sends no tools.
+- Sources run sequentially.
+- Env names are `TDDAGENTS_*`.
+- Not ported:
+  - session-memory and partial compaction;
+  - cached microcompact;
+  - the forked prompt-cache-sharing path;
+  - plan, skill and async-agent post-compact attachments (no subsystems);
+  - the global cache scope;
+  - the attachment sources whose subsystems this build lacks.
 
 ### The three things that change most
 

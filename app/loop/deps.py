@@ -16,9 +16,9 @@ which is how a placeholder ends up in a run.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from app.loop.config import RunConfig
 from app.loop.messages import Message, ToolCall
@@ -97,6 +97,25 @@ NowProvider: TypeAlias = Callable[[], float]
 #: Sink for telemetry, transitions, and the event log (Part L1).
 EventSink: TypeAlias = Callable[[Any], None]
 
+#: `QueryDeps.microcompact`: the stored history before the model call, possibly lighter.
+Microcompact: TypeAlias = Callable[[tuple[Message, ...], "LoopState", RunConfig], Awaitable[tuple[Message, ...]]]
+
+#: `QueryDeps.autocompact`: `autoCompactIfNeeded` over the history the call will send. The
+#: outcome is `app.loop.compact.auto_compact.AutoCompactOutcome`.
+Autocompact: TypeAlias = Callable[[tuple[Message, ...], "LoopState", RunConfig], Awaitable[Any]]
+
+
+async def no_microcompact(messages: tuple[Message, ...], state: LoopState, config: RunConfig) -> tuple[Message, ...]:
+    """The external build's microcompact: time-based is disabled, cached is feature-gated."""
+    return messages
+
+
+async def no_autocompact(messages: tuple[Message, ...], state: LoopState, config: RunConfig) -> Any:
+    """A run that never compacts proactively (fakes, and runs with autocompact off)."""
+    from app.loop.compact.auto_compact import AutoCompactOutcome
+
+    return AutoCompactOutcome(was_compacted=False)
+
 
 @dataclass(frozen=True, slots=True)
 class LoopDeps:
@@ -118,3 +137,7 @@ class LoopDeps:
     uuid: UuidGenerator
     now: NowProvider
     emit_event: EventSink
+    #: Upstream's own two compaction slots (`query/deps.ts`). Defaults are the no-ops a fake
+    #: needs; `get_production_deps` binds the real ones.
+    microcompact: Microcompact = no_microcompact
+    autocompact: Autocompact = no_autocompact

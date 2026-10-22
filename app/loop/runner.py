@@ -24,6 +24,8 @@ workspace, and reports only what the ledger observed.
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -31,6 +33,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from app.loop.agents.memory import AgentMemoryStore
 from app.loop.config import RunConfig, build_run_config
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.deps import LoopDeps
@@ -132,6 +135,19 @@ def run_settings_locations(
     )
 
 
+def run_agent_memory_store(run_dir: Path | None) -> tuple[AgentMemoryStore, Path | None]:
+    """
+    The run's agent-memory store (Part I5), rooted **outside** the workspace: under the
+    session's run directory when the workspace has one, else in a temporary directory the
+    runner removes afterwards (returned as the second element). Agents can therefore never
+    read another run's run-scoped memory through the workspace.
+    """
+    if run_dir is not None:
+        return AgentMemoryStore(base_dir=run_dir), None
+    root = Path(tempfile.mkdtemp(prefix="tddagents-agent-memory-"))
+    return AgentMemoryStore(base_dir=root), root
+
+
 def default_workspace(state: SessionState) -> LocalWorkspace:
     """The session's shared local workspace; a session without an id is a wiring bug."""
     session_id = state.get("session_id")
@@ -217,6 +233,7 @@ async def tdd_loop_runner(
             transcript_path=str(transcript.file_path),
         )
 
+    memory_store, memory_root = run_agent_memory_store(transcript_dir)
     initial_message = HumanMessage(content=sub_req)
     ctx = tool_context_for(
         store,
@@ -226,6 +243,7 @@ async def tdd_loop_runner(
         hook_dispatcher=hook_dispatcher,
         refresh_tools=refresh_tools,
         run_id=run_id,
+        agent_memory_store=memory_store,
     )
     try:
         return await _run_with_hooks(
@@ -237,6 +255,9 @@ async def tdd_loop_runner(
         await hook_dispatcher.drain_background()
         await execute_session_end_hooks(hook_dispatcher, "other")
         await hook_dispatcher.registry.finalize_pending()
+        memory_store.discard_run_memory(run_id)
+        if memory_root is not None:
+            shutil.rmtree(memory_root, ignore_errors=True)
 
 
 async def _run_with_hooks(
@@ -275,6 +296,12 @@ async def _run_with_hooks(
         )
     first_turn = [HumanMessage(content=session.initial_user_message)] if session.initial_user_message else []
     messages = (*session.messages, *first_turn, initial_message, *prompt.messages)
+    # `processUserInput`: the user-input attachments (the initial TDD state among them),
+    # persisted into the history the loop starts from.
+    from app.loop.attachments import get_attachment_messages
+
+    attachments = await get_attachment_messages(ctx, messages, user_input=sub_req)
+    messages = (*messages, *attachments)
     ctx = replace(ctx, messages=messages)
     loop_state = initial_loop_state(messages, ctx)
 
@@ -305,6 +332,7 @@ async def _run_with_hooks(
 __all__ = [
     "build_builtin_tools",
     "default_workspace",
+    "run_agent_memory_store",
     "run_permission_context",
     "run_settings_locations",
     "session_workspace",

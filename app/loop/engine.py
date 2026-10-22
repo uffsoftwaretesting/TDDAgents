@@ -14,23 +14,31 @@ All terminal reasons and continue sites are handled according to the closed voca
 
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any, TypeAlias
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from app.loop.attachments import get_attachment_messages
+from app.loop.compact.auto_compact import (
+    calculate_token_warning_state,
+    is_auto_compact_enabled,
+)
+from app.loop.compact.compact import (
+    PROMPT_TOO_LONG_ERROR_MESSAGE,
+    build_post_compact_messages,
+    get_messages_after_compact_boundary,
+)
 from app.loop.config import RunConfig
+from app.loop.context.tokens import token_count_with_estimation
 from app.loop.deps import LoopDeps
 from app.loop.hooks.execute import dispatcher_of, execute_stop_failure_hooks
-from app.loop.hooks.messages import (
-    ATTACHMENT_KEY,
-    async_hook_response_messages,
-    is_hook_stopped_continuation,
-)
+from app.loop.hooks.messages import is_hook_stopped_continuation
 from app.loop.messages import Message, ToolCall, tool_calls_in
 from app.loop.retry import FallbackTriggeredError
-from app.loop.state import LoopState
+from app.loop.state import CompactionTracking, LoopState
 from app.loop.streaming.abort import AbortController, bridge_cancel_token
 from app.loop.streaming.executor import StreamingToolExecutor
 from app.loop.streaming.withhold import (
@@ -40,6 +48,7 @@ from app.loop.streaming.withhold import (
     take_withhold_gate_snapshot,
 )
 from app.loop.tools.execution import yield_missing_tool_results
+from app.loop.tools.result_storage import apply_tool_result_budget
 from app.loop.transitions import Continue, Terminal, Terminated, Transition
 
 #: What a run emits: every message as it is produced, then exactly one `Terminated`.
@@ -102,26 +111,24 @@ def _stop_failure(context: Any, last: Message | None, messages: tuple[Message, .
     )
 
 
-async def _async_hook_messages(context: Any) -> list[Message]:
+def _apply_tool_result_budget(messages: tuple[Message, ...], context: Any, config: RunConfig) -> list[Message]:
     """
-    What finished background hooks have to say, collected where upstream's
-    `getAttachmentMessages` runs after a turn's tools: `async_hook_response` attachments and
-    `asyncRewake` notifications.
+    `applyToolResultBudget` over the stored history. Off unless the run provisioned a
+    `ContentReplacementState` — upstream provisions it only behind a GrowthBook flag that
+    the external build leaves off. Tools that opted out of persistence are skipped.
     """
-    dispatcher = dispatcher_of(context)
-    if dispatcher is None:
-        return []
-    out: list[Message] = []
-    for response in await dispatcher.registry.check_for_responses():
-        out.extend(async_hook_response_messages(response.response, response.attachment()))
-    for note in dispatcher.registry.drain_notifications():
-        out.append(
-            HumanMessage(
-                content=note,
-                additional_kwargs={"is_meta": True, ATTACHMENT_KEY: {"type": "queued_command"}},
-            )
-        )
-    return out
+    state = getattr(context, "content_replacement_state", None)
+    if state is None:
+        return list(messages)
+    root = getattr(getattr(context, "workspace", None), "root", None)
+    skip = frozenset(
+        getattr(t, "name", "") for t in getattr(context, "tools", ()) or ()
+        if not math.isfinite(getattr(t, "max_result_size_chars", 0))
+    )
+    return apply_tool_result_budget(
+        messages, state, run_id=config.run_id, working_directory=str(root) if root is not None else ".",
+        skip_tool_names=skip,
+    )
 
 
 def is_api_error_message(message: Message) -> bool:
@@ -180,11 +187,51 @@ async def run_loop(
             yield term
             return
 
-        messages_for_query = state.messages
+        # ── the pre-model pipeline, upstream's order (`query.ts`) ───────────────
+        # History after the last compact boundary; then the tool-result budget,
+        # microcompact and autocompact act on it, and what they return is what this
+        # iteration sends *and* what the next one starts from.
+        messages_for_query: tuple[Message, ...] = tuple(get_messages_after_compact_boundary(state.messages))
+        tracking = state.compaction_tracking
+        messages_for_query = tuple(_apply_tool_result_budget(messages_for_query, state.tool_context, config))
+        messages_for_query = tuple(await deps.microcompact(messages_for_query, state, config))
+        auto = await deps.autocompact(messages_for_query, state, config)
+        compacted_now = False
+        if auto.was_compacted and auto.compaction_result is not None:
+            compacted_now = True
+            tracking = CompactionTracking(
+                compacted=True, turn_id=deps.uuid(), turn_counter=0, consecutive_failures=0
+            )
+            post_compact = tuple(build_post_compact_messages(auto.compaction_result))
+            for message in post_compact:
+                yield message
+            messages_for_query = post_compact
+        elif auto.consecutive_failures is not None:
+            base = tracking if tracking is not None else CompactionTracking(compacted=False, turn_id="", turn_counter=0)
+            tracking = replace(base, consecutive_failures=auto.consecutive_failures)
 
         state = replace(
-            state, tool_context=replace(state.tool_context, messages=messages_for_query)
+            state,
+            messages=messages_for_query,
+            compaction_tracking=tracking,
+            tool_context=replace(state.tool_context, messages=messages_for_query),
         )
+
+        # The blocking-limit precheck (`calculateTokenWarningState(...).isAtBlockingLimit`),
+        # skipped right after a compaction and when reactive compaction will recover instead.
+        if not compacted_now and not (
+            take_withhold_gate_snapshot(state, config).reactive_compact_enabled and is_auto_compact_enabled()
+        ):
+            warning = calculate_token_warning_state(token_count_with_estimation(messages_for_query), config.model)
+            if warning.is_at_blocking_limit:
+                yield AIMessage(
+                    content=PROMPT_TOO_LONG_ERROR_MESSAGE,
+                    additional_kwargs={"is_api_error_message": True, "api_error": "invalid_request"},
+                )
+                term = Terminated(reason=Terminal.BLOCKING_LIMIT)
+                deps.emit_event(term)
+                yield term
+                return
 
         assistant_messages: list[Message] = []
         tool_calls: list[ToolCall] = []
@@ -360,7 +407,7 @@ async def run_loop(
                     messages=(*messages_for_query, *assistant_messages, resume_msg),
                     tool_context=state.tool_context,
                     phase_ledger=state.tool_context.get_app_state().phase_ledger,
-                    compaction_tracking=state.compaction_tracking,
+                    compaction_tracking=tracking,
                     has_attempted_reactive_compact=state.has_attempted_reactive_compact,
                     stop_hook_active=None,
                     turn_count=state.turn_count,
@@ -412,7 +459,7 @@ async def run_loop(
                     messages=(*messages_for_query, *assistant_messages, *stop_hook_res.blocking_errors),
                     tool_context=state.tool_context,
                     phase_ledger=state.tool_context.get_app_state().phase_ledger,
-                    compaction_tracking=state.compaction_tracking,
+                    compaction_tracking=tracking,
                     has_attempted_reactive_compact=state.has_attempted_reactive_compact,
                     stop_hook_active=True,
                     turn_count=state.turn_count,
@@ -450,9 +497,17 @@ async def run_loop(
             yield term
             return
 
-        for attachment in await _async_hook_messages(state.tool_context):
+        # `getAttachmentMessages` after the turn's tools: what changed (the TDD state, queued
+        # notifications, finished background hooks, files edited outside the agent, ...),
+        # persisted into the history the next turn starts from.
+        for attachment in await get_attachment_messages(
+            state.tool_context, (*messages_for_query, *assistant_messages, *tool_results)
+        ):
             yield attachment
             tool_results.append(attachment)
+
+        if tracking is not None and tracking.compacted:
+            tracking = replace(tracking, turn_counter=tracking.turn_counter + 1)
 
         # Upstream refreshes the roster here and nowhere else: once per iteration, after the
         # tools have run and immediately before the next turn is built — never on a recovery
@@ -464,7 +519,7 @@ async def run_loop(
             messages=(*messages_for_query, *assistant_messages, *tool_results),
             tool_context=refreshed_context,
             phase_ledger=refreshed_context.get_app_state().phase_ledger,
-            compaction_tracking=state.compaction_tracking,
+            compaction_tracking=tracking,
             has_attempted_reactive_compact=False,
             stop_hook_active=state.stop_hook_active,
             turn_count=state.turn_count + 1,

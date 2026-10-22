@@ -40,9 +40,10 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal, Mapping, Protocol, Sequence
+from typing import Any, Literal, Protocol
 
 import yaml
 
@@ -258,7 +259,7 @@ def parse_frontmatter_paths(raw: str) -> tuple[str, tuple[str, ...] | None]:
     frontmatter, content = parse_frontmatter(raw)
     if not frontmatter.get("paths"):
         return content, None
-    patterns = [p[:-3] if p.endswith("/**") else p for p in split_path_in_frontmatter(frontmatter["paths"])]
+    patterns = [p.removesuffix("/**") for p in split_path_in_frontmatter(frontmatter["paths"])]
     patterns = [p for p in patterns if p]
     if not patterns or all(p == "**" for p in patterns):
         return content, None
@@ -287,7 +288,7 @@ def lex_blocks(content: str) -> list[tuple[str, str]]:
             blocks.append(("code", "".join(lines[i:end])))
             i, prev_blank = end, False
             continue
-        if prev_blank and (line.startswith("    ") or line.startswith("\t")) and line.strip():
+        if prev_blank and (line.startswith(("    ", "\t"))) and line.strip():
             j = i
             while j < len(lines) and (lines[j].startswith("    ") or lines[j].startswith("\t") or not lines[j].strip()):
                 j += 1
@@ -338,10 +339,13 @@ def strip_html_comments(content: str) -> tuple[str, bool]:
 
 def _is_valid_include(path: str) -> bool:
     return bool(
-        path.startswith("./")
-        or path.startswith("~/")
+        path.startswith(("./", "~/"))
         or (path.startswith("/") and path != "/")
-        or (not path.startswith("@") and not re.match(r"^[#%^&*()]+", path) and re.match(r"^[a-zA-Z0-9._-]", path))
+        or (
+            not path.startswith("@")
+            and not re.match(r"^[#%^&*()]+", path)
+            and re.match(r"^[a-zA-Z0-9._-]", path)
+        )
     )
 
 
@@ -374,7 +378,7 @@ def format_file_size(size: int) -> str:
     """`format.ts` -> `formatFileSize`."""
     def fmt(value: float, unit: str) -> str:
         text = f"{value:.1f}"
-        return (text[:-2] if text.endswith(".0") else text) + unit
+        return (text.removesuffix(".0")) + unit
 
     kb = size / 1024
     if kb < 1:
@@ -557,92 +561,6 @@ def get_claude_mds(files: list[MemoryFileInfo]) -> str:
     return f"{MEMORY_INSTRUCTION_PROMPT}\n\n" + "\n\n".join(memories)
 
 
-def extract_session_memory(
-    messages: Sequence[Any],
-    summary: str | None = None,
-) -> list[str]:
-    """
-    Extract user preferences, conventions, and architectural decisions from a conversation (Plan C3).
-    """
-    memories: list[str] = []
-    seen: set[str] = set()
-
-    keywords = (
-        "always",
-        "never",
-        "prefer",
-        "use",
-        "make sure",
-        "ensure",
-        "convention",
-        "architecture",
-        "pattern",
-        "pytest",
-        "async",
-    )
-
-    for msg in messages:
-        # Check human messages for instructions / preferences
-        msg_type = getattr(msg, "type", "")
-        is_user = msg_type in ("human", "user") or msg.__class__.__name__ == "HumanMessage"
-        if not is_user:
-            continue
-
-        content = str(getattr(msg, "content", ""))
-        for sentence in re.split(r"(?<=[.!?\n])\s+", content):
-            s = sentence.strip()
-            if not s or len(s) < 10 or len(s) > 300:
-                continue
-            s_lower = s.lower()
-            if any(kw in s_lower for kw in keywords):
-                if s not in seen:
-                    seen.add(s)
-                    memories.append(s)
-
-    if summary:
-        summary_clean = summary.strip()
-        if summary_clean and summary_clean not in seen:
-            memories.append(f"Summary: {summary_clean[:200]}")
-
-    return memories
-
-
-def update_auto_memory(
-    project: str,
-    new_memories: Sequence[str],
-    home: str | None = None,
-) -> str:
-    """
-    Append new memories to the project's auto-memory entrypoint (MEMORY.md) within size limits (Plan C3).
-    """
-    entrypoint_path = Path(get_auto_mem_entrypoint(project, home))
-    entrypoint_path.parent.mkdir(parents=True, exist_ok=True)
-
-    header = "# Project Memory\n\nAuto-extracted preferences and architectural conventions.\n\n"
-    existing_content = ""
-    if entrypoint_path.is_file():
-        existing_content = entrypoint_path.read_text(encoding="utf-8")
-    else:
-        existing_content = header
-
-    # Append new bullet points
-    new_bullets: list[str] = []
-    for mem in new_memories:
-        cleaned = mem.strip().lstrip("-* ").strip()
-        if cleaned and cleaned not in existing_content:
-            new_bullets.append(f"- {cleaned}")
-
-    if new_bullets:
-        updated = existing_content.rstrip() + "\n" + "\n".join(new_bullets) + "\n"
-    else:
-        updated = existing_content
-
-    # Truncate to line & byte caps
-    truncated = truncate_entrypoint_content(updated)
-    entrypoint_path.write_text(truncated, encoding="utf-8")
-    return truncated
-
-
 def get_large_memory_files(files: list[MemoryFileInfo]) -> list[MemoryFileInfo]:
     return [f for f in files if len(f.content) > MAX_MEMORY_CHARACTER_COUNT]
 
@@ -653,12 +571,10 @@ __all__ = [
     "MAX_ENTRYPOINT_LINES",
     "MEMORY_INSTRUCTION_PROMPT",
     "MemoryFileInfo",
-    "extract_session_memory",
     "get_auto_mem_entrypoint",
     "get_claude_mds",
     "get_large_memory_files",
     "get_memory_files",
     "is_auto_memory_enabled",
     "strip_html_comments",
-    "update_auto_memory",
 ]

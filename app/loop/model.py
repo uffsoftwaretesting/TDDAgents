@@ -3,8 +3,8 @@ The streamed model call the loop consumes (Part F1): `deps.call_model(state, con
 
 Request shape follows claude-code's `queryModel` path: the system prompt is
 `getSystemPrompt` sections with `appendSystemContext`; the history is preceded by
-`prependUserContext` (memory files and date) and followed by any attachment this turn
-produces — here the TDD state delta (`compute_tdd_state_attachment`).
+`prependUserContext` (memory files and date). Attachments (the TDD state among them) are
+persisted into the stored history by the engine's attachment pipeline, not added here.
 
 The provider and model id are resolved from `Config.CHAT_MODEL` / `Config.MODEL`, the one
 place the rest of the pipeline resolves them; this module never names a model itself.
@@ -19,6 +19,7 @@ from typing import Any
 from langchain_core.messages import SystemMessage
 
 from app.config.config import Config
+from app.loop.compact.compact import is_compact_boundary_message
 from app.loop.config import RunConfig
 from app.loop.context.assembly import (
     append_system_context,
@@ -26,7 +27,7 @@ from app.loop.context.assembly import (
     get_system_prompt,
     prepend_user_context,
 )
-from app.loop.context.attachments import compute_tdd_state_attachment
+from app.loop.context.cache import prepare_cached_request
 from app.loop.hooks.messages import reorder_attachments_for_api
 from app.loop.messages import Message
 from app.loop.prompts.sections import resolve_system_prompt_sections
@@ -52,43 +53,30 @@ def convert_tool_to_langchain(tool: Tool) -> dict[str, Any]:
     }
 
 
-def read_todo(context: Any) -> str | None:
-    """
-    The session's todo list, rendered for the attachment.
-
-    It comes from `TodoWrite`'s store rather than a `TODO.md` in the workspace: a file there
-    is indistinguishable from one the project itself owns, and the agent could edit its own
-    checklist as ordinary content.
-    """
-    from app.loop.tools.todo import read_todos
-
-    try:
-        todos = read_todos(context)
-    except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
-        return None
-    if not todos:
-        return None
-    return "\n".join(f"- [{item.status}] {item.content}" for item in todos)
-
-
-def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]:
-    """System prompt + system context, user context, history, then this turn's attachment."""
-    from app.loop.context.compact import (
-        apply_tool_result_budget,
-        microcompact_tool_results,
-    )
-
+def request_system_texts(state: LoopState, config: RunConfig) -> list[str]:
+    """The system prompt sections with the system context appended (`appendSystemContext`)."""
     ws = state.tool_context.workspace
     session = get_session_context(config.run_id, ws)
     sections = resolve_system_prompt_sections(get_system_prompt(ws, Config.MODEL), session.section_cache)
-    system = SystemMessage(content="\n\n".join(append_system_context(sections, session.system_context)))
-    compacted = microcompact_tool_results(state.messages, keep_recent_turns=2)
-    budgeted = apply_tool_result_budget(compacted)
-    history = prepend_user_context(reorder_attachments_for_api(budgeted), session.user_context)
-    attachment = compute_tdd_state_attachment(
-        state.messages, state.phase_ledger, read_todo(state.tool_context)
-    )
-    return [system, *history, *([attachment] if attachment is not None else [])]
+    return append_system_context(sections, session.system_context)
+
+
+def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]:
+    """
+    System prompt + system context, then the user context and the stored history.
+
+    Everything that reshapes history — the tool-result budget, microcompact, autocompact,
+    attachments — acts on the *stored* messages in the engine, as upstream's
+    `messagesForQuery` pipeline does, so the request adds nothing per call and its prefix
+    stays byte-stable between turns.
+    """
+    ws = state.tool_context.workspace
+    session = get_session_context(config.run_id, ws)
+    system = SystemMessage(content="\n\n".join(request_system_texts(state, config)))
+    # The compact boundary is a bookkeeping record (upstream's `system` message), never input.
+    sendable = [m for m in state.messages if not is_compact_boundary_message(m)]
+    history = prepend_user_context(reorder_attachments_for_api(sendable), session.user_context)
+    return [system, *history]
 
 
 _global_token_tracker = GlobalTokenTracker()
@@ -126,7 +114,11 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
     been emitted. `RetryContext` carries what the previous failure asked to change — today
     only the model, which the 529 fallback swaps.
     """
-    messages_to_send = build_request_messages(state, config)
+    messages_to_send, cache_kwargs = prepare_cached_request(
+        build_request_messages(state, config),
+        provider=Config.CHAT_MODEL,
+        system_texts=request_system_texts(state, config),
+    )
     lc_tools = [convert_tool_to_langchain(t) for t in state.tool_context.tools]
 
     model = get_chat_model(Config.CHAT_MODEL, model=context.model, temperature=Config.TEMPERATURE)
@@ -135,10 +127,10 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
 
     try:
         stream: AsyncIterable[Any] = model.astream(
-            messages_to_send, config={"callbacks": [_global_token_tracker]}
+            messages_to_send, config={"callbacks": [_global_token_tracker]}, **cache_kwargs
         )
     except TypeError:
-        stream = model.astream(messages_to_send)
+        stream = model.astream(messages_to_send, **cache_kwargs)
     return stream
 
 

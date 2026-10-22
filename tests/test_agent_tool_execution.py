@@ -2,10 +2,11 @@
 Unit tests for I3: Agent tool execution, worker pool assembly, and phase invariants.
 """
 
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
-import pytest
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.agents.definition import AgentDefinition
@@ -16,7 +17,13 @@ from app.loop.agents.tool import (
     LEGACY_AGENT_TOOL_NAME,
     build_agent_tool,
 )
-from app.loop.context import AppState, AppStateStore, CancelToken, ToolContext, discard_app_state_update
+from app.loop.context import (
+    AppState,
+    AppStateStore,
+    CancelToken,
+    ToolContext,
+    discard_app_state_update,
+)
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.messages import Message
 from app.loop.tools.base import Tool, build_tool
@@ -44,6 +51,8 @@ def _make_context(
         set_app_state=store.update,
         messages=tuple(messages),
         tools=tuple(tools),
+        run_id="loop-test",
+        agent_memory_store=AgentMemoryStore(base_dir=tempfile.mkdtemp(prefix="agent-mem-")),
     )
 
 
@@ -243,7 +252,7 @@ async def test_agent_tool_fork_path_and_guard() -> None:
 
 
 @pytest.mark.anyio
-async def test_agent_tool_run_memory_purged_on_completion(tmp_path: Path) -> None:
+async def test_agent_tool_run_memory_outlives_the_spawn(tmp_path: Path) -> None:
     store = AgentMemoryStore(base_dir=tmp_path)
     mem_agent = AgentDefinition(
         name="researcher",
@@ -264,14 +273,11 @@ async def test_agent_tool_run_memory_purged_on_completion(tmp_path: Path) -> Non
         # Memory prompt should have been injected
         assert "# Agent Persistent Memory" in memory_prompt
         # Store some scratch file in the run memory dir
-        # Extract run_id from memory_prompt path
-        for part in memory_prompt.split("/"):
-            if part.startswith("run_"):
-                if part not in captured_run_id:
-                    captured_run_id.append(part)
-                    mem_dir = store.get_memory_dir("researcher", "run", run_id=part)
-                    assert mem_dir is not None
-                    (mem_dir / "notes.txt").write_text("Interim finding")
+        # The memory directory is the sub-requirement run's, named in the prompt.
+        mem_dir = store.get_memory_dir("researcher", "run", run_id="loop-test")
+        assert mem_dir is not None and str(mem_dir) in memory_prompt
+        (mem_dir / "notes.txt").write_text("Interim finding")
+        captured_run_id.append("loop-test")
         return "Research finished", "completed"
 
     tool = build_agent_tool(
@@ -285,9 +291,7 @@ async def test_agent_tool_run_memory_purged_on_completion(tmp_path: Path) -> Non
 
     assert res.is_error is False
     assert len(captured_run_id) == 1
-    rid = captured_run_id[0]
     assert res.metadata is not None
-    assert res.metadata["run_id"] == rid
-    # Verify that run memory dir was purged after call
-    run_dir = tmp_path / ".tddagents" / "run-memory" / rid
-    assert not run_dir.exists()
+    # Run memory is keyed by the sub-requirement's run and survives the spawn: the runner,
+    # not the Agent tool, discards it at the run's end (Part I5).
+    assert (tmp_path / ".tddagents" / "run-memory" / "loop-test" / "researcher" / "notes.txt").is_file()

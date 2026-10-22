@@ -5,8 +5,9 @@ Unit tests for the LoopDeps dependency injection seam and result structures (Par
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import FrozenInstanceError, fields
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -86,7 +87,8 @@ class TestCompactionResult:
 
 
 class TestLoopDeps:
-    def test_loop_deps_holds_all_seven_seam_components(self) -> None:
+    def test_loop_deps_holds_the_seam_components(self) -> None:
+        """The seven Part A4 members plus upstream's `microcompact` / `autocompact` (Phase 5)."""
         field_names = [f.name for f in fields(LoopDeps)]
         expected = [
             "call_model",
@@ -96,6 +98,8 @@ class TestLoopDeps:
             "uuid",
             "now",
             "emit_event",
+            "microcompact",
+            "autocompact",
         ]
         assert field_names == expected
 

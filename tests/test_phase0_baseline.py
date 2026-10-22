@@ -16,9 +16,10 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -39,6 +40,12 @@ from app.workspace.pyenv import (
 )
 
 REPO = Path(__file__).resolve().parent.parent
+
+#: The first TDD-state announcement a fresh run attaches after the prompt (Phase 5).
+INITIAL_TDD_STATE = (
+    "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
+    "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n</system-reminder>"
+)
 
 
 # ── session Python environment ───────────────────────────────────────────────
@@ -131,12 +138,14 @@ def test_failure_without_output_reports_exit_code(tmp_path):
 
 
 def test_session_python_is_real_and_isolated(session_python):
-    out = subprocess.run([str(session_python.python), "-c", "import pytest, sys; print(pytest.__version__);"
-                          "print(sys.prefix)"], capture_output=True, text=True, check=True).stdout.split()
+    out = subprocess.run([str(session_python.python), "-c", ("import pytest, sys; print(pytest.__version__);"
+                          "print(sys.prefix)")], capture_output=True, text=True, check=True).stdout.split()
     assert out[0] == "9.0.1"
     assert out[1] == str(session_python.venv_dir)
     # TDDAgents' own dependencies are not visible to generated code
-    probe = subprocess.run([str(session_python.python), "-c", "import langchain_core"], capture_output=True)
+    probe = subprocess.run(
+        [str(session_python.python), "-c", "import langchain_core"], capture_output=True, check=False
+    )
     assert probe.returncode != 0
     assert pyenv.has_packages(session_python.python, subprocess.run) is True
 
@@ -207,7 +216,7 @@ def test_app_main_imports_without_an_e2b_key(tmp_path):
     """The import chain app.main -> orchestrator -> runner -> factory was broken (ImportError)."""
     env = _clean_env(OPENAI_API_KEY="k", POSTGRES_URL="postgresql://x")
     res = subprocess.run([sys.executable, "-c", "import app.main, app.loop.factory, app.loop.runner"],
-                         cwd=tmp_path, env=env, capture_output=True, text=True)
+                         cwd=tmp_path, env=env, capture_output=True, text=True, check=False)
     assert res.returncode == 0, res.stderr
 
 
@@ -227,7 +236,8 @@ def test_production_deps_are_complete():
 
 def test_openai_and_postgres_stay_required(tmp_path):
     res = subprocess.run([sys.executable, "-c", "import app.config.config"], cwd=tmp_path,
-                         env=_clean_env(POSTGRES_URL="postgresql://x"), capture_output=True, text=True)
+                         env=_clean_env(POSTGRES_URL="postgresql://x"), capture_output=True, text=True,
+                         check=False)
     assert "No API key configured" in res.stderr
 
 
@@ -381,7 +391,9 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     assert {t.name for t in ctx.tools} == {
         "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite"}
     assert seen[0].messages[0].content == "add two numbers"
-    assert ctx.messages == seen[0].messages[:1]
+    # Phase 5: the user-input attachments (the initial TDD state) follow the prompt.
+    assert seen[0].messages[1].additional_kwargs["attachment"]["type"] == "tdd_state"
+    assert ctx.messages == seen[0].messages[:2]
     assert ctx.run_id.startswith("loop-") and len(ctx.run_id) == len("loop-") + 8
     assert seen[0].turn_count == 1
     # `refresh_tools`: the ledger moved RED -> GREEN during the run, so the pool was rebuilt
@@ -407,7 +419,7 @@ def test_runner_blocks_production_writes_in_red(python_workspace):
     result = asyncio.run(tdd_loop_runner("x", 3, {"session_id": "s"}, workspace=python_workspace,
                                          deps=_scripted_deps(turns, seen)))
     assert not python_workspace.exists("calculator.py")
-    refusal = [m for m in seen[1].messages if getattr(m, "tool_call_id", None) == "c1"][0]
+    refusal = next(m for m in seen[1].messages if getattr(m, "tool_call_id", None) == "c1")
     assert "TDD phase RED denies" in str(refusal.content)
     assert (result.index, result.red_confirmed, result.green_passed) == (3, False, False)
 
@@ -473,7 +485,7 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     assert config.gates.postgres_checkpointing is False
     [transcript] = (python_workspace.run_dir / ".tddagents" / "transcripts").glob("*.jsonl")
     assert transcript.name == f"transcript_{config.run_id}.jsonl"
-    assert [m.content for m in state.tool_context.messages] == ["spec"]
+    assert [m.content for m in state.tool_context.messages] == ["spec", INITIAL_TDD_STATE]
 
 
 def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatch, python_workspace):

@@ -32,13 +32,14 @@ import asyncio
 import inspect
 import re
 import shlex
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any
 
 from app.loop.context import ToolContext
+from app.loop.ledger import TestRunRecord
 from app.loop.tools.base import BuiltTool, build_tool
 from app.loop.tools.types import ToolResult
-
 
 RUN_TESTS_PROMPT = """Runs pytest in the workspace and returns the full output.
 
@@ -199,7 +200,12 @@ def build_run_tests_tool(
             return ToolResult(content=format_output(exec_result, header), is_error=True, exit_code=code)
 
         # Update the authoritative AppState phase_ledger: the only writer (Part D2)
-        context.set_app_state(lambda s: replace(s, phase_ledger=s.phase_ledger.with_test_result(observed)))
+        record = TestRunRecord(
+            test_path=test_path, exit_code=code, stdout=exec_result.stdout, stderr=exec_result.stderr
+        )
+        context.set_app_state(
+            lambda s: replace(s, phase_ledger=s.phase_ledger.with_test_result(observed), last_test_run=record)
+        )
 
         if code == 0:
             header = "All tests passed."

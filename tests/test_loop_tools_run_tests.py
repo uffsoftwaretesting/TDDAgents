@@ -9,7 +9,7 @@ import asyncio
 import pytest
 
 from app.loop.context import AppState, AppStateStore, tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
+from app.loop.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.loop.tools.run_tests import (
     LEDGER_EXIT_CODES,
     PYTEST_EXIT_REASONS,
@@ -395,7 +395,10 @@ BANNER = "______ ERROR collecting tests/test_mod.py ______\n"
     "E   AttributeError: module 'calc2' has no attribute 'nothing'",
 ])
 def test_missing_code_collection_errors_are_failing_tests(error_line):
-    from app.loop.tools.run_tests import is_missing_code_collection_error, ledger_exit_code
+    from app.loop.tools.run_tests import (
+        is_missing_code_collection_error,
+        ledger_exit_code,
+    )
 
     res = SuiteExecutionResult(exit_code=2, stdout=BANNER + error_line + "\n!!! Interrupted: 1 error !!!")
     assert is_missing_code_collection_error(res) is True
@@ -419,7 +422,10 @@ def test_missing_code_collection_errors_are_failing_tests(error_line):
     ("", BANNER + "E   ModuleNotFoundError: No module named 'calculator'"),           # stderr counts too
 ])
 def test_other_exit_2_runs_are_not_evidence(stdout, stderr):
-    from app.loop.tools.run_tests import is_missing_code_collection_error, ledger_exit_code
+    from app.loop.tools.run_tests import (
+        is_missing_code_collection_error,
+        ledger_exit_code,
+    )
 
     res = SuiteExecutionResult(exit_code=2, stdout=stdout, stderr=stderr)
     expected = "calculator" in stderr
@@ -428,7 +434,10 @@ def test_other_exit_2_runs_are_not_evidence(stdout, stderr):
 
 
 def test_collection_shape_only_applies_to_exit_2():
-    from app.loop.tools.run_tests import is_missing_code_collection_error, ledger_exit_code
+    from app.loop.tools.run_tests import (
+        is_missing_code_collection_error,
+        ledger_exit_code,
+    )
 
     text = BANNER + "E   ModuleNotFoundError: No module named 'calculator'"
     for code in (1, 3, 4, 5, 0):
@@ -454,3 +463,36 @@ def test_real_pytest_syntax_error_in_test_is_not_red(python_workspace):
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
     assert res.exit_code == 2 and res.is_error is True
     assert store.get().phase_ledger == PhaseLedger()
+
+
+# ── Phase 5: the last observed run, kept for the TDD re-attach after compaction ─
+
+def _record_run(result: SuiteExecutionResult, test_path: str = "tests/test_calc.py") -> AppStateStore:
+    store = AppStateStore(AppState())
+    ctx = tool_context_for(store)
+    tool = build_run_tests_tool(lambda path: result)
+    asyncio.run(tool.call({"test_path": test_path}, ctx))
+    return store
+
+
+def test_an_observed_run_is_recorded_beside_the_ledger():
+    store = _record_run(SuiteExecutionResult(exit_code=1, stdout="E   assert 1 == 2\n1 failed", stderr="warn"))
+    run = store.get().last_test_run
+    assert run == TestRunRecord(test_path="tests/test_calc.py", exit_code=1, stdout="E   assert 1 == 2\n1 failed",
+                                stderr="warn")
+    assert store.get().phase_ledger.red_confirmed is True
+
+
+def test_a_run_that_is_not_an_observation_is_not_recorded():
+    store = _record_run(SuiteExecutionResult(exit_code=5, stdout="no tests ran"))
+    assert store.get().last_test_run is None
+
+
+def test_a_later_run_replaces_the_record():
+    store = AppStateStore(AppState())
+    ctx = tool_context_for(store)
+    results = iter([SuiteExecutionResult(exit_code=1, stdout="red"), SuiteExecutionResult(exit_code=0, stdout="ok")])
+    tool = build_run_tests_tool(lambda path: next(results))
+    asyncio.run(tool.call({"test_path": "a"}, ctx))
+    asyncio.run(tool.call({"test_path": "b"}, ctx))
+    assert store.get().last_test_run == TestRunRecord(test_path="b", exit_code=0, stdout="ok", stderr="")

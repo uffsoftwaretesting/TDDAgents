@@ -11,8 +11,8 @@ Implements I5 conforming to §4.5:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import shutil
+from pathlib import Path
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -45,8 +45,11 @@ class AgentMemoryStore:
         if norm_scope == "none":
             return None
         elif norm_scope == "run":
-            rid = run_id or "default_run"
-            return self.base_dir / ".tddagents" / "run-memory" / rid / safe_agent
+            # No shared fallback: a run id that silently became "default_run" would let one
+            # run read another's scratchpad, which is exactly what run scope forbids (I5).
+            if not run_id:
+                raise ValueError("Run-scoped agent memory needs a run id")
+            return self.base_dir / ".tddagents" / "run-memory" / run_id / safe_agent
         elif norm_scope == "session":
             sid = session_id or "default_session"
             return self.base_dir / ".tddagents" / "session-memory" / sid / safe_agent
@@ -106,7 +109,7 @@ class AgentMemoryStore:
         if entrypoint.is_file():
             try:
                 existing_notes = entrypoint.read_text(encoding="utf-8").strip()
-            except Exception as e:
+            except (OSError, UnicodeDecodeError) as e:
                 logger.warning("Failed reading agent memory from %s: %s", entrypoint, e)
 
         scope_desc = {
@@ -153,5 +156,5 @@ class AgentMemoryStore:
             try:
                 shutil.rmtree(run_dir)
                 logger.info("Purged run-scoped agent memory for run %s at %s", run_id, run_dir)
-            except Exception as e:
+            except OSError as e:
                 logger.warning("Failed purging run memory %s: %s", run_dir, e)

@@ -382,6 +382,8 @@ def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
             offset=offset if partial else None,
             limit=limit if partial else None,
         )
+        # `FileReadTool`: the file's directories may hold nested memory to attach next turn.
+        context.nested_memory_attachment_triggers.add(normalize_path(file_path))
 
         if window:
             return ToolResult(content=add_line_numbers(window, max(offset, 1)))

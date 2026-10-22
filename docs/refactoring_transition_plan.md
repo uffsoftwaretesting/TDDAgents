@@ -278,6 +278,20 @@ consulted.
 - Memory: gate `update_auto_memory` behind `is_auto_memory_enabled` (or remove it); rename or
   replace `extract_session_memory`; fix the I5 run-memory leak.
 
+*Phase 5 outcome (2026-10-22), per the interview ("follow claude-code's source and
+architecture"):* the engine runs upstream's pre-model pipeline on stored history (boundary
+slice, tool-result budget — off as in the external build — microcompact — off by default —
+autocompact, blocking-limit precheck) and persists `getAttachmentMessages` after each turn's
+tools; the runner attaches the user-input attachments. `app/loop/compact/` ports
+`compactConversation` with no kept tail, file restoration, PTL retry, the hooks and the
+boundary, plus `autoCompactIfNeeded` with its circuit breaker of 3; reactive compaction uses
+the same function. The summary prompt gains TDD sections, but the TDD state after the boundary
+is re-attached from the ledger and `AppState.last_test_run` (written by `RunTests`), never from
+the summary — pinned by a test whose summary lies. `app/loop/attachments/` ports the framework
+and every source whose subsystem exists here (TDD-state among them). Cache breakpoints are wired
+for Anthropic. Both memory inventions are deleted, and run-scoped agent memory is one store per
+sub-requirement, outside the workspace, discarded at its end.
+
 ### Phase 6 — Session wrapper and transcripts (the evidence layer)
 
 - Code: `claude-code/src/QueryEngine.ts` → `QueryEngine`, `submitMessage`; `claude-code/src/utils/sessionStorage.ts` → `recordTranscript`, `recordSidechainTranscript`; `claude-code/src/utils/conversationRecovery.ts` → `loadConversationForResume`; `claude-code/src/cost-tracker.ts` → `addToTotalSessionCost`

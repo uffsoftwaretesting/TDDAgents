@@ -12,27 +12,17 @@ Implements I3 conforming to §4.5:
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable, Mapping, Sequence
-from uuid import uuid4
-
-from langchain_core.messages import AIMessage, HumanMessage
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Any
 
 from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.fork import (
-    FORK_AGENT,
     FORK_SUBAGENT_TYPE,
-    build_child_message,
-    build_forked_messages,
-    filter_incomplete_tool_calls,
-    is_in_fork_child,
 )
-from app.loop.agents.loader import get_agent_definitions_with_overrides
 from app.loop.agents.memory import AgentMemoryStore
-from app.loop.agents.resolution import resolve_agent_tools
-from app.loop.context import ToolContext, discard_app_state_update
+from app.loop.context import ToolContext
 from app.loop.messages import Message
 from app.loop.tools.base import BuiltTool, Tool, build_tool
-from app.loop.tools.pool import assemble_tool_pool
 from app.loop.tools.types import ToolResult, ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -169,22 +159,20 @@ def build_agent_tool(
                 },
             )
 
-        # Sync in-process execution
-        try:
-            summary, terminal_reason = await subagent.execute(prompt)
-            return ToolResult(
-                content=summary,
-                metadata={
-                    "agent_id": subagent.agent_id,
-                    "agent_type": subagent.definition.name,
-                    "status": "completed",
-                    "terminal_reason": terminal_reason,
-                    "run_id": subagent.run_id,
-                },
-            )
-        finally:
-            if memory_store is not None and subagent.definition.memory == "run":
-                memory_store.discard_run_memory(subagent.run_id)
+        # Sync in-process execution. Run-scoped memory is not discarded here: it belongs to
+        # the sub-requirement's run (Part I5, "one store per sub-requirement, discarded at its
+        # end"), so a re-delegated worker keeps its notes, and the runner discards it.
+        summary, terminal_reason = await subagent.execute(prompt)
+        return ToolResult(
+            content=summary,
+            metadata={
+                "agent_id": subagent.agent_id,
+                "agent_type": subagent.definition.name,
+                "status": "completed",
+                "terminal_reason": terminal_reason,
+                "run_id": subagent.run_id,
+            },
+        )
 
     def _validate(input_dict: dict[str, Any], context: ToolContext) -> ValidationResult:
         if not input_dict.get("prompt"):

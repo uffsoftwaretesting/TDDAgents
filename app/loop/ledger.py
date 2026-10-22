@@ -113,3 +113,18 @@ class PhaseLedger:
         True when a failing test has been confirmed and the test suite has subsequently passed.
         """
         return self.red_confirmed and self.green_passed
+
+
+@dataclass(frozen=True, slots=True)
+class TestRunRecord:
+    """
+    The last `RunTests` run the ledger observed (exit 0, or a failing run), kept beside the
+    ledger by the same single writer. It is the evidence the TDD state is re-attached from
+    after a compaction (Phase 5): the failing assertion, not a model's summary of it.
+    """
+
+    test_path: str
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+    __test__ = False

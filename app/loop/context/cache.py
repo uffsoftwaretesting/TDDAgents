@@ -12,8 +12,10 @@ Hard constraints:
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from app.loop.prompts.sections import (
     PromptSectionCache,
@@ -120,3 +122,53 @@ def build_system_prompt_blocks(
         blocks.append(CacheBlock(text=dynamic_text, cache_control=None))
 
     return blocks
+
+
+# ── Phase 5: what is sent to a provider that supports cache breakpoints ────────
+
+#: `getCacheControl()` without the 1h TTL (subscriber-only) or the `global` scope.
+EPHEMERAL_CACHE_CONTROL: dict[str, str] = {"type": "ephemeral"}
+
+
+def get_prompt_caching_enabled() -> bool:
+    """`getPromptCachingEnabled`: on unless `TDDAGENTS_DISABLE_PROMPT_CACHING` (upstream's
+    `DISABLE_PROMPT_CACHING`). The per-model Haiku/Sonnet/Opus switches name Anthropic
+    default models this build does not have."""
+    value = os.environ.get("TDDAGENTS_DISABLE_PROMPT_CACHING")
+    return not (value is not None and value.strip().lower() in ("1", "true", "yes", "on"))
+
+
+def system_prompt_blocks_for_api(system_texts: Sequence[str], *, enable_caching: bool) -> list[dict[str, Any]]:
+    """
+    `buildSystemPromptBlocks` over `splitSysPromptPrefix`'s path without the global cache
+    scope: every non-empty section joined into one `org`-scoped block. The global scope is a
+    first-party beta (`shouldUseGlobalCacheScope` + its beta header) this transport does not
+    send, so this build takes upstream's path for providers without it.
+    """
+    joined = "\n\n".join(text for text in system_texts if text)
+    if not joined:
+        return []
+    block: dict[str, Any] = {"type": "text", "text": joined}
+    if enable_caching:
+        block["cache_control"] = dict(EPHEMERAL_CACHE_CONTROL)
+    return [block]
+
+
+def prepare_cached_request(
+    messages: Sequence[Any], *, provider: str, system_texts: Sequence[str]
+) -> tuple[list[Any], dict[str, Any]]:
+    """
+    The request with upstream's two breakpoints, for Anthropic: the system prompt as cached
+    blocks (`buildSystemPromptBlocks`) and a `cache_control` call argument, which
+    langchain-anthropic applies to the last eligible block of the last message
+    (`addCacheBreakpoints`' marker). Any other provider, or caching disabled, gets the
+    request unchanged — OpenAI, for one, caches prompt prefixes without markers.
+    """
+    if provider != "anthropic" or not get_prompt_caching_enabled():
+        return list(messages), {}
+    from langchain_core.messages import SystemMessage
+
+    blocks = system_prompt_blocks_for_api(system_texts, enable_caching=True)
+    content: list[str | dict[Any, Any]] = list(blocks)
+    prepared = [SystemMessage(content=content), *messages[1:]] if blocks else list(messages)
+    return prepared, {"cache_control": dict(EPHEMERAL_CACHE_CONTROL)}

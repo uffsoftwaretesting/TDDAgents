@@ -50,17 +50,15 @@ class CompactionTracking:
     this turn compacted, and `turn_id` / `turn_counter` identify the turn the decision was
     made for; the compaction path of Part E7 reads all three.
 
-    Upstream's fourth member, `consecutiveFailures`, is deliberately not here. Its only
-    reader in the whole compaction path is the circuit-breaker comparison in
-    `autoCompact.ts` -> `autoCompactIfNeeded`, against a maximum this architecture does not
-    have; every other mention of it is plumbing that carries the number to that one
-    comparison. Without the bound it would be a field nothing reads, and the loop is
-    unbounded by decision, so it is dropped rather than carried.
+    Upstream's fourth member, `consecutiveFailures`, is the autocompact circuit breaker's
+    input (`MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES`, a ceiling upstream has and this build
+    ports — "ceilings follow claude-code"). Optional upstream, so `None` until a failure.
     """
 
     compacted: bool
     turn_id: str
     turn_counter: int
+    consecutive_failures: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

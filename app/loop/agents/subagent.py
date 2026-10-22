@@ -207,10 +207,17 @@ def create_subagent(
     # 5. Agent memory setup
     run_id = f"run_{uuid4().hex[:8]}"
     agent_id = f"agent_{uuid4().hex[:8]}"
-    store = memory_store or AgentMemoryStore(base_dir=getattr(parent_context.workspace, "root", None))
+    # The run's store and the run's id (Part I5): run memory belongs to the sub-requirement's
+    # run, lives outside the workspace, and is discarded when the run ends. A worker never
+    # makes a store of its own inside the workspace, where a later run could read it.
+    store = memory_store or parent_context.agent_memory_store
     memory_prompt = ""
     if agent_def.memory and agent_def.memory != "none":
-        memory_prompt = store.load_memory_prompt(agent_def.name, agent_def.memory, run_id=run_id)
+        if store is None:
+            raise ValueError("Run-scoped agent memory needs the run's memory store")
+        memory_prompt = store.load_memory_prompt(
+            agent_def.name, agent_def.memory, run_id=parent_context.run_id or None
+        )
 
     # 6. Isolated ToolContext
     worker_context = ToolContext(
@@ -224,6 +231,7 @@ def create_subagent(
         hook_dispatcher=parent_context.hook_dispatcher,
         read_file_state=dict(parent_context.read_file_state),
         run_id=parent_context.run_id,
+        agent_memory_store=store,
         # Upstream `agentId`/`agentType`: a worker's stop hooks fire `SubagentStop`
         # (matched on the agent type), never the coordinator's `Stop`.
         agent_id=agent_id,

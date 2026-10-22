@@ -12,12 +12,14 @@ Guarantees >= 90% mutation test score across app/loop/agents/:
 from __future__ import annotations
 
 import logging
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Sequence, cast
+from typing import Any, cast
 from unittest.mock import patch
-import pytest
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.loop.agents.definition import AgentDefinition, AgentFrontmatterError
@@ -89,6 +91,8 @@ def _make_context(
         set_app_state=store.update,
         messages=tuple(messages),
         tools=tuple(tools),
+        run_id="loop-test",
+        agent_memory_store=AgentMemoryStore(base_dir=tempfile.mkdtemp(prefix="agent-mem-")),
     )
 
 
@@ -437,9 +441,8 @@ class TestMemoryStoreBooster:
 
     def test_memory_dir_defaults_for_run_and_session(self, tmp_path: Path) -> None:
         store = AgentMemoryStore(base_dir=tmp_path / "proj")
-        run_dir = store.get_memory_dir("agent1", "run", run_id=None)
-        assert run_dir is not None
-        assert "default_run" in str(run_dir)
+        with pytest.raises(ValueError, match="^Run-scoped agent memory needs a run id$"):
+            store.get_memory_dir("agent1", "run", run_id=None)
 
         sess_dir = store.get_memory_dir("agent1", "session", session_id=None)
         assert sess_dir is not None
@@ -530,9 +533,8 @@ class TestMemoryStoreBooster:
         assert "## Existing Memory Notes:\nSaved notes here" in p_with_content
 
         # read exception in MEMORY.md
-        with patch.object(Path, "read_text", side_effect=OSError("Disk read error")):
-            with caplog.at_level(logging.WARNING):
-                _ = store.load_memory_prompt("agent1", "run", run_id="r1")
+        with patch.object(Path, "read_text", side_effect=OSError("Disk read error")), caplog.at_level(logging.WARNING):
+            _ = store.load_memory_prompt("agent1", "run", run_id="r1")
         assert "Failed reading agent memory" in caplog.text
         assert "Disk read error" in caplog.text
 
@@ -549,9 +551,8 @@ class TestMemoryStoreBooster:
 
         # rmtree exception handling
         store.ensure_memory_dir_exists("agent1", "run", run_id="run_fail")
-        with patch("shutil.rmtree", side_effect=OSError("Permission denied")):
-            with caplog.at_level(logging.WARNING):
-                store.discard_run_memory("run_fail")
+        with patch("shutil.rmtree", side_effect=OSError("Permission denied")), caplog.at_level(logging.WARNING):
+            store.discard_run_memory("run_fail")
         assert "Failed purging run memory" in caplog.text
 
         # default base_dir in discard_run_memory
@@ -1221,16 +1222,18 @@ class TestAgentToolExecutionBooster:
         assert len(received_prompts) == 1
         assert "run-scoped" in received_prompts[0]
 
-        # Project memory agent - verify discard_run_memory is NOT called for project memory
+        # Neither spawn discards anything: run memory belongs to the sub-requirement's run
+        # and the runner discards it (Part I5).
         with patch.object(store, "discard_run_memory", wraps=store.discard_run_memory) as mock_discard:
             res2 = await tool.call({"subagent_type": "proj_agent", "prompt": "Task 2"}, ctx)
             assert res2.is_error is False
             assert len(received_prompts) == 2
             assert "project-scoped" in received_prompts[1]
             mock_discard.assert_not_called()
+        assert (tmp_path / ".tddagents" / "run-memory" / "loop-test" / "run_agent").is_dir()
 
     @pytest.mark.anyio
-    async def test_agent_tool_runner_exception_still_purges_run_memory(self, tmp_path: Path) -> None:
+    async def test_agent_tool_runner_exception_leaves_run_memory_to_the_run(self, tmp_path: Path) -> None:
         store = AgentMemoryStore(base_dir=tmp_path)
         mem_agent = AgentDefinition(name="faulty", description="f", prompt="f", memory="run")
 
@@ -1248,9 +1251,8 @@ class TestAgentToolExecutionBooster:
             await tool.call({"subagent_type": "faulty", "prompt": "Fail now"}, ctx)
         assert "Subagent crashed during run" in str(exc_info.value)
 
-        run_mem_root = tmp_path / ".tddagents" / "run-memory"
-        if run_mem_root.exists():
-            assert list(run_mem_root.iterdir()) == []
+        # The crash does not discard the run's memory; the runner does, at the run's end.
+        assert (tmp_path / ".tddagents" / "run-memory" / "loop-test" / "faulty").is_dir()
 
     @pytest.mark.anyio
     async def test_agent_tool_fork_child_without_assistant_inspects_directive(self) -> None:

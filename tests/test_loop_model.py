@@ -3,20 +3,23 @@ import dataclasses
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+)
 
 from app.config.config import Config
 from app.loop.config import build_run_config
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.context.assembly import reset_session_context
-from app.loop.context.attachments import TDD_STATE_KEY
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.messages import tool_calls_in
 from app.loop.model import (
     accumulate_stream,
     build_request_messages,
     convert_tool_to_langchain,
-    read_todo,
     stream_call_model,
 )
 from app.loop.state import initial_loop_state
@@ -147,47 +150,24 @@ def test_request_shape(config):
     assert user_ctx.additional_kwargs == {"is_meta": True}
     assert "project rules" in user_ctx.content
     assert "Today's date is" in user_ctx.content
-    assert rest[0] is history[0]
-    attachment = rest[1]
-    assert attachment.additional_kwargs[TDD_STATE_KEY]["phase"] == "GREEN"
-    assert "Current todo list:\n- [pending] t1" in attachment.content
-    assert len(rest) == 2
+    # Phase 5: the request is the stored history; attachments are persisted by the engine.
+    assert rest == [history[0]]
 
 
-def test_request_omits_unchanged_attachment_and_memoizes_context(config):
+def test_request_memoizes_the_session_context(config):
     ws = FakeWorkspace(files={"TDDAGENTS.md": "v1"})
     first = build_request_messages(_state(ws), config)
-    announced = first[-1]
     ws.files["TDDAGENTS.md"] = "v2"
-    second = build_request_messages(_state(ws, (announced,)), config)
+    second = build_request_messages(_state(ws), config)
+    assert "v1" in first[1].content
     assert "v1" in second[1].content  # memoized per run: the prefix stays stable
-    assert second[-1] is announced  # nothing new to announce
-    assert len(second) == 3
+    assert len(second) == 2  # system + user context; this state has no history
 
 
 def test_system_context_is_appended(config, monkeypatch):
     monkeypatch.setattr("app.loop.context.assembly.get_system_context", lambda ws: {"gitStatus": "GS"})
     msgs = build_request_messages(_state(FakeWorkspace()), config)
     assert str(msgs[0].content).endswith("gitStatus: GS")
-
-
-def test_read_todo_renders_the_todowrite_store_not_a_workspace_file():
-    """
-    The list is state, not content. A `TODO.md` in the workspace would be indistinguishable
-    from a file the project owns, and the agent could rewrite its own checklist as code.
-    """
-    from app.loop.tools.todo import TodoItem
-
-    assert read_todo(_state().tool_context) is None
-    assert read_todo(_state(ws=FakeWorkspace(files={"TODO.md": "x"})).tool_context) is None
-
-    todos = (TodoItem(content="Write the failing test", status="in_progress",
-                      active_form="Writing the failing test"),)
-    assert read_todo(_state(todos=todos).tool_context) == "- [in_progress] Write the failing test"
-
-
-def test_read_todo_survives_a_context_without_a_store():
-    assert read_todo(object()) is None
 
 
 def test_request_is_keyed_by_run_and_memoizes_sections(monkeypatch, tmp_path):
