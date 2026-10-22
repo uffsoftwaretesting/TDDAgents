@@ -31,6 +31,19 @@ if TYPE_CHECKING:
 
 DEFAULT_MAX_TOOL_RESULT_CHARS = 10_000
 
+#: The PreCompact/PostCompact `trigger` of a compaction the loop starts on its own.
+#: Upstream's is `'auto'` for every compaction not typed as `/compact`.
+COMPACT_TRIGGER = "auto"
+
+
+def merge_hook_instructions(user_instructions: str | None, hook_instructions: str | None) -> str | None:
+    """`mergeHookInstructions`."""
+    if not hook_instructions:
+        return user_instructions or None
+    if not user_instructions:
+        return hook_instructions
+    return f"{user_instructions}\n\n{hook_instructions}"
+
 
 def apply_tool_result_budget(
     messages: Sequence[Message],
@@ -152,20 +165,36 @@ async def try_reactive_compact(
     microcompacted = microcompact_tool_results(state.messages, keep_recent_turns=1)
     budgeted = apply_tool_result_budget(microcompacted, max_chars_per_result=5_000)
 
-    # 2. Summarize
+    # 2. PreCompact hooks (upstream `compactConversation`): their output joins the summary
+    #    request as additional instructions (`mergeHookInstructions`).
+    from app.loop.hooks.execute import dispatcher_of, execute_post_compact_hooks, execute_pre_compact_hooks
+    from app.loop.hooks.session import process_session_start_hooks
+
+    dispatcher = dispatcher_of(state.tool_context)
+    cancel = getattr(state.tool_context, "cancel", None)
+    pre = await execute_pre_compact_hooks(dispatcher, COMPACT_TRIGGER, None, signal=cancel)
+    custom_instructions = merge_hook_instructions(None, pre.new_custom_instructions)
+
+    # 3. Summarize
     prompt_for_summary = (
         "Write a structured, concise continuation summary wrapped in <summary></summary> tags "
         "covering task overview, current progress, modified files, key technical decisions, and next steps."
     )
+    if custom_instructions and custom_instructions.strip():
+        prompt_for_summary += f"\n\nAdditional Instructions:\n{custom_instructions}"
     summary_text = await summarize_fn(prompt_for_summary)
 
-    # 3. Compact conversation
+    # 4. Compact conversation, then SessionStart(`compact`) and PostCompact hooks, whose
+    #    messages follow the kept tail (`buildPostCompactMessages`: ...kept, ...hookResults).
     compacted_messages = compact_conversation(
         budgeted,
         summary=summary_text,
         keep_tail_count=2,
         token_counter=token_counter,
     )
+    session = await process_session_start_hooks(dispatcher, "compact", model=config.model)
+    compacted_messages = (*compacted_messages, *session.messages)
+    await execute_post_compact_hooks(dispatcher, COMPACT_TRIGGER, summary_text, signal=cancel)
 
     tracking = notify_compaction(
         turn_id=f"reactive_turn_{state.turn_count}",

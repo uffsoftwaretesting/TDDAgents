@@ -116,6 +116,10 @@ class BuiltTool:
         field(default_factory=lambda: (lambda args, ctx: PermissionResult(behavior="allow")))
     )
     _map_result: Callable[[ToolResult, str], ToolMessage] = default_map_result
+    #: `Tool.ts` -> `preparePermissionMatcher`: given a validated input, a predicate over a
+    #: permission-rule content string (`git *`, `src/**`). Hook `if` conditions use it;
+    #: `None` means the tool matches only a bare `Tool` condition, as upstream.
+    _prepare_permission_matcher: Callable[[dict[str, Any]], Callable[[str], bool]] | None = None
 
     def description(self, input: dict[str, Any]) -> str:
         return self._description(input)
@@ -195,6 +199,12 @@ class BuiltTool:
     def map_result(self, result: ToolResult, tool_use_id: str) -> ToolMessage:
         return self._map_result(result, tool_use_id)
 
+    def prepare_permission_matcher(self, input: dict[str, Any]) -> Callable[[str], bool] | None:
+        """The tool's rule-content matcher for `input`, or `None` when it has none."""
+        if self._prepare_permission_matcher is None:
+            return None
+        return self._prepare_permission_matcher(input)
+
 
 def build_tool(
     *,
@@ -219,6 +229,7 @@ def build_tool(
     aliases: Sequence[str] = (),
     is_mcp: bool = False,
     max_result_size_chars: float = MAX_TOOL_RESULT_BYTES,
+    prepare_permission_matcher: Callable[[dict[str, Any]], Callable[[str], bool]] | None = None,
 ) -> BuiltTool:
     """
     Builds a Tool with fail-closed defaults for omitted members.
@@ -261,6 +272,7 @@ def build_tool(
             else (lambda args, ctx: PermissionResult(behavior="allow"))
         ),
         _map_result=map_result if map_result is not None else default_map_result,
+        _prepare_permission_matcher=prepare_permission_matcher,
     )
 
 

@@ -12,11 +12,16 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
+
 import pytest
 
-from app.hooks.backends import interpolate_arguments, interpolate_headers
-from app.hooks.schemas import CommandHook
+from app.loop.hooks.exec_command import exec_command_hook
+from app.loop.hooks.exec_http import interpolate_env_vars
+from app.loop.hooks.exec_prompt import add_arguments_to_prompt
+from app.loop.hooks.schemas import CommandHook
 from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.memory import AgentMemoryStore
 from app.loop.agents.resolution import resolve_agent_tools
@@ -219,47 +224,40 @@ def test_split_shell_commands_handles_quotes_and_escapes() -> None:
 # 4. Hook Safety & Environment Variable Leakage (Part H)
 # ============================================================================
 
-def test_interpolate_arguments_preserves_valid_json() -> None:
-    template = "Arguments evaluated: $ARGUMENTS"
+def test_prompt_hook_arguments_preserve_valid_json() -> None:
     payload = {
         "tool_name": "Bash",
         "command": "rm -rf /; echo 'owned'",
         "nested": {"param": 'quote"test', "list": [1, 2, 3]},
     }
-    interpolated = interpolate_arguments(template, payload)
-    assert '"rm -rf /; echo \'owned\'"' in interpolated
-    assert '"param": "quote\\"test"' in interpolated
+    interpolated = add_arguments_to_prompt("Arguments evaluated: $ARGUMENTS", json.dumps(payload))
+    assert interpolated.startswith("Arguments evaluated: ")
+    assert json.loads(interpolated.removeprefix("Arguments evaluated: ")) == payload
 
 
-def test_interpolate_headers_prevents_unauthorized_env_leakage(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SAFE_TOKEN", "token_safe_123")
-    monkeypatch.setenv("SECRET_OPENAI_KEY", "sk-secret-do-not-leak")
-    monkeypatch.setenv("SYSTEM_ROOT_PASSWORD", "super_secret_admin")
-
-    raw_headers = {
-        "Authorization": "Bearer $SAFE_TOKEN",
-        "X-Secret": "$SECRET_OPENAI_KEY",
-        "X-Admin": "${SYSTEM_ROOT_PASSWORD}",
+def test_http_hook_headers_never_resolve_unallowed_env_vars() -> None:
+    env = {
+        "SAFE_TOKEN": "token_safe_123",
+        "SECRET_OPENAI_KEY": "sk-secret-do-not-leak",
+        "SYSTEM_ROOT_PASSWORD": "super_secret_admin",
     }
-
-    # Only SAFE_TOKEN is allowed in allowed_env_vars
-    resolved = interpolate_headers(raw_headers, allowed_env_vars=("SAFE_TOKEN",))
-
-    assert resolved["Authorization"] == "Bearer token_safe_123"
+    allowed = frozenset({"SAFE_TOKEN"})
+    assert interpolate_env_vars("Bearer $SAFE_TOKEN", allowed, env) == "Bearer token_safe_123"
     # Unallowed env vars must be blanked out, never resolved
-    assert resolved["X-Secret"] == ""
-    assert resolved["X-Admin"] == ""
+    assert interpolate_env_vars("$SECRET_OPENAI_KEY", allowed, env) == ""
+    assert interpolate_env_vars("${SYSTEM_ROOT_PASSWORD}", allowed, env) == ""
 
 
-def test_command_hook_backend_fail_closed_on_syntax_and_missing_binary() -> None:
-    from app.hooks.backends import CommandHookBackend
-
-    backend = CommandHookBackend()
-    hook = CommandHook(command="non_existent_binary_xyz_123456", shell="bash")
-    outcome = backend.execute(hook, {}, "PreToolUse")
-    # Subprocess execution failure should be caught, not crashed
-    assert outcome.exit_code != 0
-    assert "not found" in outcome.stderr.lower() or outcome.exit_code == 127
+def test_command_hook_with_a_missing_binary_fails_without_crashing(tmp_path: Path) -> None:
+    hook = CommandHook(command="non_existent_binary_xyz_123456")
+    result = asyncio.run(
+        exec_command_hook(
+            hook, "PreToolUse", "PreToolUse:Bash", "{}", None, cwd=str(tmp_path), project_dir=str(tmp_path)
+        )
+    )
+    # The shell reports the missing command; the hook fails, the caller does not.
+    assert result.status == 127
+    assert "not found" in result.stderr.lower()
 
 
 # ============================================================================

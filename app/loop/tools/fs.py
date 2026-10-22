@@ -57,7 +57,7 @@ import math
 import re
 import shlex
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from app.loop.context import ToolContext
 from app.loop.context.file_state import FileState
@@ -70,6 +70,7 @@ from app.loop.permissions.filesystem import (
     workspace_absolute_path,
 )
 from app.loop.permissions.rules import extract_permission_context
+from app.loop.permissions.shell_rules import match_wildcard_pattern
 from app.loop.prompts.loader import parse_markdown_frontmatter, render_prompt
 from app.loop.prompts.registry import global_prompt_registry
 from app.loop.tools.base import BuiltTool, build_tool
@@ -327,6 +328,22 @@ def add_line_numbers(lines: list[str], start_line: int) -> str:
     return "\n".join(f"{start_line + i}\t{line}" for i, line in enumerate(lines))
 
 
+def file_path_permission_matcher(args: Mapping[str, Any]) -> Callable[[str], bool]:
+    """
+    `preparePermissionMatcher` of `Read`/`Write`/`Edit`: a rule pattern against `file_path`.
+    *Divergence:* upstream matches the path after `backfillObservableInput` made it
+    absolute; this pipeline has no backfill, so the path is matched as the model wrote it.
+    """
+    path = str(args.get("file_path", ""))
+    return lambda pattern: match_wildcard_pattern(pattern, path)
+
+
+def search_pattern_permission_matcher(args: Mapping[str, Any]) -> Callable[[str], bool]:
+    """`preparePermissionMatcher` of `Glob`/`Grep`: a rule pattern against the search `pattern`."""
+    searched = str(args.get("pattern", ""))
+    return lambda rule: match_wildcard_pattern(rule, searched)
+
+
 def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
     def validate_read(input_args: dict[str, Any], context: ToolContext) -> ValidationResult:
         # `FileReadTool.validateInput`: a Read-deny match is refused before any I/O.
@@ -408,6 +425,7 @@ def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         validate_input=validate_read,
         check_permissions=check_file_read_permissions("file_path"),
         call=call_read,
+        prepare_permission_matcher=file_path_permission_matcher,
     )
 
 
@@ -459,6 +477,7 @@ def build_write_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         validate_input=validate_write,
         check_permissions=check_file_write_permissions(),
         call=call_write,
+        prepare_permission_matcher=file_path_permission_matcher,
     )
 
 
@@ -557,6 +576,7 @@ def build_edit_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         validate_input=validate_edit,
         check_permissions=check_file_write_permissions(),
         call=call_edit,
+        prepare_permission_matcher=file_path_permission_matcher,
     )
 
 
@@ -638,6 +658,7 @@ def build_glob_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         validate_input=validate_glob,
         check_permissions=check_file_read_permissions("path"),
         call=call_glob,
+        prepare_permission_matcher=search_pattern_permission_matcher,
     )
 
 
@@ -832,4 +853,5 @@ def build_grep_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         validate_input=validate_grep,
         check_permissions=check_file_read_permissions("path"),
         call=call_grep,
+        prepare_permission_matcher=search_pattern_permission_matcher,
     )

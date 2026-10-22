@@ -20,7 +20,7 @@ from typing import Any, AsyncIterator
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.hooks.stop_hooks import build_stop_hooks_runner
+from app.loop.hooks.stop_hooks import build_stop_hooks_runner
 from app.loop.config import build_run_config
 from app.loop.context import AppState, AppStateStore, ToolContext, tool_context_for
 from app.loop.deps import CompactionResult, LoopDeps

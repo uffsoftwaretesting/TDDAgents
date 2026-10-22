@@ -354,7 +354,10 @@ class TestWhatTheSeamIsHanded:
         collect(model, deps=deps)
         assert stop_hooks.seen_configs == [CONFIG]
         assert len(stop_hooks.seen) == 1
-        assert stop_hooks.seen[0] == model.seen[0]
+        # Upstream hands the hooks `[...messagesForQuery, ...assistantMessages]`.
+        seen = stop_hooks.seen[0]
+        assert seen.messages == (*model.seen[0].messages, AIMessage(content="done"))
+        assert replace(seen, messages=model.seen[0].messages) == model.seen[0]
 
     def test_compact_is_given_the_run_config_and_state(self):
         compact = FakeCompact([CompactionResult(compacted=True, messages=())])
@@ -421,36 +424,34 @@ class TestAllTerminalReturns:
         events = collect(model, tools=cancelling_tools, state=state)
         assert events[-1] == Terminated(reason=Terminal.ABORTED_TOOLS)
 
-    def test_terminal_hook_stopped_via_kwargs(self):
+    def test_terminal_hook_stopped_on_a_stopped_continuation_attachment(self):
+        """`query.ts`: a tool-phase attachment of type `hook_stopped_continuation` ends the run."""
         async def hook_stopping_tools(
             calls: tuple[ToolCall, ...], msgs: tuple[Message, ...], s: LoopState, c: RunConfig
         ) -> AsyncIterator[Message]:
-            msg = ToolMessage(
-                content="vetoed",
-                tool_call_id=calls[0]["id"],
-                additional_kwargs={"hook_stopped_continuation": True},
+            yield ToolMessage(content="ran", tool_call_id=calls[0]["id"])
+            yield HumanMessage(
+                content="stopped",
+                additional_kwargs={"is_meta": True, "attachment": {"type": "hook_stopped_continuation"}},
             )
-            yield msg
 
         model = FakeModel([[asks_for("RunTests", "c1")], [AIMessage(content="done")]])
         events = collect(model, tools=hook_stopping_tools)
         assert events[-1] == Terminated(reason=Terminal.HOOK_STOPPED)
 
-    def test_terminal_hook_stopped_via_attribute(self):
-        async def hook_stopping_tools(
+    def test_another_attachment_does_not_stop_the_run(self):
+        async def annotating_tools(
             calls: tuple[ToolCall, ...], msgs: tuple[Message, ...], s: LoopState, c: RunConfig
         ) -> AsyncIterator[Message]:
-            msg = SimpleNamespace(
-                content="vetoed",
-                tool_call_id=calls[0]["id"],
-                hook_stopped_continuation=True,
-                additional_kwargs={},
+            yield ToolMessage(content="ran", tool_call_id=calls[0]["id"])
+            yield HumanMessage(
+                content="note",
+                additional_kwargs={"is_meta": True, "attachment": {"type": "hook_additional_context"}},
             )
-            yield msg  # type: ignore[misc]
 
         model = FakeModel([[asks_for("RunTests", "c1")], [AIMessage(content="done")]])
-        events = collect(model, tools=hook_stopping_tools)
-        assert events[-1] == Terminated(reason=Terminal.HOOK_STOPPED)
+        events = collect(model, tools=annotating_tools)
+        assert events[-1] == Terminated(reason=Terminal.COMPLETED)
 
     def test_terminal_model_error_on_exception(self):
         async def failing_model(s: LoopState, c: RunConfig) -> AsyncIterator[Message]:
@@ -534,17 +535,14 @@ class TestMessageHelperFunctions:
         msg = AIMessage(content="")
         assert _is_api_error(msg, "prompt_too_long") is False
 
-    def test_has_hook_stopped_via_attribute(self):
-        msg = SimpleNamespace(hook_stopped_continuation=True)
-        assert _has_hook_stopped(msg) is True  # type: ignore[arg-type]
-        msg_false = SimpleNamespace(hook_stopped_continuation=False)
-        assert _has_hook_stopped(msg_false) is False  # type: ignore[arg-type]
-
-    def test_has_hook_stopped_via_additional_kwargs(self):
-        msg = ToolMessage(content="", tool_call_id="c1", additional_kwargs={"hook_stopped_continuation": True})
-        assert _has_hook_stopped(msg) is True
-        msg_false = ToolMessage(content="", tool_call_id="c1", additional_kwargs={"hook_stopped_continuation": False})
-        assert _has_hook_stopped(msg_false) is False
+    def test_has_hook_stopped_reads_the_attachment_type(self):
+        stopped = HumanMessage(content="", additional_kwargs={"attachment": {"type": "hook_stopped_continuation"}})
+        assert _has_hook_stopped(stopped) is True
+        other = HumanMessage(content="", additional_kwargs={"attachment": {"type": "hook_success"}})
+        assert _has_hook_stopped(other) is False
+        # The pre-Phase-4 flag is no longer a stop signal: only the attachment is.
+        legacy = ToolMessage(content="", tool_call_id="c1", additional_kwargs={"hook_stopped_continuation": True})
+        assert _has_hook_stopped(legacy) is False
 
     def test_has_hook_stopped_when_neither_present(self):
         msg = ToolMessage(content="", tool_call_id="c1")

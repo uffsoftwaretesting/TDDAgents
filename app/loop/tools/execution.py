@@ -20,14 +20,21 @@ places to get RED wrong, and the gate is the one a hook cannot talk its way past
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Iterator, Sequence
 
 from langchain_core.messages import ToolMessage
 
+from app.loop.hooks.messages import HookAttachment, create_attachment_message, messages_for
+from app.loop.hooks.tool_hooks import (
+    run_post_tool_use_failure_hooks,
+    run_post_tool_use_hooks,
+    run_pre_tool_use_hooks,
+)
 from app.loop.messages import Message, ToolCall
 from app.loop.tools.base import Tool, find_tool_by_name
-from app.loop.tools.hook_permissions import resolve_hook_permission_decision, verdict_from_hook_outcome
+from app.loop.tools.hook_permissions import resolve_hook_permission_decision
 from app.loop.tools.result_storage import MAX_TOOL_RESULT_BYTES, maybe_persist_large_result
 from app.loop.tools.validation import INPUT_VALIDATION_ERROR, validate_against_schema
 from app.loop.tools.types import ContextModifier, ToolResult
@@ -77,6 +84,8 @@ class ToolExecutionOutcome:
 
     message: ToolMessage
     context_modifier: ContextModifier | None = None
+    #: Hook messages (upstream's attachments) to emit right after the tool result.
+    extra_messages: tuple[Message, ...] = ()
 
 
 async def run_tool_use(
@@ -140,23 +149,24 @@ async def run_tool_use(
         return ToolExecutionOutcome(message=msg)
 
     # 3. PreToolUse hooks. They may rewrite the input, and they may state a permission
-    #    opinion — which the gate then still gets to overrule.
-    hook_dispatcher = getattr(context, "hook_dispatcher", None)
-    hook_verdict = None
-    pre_outcome = None
-    if hook_dispatcher is not None:
-        cmd_arg = tool_args.get("command") if isinstance(tool_args, dict) else None
-        pre_outcome = hook_dispatcher.run(
-            "PreToolUse",
-            tool_name=tool_name,
-            tool_input=tool_args if isinstance(tool_args, dict) else {},
-            command=str(cmd_arg) if cmd_arg is not None else None,
+    #    opinion — which the gate then still gets to overrule. Their messages are
+    #    collected and emitted after the tool result, upstream's order once attachments
+    #    are reordered past tool results for the API.
+    pre = await run_pre_tool_use_hooks(context, tool_name, tool_args if isinstance(tool_args, dict) else {}, call_id)
+    hook_messages: list[Message] = list(messages_for(pre.attachments))
+    if pre.stopped:
+        msg = ToolMessage(
+            content=CANCEL_MESSAGE,
+            tool_call_id=call_id,
+            status="error",
+            additional_kwargs={"is_error": True, "tool_use_result": f"Error: {pre.stop_reason}"},
         )
-        hook_verdict = verdict_from_hook_outcome(pre_outcome)
-        if hook_verdict is None and pre_outcome.updated_input is not None:
-            # A rewrite with no permission opinion: upstream's `hookUpdatedInput`
-            # passthrough, after which the ordinary permission flow continues.
-            tool_args = pre_outcome.updated_input
+        return ToolExecutionOutcome(message=msg, extra_messages=tuple(hook_messages))
+    hook_verdict = pre.verdict
+    if pre.updated_input is not None:
+        # A rewrite with no permission opinion: upstream's `hookUpdatedInput` passthrough,
+        # after which the ordinary permission flow continues.
+        tool_args = pre.updated_input
 
     # 4. Permission. The single phase-enforcement point lives inside this gate
     #    (`check_tdd_phase_permission`), which is why the duplicate pre-tool phase check
@@ -165,25 +175,37 @@ async def run_tool_use(
     resolved = await resolve_hook_permission_decision(hook_verdict, tool, tool_args, context, call_id)
     permission = resolved.decision
     if permission.behavior != "allow":
-        denied_msg = permission.message or f"Permission denied for tool: {tool_name}"
+        denied_msg = permission.message
+        if pre.prevent_continuation and not denied_msg:
+            denied_msg = "Execution stopped by PreToolUse hook" + (f": {pre.stop_reason}" if pre.stop_reason else "")
         msg = ToolMessage(
-            content=denied_msg,
+            content=denied_msg or f"Permission denied for tool: {tool_name}",
             tool_call_id=call_id,
             status="error",
             additional_kwargs={"is_error": True, "permission_behavior": permission.behavior},
         )
-        return ToolExecutionOutcome(message=msg)
+        return ToolExecutionOutcome(message=msg, extra_messages=tuple(hook_messages))
 
     effective_args = permission.updated_input if permission.updated_input is not None else resolved.input
 
-    # Execute tool call
+    # Execute tool call. A tool that raises takes upstream's failure path: PostToolUseFailure
+    # hooks, no governance and no PostToolUse.
     try:
         result = await tool.call(effective_args, context)
     except Exception as exc:
-        result = ToolResult(
-            content=f"<tool_use_error>Error calling tool ({tool.name}): {exc}</tool_use_error>",
-            is_error=True,
-            tool_use_id=call_id,
+        content = f"<tool_use_error>Error calling tool ({tool.name}): {exc}</tool_use_error>"
+        failure = await run_post_tool_use_failure_hooks(
+            context, tool_name, effective_args if isinstance(effective_args, dict) else {}, str(exc), call_id,
+            bool(context.cancel.cancelled),
+        )
+        msg = ToolMessage(
+            content=content,
+            tool_call_id=call_id,
+            status="error",
+            additional_kwargs={"is_error": True},
+        )
+        return ToolExecutionOutcome(
+            message=msg, extra_messages=(*hook_messages, *messages_for(failure.attachments))
         )
 
     # 5. Result governance, before any hook sees the output. Upstream persists and commits a
@@ -191,24 +213,30 @@ async def run_tool_use(
     #    already ran, and its output is the ground truth of what happened.
     result = _persist_if_oversized(result, tool, tool_name, call_id, context)
 
-    # 6. PostToolUse hooks. Additive only — they cannot un-run the tool.
-    if hook_dispatcher is not None:
-        cmd_arg = effective_args.get("command") if isinstance(effective_args, dict) else None
-        post_outcome = hook_dispatcher.run(
-            "PostToolUse",
-            tool_name=tool_name,
-            tool_input=effective_args if isinstance(effective_args, dict) else {},
-            tool_response=str(result.content),
-            command=str(cmd_arg) if cmd_arg is not None else None,
-        )
-        if post_outcome.additional_context:
-            extra = f"\n\n[Hook feedback]: {post_outcome.additional_context}"
-            result = ToolResult(
-                content=f"{result.content}{extra}",
-                is_error=result.is_error,
-                tool_use_id=result.tool_use_id,
-                context_modifier=result.context_modifier,
+    # 6. PostToolUse hooks. Additive only — they cannot un-run the tool. What they add
+    #    (blocking errors, additional context, a stop) follows the result as messages.
+    post = await run_post_tool_use_hooks(
+        context, tool_name, effective_args if isinstance(effective_args, dict) else {}, str(result.content),
+        call_id, bool(getattr(tool, "is_mcp", False)),
+    )
+    hook_messages.extend(messages_for(post.attachments))
+    if post.updated_mcp_tool_output is not None:
+        # MCP tools only (`run_post_tool_use_hooks` drops it otherwise): upstream commits an
+        # MCP result *after* PostToolUse, so a hook's `updatedMCPToolOutput` replaces it.
+        replaced = post.updated_mcp_tool_output
+        result = replace(result, content=replaced if isinstance(replaced, str) else json.dumps(replaced))
+    if pre.prevent_continuation:
+        stopped = create_attachment_message(
+            HookAttachment(
+                type="hook_stopped_continuation",
+                message=pre.stop_reason or "Execution stopped by hook",
+                hook_name=f"PreToolUse:{tool_name}",
+                tool_use_id=call_id,
+                hook_event="PreToolUse",
             )
+        )
+        if stopped is not None:
+            hook_messages.append(stopped)
 
     # Map to ToolMessage
     message = tool.map_result(result, call_id)
@@ -217,7 +245,7 @@ async def run_tool_use(
     if result.context_modifier is not None:
         modifier = ContextModifier(tool_use_id=call_id, modify_context=result.context_modifier)
 
-    return ToolExecutionOutcome(message=message, context_modifier=modifier)
+    return ToolExecutionOutcome(message=message, context_modifier=modifier, extra_messages=tuple(hook_messages))
 
 
 def yield_missing_tool_results(

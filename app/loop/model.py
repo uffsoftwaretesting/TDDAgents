@@ -26,6 +26,7 @@ from app.loop.context.assembly import (
     prepend_user_context,
 )
 from app.loop.context.attachments import compute_tdd_state_attachment
+from app.loop.hooks.messages import reorder_attachments_for_api
 from app.loop.messages import Message
 from app.loop.prompts.sections import resolve_system_prompt_sections
 from app.loop.retry import RetryContext, RetryOptions, with_retry
@@ -79,7 +80,7 @@ def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]
     system = SystemMessage(content="\n\n".join(append_system_context(sections, session.system_context)))
     compacted = microcompact_tool_results(state.messages, keep_recent_turns=2)
     budgeted = apply_tool_result_budget(compacted)
-    history = prepend_user_context(budgeted, session.user_context)
+    history = prepend_user_context(reorder_attachments_for_api(budgeted), session.user_context)
     attachment = compute_tdd_state_attachment(
         state.messages, state.phase_ledger, read_todo(state.tool_context)
     )

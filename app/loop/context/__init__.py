@@ -152,6 +152,9 @@ class ToolContext:
     #: `agentId`: per-agent state (the todo list today, more in Part J) is keyed by it, so a
     #: worker's bookkeeping cannot overwrite the coordinator's.
     agent_id: str | None = None
+    #: The worker's agent type (upstream `agentType`), `None` on the main thread. Hooks read
+    #: it: `SubagentStop` matches on it and every hook input carries it.
+    agent_type: str | None = None
 
 
 def tool_context_for(
@@ -165,6 +168,7 @@ def tool_context_for(
     refresh_tools: Callable[[], tuple[Any, ...]] | None = None,
     run_id: str = "",
     agent_id: str | None = None,
+    agent_type: str | None = None,
 ) -> ToolContext:
     """
     Build a context wired to a store, which is what the main loop wants.
@@ -185,6 +189,7 @@ def tool_context_for(
         refresh_tools=refresh_tools,
         run_id=run_id,
         agent_id=agent_id,
+        agent_type=agent_type,
     )
 
 

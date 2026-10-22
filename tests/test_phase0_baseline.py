@@ -493,7 +493,12 @@ def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatc
     result = asyncio.run(runner_mod.tdd_loop_runner("spec", 0, {"session_id": "abc"}))
     assert asked == ["abc"]
     assert seen[0][0].tool_context.workspace is python_workspace
-    assert result.terminal_reason == "completed"
+    # Phase 4: the production stop hooks enforce barrier 3. A model that stops without an
+    # observed Red->Green is refused once, then the latch ends the run — never `completed`.
+    assert len(seen) == 2
+    assert "red_confirmed=False" in str(seen[1][0].messages[-1].content)
+    assert result.terminal_reason == "stop_hook_prevented"
+    assert result.status == "failed"
 
 
 def test_runner_tolerates_a_workspace_without_a_run_dir(monkeypatch, make_fake_workspace, tmp_path):
@@ -512,7 +517,7 @@ def test_runner_tolerates_a_workspace_without_a_run_dir(monkeypatch, make_fake_w
     assert not hasattr(ws, "run_dir")
     result = asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=ws, deps=_recording_deps([])))
     assert bases == [None]
-    assert result.terminal_reason == "completed"
+    assert result.terminal_reason == "stop_hook_prevented"
 
 
 def test_runner_needs_a_session_id_for_its_default_workspace():
@@ -576,17 +581,32 @@ def test_orchestrator_binds_the_session_workspace_into_the_runner(monkeypatch, t
 
 # ── edges the mutation run surfaced ──────────────────────────────────────────
 
-def test_production_hooks_are_inert_passthroughs():
-    from app.loop.factory import get_production_deps, production_compact, production_stop_hooks
+def test_production_compact_is_an_inert_passthrough():
+    from app.loop.factory import get_production_deps, production_compact
 
     assert get_production_deps().compact is production_compact
-    assert get_production_deps().stop_hooks is production_stop_hooks
     state = initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
     compacted = asyncio.run(production_compact(state, None))  # type: ignore[arg-type]
     assert compacted.compacted is False
     assert compacted.messages == state.messages
     assert compacted.tracking is state.compaction_tracking
-    assert asyncio.run(production_stop_hooks(state, None)).prevent_continuation is False  # type: ignore[arg-type]
+
+
+async def _as_coroutine(awaitable: Any) -> Any:
+    return await awaitable
+
+
+def test_production_stop_hooks_enforce_barrier_three():
+    """Phase 4: the production stop hooks are no longer a no-op — RED cannot terminate."""
+    from app.loop.deps import StopHookResult
+    from app.loop.factory import get_production_deps
+
+    state = initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
+    pending = get_production_deps().stop_hooks(state, None)  # type: ignore[arg-type]
+    result: StopHookResult = asyncio.run(_as_coroutine(pending))
+    assert result.prevent_continuation is False
+    assert len(result.blocking_errors) == 1
+    assert "red_confirmed=False" in str(result.blocking_errors[0].content)
 
 
 def test_export_creates_missing_destination_parents(tmp_path):

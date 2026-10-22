@@ -20,6 +20,8 @@ Ported from `reference/claude-code/src/services/tools/toolHooks.ts` ->
   dontAsk, offered to PermissionRequest hooks when no prompt can be shown, else returned.
 * **no verdict** — the full gate.
 
+The verdict comes from `app/loop/hooks/tool_hooks.py::run_pre_tool_use_hooks`.
+
 Not ported: upstream's `requireCanUseTool` context flag (speculative overlays), which this
 loop has no use for.
 """
@@ -27,7 +29,7 @@ loop has no use for.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 from app.loop.permissions.gate import has_permissions_to_use_tool, resolve_ask_without_prompt
 from app.loop.permissions.messages import create_permission_request_message
@@ -120,40 +122,8 @@ async def resolve_hook_permission_decision(
     )
 
 
-def verdict_from_hook_outcome(outcome: Any) -> HookPermissionVerdict | None:
-    """
-    Read a dispatcher outcome as a permission verdict.
-
-    `app/hooks/` reports a veto as `denied`; a richer JSON verdict arrives as
-    `permission_behavior`. Anything else is not an opinion about permission, and returning
-    `None` keeps the ordinary gate in charge.
-    """
-    if outcome is None:
-        return None
-    behavior: PermissionBehavior | None = None
-    raw = getattr(outcome, "permission_behavior", None)
-    if isinstance(raw, PermissionBehavior):
-        behavior = raw
-    elif isinstance(raw, str):
-        try:
-            behavior = PermissionBehavior(raw)
-        except ValueError:
-            behavior = None
-    if behavior is None and getattr(outcome, "denied", False):
-        behavior = PermissionBehavior.DENY
-    if behavior is None:
-        return None
-    updated = getattr(outcome, "updated_input", None)
-    return HookPermissionVerdict(
-        behavior=behavior,
-        message=str(getattr(outcome, "reason", "") or ""),
-        updated_input=dict(updated) if isinstance(updated, Mapping) else None,
-    )
-
-
 __all__ = [
     "HookPermissionVerdict",
     "ResolvedPermission",
     "resolve_hook_permission_decision",
-    "verdict_from_hook_outcome",
 ]

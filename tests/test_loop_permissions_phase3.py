@@ -4,7 +4,7 @@ Phase 3 — permissions and settings wired at runtime.
 Covers the modules the phase added (`dangerous.py`, `permission_request.py`, `messages.py`),
 the settings sources added to `settings.py` (flag, policy with drop-ins,
 `allowManagedPermissionRulesOnly`, mode resolution, `initializeToolPermissionContext`), the
-PermissionRequest decision parsing in `app/hooks/`, and the D6 structural invariant against
+PermissionRequest decision parsing (`app/loop/hooks/` since Phase 4), and the D6 structural invariant against
 the shipped settings: no settings-loaded allow lets a RED-phase call write production code.
 """
 
@@ -19,9 +19,9 @@ from typing import Any
 
 import pytest
 
-from app.hooks.backends import CommandHookBackend, HookExecutionOutcome
-from app.hooks.dispatcher import HookDispatcher
-from app.hooks.schemas import CommandHook, HookMatcher, HookSettings
+from app.loop.hooks.config import HooksConfigSnapshot
+from app.loop.hooks.execute import HookDispatcher
+from app.loop.hooks.output import AggregatedHookResult
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions import dangerous as dg
@@ -470,15 +470,18 @@ def test_build_tool_permission_context_end_to_end(tmp_path, caplog):
 
 # ── PermissionRequest hooks ──────────────────────────────────────────────────
 
-class _Dispatcher:
+class _Dispatcher(HookDispatcher):
+    """A real dispatcher whose hooks are replaced by one scripted PermissionRequest decision."""
+
     def __init__(self, decision=None, raises=None):
+        super().__init__(snapshot=HooksConfigSnapshot(), session_id="s", cwd=".", project_dir=".")
         self.decision, self.raises, self.calls = decision, raises, []
 
-    def run(self, event, **kwargs):
-        self.calls.append((event, kwargs))
+    async def execute_hooks(self, hook_input, tool_use_id, **kwargs):
+        self.calls.append((hook_input["hook_event_name"], dict(hook_input), tool_use_id))
         if self.raises:
             raise self.raises
-        return SimpleNamespace(permission_request_result=self.decision)
+        yield AggregatedHookResult(permission_request_result=self.decision)
 
 
 def _run(decision=None, dispatcher=None, args=None):
@@ -512,8 +515,8 @@ def test_hook_payload():
     dispatcher = _Dispatcher(None)
     _run(dispatcher=dispatcher)
     assert dispatcher.calls == [("PermissionRequest", {
-        "tool_name": "Bash", "tool_input": {"command": "c"},
-        "ctx_fields": {"permission_mode": "default", "tool_use_id": "tu"}})]
+        "session_id": "s", "transcript_path": "", "cwd": ".", "permission_mode": "default",
+        "hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "c"}}, "tu")]
 
 
 def test_hook_allow_with_and_without_updated_input(caplog):
@@ -546,46 +549,6 @@ def test_hook_failure_falls_through(caplog):
         res, _ = _run(dispatcher=_Dispatcher(raises=RuntimeError("boom")))
     assert res is None
     assert "PermissionRequest hook failed for headless agent" in [r.getMessage() for r in caplog.records]
-
-
-# ── app/hooks: parsing the PermissionRequest decision ────────────────────────
-
-def _hook(tmp_path: Path, document: Any) -> CommandHook:
-    script = write(tmp_path / "hook.py", f"import json; print(json.dumps({document!r}))")
-    return CommandHook(command=f"python3 {script}")
-
-
-def test_command_backend_reads_hook_specific_output(tmp_path):
-    backend = CommandHookBackend(tmp_path)
-    decision = {"behavior": "allow", "updatedInput": {"command": "ls"}}
-    document = {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
-    out = backend.execute(_hook(tmp_path, document), {}, "PermissionRequest")
-    assert out.permission_request_result == decision
-    # Wrong event, wrong hookEventName, or no valid behavior: no decision.
-    assert backend.execute(_hook(tmp_path, document), {}, "PreToolUse").permission_request_result is None
-    wrong_name = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "decision": decision}}
-    assert backend.execute(_hook(tmp_path, wrong_name), {}, "PermissionRequest").permission_request_result is None
-    for bad in ({"behavior": "ask"}, "allow", None):
-        doc = {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": bad}}
-        assert backend.execute(_hook(tmp_path, doc), {}, "PermissionRequest").permission_request_result is None
-    not_dict = {"hookSpecificOutput": "PermissionRequest"}
-    assert backend.execute(_hook(tmp_path, not_dict), {}, "PermissionRequest").permission_request_result is None
-
-
-def test_dispatcher_keeps_the_first_decision(tmp_path):
-    first = {"behavior": "deny", "message": "first"}
-    second = {"behavior": "allow"}
-    hooks = []
-    for i, (name, decision) in enumerate((("none", None), ("a", first), ("b", second))):
-        document: dict[str, Any] = {}
-        if decision is not None:
-            document = {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
-        script = write(tmp_path / f"h{i}.py", f"import json; print(json.dumps({document!r}))")
-        hooks.append(CommandHook(command=f"python3 {script}"))
-    settings = HookSettings(events={"PermissionRequest": (HookMatcher(matcher="Bash", hooks=tuple(hooks)),)})
-    outcome = HookDispatcher(settings, tmp_path).run("PermissionRequest", tool_name="Bash", tool_input={})
-    assert outcome.permission_request_result == first
-    assert HookExecutionOutcome().permission_request_result is None
 
 
 # ── D6 structural invariant, against the shipped settings ────────────────────

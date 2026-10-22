@@ -20,11 +20,14 @@ from langchain_core.messages import AIMessage
 from typing import Any
 
 from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.hooks.messages import HookBlockingError
+from app.loop.hooks.output import AggregatedHookResult
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.types import ToolPermissionContext
 from app.loop.tools.base import build_tool
 from app.loop.tools.execution import run_tool_use
 from app.loop.tools.types import ToolResult, ValidationResult
+from tests.hook_doubles import ScriptedDispatcher
 
 SCHEMA = {
     "type": "object",
@@ -67,19 +70,9 @@ def recording_tool(log: list[str], **kwargs: Any) -> Any:
     return build_tool(**defaults)
 
 
-class RecordingDispatcher:
-    """Stands in for `app/hooks/`, recording the order it was consulted in."""
-
-    def __init__(self, log: list[str], outcomes: dict[str, Any] | None = None) -> None:
-        self.log = log
-        self.outcomes = outcomes or {}
-        self.seen: list[tuple[str, dict[str, Any]]] = []
-
-    def run(self, event: str, **payload: Any) -> Any:
-        self.log.append(event)
-        self.seen.append((event, payload))
-        return self.outcomes.get(event, SimpleNamespace(
-            denied=False, reason="", updated_input=None, additional_context=None))
+def RecordingDispatcher(log: list[str], script: dict[str, Any] | None = None) -> ScriptedDispatcher:
+    """A real dispatcher that records the order it was consulted in and replays `script`."""
+    return ScriptedDispatcher(log, script)
 
 
 # -- schema validation comes first ------------------------------------------
@@ -141,12 +134,12 @@ def test_the_pre_hook_runs_before_the_tool_and_the_post_hook_after_it():
 def test_a_hook_veto_stops_the_call():
     log: list[str] = []
     tool = recording_tool(log)
-    dispatcher = RecordingDispatcher(log, {"PreToolUse": SimpleNamespace(
-        denied=True, reason="policy says no", updated_input=None)})
+    dispatcher = RecordingDispatcher(log, {"PreToolUse": [AggregatedHookResult(
+        blocking_error=HookBlockingError(blocking_error="policy says no", command="vet.sh"))]})
     outcome = execute(tool, call(file_path="tests/a.py"), context(hook_dispatcher=dispatcher))
 
     assert "call" not in log
-    assert "policy says no" in str(outcome.message.content)
+    assert str(outcome.message.content) == "PreToolUse:WriteFile hook error: policy says no"
     assert outcome.message.additional_kwargs["permission_behavior"] == "deny"
 
 
@@ -158,9 +151,8 @@ def test_a_hook_rewrite_without_a_verdict_reaches_the_tool():
         return ToolResult(content="ran")
 
     tool = recording_tool([], call=do_call)
-    dispatcher = RecordingDispatcher([], {"PreToolUse": SimpleNamespace(
-        denied=False, reason="", updated_input={"file_path": "tests/rewritten.py"},
-        additional_context=None)})
+    dispatcher = RecordingDispatcher([], {"PreToolUse": [AggregatedHookResult(
+        updated_input={"file_path": "tests/rewritten.py"})]})
     execute(tool, call(file_path="tests/a.py"), context(hook_dispatcher=dispatcher))
     assert seen == {"file_path": "tests/rewritten.py"}
 
@@ -169,9 +161,7 @@ def test_a_hook_allow_cannot_defeat_the_phase_rules():
     """The one that matters: barrier 2 is not negotiable by a hook."""
     log: list[str] = []
     tool = recording_tool(log)
-    dispatcher = RecordingDispatcher(log, {"PreToolUse": SimpleNamespace(
-        denied=False, permission_behavior="allow", reason="", updated_input=None,
-        additional_context=None)})
+    dispatcher = RecordingDispatcher(log, {"PreToolUse": [AggregatedHookResult(permission_behavior="allow")]})
     outcome = execute(
         tool, call(file_path="calculator.py"),
         context(PhaseLedger(phase=TddPhase.RED), hook_dispatcher=dispatcher),
@@ -210,7 +200,7 @@ def test_an_oversized_result_is_filed_before_a_hook_sees_it(tmp_path, monkeypatc
 
     assert "<persisted-output>" in str(outcome.message.content)
     # The hook was shown the governed output, not the raw 3000 characters.
-    post = [payload for event, payload in dispatcher.seen if event == "PostToolUse"][0]
+    post = dispatcher.payload("PostToolUse")
     assert "<persisted-output>" in post["tool_response"]
     assert big not in post["tool_response"]
 
@@ -220,13 +210,16 @@ def test_a_hook_can_annotate_a_result_but_not_replace_it():
         return ToolResult(content="the real output")
 
     tool = recording_tool([], call=do_call)
-    dispatcher = RecordingDispatcher([], {"PostToolUse": SimpleNamespace(
-        denied=False, reason="", updated_input=None, additional_context="mind the style guide")})
+    dispatcher = RecordingDispatcher([], {"PostToolUse": [AggregatedHookResult(
+        additional_contexts=("mind the style guide",))]})
     outcome = execute(tool, call(file_path="tests/a.py"), context(hook_dispatcher=dispatcher))
 
-    content = str(outcome.message.content)
-    assert content.startswith("the real output")
-    assert "mind the style guide" in content
+    # The result stands untouched; the hook's context follows it as its own message.
+    assert str(outcome.message.content) == "the real output"
+    (extra,) = outcome.extra_messages
+    assert extra.content == (
+        "<system-reminder>\nPostToolUse:WriteFile hook additional context: mind the style guide\n</system-reminder>"
+    )
 
 
 def test_a_result_under_the_limit_is_left_exactly_as_the_tool_produced_it():
@@ -355,7 +348,8 @@ def test_the_pre_hook_payload_names_the_tool_and_its_input():
     assert event == "PreToolUse"
     assert payload["tool_name"] == "WriteFile"
     assert payload["tool_input"] == {"file_path": "tests/a.py"}
-    assert payload["command"] is None
+    assert payload["tool_use_id"] == "c1"
+    assert "command" not in payload
 
 
 def test_a_bash_call_hands_the_hook_the_command_itself():
@@ -368,8 +362,8 @@ def test_a_bash_call_hands_the_hook_the_command_itself():
     dispatcher = RecordingDispatcher([])
     execute(tool, call("Bash", command="ls -la"), context(hook_dispatcher=dispatcher))
 
-    pre = dict(dispatcher.seen)["PreToolUse"]
-    assert pre["command"] == "ls -la"
+    pre = dispatcher.payload("PreToolUse")
+    assert pre["tool_input"] == {"command": "ls -la"}
     assert pre["tool_name"] == "Bash"
 
 
@@ -381,20 +375,19 @@ def test_the_post_hook_payload_names_the_tool_and_carries_the_result():
     dispatcher = RecordingDispatcher([])
     execute(tool, call(file_path="tests/a.py"), context(hook_dispatcher=dispatcher))
 
-    post = dict(dispatcher.seen)["PostToolUse"]
+    post = dispatcher.payload("PostToolUse")
     assert post["tool_name"] == "WriteFile"
     assert post["tool_response"] == "what the tool produced"
     assert post["tool_input"] == {"file_path": "tests/a.py"}
 
 
 def test_the_post_hook_sees_the_input_the_tool_was_actually_called_with():
-    dispatcher = RecordingDispatcher([], {"PreToolUse": SimpleNamespace(
-        denied=False, reason="", updated_input={"file_path": "tests/rewritten.py"},
-        additional_context=None)})
+    dispatcher = RecordingDispatcher([], {"PreToolUse": [AggregatedHookResult(
+        updated_input={"file_path": "tests/rewritten.py"})]})
     tool = recording_tool([])
     execute(tool, call(file_path="tests/a.py"), context(hook_dispatcher=dispatcher))
 
-    post = dict(dispatcher.seen)["PostToolUse"]
+    post = dispatcher.payload("PostToolUse")
     assert post["tool_input"] == {"file_path": "tests/rewritten.py"}
 
 

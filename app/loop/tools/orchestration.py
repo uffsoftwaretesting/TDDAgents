@@ -185,6 +185,8 @@ async def run_tools(
                         cid, outcome = await finished
                         completed_tool_ids.add(cid)
                         yield outcome.message
+                        for extra in outcome.extra_messages:
+                            yield extra
                         if outcome.context_modifier is not None:
                             queued_modifiers.setdefault(cid, []).append(
                                 outcome.context_modifier.modify_context
@@ -215,6 +217,8 @@ async def run_tools(
 
                     completed_tool_ids.add(cid)
                     yield outcome.message
+                    for extra in outcome.extra_messages:
+                        yield extra
 
                     if outcome.context_modifier is not None:
                         apply_context_modifier(context, outcome.context_modifier.modify_context)

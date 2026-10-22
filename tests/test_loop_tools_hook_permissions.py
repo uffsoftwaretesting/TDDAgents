@@ -28,8 +28,9 @@ from app.loop.tools.base import build_tool
 from app.loop.tools.hook_permissions import (
     HookPermissionVerdict,
     resolve_hook_permission_decision,
-    verdict_from_hook_outcome,
 )
+from app.loop.hooks.output import AggregatedHookResult
+from tests.hook_doubles import ScriptedDispatcher
 
 
 async def _unused_call(args: dict[str, Any], ctx: Any) -> Any:  # pragma: no cover
@@ -60,39 +61,6 @@ def resolve(verdict, tool=None, args=None, context=None):
             verdict, tool or make_tool(), args or dict(NEUTRAL_ARGS), context or make_context()
         )
     )
-
-
-# ── reading a dispatcher outcome ────────────────────────────────────────────
-
-def test_a_veto_reads_as_deny():
-    outcome = SimpleNamespace(denied=True, reason="no writes today", updated_input=None)
-    verdict = verdict_from_hook_outcome(outcome)
-    assert verdict is not None
-    assert verdict.behavior == PermissionBehavior.DENY
-    assert verdict.message == "no writes today"
-
-
-def test_an_explicit_behavior_string_is_understood():
-    outcome = SimpleNamespace(denied=False, permission_behavior="allow", reason="", updated_input=None)
-    verdict = verdict_from_hook_outcome(outcome)
-    assert verdict is not None and verdict.behavior == PermissionBehavior.ALLOW
-
-
-def test_an_unknown_behavior_string_is_not_an_opinion():
-    outcome = SimpleNamespace(denied=False, permission_behavior="maybe", reason="", updated_input=None)
-    assert verdict_from_hook_outcome(outcome) is None
-
-
-def test_silence_is_not_an_opinion():
-    assert verdict_from_hook_outcome(None) is None
-    assert verdict_from_hook_outcome(SimpleNamespace(denied=False, updated_input={"a": 1})) is None
-
-
-def test_an_updated_input_is_carried_with_the_verdict():
-    outcome = SimpleNamespace(denied=False, permission_behavior="allow", reason="",
-                              updated_input={"file_path": "b.py"})
-    verdict = verdict_from_hook_outcome(outcome)
-    assert verdict is not None and verdict.updated_input == {"file_path": "b.py"}
 
 
 # ── no hook opinion ─────────────────────────────────────────────────────────
@@ -236,8 +204,8 @@ def test_a_hook_ask_never_overrides_a_deny_rule_or_the_phase_tier():
 
 
 def test_a_hook_ask_reaches_permission_request_hooks_when_headless():
-    outcome = SimpleNamespace(permission_request_result={"behavior": "allow"})
-    ctx = make_context(hook_dispatcher=SimpleNamespace(run=lambda *a, **k: outcome))
+    allow = AggregatedHookResult(permission_request_result={"behavior": "allow"})
+    ctx = make_context(hook_dispatcher=ScriptedDispatcher(script={"PermissionRequest": [allow]}))
     resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK), context=ctx)
     assert resolved.decision.behavior == PermissionBehavior.ALLOW
     assert resolved.decision.decision_reason == {"type": "hook", "hookName": "PermissionRequest"}
@@ -357,11 +325,6 @@ def test_an_interactive_tool_needs_the_hook_to_supply_the_input():
     supplied = HookPermissionVerdict(behavior=PermissionBehavior.ALLOW, updated_input={"file_path": "tests/x.py"})
     resolved = resolve(supplied, tool=interactive)
     assert (resolved.decision.behavior, resolved.input) == (PermissionBehavior.ALLOW, {"file_path": "tests/x.py"})
-
-
-def test_a_permission_behavior_enum_verdict_is_read_as_is():
-    verdict = verdict_from_hook_outcome(SimpleNamespace(permission_behavior=PermissionBehavior.ASK))
-    assert verdict is not None and verdict.behavior == PermissionBehavior.ASK
 
 
 # ── what the resolver hands to the gate (mutation-driven pins) ───────────────

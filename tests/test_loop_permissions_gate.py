@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from app.loop.hooks.output import AggregatedHookResult
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.gate import (
@@ -29,6 +30,7 @@ from app.loop.permissions.types import (
 )
 from app.loop.tools.base import build_tool
 from app.loop.tools.types import PermissionResult, ToolResult
+from tests.hook_doubles import ScriptedDispatcher
 
 ALLOW, DENY, ASK, PASS = (
     PermissionBehavior.ALLOW,
@@ -335,17 +337,19 @@ def test_headless_does_not_touch_allow_or_deny():
     assert _gate(_Tool(result=denied), perm) is denied
 
 
-class _Dispatcher:
-    def __init__(self, decision=None, raises=None):
-        self.decision = decision
-        self.raises = raises
-        self.calls: list[tuple[Any, ...]] = []
+class _Dispatcher(ScriptedDispatcher):
+    """Scripts one PermissionRequest decision; `calls` is what each hook was handed."""
 
-    def run(self, event, *, tool_name, tool_input, ctx_fields=None, tool_response=None, command=None):
-        self.calls.append((event, tool_name, tool_input, ctx_fields))
-        if self.raises is not None:
-            raise self.raises
-        return SimpleNamespace(permission_request_result=self.decision)
+    def __init__(self, decision=None, raises=None):
+        script = {"PermissionRequest": [AggregatedHookResult(permission_request_result=decision)]}
+        super().__init__(script=script, raises=raises)
+
+    @property
+    def calls(self) -> list[tuple[Any, ...]]:
+        return [
+            (event, p["tool_name"], p["tool_input"], p.get("permission_mode"))
+            for event, p in self.seen
+        ]
 
 
 HEADLESS = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS, should_avoid_permission_prompts=True)
@@ -357,8 +361,7 @@ def test_headless_permission_request_hook_allow_and_payload():
     res = _gate(_Tool(name="Bash"), args={"command": "x"}, ctx=ctx, tool_use_id="tu1")
     assert (res.behavior, res.updated_input, res.decision_reason) == (
         ALLOW, {"command": "safe"}, {"type": "hook", "hookName": "PermissionRequest"})
-    assert dispatcher.calls == [("PermissionRequest", "Bash", {"command": "x"},
-                                 {"permission_mode": "acceptEdits", "tool_use_id": "tu1"})]
+    assert dispatcher.calls == [("PermissionRequest", "Bash", {"command": "x"}, "acceptEdits")]
 
 
 def test_headless_permission_request_hook_deny():

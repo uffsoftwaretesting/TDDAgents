@@ -21,6 +21,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.loop.config import RunConfig
 from app.loop.deps import LoopDeps
+from app.loop.hooks.execute import dispatcher_of, execute_stop_failure_hooks
+from app.loop.hooks.messages import ATTACHMENT_KEY, async_hook_response_messages, is_hook_stopped_continuation
 from app.loop.messages import Message, ToolCall, tool_calls_in
 from app.loop.retry import FallbackTriggeredError
 from app.loop.state import LoopState
@@ -73,10 +75,47 @@ def _is_api_error(message: Message, error_type: str) -> bool:
 
 
 def _has_hook_stopped(message: Message) -> bool:
-    if getattr(message, "hook_stopped_continuation", None) is True:
-        return True
-    additional = getattr(message, "additional_kwargs", None)
-    return isinstance(additional, dict) and additional.get("hook_stopped_continuation") is True
+    """`query.ts`: a tool-phase message whose attachment is `hook_stopped_continuation`."""
+    return is_hook_stopped_continuation(message)
+
+
+async def _stop_failure(context: Any, last: Message | None, messages: tuple[Message, ...]) -> None:
+    """
+    `executeStopFailureHooks` for a turn that ended on an API error. Upstream fires it
+    without awaiting; here it is awaited, because the run's event loop may close before a
+    detached task finishes and the hook would silently never run.
+    """
+    error = None
+    details = None
+    if last is not None:
+        kwargs = getattr(last, "additional_kwargs", None) or {}
+        error = kwargs.get("api_error") if isinstance(kwargs, dict) else None
+        details = kwargs.get("error_details") if isinstance(kwargs, dict) else None
+    await execute_stop_failure_hooks(
+        context, str(error) if error else None, str(details) if details else None, messages
+    )
+
+
+async def _async_hook_messages(context: Any) -> list[Message]:
+    """
+    What finished background hooks have to say, collected where upstream's
+    `getAttachmentMessages` runs after a turn's tools: `async_hook_response` attachments and
+    `asyncRewake` notifications.
+    """
+    dispatcher = dispatcher_of(context)
+    if dispatcher is None:
+        return []
+    out: list[Message] = []
+    for response in await dispatcher.registry.check_for_responses():
+        out.extend(async_hook_response_messages(response.response, response.attachment()))
+    for note in dispatcher.registry.drain_notifications():
+        out.append(
+            HumanMessage(
+                content=note,
+                additional_kwargs={"is_meta": True, ATTACHMENT_KEY: {"type": "queued_command"}},
+            )
+        )
+    return out
 
 
 def is_api_error_message(message: Message) -> bool:
@@ -295,6 +334,10 @@ async def run_loop(
             # Recovery exhausted/failed: surface withheld error if present and exit cleanly
             for wm in withheld_messages:
                 yield wm
+            surfaced = [*assistant_messages, *withheld_messages]
+            await _stop_failure(
+                state.tool_context, surfaced[-1] if surfaced else None, (*messages_for_query, *assistant_messages)
+            )
             term = Terminated(reason=Terminal.PROMPT_TOO_LONG)
             deps.emit_event(term)
             yield term
@@ -340,12 +383,19 @@ async def run_loop(
             # reporting a provider outage that way would claim a TDD cycle nobody observed.
             # The guard's actual fix — never let stop hooks see an API error — is kept whole.
             if assistant_messages and is_api_error_message(assistant_messages[-1]):
+                await _stop_failure(
+                    state.tool_context, assistant_messages[-1], (*messages_for_query, *assistant_messages)
+                )
                 term = Terminated(reason=Terminal.MODEL_ERROR)
                 deps.emit_event(term)
                 yield term
                 return
 
-            stop_hook_res = await deps.stop_hooks(state, config)
+            # Upstream hands the hooks `[...messagesForQuery, ...assistantMessages]`; a view of
+            # the state with this turn's answer appended, not a continue site.
+            stop_hook_res = await deps.stop_hooks(
+                replace(state, messages=(*messages_for_query, *assistant_messages)), config
+            )
             if stop_hook_res.prevent_continuation:
                 term = Terminated(reason=Terminal.STOP_HOOK_PREVENTED)
                 deps.emit_event(term)
@@ -393,6 +443,10 @@ async def run_loop(
             deps.emit_event(term)
             yield term
             return
+
+        for attachment in await _async_hook_messages(state.tool_context):
+            yield attachment
+            tool_results.append(attachment)
 
         # Upstream refreshes the roster here and nowhere else: once per iteration, after the
         # tools have run and immediately before the next turn is built — never on a recovery

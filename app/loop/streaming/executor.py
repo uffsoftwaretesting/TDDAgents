@@ -293,6 +293,7 @@ class StreamingToolExecutor:
             )
             msg = outcome.message
             messages.append(msg)
+            messages.extend(outcome.extra_messages)
 
             if outcome.context_modifier is not None:
                 context_modifiers.append(outcome.context_modifier.modify_context)

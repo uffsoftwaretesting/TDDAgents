@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,8 @@ from app.loop.config import RunConfig, build_run_config
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.deps import LoopDeps
 from app.loop.engine import drain, run_loop
+from app.loop.hooks.execute import HookDispatcher
+from app.loop.permissions.settings import SettingsLocations
 from app.loop.permissions.settings import build_tool_permission_context
 from app.loop.permissions.types import ToolPermissionContext
 from app.loop.state import initial_loop_state
@@ -110,6 +113,23 @@ def run_permission_context(
     )
 
 
+def run_settings_locations(
+    config: RunConfig,
+    project_root: Path,
+    home: Path | None = None,
+    managed_dir: Path | str | None = None,
+) -> SettingsLocations:
+    """Where this run's settings live: the same files its permission context is built from."""
+    from app.loop.permissions.settings import MANAGED_DIR
+
+    return SettingsLocations(
+        project_root=project_root,
+        home=home,
+        flag_settings_path=Path(config.settings_path) if config.settings_path is not None else None,
+        managed_dir=Path(managed_dir if managed_dir is not None else MANAGED_DIR),
+    )
+
+
 def default_workspace(state: SessionState) -> LocalWorkspace:
     """The session's shared local workspace; a session without an id is a wiring bug."""
     session_id = state.get("session_id")
@@ -129,6 +149,7 @@ async def tdd_loop_runner(
     project_root: Path | None = None,
     home: Path | None = None,
     managed_dir: Path | str | None = None,
+    hook_dispatcher: HookDispatcher | None = None,
 ) -> PlanItemResult:
     """
     Run one sub-requirement through the loop and report what the ledger observed.
@@ -136,6 +157,11 @@ async def tdd_loop_runner(
     `project_root` is where the project and local settings live (the repository, upstream's
     original cwd); the workspace is the working directory the rules anchor to.
     `home` and `managed_dir` relocate the user and policy scopes (tests use them).
+
+    Hooks follow upstream's headless session: SessionStart (`startup`) and UserPromptSubmit
+    (the sub-requirement) before the first model call, SessionEnd (`other`) after the last,
+    then any background hook still running is killed. A UserPromptSubmit hook that blocks or
+    says `continue: false` stops the run before the model is called: `hook_stopped`, failed.
     """
     run_id = f"loop-{uuid.uuid4().hex[:8]}"
     ws = workspace if workspace is not None else default_workspace(state)
@@ -170,22 +196,81 @@ async def tdd_loop_runner(
         tools_now: tuple[Tool, ...] = pool_cache["tools"]
         return tools_now
 
+    from app.loop.transcript import TranscriptLogger, with_transcript_logger
+
+    run_dir = getattr(ws, "run_dir", None)
+    transcript_dir = Path(run_dir) if run_dir is not None else None
+    transcript = TranscriptLogger(run_id=run_id, base_dir=transcript_dir)
+
+    root_dir = Path(project_root) if project_root is not None else Path.cwd()
+    if hook_dispatcher is None:
+        from app.loop.hooks.runtime import build_hook_dispatcher
+
+        hook_dispatcher = build_hook_dispatcher(
+            run_settings_locations(config, root_dir, home, managed_dir),
+            session_id=run_id,
+            cwd=str(getattr(ws, "root", None) or root_dir),
+            project_dir=str(root_dir),
+            model=config.model,
+            transcript_path=str(transcript.file_path),
+        )
+
     initial_message = HumanMessage(content=sub_req)
     ctx = tool_context_for(
         store,
         messages=(initial_message,),
         tools=refresh_tools(),
         workspace=ws,
+        hook_dispatcher=hook_dispatcher,
         refresh_tools=refresh_tools,
         run_id=run_id,
     )
-    loop_state = initial_loop_state((initial_message,), ctx)
+    try:
+        return await _run_with_hooks(
+            sub_req, idx, run_id, initial_message, ctx, store, config, deps, transcript, with_transcript_logger
+        )
+    finally:
+        from app.loop.hooks.execute import execute_session_end_hooks
 
-    from app.loop.transcript import TranscriptLogger, with_transcript_logger
+        await execute_session_end_hooks(hook_dispatcher, "other")
+        await hook_dispatcher.registry.finalize_pending()
 
-    run_dir = getattr(ws, "run_dir", None)
-    transcript_dir = Path(run_dir) if run_dir is not None else None
-    transcript = TranscriptLogger(run_id=run_id, base_dir=transcript_dir)
+
+async def _run_with_hooks(
+    sub_req: str,
+    idx: int,
+    run_id: str,
+    initial_message: HumanMessage,
+    ctx: Any,
+    store: AppStateStore,
+    config: RunConfig,
+    deps: LoopDeps,
+    transcript: Any,
+    with_transcript_logger: Any,
+) -> PlanItemResult:
+    """SessionStart and UserPromptSubmit, then the loop itself."""
+    from app.loop.hooks.session import process_session_start_hooks, process_user_prompt_submit_hooks
+
+    session = await process_session_start_hooks(ctx.hook_dispatcher, "startup", model=config.model)
+    mode = str(store.get().tool_permission_context.mode)
+    prompt = await process_user_prompt_submit_hooks(ctx, sub_req, mode)
+    if not prompt.should_query:
+        reason = prompt.blocked_message or prompt.stopped_message or ""
+        logger.info("Loop %s not started: UserPromptSubmit hook stopped it: %s", run_id, reason)
+        final = store.get().phase_ledger
+        return PlanItemResult(
+            index=idx,
+            sub_requirement=sub_req,
+            status="failed",
+            terminal_reason=str(Terminal.HOOK_STOPPED),
+            red_confirmed=final.red_confirmed,
+            green_passed=final.green_passed,
+            error_message=reason,
+        )
+    first_turn = [HumanMessage(content=session.initial_user_message)] if session.initial_user_message else []
+    messages = (*session.messages, *first_turn, initial_message, *prompt.messages)
+    ctx = replace(ctx, messages=messages)
+    loop_state = initial_loop_state(messages, ctx)
 
     logger.info("Launching TDD loop %s for sub-requirement %d: %s", run_id, idx, sub_req)
     try:
@@ -215,6 +300,7 @@ __all__ = [
     "build_builtin_tools",
     "default_workspace",
     "run_permission_context",
+    "run_settings_locations",
     "session_workspace",
     "tdd_loop_runner",
 ]

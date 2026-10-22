@@ -223,6 +223,11 @@ def create_subagent(
         workspace=parent_context.workspace,
         hook_dispatcher=parent_context.hook_dispatcher,
         read_file_state=dict(parent_context.read_file_state),
+        run_id=parent_context.run_id,
+        # Upstream `agentId`/`agentType`: a worker's stop hooks fire `SubagentStop`
+        # (matched on the agent type), never the coordinator's `Stop`.
+        agent_id=agent_id,
+        agent_type=agent_def.name,
     )
 
     from app.loop.agents.tool import default_subagent_runner

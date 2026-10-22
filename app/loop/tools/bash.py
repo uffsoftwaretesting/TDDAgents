@@ -24,14 +24,17 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from app.loop.context import ToolContext
+from app.loop.permissions.bash_commands import split_command
 from app.loop.permissions.bash_permissions import bash_tool_has_permission
 from app.loop.permissions.bash_read_only import is_bash_read_only
 from app.loop.permissions.filesystem import permission_cwd
 from app.loop.permissions.rules import extract_permission_context
+from app.loop.permissions.shell_rules import match_wildcard_pattern, permission_rule_extract_prefix
 from app.loop.permissions.types import PermissionResult
 from app.loop.prompts.loader import parse_markdown_frontmatter
 from app.loop.tools.base import BuiltTool, build_tool
@@ -104,6 +107,50 @@ async def check_bash_permissions(args: dict[str, Any], context: ToolContext) -> 
     )
 
 
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _argv_text(subcommand: str) -> str | None:
+    """A subcommand as its argv joined by spaces, leading `VAR=val` dropped; `None` if unparseable."""
+    try:
+        argv = shlex.split(subcommand)
+    except ValueError:
+        return None
+    while argv and _ENV_ASSIGNMENT.match(argv[0]):
+        argv.pop(0)
+    return " ".join(argv)
+
+
+def bash_permission_matcher(args: Mapping[str, Any]) -> Callable[[str], bool]:
+    """
+    `BashTool.preparePermissionMatcher`. Hook `if` filtering is "no match -> skip the hook",
+    so a compound command fires the hook if **any** subcommand matches (`ls && git push`
+    must not slip past a `Bash(git *)` hook), and a command that cannot be parsed matches
+    everything — fail safe by running the hook. Subcommands are matched on argv, so
+    `FOO=bar git push` still matches `Bash(git *)`.
+
+    *Divergence:* upstream parses with tree-sitter (`parseForSecurity`); this Bash tool has
+    no AST parser, so subcommands come from the legacy splitter (`splitCommand_DEPRECATED`)
+    and argv from POSIX shell-word splitting.
+    """
+    command = str(args.get("command", ""))
+    try:
+        parts = [_argv_text(part) for part in split_command(command)]
+    except Exception:  # noqa: BLE001 - an unparseable command must still run the hook
+        return lambda pattern: True
+    if any(part is None for part in parts):
+        return lambda pattern: True
+    subcommands = [part for part in parts if part is not None]
+
+    def matches(pattern: str) -> bool:
+        prefix = permission_rule_extract_prefix(pattern)
+        if prefix is not None:
+            return any(cmd == prefix or cmd.startswith(f"{prefix} ") for cmd in subcommands)
+        return any(match_wildcard_pattern(pattern, cmd) for cmd in subcommands)
+
+    return matches
+
+
 def build_bash_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
     async def call_bash(input_args: dict[str, Any], context: ToolContext) -> ToolResult:
         command = str(input_args.get("command") or "")
@@ -159,4 +206,5 @@ def build_bash_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         validate_input=validate_bash_input,
         check_permissions=check_bash_permissions,
         call=call_bash,
+        prepare_permission_matcher=bash_permission_matcher,
     )

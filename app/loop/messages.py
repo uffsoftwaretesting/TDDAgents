@@ -20,7 +20,7 @@ from langchain_core.messages.tool import ToolCall
 #: What a conversation is made of, as far as the loop is concerned.
 Message = BaseMessage
 
-__all__ = ["Message", "ToolCall", "tool_calls_in"]
+__all__ = ["Message", "ToolCall", "tool_calls_in", "wrap_in_system_reminder"]
 
 
 def tool_calls_in(message: Message) -> tuple[ToolCall, ...]:
@@ -41,3 +41,11 @@ def tool_calls_in(message: Message) -> tuple[ToolCall, ...]:
     """
     calls: list[ToolCall] | None = getattr(message, "tool_calls", None)
     return tuple(calls or ())
+
+
+def wrap_in_system_reminder(content: str) -> str:
+    """
+    `src/utils/messages.ts` -> `wrapInSystemReminder`. Lives here, in the leaf module, so
+    the hook system can wrap its attachments without importing the context package.
+    """
+    return f"<system-reminder>\n{content}\n</system-reminder>"

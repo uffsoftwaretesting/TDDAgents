@@ -35,7 +35,7 @@ pipeline while the graph stayed the enforcement mechanism.
 |---|---|
 | The graph below still runs | The [Architecture](#architecture) section describes the code as it exists today. It is accurate. Do not break it. |
 | But do not invest in it | `execute_tester`, `execute_developer`, both runners, `build_tdd_subgraph`, the `wrapper_*` functions, `is_flow_type` and both router functions **dissolve into the loop**. Extending them is wasted work. |
-| Shipped layers are being replaced | **At the user's explicit direction, `app/tools/`, `app/hooks/`, `app/workspace/` and `app/sync/` will be dropped** and rebuilt against the loop. They are not a foundation to build on. |
+| Shipped layers are being replaced | **At the user's explicit direction, `app/workspace/` and `app/sync/` will be dropped** and rebuilt against the loop. They are not a foundation to build on. `app/tools/` and `app/hooks/` were deleted in Phase 4. |
 | Jinja2 is going | Prompts become Markdown (see [Prompt conventions](#prompt-conventions-incoming)). Do not author new `.jinja2` templates. |
 | The quality gate does not change | It still applies to everything you write, including throwaway work. |
 
@@ -44,7 +44,7 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–3 of `docs/refactoring_transition_plan.md` are wired into the loop runner (`app/loop/runner.py`). Nothing in the legacy graph
+Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–4 of `docs/refactoring_transition_plan.md` are wired into the loop runner (`app/loop/runner.py`). Nothing in the legacy graph
 calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
 | File / Subpackage | Ships |
@@ -111,13 +111,13 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `app/sync/baseline.py` | SHA256 snapshot, `IgnoreRules` (.gitignore matching), 3-way `classify` conflict resolution (G4) |
 | `app/sync/events.py` | `SyncCheckpoint`, `SyncConflict`, event logging and drainable sink (G4) |
 | `app/sync/engine.py` | `SyncEngine`: bidirectional sync at 4 deterministic checkpoints (`seed`, `reconcile_ledger`, `flush`), conflict backup (G4) |
-| `app/hooks/events.py` | 27 `HookEvent` enum values, per-event match keys, regex/wildcard/alternation, scoping dedup (H1) |
-| `app/hooks/matching.py` | `matches_pattern`, `matches_rule`, `deduplicate_hooks` enforcing most-specific precedence (H1) |
-| `app/hooks/schemas.py` | Discriminated union (`CommandHook`, `PromptHook`, `AgentHook`, `HttpHook`, `HookMatcher`, `HookSettings`), lossless round-trip serialization (H2) |
-| `app/hooks/config.py` | 3-tier config loading (project, user global, defaults), file discovery and merging (H2) |
-| `app/hooks/backends.py` | Execution backends: Command (exit 0/2 semantics, stdout JSON), Prompt, Agent, and HTTP (H3 & H4) |
-| `app/hooks/dispatcher.py` | `HookDispatcher` event runner, exit-code protocol, payload enrichment, fail-closed safety (H3 & H4) |
-| `app/hooks/stop_hooks.py` | `build_stop_hooks_runner` unifying `tdd_phase_incomplete_hook`, extra hooks, and configured Stop hooks with `stop_hook_active` latching (H5) |
+| `hooks/events.py`, `hooks/schemas.py`, `hooks/config.py` | The 27 `HookEvent`s and each event's match query; the `command`/`prompt`/`agent`/`http` hook schema; the run's frozen `HooksConfigSnapshot` from the five settings sources with policy `disableAllHooks`/`allowManagedHooksOnly` (Phase 4) |
+| `hooks/output.py`, `hooks/messages.py` | `processHookJSONOutput`, hook-JSON validation with upstream's schema hint; hook attachments as `<system-reminder>` meta messages exactly where upstream sends them to the model; `reorder_attachments_for_api` (Phase 4) |
+| `hooks/matching.py` | `matchesPattern`, `if` conditions via each tool's `prepare_permission_matcher`, dedup, `getMatchingHooks` (Phase 4) |
+| `hooks/execute.py` | `HookDispatcher` (one per run, on `ToolContext.hook_dispatcher`): `executeHooks` in parallel with deny > ask > allow, `executeHooksOutsideREPL`, and every per-event executor (Phase 4) |
+| `hooks/exec_command.py`, `hooks/process.py`, `hooks/async_registry.py` | `execCommandHook` (stdin JSON, `TDDAGENTS_PROJECT_DIR`, process-group kill on timeout/abort), background `async`/`asyncRewake` hooks delivered between turns (Phase 4) |
+| `hooks/exec_prompt.py`, `hooks/exec_agent.py`, `hooks/exec_http.py`, `hooks/ssrf_guard.py` | Prompt hooks (`{ok, reason}`), agent-hook verifier loop (`StructuredOutput`, 50-turn upstream ceiling), HTTP hooks with URL/env allowlists and the SSRF guard (Phase 4) |
+| `hooks/tool_hooks.py`, `hooks/stop_hooks.py`, `hooks/session.py`, `hooks/runtime.py` | `runPreToolUseHooks`/`runPostToolUseHooks`/`runPostToolUseFailureHooks`; `handleStopHooks` + `build_stop_hooks_runner` (**TDD hook first**, configured hooks only add blocks); SessionStart/UserPromptSubmit processing; `build_hook_dispatcher` (Phase 4) |
 
 
 
@@ -305,6 +305,95 @@ cannot succeed (a root inside the reference root always takes the second), and a
 - the POSIX-unreachable backslash UNC branch (a `\\server` path is relative and joined onto
   the cwd first, as upstream's `expandPath` does).
 
+### What Phase 4 changed (2026-10-21)
+
+Hooks are rebuilt against the loop in `app/loop/hooks/`, and `app/hooks/` and `app/tools/`
+are deleted. The user's direction for every choice was **"follow claude-code's source and
+architecture"**.
+
+- **All four hook types** (command, prompt, agent, http) and all 27 events parse. The run's
+  hooks are a **frozen snapshot** taken at startup from the same five settings sources as the
+  permission rules. Policy `disableAllHooks`, `allowManagedHooksOnly` and
+  `strictPluginOnlyCustomization` decide first, and a user-editable `disableAllHooks` can
+  only reduce the run to policy hooks.
+- **`executeHooks` is upstream's**: matching hooks run in parallel and their results stream
+  back as they complete. The permission verdict is aggregated deny > ask > allow, and that
+  aggregate is re-yielded after later results exactly as upstream does it. The JSON contract
+  (`continue`, legacy `decision`, `hookSpecificOutput`) is `processHookJSONOutput` field for
+  field. Exit 2 blocks, any other non-zero exit is a non-blocking error, and timeouts and
+  aborts kill the hook's whole process group.
+- **Hook output is messages now**, no longer text appended to a tool result. An attachment
+  upstream shows the model becomes a `<system-reminder>` meta message, and one it hides is
+  logged. `reorder_attachments_for_api` moves them after a batch's tool results, because a
+  provider rejects anything between tool calls and their results.
+- **Call sites**:
+  - PreToolUse, PostToolUse and PostToolUseFailure in the tool pipeline. A raising tool now
+    takes the failure path, and a hook's `updatedMCPToolOutput` replaces an MCP result.
+  - PermissionRequest at the headless ask.
+  - Stop, or SubagentStop when the context has an `agent_id`. Workers now carry
+    `agent_id` and `agent_type`.
+  - StopFailure at the API-error and prompt-too-long exits.
+  - SessionStart (`startup`), UserPromptSubmit and SessionEnd (`other`) in the runner. A
+    blocking or `continue: false` UserPromptSubmit ends the run `hook_stopped` before any
+    model call.
+  - PreCompact, SessionStart (`compact`) and PostCompact in reactive compaction.
+  - Async and `asyncRewake` hooks are delivered after a turn's tools.
+- **`if` conditions** use a new per-tool `prepare_permission_matcher`. File tools match on
+  `file_path`, Glob and Grep on `pattern`. Bash matches if *any* subcommand matches, and an
+  unparseable command always runs the hook.
+- **Barrier 3 is finally wired in production.** `production_stop_hooks` used to be a no-op;
+  `build_stop_hooks_runner` runs `tdd_phase_incomplete_hook` first, configured hooks can
+  only *add* blocks, and a configured `continue: false` ends the run `stop_hook_prevented`,
+  never `completed`. A worker is guarded by the coordinator, not by the TDD hook.
+- **Prompt and agent hooks** default to `TDDAGENTS_SMALL_FAST_MODEL` (upstream's
+  `ANTHROPIC_SMALL_FAST_MODEL`), then the run's model.
+- **The agent-hook verifier** runs in `dontAsk`. Its pool is upstream's: the parent's
+  phase-filtered tools minus the disallowed set, plus `StructuredOutput`, with upstream's
+  50-turn ceiling. It reads the parent's ledger and rules, so the phase tier applies to every
+  call it makes.
+
+*Divergences, all recorded:*
+- **The agent-hook verifier's app-state writes are discarded** (TDD: only the workers'
+  `RunTests` moves the ledger).
+- StopFailure is awaited, not fire-and-forget.
+- Invalid hook entries are dropped one by one, rather than invalidating the whole settings
+  file.
+- `null`-valued JSON fields are ignored.
+- `file_path` is matched as written, with no `backfillObservableInput`.
+- The Bash `if` matcher uses the legacy splitter instead of tree-sitter.
+- The async registry is per run.
+- Not ported:
+  - plugins and their environment variables;
+  - `CLAUDE_ENV_FILE`, `CLAUDE_CODE_SHELL_PREFIX` and the prompt-request protocol;
+  - `watchPaths` and FileChanged;
+  - the sandbox network proxy for HTTP hooks;
+  - progress messages and the stop-hook summary (UI).
+
+**Mutation, Phase 4 modules** (`hooks/`, `tools/execution.py`,
+`permissions/permission_request.py`, `runner.py`). The first run scored **89.5%**
+(4901 / 5474; 5489 mutants, 15 timeout, 541 survived, 32 with no tests). Triage killed 304
+more, verified one by one inside `mutants/`, and deleted 4 dead-code mutants, for a
+**projected 95.2%** (≈5205 / 5470). That projection is confirmed by the pre-push mutmut run.
+
+The remaining ≈265 survivors are the recorded equivalent classes:
+- log wording and arguments (≈139);
+- codec aliases;
+- default arguments;
+- `getattr` defaults on attributes that always exist;
+- `False`→`None`;
+- timing granularity under the 0.05 s abort poll;
+- library equivalences (urllib's lowercased proxy keys, POST implied by a request body);
+- dataclass defaults;
+- a PreToolUse deny `blocking_error` that `hookSpecificOutput` always overwrites;
+- the Phase 0 pool `phase_ledger` class.
+
+Triage also ported a missed upstream behaviour (MCP output replacement) and removed dead
+code in `ssrf_guard.py` and `tool_hooks.py`.
+
+**Verifying a survivor inside `mutants/`:** the baseline is `MUTANT_UNDER_TEST=""`. Left
+unset, mutmut's trampoline raises `KeyError` in every test, which makes every mutant look
+killed.
+
 ### The three things that change most
 
 1. **Routing by `status` string literals is replaced** by a closed vocabulary of seven
@@ -392,7 +481,7 @@ adapter and is tested against a fake adapter, which is the pattern to copy.
 ### Recorded baseline
 
 Measured against `app/workspace/`, `app/sync/`, `app/errors/`, `app/tools/` and
-`app/hooks/`, 942 tests:
+`app/hooks/`, 942 tests (historical: `app/tools/` and `app/hooks/` were deleted in Phase 4):
 
 | | |
 |---|---|
@@ -695,7 +784,7 @@ importing anything under `app/graph/` fails there.)
 P=.venv/bin
 
 $P/pytest tests/ -q                                     # offline suite, no credentials
-$P/flake8 app/loop app/workspace app/sync app/sandbox app/tools app/hooks tests   # touched files
+$P/flake8 app/loop app/workspace app/sync app/sandbox tests   # touched files
 $P/mypy                                                 # strict; config in pyproject.toml
 $P/mutmut run && $P/mutmut results                      # mutation testing; see the gotchas
 ```
@@ -832,61 +921,13 @@ Agents return the **full** conversation history; the node slices `updated_histor
 
 The sandbox is created once in `TDDOrchestrator.run` and killed in its `finally`; nodes only `Sandbox.connect(sandbox_id)`.
 
-### The tool layer (Phase 1B) — built, never wired, now scheduled for replacement
+### The tool layer (Phase 1B) — deleted in Phase 4
 
-> **Superseded.** This layer is one of the four the user has decided to drop and rebuild
-> against the loop — see [Upcoming refactor](#upcoming-refactor--read-before-extending-anything).
-> It is documented here because it still exists on disk and its design notes are the clearest
-> record of what was learned porting `Tool.ts`; several of its decisions carry over to the
-> rebuild. **Do not extend it.**
-
-`app/tools/` and `app/hooks/` are complete and fully tested, and **nothing in the running
-graph calls them**. The legacy `AgentAction` path is still what executes, so this layer
-changes no pipeline behavior.
-
-- **`tools/base.py`** — the `Tool` protocol, ported from claude-code's `Tool.ts`. Per-input
-  predicates (`is_read_only`, `is_concurrency_safe`, `is_destructive`,
-  `required_capability`), per-tool `max_result_chars`, and a `description(input)`/`prompt()`
-  split. `build_tool()` + `TOOL_DEFAULTS` fill omitted members with fail-closed defaults.
-- **`execute_tool()` is the only supported way to call a tool.** It owns the whole pipeline:
-  parse → `validate_input` → PreToolUse hook → `check_permissions` → capability gate →
-  workspace gate → `call` → result governance → PostToolUse hook → sync checkpoint.
-  Calling `tool.call` directly bypasses all of it.
-- **Two orthogonal enforcement axes**, checked at `ToolContext` level rather than during
-  tool resolution, so a mistaken frontmatter entry cannot grant capability.
-  `permission_mode` gates *what* on a three-level ladder (`read` < `write` < `execute`);
-  `workspace` gates *where*. `Bash` reports its capability **per input**, which is what
-  lets the `read_only` researcher hold it: `Bash("ls")` is a read, `Bash("pip install")`
-  is refused. `RunTests` is exempt from the ladder (it runs no agent-authored command),
-  which is what keeps the refactorer at `workspace_write`.
-- **Three sandbox pins**: `RunTests`, `BashOutput` and `KillShell` bypass the router and
-  talk to `E2BAdapter` directly. `HostRead` is the only tool pinned to `local`, and it
-  carries no path allowlist — the `workspace` field is the boundary, deliberately.
-- **Result governance**: a result over its tool's limit is written to
-  `.tddagents/tool_results/` in the sandbox and returned as head/tail plus a path the agent
-  can `ReadFile`. `.tddagents/` is in `SYNC_EXCLUDE_FALLBACK`, so tooling scratch never
-  reaches `workspace_output_*`. `ReadFile` alone is unbounded — persisting it would create
-  a ReadFile → file → ReadFile loop.
-- **`tools/executor.py`** partitions a turn's calls exactly as `toolOrchestration.ts` does:
-  consecutive concurrency-safe calls run together on a thread pool capped at
-  `Config.MAX_TOOL_CONCURRENCY`, everything else runs alone. Results are re-sorted into the
-  model's original call order, so the message list and event log are replayable even though
-  wall-clock interleaving is not. A failing tool does **not** abort its siblings.
-- **`app/hooks/`** — PreToolUse/PostToolUse as ordinary shell commands, configured in three
-  merged scopes (`~/.tddagents/settings.json` → `.tddagents/settings.json` →
-  `.tddagents/settings.local.json`; later scopes append, so a personal file can add a veto
-  but never silence a project one). JSON payload on stdin; exit 0 proceeds, exit 2 vetoes a
-  PreToolUse call or flags a PostToolUse result, anything else is logged and ignored. A
-  typed JSON document on stdout refines the verdict. **This supersedes the plan document's
-  Phase 6 "on_start only" scope**, at the user's explicit direction.
-  - PostToolUse cannot un-run a tool: the output stands as ground truth, the hook's stderr
-    rides along as feedback, and `hook_stopped_continuation` is set for Phase 2 to halt on.
-  - Hooks run on the host, outside the `workspace` boundary. They are operator
-    configuration, like the shell that launched the pipeline.
-
-`CommandExitException` is reclassified **on the tool path only**: a non-zero exit is a
-`ToolResult` carrying `exit_code`. `utils/sandbox_utils.py::_run_or_raise` still escalates
-it to `TransientInfraError` for the legacy nodes, and goes away with them in Phase 2.
+`app/tools/` and `app/hooks/` were a first port of `Tool.ts` and the hook system onto the
+LangGraph pipeline. Nothing in the running graph ever called them, and Phase 4 deleted both
+(2026-10-21, at the user's direction) once `app/loop/tools/` and `app/loop/hooks/` had
+replaced them. Their design notes live on in git history; the loop-side modules are the
+ones to read.
 
 ### Error taxonomy
 

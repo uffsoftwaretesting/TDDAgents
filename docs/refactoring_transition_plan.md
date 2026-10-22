@@ -214,6 +214,42 @@ rules (as v2.1.110 later does upstream); applied updates are re-stripped of dang
   `agent_type`.
 - Then delete `app/hooks/` (scheduled in `CLAUDE.md`).
 
+*Phase 4 outcome (2026-10-21), per the interview ("follow claude-code's source and
+architecture" for every choice):* `app/loop/hooks/` ports the hook system whole — the 27-event
+vocabulary, the four hook types (command, prompt, agent, http with the SSRF guard), the
+config snapshot over the same five settings sources as the permission rules (policy
+`disableAllHooks` / `allowManagedHooksOnly` / `strictPluginOnlyCustomization`), `executeHooks`
+(parallel, results as they complete, deny > ask > allow), `processHookJSONOutput`, async and
+`asyncRewake` hooks delivered between turns, and `if` conditions through each tool's new
+`prepare_permission_matcher`. Call sites are upstream's: PreToolUse / PostToolUse /
+PostToolUseFailure in the tool pipeline (hook output is now separate meta messages, reordered
+after a batch's tool results for the API), PermissionRequest at the headless ask, Stop /
+SubagentStop (by `agent_id`), StopFailure at the API-error and prompt-too-long exits,
+SessionStart (`startup`, and `compact` after a compaction) + UserPromptSubmit + SessionEnd in
+the runner, PreCompact / PostCompact in reactive compaction. `get_production_deps` wires the
+stop runner with **`tdd_phase_incomplete_hook` first**; configured hooks only add blocks, and a
+configured `continue: false` ends the run `stop_hook_prevented`, never `completed`. Prompt and
+agent hooks default to `TDDAGENTS_SMALL_FAST_MODEL`, then the run's model. The agent-hook
+verifier gets upstream's pool (the parent's phase-filtered tools minus the disallowed set) in
+`dontAsk`, reads the parent's ledger and rules so the phase tier applies, and has its app-state
+writes discarded, so it can never move the ledger. `app/hooks/` and `app/tools/` are deleted.
+
+### Phase 4b — The auto-mode (YOLO) classifier
+
+- Code: `claude-code/src/utils/permissions/yoloClassifier.ts` → `classifyYoloAction`, `buildYoloSystemPrompt`; `claude-code/src/utils/permissions/classifierDecision.ts` → `isAutoModeAllowlistedTool`; `claude-code/src/utils/permissions/denialTracking.ts` → `recordDenial`, `recordSuccess`; `claude-code/src/utils/permissions/permissions.ts` → `hasPermissionsToUseTool`
+- Added by the user on 2026-10-21, built after Phase 4 passes its gate.
+- Port the classifier code whole: transcript building, the `classify_result` tool, the
+  two-stage XML path, fail-closed on errors, denial tracking, the acceptEdits and allowlist
+  fast paths, and the auto branch of `hasPermissionsToUseTool` (before the headless deny), plus
+  PermissionDenied hooks on a classifier denial.
+- **The classifier's system prompt is absent from the v2.1.88 snapshot** (the `.txt` files are
+  compiled out). A TDDAgents-owned Markdown prompt under `app/prompts/` replaces it, recorded as
+  a divergence.
+- **TDD:** the classifier only ever sees an 'ask' — the phase tier sits above it and denies
+  first, so no classifier verdict can open a phase-forbidden write.
+- `auto` is opt-in (`RunConfig.permission_mode` or settings `defaultMode: auto`); the shipped
+  default stays `acceptEdits`.
+
 ### Phase 5 — Context assembly, attachments and compaction
 
 - Code: `claude-code/src/services/compact/autoCompact.ts` → `autoCompactIfNeeded`, `AUTOCOMPACT_BUFFER_TOKENS`; `claude-code/src/services/compact/compact.ts` → `compactConversation`; `claude-code/src/services/compact/postCompactCleanup.ts` → `runPostCompactCleanup`; `claude-code/src/utils/attachments.ts` → `getAttachments`; `claude-code/src/services/api/claude.ts` → `addCacheBreakpoints`

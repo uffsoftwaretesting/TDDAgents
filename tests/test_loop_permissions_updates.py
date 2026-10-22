@@ -31,6 +31,8 @@ from app.loop.permissions.types import (
     PermissionRuleSource,
     ToolPermissionContext,
 )
+from app.loop.hooks.output import AggregatedHookResult
+from tests.hook_doubles import ScriptedDispatcher
 
 S = PermissionRuleSource
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK
@@ -285,7 +287,8 @@ def test_build_context_carries_its_locations(tmp_path):
 
 def _ctx(perm: ToolPermissionContext, decision: Any, ledger: PhaseLedger | None = None):
     state = AppState(phase_ledger=ledger or PhaseLedger(), tool_permission_context=perm)
-    dispatcher = SimpleNamespace(run=lambda *a, **k: SimpleNamespace(permission_request_result=decision))
+    scripted = [AggregatedHookResult(permission_request_result=decision)]
+    dispatcher = ScriptedDispatcher(script={"PermissionRequest": scripted})
     return tool_context_for(AppStateStore(state=state), hook_dispatcher=dispatcher,
                             workspace=SimpleNamespace(root="/ws"))
 

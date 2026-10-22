@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage
 
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
+from app.loop.messages import wrap_in_system_reminder as wrap_in_system_reminder
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,11 +216,6 @@ class DeltaManager:
 # ── TDD run state ────────────────────────────────────────────────────────────
 
 TDD_STATE_KEY = "tdd_state"
-
-
-def wrap_in_system_reminder(content: str) -> str:
-    """`src/utils/messages.ts` -> `wrapInSystemReminder`."""
-    return f"<system-reminder>\n{content}\n</system-reminder>"
 
 
 def tdd_state_payload(ledger: PhaseLedger, todo: str | None) -> dict[str, object]:

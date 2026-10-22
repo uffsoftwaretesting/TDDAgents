@@ -95,24 +95,27 @@ async def run_permission_request_hooks_for_headless_agent(
     context: ToolContext,
     permission_mode: PermissionMode | str,
 ) -> PermissionResult | None:
-    """`runPermissionRequestHooksForHeadlessAgent`: a hook's decision, or `None`."""
-    dispatcher = getattr(context, "hook_dispatcher", None)
-    if dispatcher is None:
-        return None
+    """`runPermissionRequestHooksForHeadlessAgent`: the first hook decision, or `None`."""
+    from app.loop.hooks.execute import execute_permission_request_hooks
+
     try:
-        outcome = dispatcher.run(
-            PERMISSION_REQUEST_EVENT,
-            tool_name=tool.name,
-            tool_input=input_args,
-            ctx_fields={"permission_mode": str(permission_mode), "tool_use_id": tool_use_id},
-        )
+        async for result in execute_permission_request_hooks(
+            context, tool.name, tool_use_id, input_args, str(permission_mode), None,
+            getattr(context, "cancel", None),
+        ):
+            decision = permission_request_decision(result)
+            if decision is None:
+                continue
+            return await _apply_decision(decision, tool, input_args, context)
     except Exception:
         # If hooks fail, fall through to the auto-deny rather than crashing.
         logger.exception("PermissionRequest hook failed for headless agent")
-        return None
-    decision = permission_request_decision(outcome)
-    if decision is None:
-        return None
+    return None
+
+
+async def _apply_decision(
+    decision: Mapping[str, Any], tool: Tool, input_args: dict[str, Any], context: ToolContext
+) -> PermissionResult:
     if decision["behavior"] == "allow":
         updated = decision.get("updatedInput")
         final_input = dict(updated) if isinstance(updated, Mapping) else input_args
