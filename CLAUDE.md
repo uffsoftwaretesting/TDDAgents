@@ -447,7 +447,35 @@ The auto-mode ("YOLO") classifier, added to the plan by the user and ported whol
 - Not ported: the PowerShell guard, `plan` mode with auto active, debug dumps, and the Bash
   classifier (all off in the external build).
 
-The Phase 4b modules join the pre-push mutation run.
+**Pre-push gate, Phases 4 + 4b (2026-10-22).** Measured under `paths_to_mutate` =
+`hooks/`, `tools/execution.py`, `permissions/{permission_request,auto_mode,denial_tracking,
+classifier_decision,yolo_classifier}.py`, `runner.py`, at 5132 tests:
+
+| | |
+|---|---|
+| Mutants | 7436 (21 timeout) |
+| Killed (gate run) | 6807 — **91.8%** (6807 / 7415) |
+| Killed after triage | 7048 — **95.1%** (7048 / 7414; one dead-code mutant deleted) |
+| flake8 / ruff / mypy | 0 findings, 0 findings, 0 errors (strict) |
+
+Triage killed 241 more mutants, each verified inside `mutants/` against the
+`MUTANT_UNDER_TEST=""` baseline. 108 of them sat in `build_production_classifier_caller`,
+which is now tested offline through a fake `get_chat_model` and is no longer exempt.
+
+The remaining survivors are the recorded equivalent classes:
+- log wording and arguments;
+- `getattr` defaults on attributes that always exist;
+- default arguments;
+- codec aliases;
+- `False`→`None`;
+- dataclass defaults;
+- case flips under `re.IGNORECASE`;
+- `_with_accept_edits`' `permission_context` variants, which fall back to the same
+  overridden app state.
+
+**Ruff** joins the lint step with its 0.17 defaults. `[tool.ruff.lint] external` lists
+flake8's codes, so ruff does not strip flake8's `# noqa` markers. Deliberate catch-alls
+carry `# noqa: BLE001` with their reason.
 
 ### The three things that change most
 

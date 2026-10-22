@@ -13,9 +13,10 @@ import logging
 import sys
 import time
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage

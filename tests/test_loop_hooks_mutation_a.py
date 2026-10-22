@@ -13,8 +13,9 @@ import json
 import re
 import time
 import uuid
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
-from typing import Any, AsyncIterator, Mapping
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -41,7 +42,9 @@ from app.loop.hooks.tool_hooks import (
     run_pre_tool_use_hooks,
 )
 from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.permission_request import run_permission_request_hooks_for_headless_agent
+from app.loop.permissions.permission_request import (
+    run_permission_request_hooks_for_headless_agent,
+)
 from app.loop.permissions.types import PermissionMode, ToolPermissionContext
 from app.loop.state import initial_loop_state
 from app.loop.tools.base import build_tool

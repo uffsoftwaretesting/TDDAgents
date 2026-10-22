@@ -20,7 +20,11 @@ from app.loop.hooks.tool_hooks import (
     run_post_tool_use_hooks,
     run_pre_tool_use_hooks,
 )
-from app.loop.permissions.types import PermissionBehavior, PermissionMode, ToolPermissionContext
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionMode,
+    ToolPermissionContext,
+)
 from tests.hook_doubles import ScriptedDispatcher
 
 BLOCK = HookBlockingError(blocking_error="no writes", command="vet.sh")

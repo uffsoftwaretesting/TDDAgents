@@ -16,12 +16,18 @@ from app.loop.hooks.matching import (
     matches_pattern,
     prepare_if_condition_matcher,
 )
-from app.loop.hooks.schemas import AgentHook, CommandHook, HookMatcher, HttpHook, PromptHook
+from app.loop.hooks.schemas import (
+    AgentHook,
+    CommandHook,
+    HookMatcher,
+    HttpHook,
+    PromptHook,
+)
 from app.loop.tools.base import build_tool
 from app.loop.tools.types import ToolResult
 
-
 # ── matchesPattern ────────────────────────────────────────────────────────────
+
 
 def test_empty_and_star_match_everything():
     assert matches_pattern("Bash", None) is True

@@ -24,8 +24,9 @@ how the engine recognises `hook_stopped_continuation` (upstream's `query.ts` che
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 

@@ -23,12 +23,19 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from app.loop.hooks.config import HooksConfigSnapshot
 from app.loop.hooks.events import TOOL_EVENTS, HookEvent, match_query_for
-from app.loop.hooks.schemas import DEFAULT_HOOK_SHELL, CommandHook, HookCommand, HookMatcher, HttpHook
+from app.loop.hooks.schemas import (
+    DEFAULT_HOOK_SHELL,
+    CommandHook,
+    HookCommand,
+    HookMatcher,
+    HttpHook,
+)
 from app.loop.permissions.settings import (
     LEGACY_TOOL_NAME_ALIASES,
     normalize_legacy_tool_name,

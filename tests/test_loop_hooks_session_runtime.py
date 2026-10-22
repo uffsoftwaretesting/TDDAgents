@@ -18,7 +18,10 @@ from app.loop.hooks.messages import HookAttachment, HookBlockingError
 from app.loop.hooks.output import AggregatedHookResult
 from app.loop.hooks.runtime import build_hook_dispatcher
 from app.loop.hooks.schemas import CommandHook, HookMatcher
-from app.loop.hooks.session import process_session_start_hooks, process_user_prompt_submit_hooks
+from app.loop.hooks.session import (
+    process_session_start_hooks,
+    process_user_prompt_submit_hooks,
+)
 from app.loop.permissions.settings import SettingsLocations
 from tests.hook_doubles import ScriptedDispatcher
 

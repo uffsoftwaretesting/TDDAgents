@@ -22,8 +22,9 @@ the permission rules and the TDD phase tier, so no hook can approve a phase-forb
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 from app.loop.hooks.execute import (
     execute_post_tool_hooks,
@@ -295,8 +296,8 @@ __all__ = [
     "PostToolHooksOutcome",
     "PreToolHooksOutcome",
     "get_rule_behavior_description",
-    "run_post_tool_use_failure_hooks",
     "run_permission_denied_hooks",
+    "run_post_tool_use_failure_hooks",
     "run_post_tool_use_hooks",
     "run_pre_tool_use_hooks",
 ]

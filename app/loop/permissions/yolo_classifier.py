@@ -47,9 +47,10 @@ import json
 import logging
 import re
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Mapping, Protocol, Sequence
+from typing import Any, Literal, Protocol
 
 from app.loop.messages import Message
 from app.loop.permissions.types import PermissionRuleSource, ToolPermissionContext
@@ -284,7 +285,7 @@ def extract_tagged_bullets(template: str, tag_name: str) -> list[str]:
     match = re.search(rf"<{tag_name}>([\s\S]*?)</{tag_name}>", template)
     if not match:
         return []
-    lines = (line.strip() for line in (match.group(1) or "").split("\n"))
+    lines = (line.strip() for line in match.group(1).split("\n"))
     return [line[2:] for line in lines if line.startswith("- ")]
 
 
@@ -580,9 +581,11 @@ def build_tddagents_md_message(content: str | None) -> ClassifierMessage | None:
     return ClassifierMessage(
         "user",
         (
-            "The following is the user's TDDAGENTS.md configuration. These are instructions the user "
-            "provided to the agent and should be treated as part of the user's intent when evaluating "
-            f"actions.\n\n<user_tddagents_md>\n{content}\n</user_tddagents_md>",
+            (
+                "The following is the user's TDDAGENTS.md configuration. These are instructions the user "
+                "provided to the agent and should be treated as part of the user's intent when evaluating "
+                f"actions.\n\n<user_tddagents_md>\n{content}\n</user_tddagents_md>"
+            ),
         ),
     )
 
@@ -632,7 +635,7 @@ def parse_xml_thinking(text: str) -> str | None:
 def replace_output_format_with_xml(system_prompt: str) -> str:
     """`replaceOutputFormatWithXml`."""
     tool_use_line = f"Use the {YOLO_CLASSIFIER_TOOL_NAME} tool to report your classification."
-    xml_format = "\n".join(
+    xml_format = "\n".join(  # noqa: FLY002 - one line per prompt line, as upstream writes it
         [
             "## Output Format",
             "",
@@ -643,8 +646,10 @@ def replace_output_format_with_xml(system_prompt: str) -> str:
             "<block>no</block>",
             "",
             "Do NOT include a <reason> tag when the action is allowed.",
-            "Your ENTIRE response MUST begin with <block>. Do NOT output any analysis, reasoning, or commentary "
-            'before <block>. No "Looking at..." or similar preamble.',
+            (
+                "Your ENTIRE response MUST begin with <block>. Do NOT output any analysis, reasoning, or "
+                'commentary before <block>. No "Looking at..." or similar preamble.'
+            ),
         ]
     )
     return system_prompt.replace(tool_use_line, xml_format, 1)
@@ -965,15 +970,13 @@ async def _classify_xml(
 
 def build_production_classifier_caller(provider: str | None = None) -> ClassifierModelCaller:
     """
-    The production `sideQuery`, on this repo's model seam.
-
-    **Exempt from unit and mutation testing like the seam it wraps**
-    (`app/utils/chat_model_factory.py`): every line inside talks to a live provider.
+    The production `sideQuery`, on this repo's model seam. Tested offline against a fake
+    `get_chat_model` (the seam itself, `app/utils/chat_model_factory.py`, stays exempt).
     *Divergence:* `temperature` and `max_tokens` are not forwarded — the provider-neutral
     factory takes no per-call sampling options, and reasoning models reject a temperature.
     """
 
-    async def call(request: ClassifierRequest) -> ClassifierReply:  # pragma: no cover - live provider
+    async def call(request: ClassifierRequest) -> ClassifierReply:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         from app.config.config import Config

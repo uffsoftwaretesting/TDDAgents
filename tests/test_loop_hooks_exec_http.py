@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import http.server
 import threading
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any, ClassVar
 
 import pytest
 
@@ -304,9 +305,9 @@ def test_timeout_is_aborted() -> None:
 # ── default transport against a local loopback server ────────────────────────
 
 class _Handler(http.server.BaseHTTPRequestHandler):
-    seen: list[dict[str, Any]] = []
+    seen: ClassVar[list[dict[str, Any]]] = []
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         _Handler.seen.append({
             "path": self.path,

@@ -50,12 +50,17 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Protocol, Sequence
+from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from app.loop.hooks.exec_prompt import add_arguments_to_prompt, get_small_fast_model, parse_hook_response
+from app.loop.hooks.exec_prompt import (
+    add_arguments_to_prompt,
+    get_small_fast_model,
+    parse_hook_response,
+)
 from app.loop.hooks.messages import HookAttachment, HookBlockingError
 from app.loop.hooks.output import HookResult
 from app.loop.hooks.process import ABORT_POLL_SECONDS, is_aborted

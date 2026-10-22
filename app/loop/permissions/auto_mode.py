@@ -48,8 +48,16 @@ from app.loop.permissions.denial_tracking import (
     record_success,
     should_fallback_to_prompting,
 )
-from app.loop.permissions.rules import extract_permission_context, requires_user_interaction
-from app.loop.permissions.types import PermissionBehavior, PermissionMode, PermissionResult, ToolPermissionContext
+from app.loop.permissions.rules import (
+    extract_permission_context,
+    requires_user_interaction,
+)
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionResult,
+    ToolPermissionContext,
+)
 
 if TYPE_CHECKING:
     from app.loop.context import ToolContext
@@ -263,10 +271,10 @@ async def auto_mode_decision(
 
 __all__ = [
     "DENIAL_LIMIT_ABORT",
-    "AutoModeAbortError",
     "SAFETY_CHECK_HEADLESS_REASON",
     "TRANSCRIPT_TOO_LONG_ABORT",
     "TRANSCRIPT_TOO_LONG_REASON",
+    "AutoModeAbortError",
     "auto_mode_decision",
     "current_denial_state",
     "handle_denial_limit_exceeded",

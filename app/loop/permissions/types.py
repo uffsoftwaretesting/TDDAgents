@@ -9,9 +9,10 @@ Ported from:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.loop.permissions.settings import SettingsLocations
@@ -167,9 +168,7 @@ def get_next_permission_mode(
         if is_bypass_available:
             return PermissionMode.BYPASS_PERMISSIONS
         return PermissionMode.DEFAULT
-    elif mode == PermissionMode.BYPASS_PERMISSIONS:
-        return PermissionMode.DEFAULT
-    elif mode == PermissionMode.DONT_ASK:
+    elif mode == PermissionMode.BYPASS_PERMISSIONS or mode == PermissionMode.DONT_ASK:
         return PermissionMode.DEFAULT
     else:
         # Fallback for auto, bubble, or other modes

@@ -25,7 +25,9 @@ from app.loop.permissions.messages import (
     create_permission_request_message,
     dont_ask_reject_message,
 )
-from app.loop.permissions.permission_request import run_permission_request_hooks_for_headless_agent
+from app.loop.permissions.permission_request import (
+    run_permission_request_hooks_for_headless_agent,
+)
 from app.loop.permissions.rules import (
     extract_permission_context,
     get_allow_rule_for_tool,
@@ -67,7 +69,10 @@ async def has_permissions_to_use_tool(
     (`auto_mode.py`) before the headless deny; any other 'ask' is resolved by
     `resolve_ask_without_prompt`.
     """
-    from app.loop.permissions.auto_mode import auto_mode_decision, reset_denials_on_allow
+    from app.loop.permissions.auto_mode import (
+        auto_mode_decision,
+        reset_denials_on_allow,
+    )
 
     result = await _has_permissions_to_use_tool_inner(tool, input_args, context)
     perm_ctx = extract_permission_context(context)

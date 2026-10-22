@@ -24,8 +24,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from app.loop.context import ToolContext
 from app.loop.permissions.bash_permissions import bash_tool_has_permission
@@ -129,7 +130,7 @@ def build_bash_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
             # would stall every concurrently dispatched tool and the model stream with it,
             # which is the whole point of the streaming executor.
             res = await asyncio.to_thread(ws.execute, command, timeout=timeout_ms / 1000)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Execution error: {e}", is_error=True)
 
         content = res.stdout

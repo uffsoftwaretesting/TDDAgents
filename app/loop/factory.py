@@ -3,10 +3,10 @@ import uuid
 from typing import Any
 
 from app.loop.config import RunConfig
-from app.loop.state import LoopState
-from app.loop.deps import LoopDeps, CompactionResult
+from app.loop.deps import CompactionResult, LoopDeps
 from app.loop.hooks.stop_hooks import build_stop_hooks_runner
 from app.loop.model import stream_call_model
+from app.loop.state import LoopState
 from app.loop.tools.orchestration import run_tools
 
 

@@ -15,17 +15,23 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context import AppState, AppStateStore, CancelToken, discard_app_state_update, tool_context_for
+from app.loop.context import (
+    AppState,
+    AppStateStore,
+    CancelToken,
+    discard_app_state_update,
+    tool_context_for,
+)
 from app.loop.hooks import exec_agent as ea
 from app.loop.hooks import exec_prompt as ep
 from app.loop.hooks.exec_agent import (
     STRUCTURED_OUTPUT_PROMPT,
     AgentHookRequest,
     AgentHookRunOutcome,
+    StructuredOutputHolder,
     build_agent_hook_runner,
     create_structured_output_tool,
     exec_agent_hook,
-    StructuredOutputHolder,
 )
 from app.loop.hooks.exec_prompt import HookCancelled, exec_prompt_hook, run_with_signal
 from app.loop.hooks.schemas import AgentHook, PromptHook

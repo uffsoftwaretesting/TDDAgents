@@ -15,13 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import (
-    AsyncIterator,
-    Callable,
-    Iterator,
     Literal,
-    Sequence,
 )
 
 from langchain_core.messages import ToolMessage
@@ -141,7 +138,7 @@ class StreamingToolExecutor:
 
         try:
             is_concurrency_safe = bool(tool_def.is_concurrency_safe(args))
-        except Exception:
+        except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             is_concurrency_safe = False
 
         tracked = TrackedTool(
@@ -313,7 +310,7 @@ class StreamingToolExecutor:
                     self.errored_tool_description = self._get_tool_description(tool)
                     self.sibling_abort_controller.abort("sibling_error")
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             this_tool_errored = True
             logger.warning("Tool execution raised unexpected exception: %s", exc)
             err_msg = ToolMessage(
@@ -368,8 +365,7 @@ class StreamingToolExecutor:
 
             if tool.status == "completed":
                 tool.status = "yielded"
-                for msg in tool.results:
-                    yield msg
+                yield from tool.results
             else:
                 # Invariant F4: Maintain strictly ordered emission of completed results
                 break

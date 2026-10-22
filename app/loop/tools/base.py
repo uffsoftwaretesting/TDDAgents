@@ -9,8 +9,14 @@ Ported from:
 from __future__ import annotations
 
 import inspect
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol, Sequence, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Protocol,
+    runtime_checkable,
+)
 
 from langchain_core.messages import ToolMessage
 
@@ -127,7 +133,7 @@ class BuiltTool:
     def is_enabled(self) -> bool:
         try:
             return bool(self._is_enabled())
-        except Exception:
+        except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return False
 
     def is_concurrency_safe(self, input: dict[str, Any]) -> bool:
@@ -136,7 +142,7 @@ class BuiltTool:
         """
         try:
             return bool(self._is_concurrency_safe(input))
-        except Exception:
+        except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return False
 
     def is_read_only(self, input: dict[str, Any]) -> bool:
@@ -145,25 +151,25 @@ class BuiltTool:
         """
         try:
             return bool(self._is_read_only(input))
-        except Exception:
+        except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return False
 
     def is_destructive(self, input: dict[str, Any]) -> bool:
         try:
             return bool(self._is_destructive(input))
-        except Exception:
+        except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return False
 
     def is_implementation_writer(self) -> bool:
         try:
             return bool(self._is_implementation_writer())
-        except Exception:
+        except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return False
 
     def is_test_writer(self) -> bool:
         try:
             return bool(self._is_test_writer())
-        except Exception:
+        except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return False
 
     def requires_user_interaction(self, input: dict[str, Any] | None = None) -> bool:
@@ -175,13 +181,13 @@ class BuiltTool:
                 except TypeError:
                     return bool(fn())  # type: ignore[call-arg]
             return bool(fn())  # type: ignore[call-arg]
-        except Exception:
+        except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return False
 
     def validate_input(self, input: dict[str, Any], context: ToolContext) -> ValidationResult:
         try:
             return self._validate_input(input, context)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ValidationResult(valid=False, message=str(exc))
 
     async def check_permissions(self, input: dict[str, Any], context: ToolContext) -> PermissionResult:

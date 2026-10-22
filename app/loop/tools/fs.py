@@ -53,11 +53,11 @@ Divergences, each forced by the `Workspace` protocol:
 from __future__ import annotations
 
 import math
-
 import re
 import shlex
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from app.loop.context import ToolContext
 from app.loop.context.file_state import FileState
@@ -74,9 +74,9 @@ from app.loop.permissions.shell_rules import match_wildcard_pattern
 from app.loop.prompts.loader import parse_markdown_frontmatter, render_prompt
 from app.loop.prompts.registry import global_prompt_registry
 from app.loop.tools.base import BuiltTool, build_tool
+from app.loop.tools.result_storage import TOOL_RESULTS_SUBDIR, config_home
 from app.loop.tools.ripgrep import rip_grep, to_relative_path
 from app.loop.tools.types import ToolResult, ValidationResult
-from app.loop.tools.result_storage import TOOL_RESULTS_SUBDIR, config_home
 from app.workspace.base import WorkspaceNotFound, normalize_path
 
 #: `FileReadTool.validateInput`'s refusal of a Read-denied path (errorCode 1).
@@ -368,7 +368,7 @@ def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
 
         try:
             content = read_text(ws, file_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Error reading file: {e}", is_error=True)
         if content is None:
             return ToolResult(content=f"File does not exist. {FILE_NOT_FOUND_CWD_NOTE}", is_error=True)
@@ -454,7 +454,7 @@ def build_write_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
             if is_stale(context, file_path, existing):
                 return ToolResult(content=FILE_UNEXPECTEDLY_MODIFIED_ERROR, is_error=True)
             ws.write_file(file_path, content)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Error writing file: {e}", is_error=True)
         record_write(context, file_path, content)
         if existing is None:
@@ -542,7 +542,7 @@ def build_edit_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
             actual_new = preserve_quote_style(old_string, actual_old, new_string)
             updated = actual_new if actual_old == "" else apply_edit_to_file(base, actual_old, actual_new, replace_all)
             ws.write_file(file_path, updated)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Error editing file: {e}", is_error=True)
 
         record_write(context, file_path, updated)
@@ -629,7 +629,7 @@ def build_glob_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         )
         try:
             paths = [to_relative_path(p) for p in rip_grep(ws, args, search_dir)]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Glob error: {e}", is_error=True)
         if not paths:
             return ToolResult(content="No files found")
@@ -717,7 +717,7 @@ def sort_by_mtime(ws: Any, paths: list[str]) -> list[str]:
     try:
         res = ws.execute(shlex.join(["python3", "-c", MTIME_SCRIPT, *paths]))
         mtimes = [int(x) for x in res.stdout.split()]
-    except Exception:
+    except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
         mtimes = []
     if len(mtimes) != len(paths):
         mtimes = [0] * len(paths)
@@ -762,7 +762,7 @@ def build_grep_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
                 extract_permission_context(context), permission_cwd(context), anchor_floating=True
             )
             results = rip_grep(ws, build_grep_args(input_args, ignore), target)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Grep error: {e}", is_error=True)
 
         if mode == "content":

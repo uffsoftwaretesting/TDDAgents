@@ -23,8 +23,9 @@ anywhere in the tool path.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from app.loop.context.file_state import FileState
 from app.loop.ledger import PhaseLedger
@@ -69,13 +70,13 @@ class AppState:
     `agentId ?? sessionId`, so a subagent's checklist never overwrites the coordinator's.
     """
 
-    phase_ledger: PhaseLedger = PhaseLedger()
+    phase_ledger: PhaseLedger = field(default_factory=PhaseLedger)
     todos: Mapping[str, tuple[Any, ...]] = field(default_factory=dict)
     #: Upstream `appState.toolPermissionContext`: the run's rules and mode, built once at
     #: entry by `build_tool_permission_context`. It lives here rather than on the
     #: `ToolContext` so a synchronous worker, which reads its parent's app state, is held
     #: to the same rules (`ToolContext.permission_context` still overrides it when set).
-    tool_permission_context: ToolPermissionContext = ToolPermissionContext()
+    tool_permission_context: ToolPermissionContext = field(default_factory=ToolPermissionContext)
     #: Upstream `appState.denialTracking`: the auto-mode classifier's denial streak and total
     #: (`permissions/denial_tracking.py`), `None` until auto mode first records one.
     denial_tracking: DenialTrackingState | None = None
@@ -217,9 +218,9 @@ from app.loop.context.attachments import (  # noqa: E402
     McpInstructionsDelta,
 )
 from app.loop.context.cache import (  # noqa: E402
+    MAX_CACHE_BREAKPOINTS,
     CacheBlock,
     CacheLatchError,
-    MAX_CACHE_BREAKPOINTS,
     SessionLatches,
     build_system_prompt_blocks,
     validate_cache_breakpoints_budget,
@@ -257,41 +258,41 @@ from app.loop.context.tokens import (  # noqa: E402
 )
 
 __all__ = [
-    "CancelToken",
+    "MAX_CACHE_BREAKPOINTS",
+    "AgentListingDelta",
     "AppState",
     "AppStateStore",
-    "discard_app_state_update",
-    "FileState",
-    "ToolContext",
-    "tool_context_for",
-    "TokenCounter",
-    "TokenWarningState",
-    "estimate_string_tokens",
-    "estimate_block_tokens",
-    "estimate_message_tokens",
-    "count_messages_tokens",
-    "calculate_token_warning_state",
-    "find_safe_truncation_index",
-    "slice_messages_head",
-    "validate_api_invariants",
-    "is_user_message",
-    "is_assistant_message",
-    "InstructionFile",
-    "load_instruction_file",
-    "strip_html_comments",
     "CacheBlock",
     "CacheLatchError",
-    "MAX_CACHE_BREAKPOINTS",
-    "SessionLatches",
-    "build_system_prompt_blocks",
-    "validate_cache_breakpoints_budget",
-    "AgentListingDelta",
-    "McpInstructionsDelta",
+    "CancelToken",
     "DeltaManager",
+    "FileState",
+    "InstructionFile",
+    "McpInstructionsDelta",
+    "SessionLatches",
+    "TokenCounter",
+    "TokenWarningState",
+    "ToolContext",
     "apply_tool_result_budget",
-    "microcompact_tool_results",
+    "build_system_prompt_blocks",
+    "calculate_token_warning_state",
     "compact_conversation",
-    "try_reactive_compact",
+    "count_messages_tokens",
+    "discard_app_state_update",
+    "estimate_block_tokens",
+    "estimate_message_tokens",
+    "estimate_string_tokens",
+    "find_safe_truncation_index",
     "invalidate_context_caches",
+    "is_assistant_message",
+    "is_user_message",
+    "load_instruction_file",
+    "microcompact_tool_results",
     "notify_compaction",
+    "slice_messages_head",
+    "strip_html_comments",
+    "tool_context_for",
+    "try_reactive_compact",
+    "validate_api_invariants",
+    "validate_cache_breakpoints_budget",
 ]

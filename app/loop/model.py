@@ -13,7 +13,8 @@ place the rest of the pipeline resolves them; this module never names a model it
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterable, AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator
+from typing import Any
 
 from langchain_core.messages import SystemMessage
 
@@ -63,7 +64,7 @@ def read_todo(context: Any) -> str | None:
 
     try:
         todos = read_todos(context)
-    except Exception:
+    except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
         return None
     if not todos:
         return None
@@ -72,7 +73,10 @@ def read_todo(context: Any) -> str | None:
 
 def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]:
     """System prompt + system context, user context, history, then this turn's attachment."""
-    from app.loop.context.compact import apply_tool_result_budget, microcompact_tool_results
+    from app.loop.context.compact import (
+        apply_tool_result_budget,
+        microcompact_tool_results,
+    )
 
     ws = state.tool_context.workspace
     session = get_session_context(config.run_id, ws)

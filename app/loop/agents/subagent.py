@@ -16,9 +16,10 @@ Provides:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -105,7 +106,7 @@ def _resolve_agent_definition(
         if filepath and Path(filepath).is_file():
             try:
                 return load_agent_definition_from_path(filepath, vars=vars, source="registry")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
                 logger.warning("Failed to load agent definition from path %s: %s", filepath, e)
         # Fallback to in-memory frontmatter/body
         fm = entry.get("frontmatter", {})
@@ -148,13 +149,13 @@ def create_subagent(
     - Filters tools and assembles independent worker tool pool.
     """
     # Check fork recursion guard
-    if (
+    is_fork = (
         (isinstance(agent_name_or_def, str) and not agent_name_or_def)
         or agent_name_or_def == FORK_SUBAGENT_TYPE
         or agent_name_or_def is FORK_AGENT
-    ):
-        if is_in_fork_child(parent_context.messages):
-            raise ValueError("Fork children cannot recursively spawn fork subagents.")
+    )
+    if is_fork and is_in_fork_child(parent_context.messages):
+        raise ValueError("Fork children cannot recursively spawn fork subagents.")
 
     # 1. Resolve agent definition
     agent_def = _resolve_agent_definition(
@@ -164,12 +165,11 @@ def create_subagent(
     # 2. Enforce TDD phase invariant
     current_app_state = parent_context.get_app_state()
     current_ledger = current_app_state.phase_ledger
-    if agent_def.phase is not None and current_ledger is not None:
-        if current_ledger.phase != agent_def.phase:
-            raise ValueError(
-                f"Agent '{agent_def.name}' requires phase {agent_def.phase}, "
-                f"but current TDD ledger is in phase {current_ledger.phase}."
-            )
+    if agent_def.phase is not None and current_ledger is not None and current_ledger.phase != agent_def.phase:
+        raise ValueError(
+            f"Agent '{agent_def.name}' requires phase {agent_def.phase}, "
+            f"but current TDD ledger is in phase {current_ledger.phase}."
+        )
 
     # 3. Resolve worker tools
     candidate_pool = list(available_tools) if available_tools else list(parent_context.tools)

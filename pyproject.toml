@@ -63,3 +63,8 @@ tests_dir = ["tests/"]
 # is never copied, every mutant dies of ImportError instead of of a real assertion, and
 # the run reports a meaningless 100%.
 also_copy = ["app/", "requirements.txt", ".tddagents/", "docs/"]
+
+[tool.ruff.lint]
+# flake8 is the project linter of record (setup.cfg); these are its codes, so a `# noqa`
+# for them is not an unused directive to ruff.
+external = ["E302", "E402", "E501", "W291", "W293"]

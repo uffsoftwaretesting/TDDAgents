@@ -143,12 +143,12 @@ def test_an_invalid_hook_discards_the_whole_settings_file(tmp_path, caplog):
     import json as _json
     import logging as _logging
 
+    from app.loop.hooks.config import capture_hooks_config_snapshot
     from app.loop.permissions.settings import (
         SettingsLocations,
         load_permission_rules,
         parse_settings_file,
     )
-    from app.loop.hooks.config import capture_hooks_config_snapshot
 
     proj = tmp_path / "proj"
     (proj / ".tddagents").mkdir(parents=True)

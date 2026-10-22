@@ -8,19 +8,29 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context import AppState, AppStateStore, DenialTrackingBox, tool_context_for
+from app.loop.context import (
+    AppState,
+    AppStateStore,
+    DenialTrackingBox,
+    tool_context_for,
+)
 from app.loop.hooks.output import AggregatedHookResult
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.auto_mode import (
     DENIAL_LIMIT_ABORT,
-    AutoModeAbortError,
     SAFETY_CHECK_HEADLESS_REASON,
     TRANSCRIPT_TOO_LONG_ABORT,
     TRANSCRIPT_TOO_LONG_REASON,
+    AutoModeAbortError,
 )
 from app.loop.permissions.denial_tracking import DenialTrackingState
 from app.loop.permissions.gate import has_permissions_to_use_tool
-from app.loop.permissions.types import PermissionBehavior, PermissionMode, PermissionResult, ToolPermissionContext
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionResult,
+    ToolPermissionContext,
+)
 from app.loop.permissions.yolo_classifier import (
     YoloClassifierResult,
     build_classifier_unavailable_message,
@@ -93,7 +103,7 @@ def test_a_classifier_allow_is_an_allow_and_resets_the_streak():
     assert (res.behavior, res.updated_input) == (ALLOW, {"command": "ls"})
     assert res.decision_reason == {"type": "classifier", "classifier": "auto-mode", "reason": "fine"}
     assert store.get().denial_tracking == DenialTrackingState(0, 5)
-    messages, action, tools, perm_ctx, signal, kwargs = clf.calls[0]
+    messages, _action, _tools, perm_ctx, signal, kwargs = clf.calls[0]
     assert messages == (HumanMessage(content="task"),)
     assert perm_ctx.mode == PermissionMode.AUTO
     assert signal is ctx.cancel

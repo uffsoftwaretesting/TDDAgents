@@ -14,27 +14,32 @@ All terminal reasons and continue sites are handled according to the closed voca
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
-from typing import Any, AsyncIterator, TypeAlias
+from typing import Any, TypeAlias
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.loop.config import RunConfig
 from app.loop.deps import LoopDeps
 from app.loop.hooks.execute import dispatcher_of, execute_stop_failure_hooks
-from app.loop.hooks.messages import ATTACHMENT_KEY, async_hook_response_messages, is_hook_stopped_continuation
+from app.loop.hooks.messages import (
+    ATTACHMENT_KEY,
+    async_hook_response_messages,
+    is_hook_stopped_continuation,
+)
 from app.loop.messages import Message, ToolCall, tool_calls_in
 from app.loop.retry import FallbackTriggeredError
 from app.loop.state import LoopState
 from app.loop.streaming.abort import AbortController, bridge_cancel_token
 from app.loop.streaming.executor import StreamingToolExecutor
-from app.loop.tools.execution import yield_missing_tool_results
 from app.loop.streaming.withhold import (
     is_max_output_tokens,
     is_prompt_too_long,
     is_withheld_error,
     take_withhold_gate_snapshot,
 )
+from app.loop.tools.execution import yield_missing_tool_results
 from app.loop.transitions import Continue, Terminal, Terminated, Transition
 
 #: What a run emits: every message as it is produced, then exactly one `Terminated`.
@@ -69,9 +74,7 @@ def _is_api_error(message: Message, error_type: str) -> bool:
     if getattr(message, "api_error", None) == error_type:
         return True
     additional = getattr(message, "additional_kwargs", None)
-    if isinstance(additional, dict) and additional.get("api_error") == error_type:
-        return True
-    return False
+    return bool(isinstance(additional, dict) and additional.get("api_error") == error_type)
 
 
 def _has_hook_stopped(message: Message) -> bool:
@@ -152,7 +155,7 @@ def refresh_tool_pool(context: Any) -> Any:
         return context
     try:
         refreshed = refresh()
-    except Exception:
+    except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
         return context
     if refreshed is None or refreshed is getattr(context, "tools", None):
         return context
@@ -196,12 +199,12 @@ async def run_loop(
         bridge_cancel_token(state.tool_context.cancel, turn_controller)
 
         def new_streaming_executor() -> StreamingToolExecutor | None:
-            if not getattr(state.tool_context, "tools", None):
+            if not getattr(state.tool_context, "tools", None):  # noqa: B023 - closure runs within the same iteration
                 return None
             return StreamingToolExecutor(
-                tools=state.tool_context.tools,
-                tool_context=state.tool_context,
-                turn_abort_controller=turn_controller,
+                tools=state.tool_context.tools,  # noqa: B023 - closure runs within the same iteration
+                tool_context=state.tool_context,  # noqa: B023 - closure runs within the same iteration
+                turn_abort_controller=turn_controller,  # noqa: B023 - closure runs within the same iteration
             )
 
         streaming_executor: StreamingToolExecutor | None = new_streaming_executor()
@@ -270,7 +273,7 @@ async def run_loop(
                     )
                 )
                 attempt_with_fallback = True
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
                 model_failed = exc
 
         if model_failed is not None:

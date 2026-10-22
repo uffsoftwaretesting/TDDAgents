@@ -30,8 +30,9 @@ HOOK = CommandHook(command="vet.sh")
 
 
 def process(doc: dict[str, Any], **kw: Any):
-    defaults: dict[str, Any] = dict(command="vet.sh", hook_name="PreToolUse:Bash", tool_use_id="t1",
-                                    hook_event="PreToolUse")
+    defaults: dict[str, Any] = {
+        "command": "vet.sh", "hook_name": "PreToolUse:Bash", "tool_use_id": "t1", "hook_event": "PreToolUse",
+    }
     defaults.update(kw)
     return process_hook_json_output(doc, **defaults)
 

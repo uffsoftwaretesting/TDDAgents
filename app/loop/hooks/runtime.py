@@ -18,11 +18,23 @@ from typing import Any
 
 from app.loop.hooks.async_registry import AsyncHookRegistry
 from app.loop.hooks.config import capture_hooks_config_snapshot
-from app.loop.hooks.exec_agent import AgentHookRunner, build_agent_hook_runner, exec_agent_hook
+from app.loop.hooks.exec_agent import (
+    AgentHookRunner,
+    build_agent_hook_runner,
+    exec_agent_hook,
+)
 from app.loop.hooks.exec_http import exec_http_hook, http_hook_policy_from_settings
-from app.loop.hooks.exec_prompt import PromptModelCaller, build_prompt_model_caller, exec_prompt_hook
+from app.loop.hooks.exec_prompt import (
+    PromptModelCaller,
+    build_prompt_model_caller,
+    exec_prompt_hook,
+)
 from app.loop.hooks.execute import HookDispatcher
-from app.loop.permissions.settings import SettingsLocations, get_settings_for_source, load_settings
+from app.loop.permissions.settings import (
+    SettingsLocations,
+    get_settings_for_source,
+    load_settings,
+)
 from app.loop.permissions.types import PermissionRuleSource
 
 

@@ -17,9 +17,10 @@ import json
 import ssl
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import Any, ClassVar
 
 import pytest
 from langchain_core.messages import ToolMessage
@@ -27,13 +28,32 @@ from langchain_core.messages import ToolMessage
 from app.loop.hooks.async_registry import AsyncHookRegistry
 from app.loop.hooks.config import HooksConfigSnapshot
 from app.loop.hooks.exec_command import exec_command_hook
-from app.loop.hooks.exec_http import HttpHookPolicy, HttpRequest, _send_blocking, exec_http_hook, should_bypass_proxy
-from app.loop.hooks.matching import _find_tool, get_matching_hooks, prepare_if_condition_matcher
+from app.loop.hooks.exec_http import (
+    HttpHookPolicy,
+    HttpRequest,
+    _send_blocking,
+    exec_http_hook,
+    should_bypass_proxy,
+)
+from app.loop.hooks.matching import (
+    _find_tool,
+    get_matching_hooks,
+    prepare_if_condition_matcher,
+)
 from app.loop.hooks.messages import reorder_attachments_for_api
 from app.loop.hooks.output import validate_hook_json
 from app.loop.hooks.process import CapturedProcess
-from app.loop.hooks.schemas import CommandHook, HookMatcher, HttpHook, parse_hooks_settings
-from app.loop.hooks.ssrf_guard import expand_ipv6_groups, is_blocked_address, ssrf_guarded_lookup
+from app.loop.hooks.schemas import (
+    CommandHook,
+    HookMatcher,
+    HttpHook,
+    parse_hooks_settings,
+)
+from app.loop.hooks.ssrf_guard import (
+    expand_ipv6_groups,
+    is_blocked_address,
+    ssrf_guarded_lookup,
+)
 
 PINNED = "127.0.0.2"
 
@@ -41,7 +61,7 @@ PINNED = "127.0.0.2"
 # ── a recording loopback server ──────────────────────────────────────────────
 
 class _Handler(http.server.BaseHTTPRequestHandler):
-    seen: list[dict[str, Any]] = []
+    seen: ClassVar[list[dict[str, Any]]] = []
 
     def _record(self, body: str) -> None:
         _Handler.seen.append({
@@ -52,7 +72,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "x": self.headers.get("X-Hook"),
         })
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length).decode()
         self._record(body)
@@ -71,13 +91,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         self._record("")
         self.send_response(405)
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def do_CONNECT(self) -> None:  # noqa: N802
+    def do_CONNECT(self) -> None:
         self._record("")
         self.send_response(200)
         self.end_headers()
@@ -110,7 +130,7 @@ def tls_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]
 
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "tddagents-test")])
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)

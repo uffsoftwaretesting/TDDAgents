@@ -18,8 +18,9 @@ whose message carries the schema hint, exactly as upstream prints it.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 from app.loop.hooks.messages import HookAttachment, HookBlockingError
 from app.loop.hooks.schemas import HookCommand

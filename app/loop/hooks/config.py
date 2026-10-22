@@ -25,11 +25,16 @@ mid-run does not change what the run executes, so the record of a run can name i
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.loop.hooks.schemas import HookMatcher, parse_hooks_settings
-from app.loop.permissions.settings import SettingsLocations, get_settings_for_source, load_settings
+from app.loop.permissions.settings import (
+    SettingsLocations,
+    get_settings_for_source,
+    load_settings,
+)
 from app.loop.permissions.types import PermissionRuleSource
 
 

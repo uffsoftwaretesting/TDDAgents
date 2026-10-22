@@ -18,19 +18,20 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator, Callable, Sequence
+from typing import TYPE_CHECKING
 
 from langchain_core.messages import AIMessage
 
 from app.loop.messages import Message, ToolCall
 from app.loop.tools.base import Tool, find_tool_by_name
-from app.loop.tools.validation import validate_against_schema
 from app.loop.tools.execution import (
     ToolExecutionOutcome,
     run_tool_use,
     yield_missing_tool_results,
 )
+from app.loop.tools.validation import validate_against_schema
 
 #: `toolOrchestration.ts` -> `getMaxToolUseConcurrency`'s fallback.
 DEFAULT_MAX_TOOL_USE_CONCURRENCY = 10
@@ -89,14 +90,12 @@ def partition_tool_calls(
         tool_name = str(call.get("name") or "")
         tool = find_tool_by_name(tools, tool_name)
         args = call.get("args") or {}
-        if tool is None:
-            is_safe = False
-        elif validate_against_schema(tool_name, getattr(tool, "input_schema", None), args) is not None:
+        if tool is None or validate_against_schema(tool_name, getattr(tool, "input_schema", None), args) is not None:
             is_safe = False
         else:
             try:
                 is_safe = bool(tool.is_concurrency_safe(args))
-            except Exception:
+            except Exception:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
                 is_safe = False
 
         if is_safe and batches and batches[-1].is_concurrency_safe:
@@ -173,7 +172,7 @@ async def run_tools(
                 async def execute_concurrent(c: ToolCall) -> tuple[str, ToolExecutionOutcome]:
                     cid_inner = str(c.get("id") or "")
                     try:
-                        async with semaphore:
+                        async with semaphore:  # noqa: B023 - closure runs within the same iteration
                             outcome = await run_tool_use(c, assistant_message, context, available_tools)
                         return cid_inner, outcome
                     finally:

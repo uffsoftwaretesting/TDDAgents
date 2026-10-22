@@ -6,9 +6,10 @@ import asyncio
 import itertools
 import json
 import logging
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -16,7 +17,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.loop.context import CancelToken
 from app.loop.hooks import execute as ex
 from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.events import SESSION_END_HOOK_TIMEOUT_MS_DEFAULT, TOOL_HOOK_EXECUTION_TIMEOUT_MS
+from app.loop.hooks.events import (
+    SESSION_END_HOOK_TIMEOUT_MS_DEFAULT,
+    TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+)
 from app.loop.hooks.execute import (
     HookDispatcher,
     HookOutsideReplResult,
@@ -38,10 +42,17 @@ from app.loop.hooks.execute import (
 )
 from app.loop.hooks.messages import HookAttachment, HookBlockingError
 from app.loop.hooks.output import AggregatedHookResult, HookResult
-from app.loop.hooks.schemas import AgentHook, CommandHook, HookCommand, HookMatcher, HttpHook, PromptHook
-
+from app.loop.hooks.schemas import (
+    AgentHook,
+    CommandHook,
+    HookCommand,
+    HookMatcher,
+    HttpHook,
+    PromptHook,
+)
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def snapshot(event: str, *hooks: HookCommand, matcher: str | None = None, **kwargs: Any) -> HooksConfigSnapshot:
     return HooksConfigSnapshot(hooks={event: (HookMatcher(hooks=tuple(hooks), matcher=matcher),)}, **kwargs)
@@ -172,7 +183,7 @@ def test_the_prompt_executor_is_handed_everything():
     ctx = SimpleNamespace(tools=())
     messages = [HumanMessage(content="m")]
     collect(d.execute_hooks(PRE, "tu-9", match_query="Bash", signal=token, tool_context=ctx, messages=messages))
-    [(hook, hook_name, event, json_input, signal, context, msgs, tool_use_id)] = prompts.calls
+    [(_hook, hook_name, event, json_input, signal, context, msgs, tool_use_id)] = prompts.calls
     assert (hook_name, event, tool_use_id) == ("PreToolUse:Bash", "PreToolUse", "tu-9")
     assert json.loads(json_input) == PRE
     assert signal is token and context is ctx and msgs is messages
@@ -240,7 +251,7 @@ def test_updated_input_rides_with_allow_and_ask_but_not_deny():
     cases: tuple[tuple[Any, Any], ...] = (("allow", {"a": 1}), ("ask", {"a": 1}), ("deny", None))
     for behavior, expected in cases:
         items = run_prompts({"p": lambda h: HookResult(
-            hook=h, outcome="success", permission_behavior=behavior, updated_input={"a": 1})})
+            hook=h, outcome="success", permission_behavior=behavior, updated_input={"a": 1})})  # noqa: B023
         assert items == [AggregatedHookResult(permission_behavior=behavior, hook_source="settings",
                                               updated_input=expected)]
 
@@ -363,7 +374,7 @@ def test_the_agent_executor_is_handed_everything_including_agent_type(clock):
     hook = AgentHook(prompt="verify", status_message="Verifying")
     hook_input = {"hook_event_name": "SubagentStop", "agent_type": "tester"}
     result = one(dispatcher(agent_executor=agent), hook, messages, hook_input)
-    [(h, name, event, json_input, signal, ctx, tool_use_id, msgs, agent_type)] = seen
+    [(h, name, event, json_input, _signal, _ctx, tool_use_id, msgs, agent_type)] = seen
     assert (h, name, event, tool_use_id, msgs, agent_type) == (
         hook, "PreToolUse:Bash", "SubagentStop", "tu", messages, "tester")
     assert json.loads(json_input) == hook_input
@@ -603,14 +614,14 @@ def test_http_async_reply_is_a_bare_success():
 
 def test_http_reply_is_processed_with_the_url_as_command():
     body = '{"decision": "block", "reason": "nope"}'
-    hook, result, _ = http_one(http_result(body=body, status_code=200))
+    _hook, result, _ = http_one(http_result(body=body, status_code=200))
     assert result.outcome == "success"
     assert result.blocking_error == HookBlockingError(blocking_error="nope", command="https://hooks.test/pre")
     assert result.attachment is not None and result.attachment.type == "hook_blocking_error"
 
 
 def test_http_empty_body_is_an_empty_json_reply():
-    hook, result, _ = http_one(http_result(body="", status_code=204))
+    _hook, result, _ = http_one(http_result(body="", status_code=204))
     assert result.outcome == "success"
     assert result.attachment is not None
     assert (result.attachment.type, result.attachment.stdout, result.attachment.exit_code,
@@ -832,7 +843,7 @@ def test_post_tool_hooks_input():
     d = recorder("PostToolUse")
     context = ctx(d)
     collect(execute_post_tool_hooks(context, "Edit", "tu2", {"file_path": "a"}, {"ok": 1}, "plan"))
-    [(hook_input, tool_use_id, kwargs)] = d.calls
+    [(hook_input, _tool_use_id, kwargs)] = d.calls
     assert hook_input == {**BASE, "permission_mode": "plan", "hook_event_name": "PostToolUse",
                           "tool_name": "Edit", "tool_input": {"file_path": "a"}, "tool_response": {"ok": 1},
                           "tool_use_id": "tu2"}
@@ -949,7 +960,7 @@ def test_pre_compact_merges_successful_outputs_and_describes_all():
     result = asyncio.run(execute_pre_compact_hooks(d, "auto", "custom", "sig", 7))
     assert result == PreCompactHookResult(
         new_custom_instructions="keep tests\n\nand ledger",
-        user_display_message="\n".join([
+        user_display_message="\n".join([  # noqa: FLY002 - one line per display line
             "PreCompact [a] completed successfully: keep tests",
             "PreCompact [b] completed successfully",
             "PreCompact [c] failed: broke",

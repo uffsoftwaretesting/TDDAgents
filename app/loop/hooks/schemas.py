@@ -15,8 +15,9 @@ rules in the same files are already loaded that way).
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, TypeAlias
+from typing import Any, TypeAlias
 from urllib.parse import urlparse
 
 from app.loop.hooks.events import is_hook_event
@@ -326,9 +327,9 @@ __all__ = [
     "HookMatcher",
     "HookSchemaError",
     "HooksSettings",
-    "hooks_schema_errors",
     "HttpHook",
     "PromptHook",
+    "hooks_schema_errors",
     "parse_hook_command",
     "parse_hook_matcher",
     "parse_hooks_settings",

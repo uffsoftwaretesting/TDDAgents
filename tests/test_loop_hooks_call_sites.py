@@ -8,16 +8,21 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, AsyncIterator
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.loop.config import build_run_config
 from app.loop.context import AppStateStore, tool_context_for
-from app.loop.context.compact import COMPACT_TRIGGER, merge_hook_instructions, try_reactive_compact
+from app.loop.context.compact import (
+    COMPACT_TRIGGER,
+    merge_hook_instructions,
+    try_reactive_compact,
+)
 from app.loop.deps import CompactionResult, LoopDeps, StopHookResult
 from app.loop.engine import drain, run_loop
 from app.loop.hooks.execute import HookOutsideReplResult
@@ -184,7 +189,7 @@ def test_serial_and_concurrent_batches_emit_extras_after_each_result():
         state = initial_loop_state((HumanMessage(content="t"),), context)
 
         async def collect() -> list[Any]:
-            return [m async for m in run_tools(_calls("a", "b"), (AIMessage(content=""),), state, CONFIG)]
+            return [m async for m in run_tools(_calls("a", "b"), (AIMessage(content=""),), state, CONFIG)]  # noqa: B023
 
         _assert_each_result_is_followed_by_its_note(asyncio.run(collect()), ("a", "b"))
 
@@ -390,8 +395,8 @@ def test_a_stopped_prompt_never_reaches_the_model(monkeypatch, tmp_path):
 
 
 def test_run_settings_locations(tmp_path):
-    from app.loop.runner import run_settings_locations
     from app.loop.permissions.settings import MANAGED_DIR, SettingsLocations
+    from app.loop.runner import run_settings_locations
 
     flagged = replace(CONFIG, settings_path=str(tmp_path / "flag.json"))
     assert run_settings_locations(flagged, tmp_path, tmp_path / "home", tmp_path / "etc") == SettingsLocations(
@@ -498,7 +503,9 @@ def test_an_exception_in_the_permission_phase_becomes_a_tool_use_error_and_the_r
 
     from langchain_core.messages import AIMessage as _AI
 
-    from app.loop.context import AppState, AppStateStore as _Store, tool_context_for as _ctx
+    from app.loop.context import AppState
+    from app.loop.context import AppStateStore as _Store
+    from app.loop.context import tool_context_for as _ctx
     from app.loop.permissions.denial_tracking import DenialTrackingState
     from app.loop.permissions.types import (
         PermissionBehavior,
@@ -539,10 +546,12 @@ def test_stop_failure_hooks_are_fire_and_forget_but_finish_before_the_run_ends()
     background work is drained when the run finalizes."""
     import asyncio as _asyncio
 
-    from langchain_core.messages import AIMessage as _AI, HumanMessage as _Human
+    from langchain_core.messages import AIMessage as _AI
+    from langchain_core.messages import HumanMessage as _Human
 
     from app.loop.config import build_run_config
-    from app.loop.context import AppStateStore as _Store, tool_context_for as _ctx
+    from app.loop.context import AppStateStore as _Store
+    from app.loop.context import tool_context_for as _ctx
     from app.loop.engine import drain, run_loop
     from app.loop.state import initial_loop_state
     from app.loop.transitions import Terminal
@@ -565,8 +574,9 @@ def test_stop_failure_hooks_are_fire_and_forget_but_finish_before_the_run_ends()
         dispatcher = SlowOutside()
         ctx = _ctx(_Store(), hook_dispatcher=dispatcher)
         state = initial_loop_state((_Human(content="t"),), ctx)
-        from app.loop.factory import get_production_deps
         import dataclasses
+
+        from app.loop.factory import get_production_deps
 
         deps = dataclasses.replace(get_production_deps(), call_model=model)
         terminal = await drain(run_loop(state, build_run_config("r", postgres_checkpointing=False), deps))

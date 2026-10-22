@@ -41,8 +41,9 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Sequence
+from typing import TYPE_CHECKING, Any, Literal
 
 from pathspec.util import lookup_pattern
 
@@ -124,7 +125,7 @@ def get_paths_for_permission_check(path: str) -> tuple[str, ...]:
     (symlinks followed, including in a missing file's ancestors). UNC paths are never
     touched, so no lookup can reach the network.
     """
-    if path.startswith("//") or path.startswith("\\\\"):
+    if path.startswith(("//", "\\\\")):
         return (path,)
     resolved = os.path.realpath(path)
     return (path,) if resolved == path else (path, resolved)
@@ -132,7 +133,7 @@ def get_paths_for_permission_check(path: str) -> tuple[str, ...]:
 
 def is_dangerous_file_path_to_auto_edit(path: str) -> bool:
     """`isDangerousFilePathToAutoEdit`: UNC paths, dangerous directories and files."""
-    if path.startswith("\\\\") or path.startswith("//"):
+    if path.startswith(("\\\\", "//")):
         return True
     segments = path.split("/")
     for index, segment in enumerate(segments):
@@ -293,7 +294,7 @@ def matching_rule_for_input(
     absolute = expand_path(path, cwd)
     for root, pattern_map in get_patterns_by_root(context, tool_type, behavior, cwd).items():
         # The `ignore` package matches a path and everything under it, so `/**` is dropped.
-        adjusted = [p[:-3] if p.endswith("/**") else p for p in pattern_map]
+        adjusted = [p.removesuffix("/**") for p in pattern_map]
         relative = posixpath.relpath(absolute, root if root is not None else cwd)
         if relative.startswith("../") or relative == "..":
             continue
@@ -333,9 +334,9 @@ def is_path_allowed(
                 False, {"type": "safetyCheck", "reason": message, "classifierApprovable": approvable}
             )
 
-    if path_in_allowed_working_path(resolved_path, context, cwd, candidates):
-        if operation == "read" or context.mode == PermissionMode.ACCEPT_EDITS:
-            return PathCheckResult(True)
+    in_working_path = path_in_allowed_working_path(resolved_path, context, cwd, candidates)
+    if in_working_path and (operation == "read" or context.mode == PermissionMode.ACCEPT_EDITS):
+        return PathCheckResult(True)
 
     allow_rule = matching_rule_for_input(resolved_path, context, permission_type, "allow", cwd)
     if allow_rule is not None:
@@ -459,7 +460,7 @@ def check_read_permission_for_tool(
     absolute = expand_path(path, cwd)
     candidates = get_paths_for_permission_check(absolute)
     for candidate in candidates:
-        if candidate.startswith("\\\\") or candidate.startswith("//"):
+        if candidate.startswith(("\\\\", "//")):
             return PermissionResult(
                 behavior=PermissionBehavior.ASK,
                 message=(
@@ -641,36 +642,36 @@ def check_file_read_permissions(path_key: str) -> Any:
 
 
 __all__ = [
-    "check_file_read_permissions",
-    "check_read_permission_for_tool",
-    "check_readable_internal_path",
-    "get_file_read_ignore_patterns",
-    "is_project_dir_path",
-    "normalize_pattern_to_path",
-    "normalize_patterns_to_path",
-    "read_deny_ignore_globs",
     "DANGEROUS_DIRECTORIES",
     "DANGEROUS_FILES",
     "FILE_EDIT_TOOL_NAME",
     "FILE_READ_TOOL_NAME",
     "PathCheckResult",
     "all_working_directories",
+    "check_file_read_permissions",
     "check_file_write_permissions",
     "check_path_safety_for_auto_edit",
+    "check_read_permission_for_tool",
+    "check_readable_internal_path",
     "check_write_permission_for_tool",
     "expand_path",
+    "get_file_read_ignore_patterns",
     "get_paths_for_permission_check",
     "get_patterns_by_root",
     "has_suspicious_windows_path_pattern",
     "is_dangerous_file_path_to_auto_edit",
     "is_path_allowed",
+    "is_project_dir_path",
     "matching_rule_for_input",
     "normalize_case_for_comparison",
+    "normalize_pattern_to_path",
+    "normalize_patterns_to_path",
     "path_from_tool_input",
     "path_in_allowed_working_path",
     "path_in_working_path",
     "pattern_with_root",
     "permission_cwd",
+    "read_deny_ignore_globs",
     "root_path_for_source",
     "workspace_absolute_path",
 ]

@@ -28,8 +28,9 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from typing import Any
 
 from app.loop.hooks.async_registry import AsyncHookRegistry
 from app.loop.hooks.config import HooksConfigSnapshot
@@ -50,7 +51,14 @@ from app.loop.hooks.output import (
     parse_http_hook_output,
 )
 from app.loop.hooks.process import is_aborted
-from app.loop.hooks.schemas import AgentHook, CommandHook, HookCommand, HookMatcher, HttpHook, PromptHook
+from app.loop.hooks.schemas import (
+    AgentHook,
+    CommandHook,
+    HookCommand,
+    HookMatcher,
+    HttpHook,
+    PromptHook,
+)
 from app.loop.messages import Message
 
 logger = logging.getLogger("TDDOrchestrator.Hooks")

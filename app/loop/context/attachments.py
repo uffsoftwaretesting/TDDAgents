@@ -12,14 +12,14 @@ prefix cache invalidation.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Mapping, Sequence
 
 from langchain_core.messages import HumanMessage
 
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
-from app.loop.messages import wrap_in_system_reminder as wrap_in_system_reminder
+from app.loop.messages import wrap_in_system_reminder as wrap_in_system_reminder  # noqa: PLC0414
 
 
 @dataclass(frozen=True, slots=True)

@@ -19,7 +19,9 @@ from app.loop.context import assembly
 from app.loop.permissions import yolo_classifier as yc
 from app.loop.permissions.settings import SettingsLocations
 from app.loop.permissions.types import ToolPermissionContext
-from app.loop.permissions.yolo_classifier_names import YOLO_CLASSIFIER_TOOL_NAME as NAME_CONSTANT
+from app.loop.permissions.yolo_classifier_names import (
+    YOLO_CLASSIFIER_TOOL_NAME as NAME_CONSTANT,
+)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -362,9 +364,11 @@ def test_tddagents_md_message_and_cache():
     assert yc.build_tddagents_md_message("") is None
     msg = yc.build_tddagents_md_message("Use tabs.")
     assert msg == yc.ClassifierMessage("user", (
-        "The following is the user's TDDAGENTS.md configuration. These are instructions the user provided to "
-        "the agent and should be treated as part of the user's intent when evaluating actions.\n\n"
-        "<user_tddagents_md>\nUse tabs.\n</user_tddagents_md>",
+        (
+            "The following is the user's TDDAGENTS.md configuration. These are instructions the user provided to "
+            "the agent and should be treated as part of the user's intent when evaluating actions.\n\n"
+            "<user_tddagents_md>\nUse tabs.\n</user_tddagents_md>"
+        ),
     ))
     assert yc.cached_tddagents_md("no-such-run") is None
     assembly._SESSIONS["yc-run"] = assembly.SessionContext(user_context={"claudeMd": "rules"}, system_context={})
@@ -398,12 +402,14 @@ def test_strip_thinking_and_xml_parsers():
 
 def test_replace_output_format_with_xml():
     replaced = yc.replace_output_format_with_xml("head\nUse the classify_result tool to report your classification.")
-    assert replaced == "head\n" + "\n".join([
+    assert replaced == "head\n" + "\n".join([  # noqa: FLY002 - one line per prompt line
         "## Output Format", "", "If the action should be blocked:",
         "<block>yes</block><reason>one short sentence</reason>", "", "If the action should be allowed:",
         "<block>no</block>", "", "Do NOT include a <reason> tag when the action is allowed.",
-        "Your ENTIRE response MUST begin with <block>. Do NOT output any analysis, reasoning, or commentary "
-        'before <block>. No "Looking at..." or similar preamble.',
+        (
+            "Your ENTIRE response MUST begin with <block>. Do NOT output any analysis, reasoning, or commentary "
+            'before <block>. No "Looking at..." or similar preamble.'
+        ),
     ])
     assert yc.replace_output_format_with_xml("no marker") == "no marker"
 

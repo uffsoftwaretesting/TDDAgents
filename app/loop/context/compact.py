@@ -14,7 +14,8 @@ Implements graduated context management (§2.5):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, ToolMessage
 
@@ -167,7 +168,11 @@ async def try_reactive_compact(
 
     # 2. PreCompact hooks (upstream `compactConversation`): their output joins the summary
     #    request as additional instructions (`mergeHookInstructions`).
-    from app.loop.hooks.execute import dispatcher_of, execute_post_compact_hooks, execute_pre_compact_hooks
+    from app.loop.hooks.execute import (
+        dispatcher_of,
+        execute_post_compact_hooks,
+        execute_pre_compact_hooks,
+    )
     from app.loop.hooks.session import process_session_start_hooks
 
     dispatcher = dispatcher_of(state.tool_context)

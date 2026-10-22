@@ -140,7 +140,7 @@ def test_explicit_timeout_ms_wins_over_the_hooks(tmp_path):
 def test_the_default_timeout_is_ten_minutes(tmp_path, monkeypatch):
     from app.loop.hooks.events import TOOL_HOOK_EXECUTION_TIMEOUT_MS
 
-    assert getattr(ec, "TOOL_HOOK_EXECUTION_TIMEOUT_MS") is TOOL_HOOK_EXECUTION_TIMEOUT_MS
+    assert getattr(ec, "TOOL_HOOK_EXECUTION_TIMEOUT_MS") is TOOL_HOOK_EXECUTION_TIMEOUT_MS  # noqa: B009
     assert TOOL_HOOK_EXECUTION_TIMEOUT_MS == 600_000
     monkeypatch.setattr("app.loop.hooks.exec_command.TOOL_HOOK_EXECUTION_TIMEOUT_MS", 150)
     started = time.monotonic()

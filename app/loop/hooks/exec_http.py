@@ -38,8 +38,9 @@ import socket
 import ssl
 import urllib.error
 import urllib.request
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 from app.loop.hooks.process import ABORT_POLL_SECONDS, is_aborted

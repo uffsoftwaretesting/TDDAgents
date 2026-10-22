@@ -21,12 +21,17 @@ places to get RED wrong, and the gate is the one a hook cannot talk its way past
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Iterator, Sequence
+from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, ToolMessage
 
-from app.loop.hooks.messages import HookAttachment, create_attachment_message, messages_for
+from app.loop.hooks.messages import (
+    HookAttachment,
+    create_attachment_message,
+    messages_for,
+)
 from app.loop.hooks.tool_hooks import (
     PERMISSION_DENIED_RETRY_MESSAGE,
     run_permission_denied_hooks,
@@ -37,9 +42,12 @@ from app.loop.hooks.tool_hooks import (
 from app.loop.messages import Message, ToolCall
 from app.loop.tools.base import Tool, find_tool_by_name
 from app.loop.tools.hook_permissions import resolve_hook_permission_decision
-from app.loop.tools.result_storage import MAX_TOOL_RESULT_BYTES, maybe_persist_large_result
-from app.loop.tools.validation import INPUT_VALIDATION_ERROR, validate_against_schema
+from app.loop.tools.result_storage import (
+    MAX_TOOL_RESULT_BYTES,
+    maybe_persist_large_result,
+)
 from app.loop.tools.types import ContextModifier, ToolResult
+from app.loop.tools.validation import INPUT_VALIDATION_ERROR, validate_against_schema
 
 if TYPE_CHECKING:
     from app.loop.context import ToolContext
@@ -101,7 +109,7 @@ async def run_tool_use(
     """
     try:
         return await _run_tool_use(tool_call, assistant_message, context, tools)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
         # `runToolUse`'s outer `catch`: anything thrown outside the tool's own call —
         # validation, hooks, the permission gate (an auto-mode `AbortError`) — becomes the
         # call's error result. The turn goes on.
@@ -229,7 +237,7 @@ async def _run_tool_use(
     # hooks, no governance and no PostToolUse.
     try:
         result = await tool.call(effective_args, context)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
         content = f"<tool_use_error>Error calling tool ({tool.name}): {exc}</tool_use_error>"
         failure = await run_post_tool_use_failure_hooks(
             context, tool_name, effective_args if isinstance(effective_args, dict) else {}, str(exc), call_id,

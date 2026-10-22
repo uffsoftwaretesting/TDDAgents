@@ -8,7 +8,8 @@ per event instead of spawning anything, and records each hook input it was hande
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from typing import Any
 
 from app.loop.hooks.config import HooksConfigSnapshot
 from app.loop.hooks.execute import HookDispatcher, HookOutsideReplResult

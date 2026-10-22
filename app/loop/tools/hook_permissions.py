@@ -31,9 +31,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from app.loop.permissions.gate import has_permissions_to_use_tool, resolve_ask_without_prompt
+from app.loop.permissions.gate import (
+    has_permissions_to_use_tool,
+    resolve_ask_without_prompt,
+)
 from app.loop.permissions.messages import create_permission_request_message
-from app.loop.permissions.rules import check_rule_based_permissions, requires_user_interaction
+from app.loop.permissions.rules import (
+    check_rule_based_permissions,
+    requires_user_interaction,
+)
 from app.loop.permissions.types import PermissionBehavior, PermissionResult
 
 if TYPE_CHECKING:

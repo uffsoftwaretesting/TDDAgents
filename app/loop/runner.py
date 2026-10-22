@@ -36,8 +36,10 @@ from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.deps import LoopDeps
 from app.loop.engine import drain, run_loop
 from app.loop.hooks.execute import HookDispatcher
-from app.loop.permissions.settings import SettingsLocations
-from app.loop.permissions.settings import build_tool_permission_context
+from app.loop.permissions.settings import (
+    SettingsLocations,
+    build_tool_permission_context,
+)
 from app.loop.permissions.types import ToolPermissionContext
 from app.loop.state import initial_loop_state
 from app.loop.tools.base import Tool
@@ -250,7 +252,10 @@ async def _run_with_hooks(
     with_transcript_logger: Any,
 ) -> PlanItemResult:
     """SessionStart and UserPromptSubmit, then the loop itself."""
-    from app.loop.hooks.session import process_session_start_hooks, process_user_prompt_submit_hooks
+    from app.loop.hooks.session import (
+        process_session_start_hooks,
+        process_user_prompt_submit_hooks,
+    )
 
     session = await process_session_start_hooks(ctx.hook_dispatcher, "startup", model=config.model)
     mode = str(store.get().tool_permission_context.mode)

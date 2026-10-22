@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from typing import Callable
+from collections.abc import Callable
 
 #: `(address, family)` pairs, family 4 or 6 — the shape of `dns.lookup(..., {all: true})`.
 Resolver = Callable[[str], list[tuple[str, int]]]
@@ -91,7 +91,7 @@ def _is_blocked_v6(address: str) -> bool:
     mapped = extract_mapped_ipv4(lower)
     if mapped is not None:
         return _is_blocked_v4(mapped)
-    if lower.startswith("fc") or lower.startswith("fd"):
+    if lower.startswith(("fc", "fd")):
         return True
     first = lower.split(":")[0]
     return len(first) == 4 and "fe80" <= first <= "febf"

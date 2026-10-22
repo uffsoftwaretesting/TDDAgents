@@ -33,12 +33,20 @@ divergence:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 from app.loop.permissions.dangerous import strip_dangerous_permissions
-from app.loop.permissions.rules import check_rule_based_permissions, extract_permission_context
-from app.loop.permissions.types import PermissionBehavior, PermissionMode, PermissionResult
+from app.loop.permissions.rules import (
+    check_rule_based_permissions,
+    extract_permission_context,
+)
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionResult,
+)
 from app.loop.permissions.updates import (
     apply_permission_updates,
     parse_permission_updates,

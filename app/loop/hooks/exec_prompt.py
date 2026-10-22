@@ -37,7 +37,8 @@ import os
 import re
 import shlex
 import uuid
-from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Any, Protocol
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
