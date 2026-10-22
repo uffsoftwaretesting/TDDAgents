@@ -17,8 +17,12 @@ workspace, and reports only what the ledger observed.
   managed tier applied. The context lives in the sub-requirement's `AppState`, so a worker
   reading its parent's state is held to it. The run is headless
   (`should_avoid_permission_prompts`): an `ask` that no PermissionRequest hook answers is a deny.
-* **Transcript.** Written beside the workspace, never inside it, so agents cannot read or
-  edit their own record and it never reaches the exported artifact.
+* **Transcript.** A `QueryEngine` per sub-requirement (Phase 6) records it at upstream's
+  location, `<config home>/projects/<sanitized workspace>/<run id>.jsonl` — never inside the
+  workspace, so agents cannot read or edit their own record and it never reaches the
+  exported artifact. Every transition goes to `<run id>/events.jsonl` beside it, with the
+  ledger snapshot and the last `RunTests` exit code; the run's cost tracker sits on the
+  tool context so worker API calls count toward it.
 """
 
 from __future__ import annotations
@@ -36,15 +40,18 @@ from langchain_core.messages import HumanMessage
 from app.loop.agents.memory import AgentMemoryStore
 from app.loop.config import RunConfig, build_run_config
 from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.cost import CostTracker
 from app.loop.deps import LoopDeps
-from app.loop.engine import drain, run_loop
+from app.loop.events import TransitionEventRecorder, events_path
 from app.loop.hooks.execute import HookDispatcher
 from app.loop.permissions.settings import (
     SettingsLocations,
     build_tool_permission_context,
 )
 from app.loop.permissions.types import ToolPermissionContext
+from app.loop.query_engine import QueryEngine
 from app.loop.state import initial_loop_state
+from app.loop.storage.session_storage import TranscriptStore
 from app.loop.tools.base import Tool
 from app.loop.tools.pool import assemble_tool_pool
 from app.loop.transitions import Terminal
@@ -214,23 +221,22 @@ async def tdd_loop_runner(
         tools_now: tuple[Tool, ...] = pool_cache["tools"]
         return tools_now
 
-    from app.loop.transcript import TranscriptLogger, with_transcript_logger
-
     run_dir = getattr(ws, "run_dir", None)
     transcript_dir = Path(run_dir) if run_dir is not None else None
-    transcript = TranscriptLogger(run_id=run_id, base_dir=transcript_dir)
-
     root_dir = Path(project_root) if project_root is not None else Path.cwd()
+    cwd = str(getattr(ws, "root", None) or root_dir)
+    transcript = TranscriptStore(run_id, cwd)
+
     if hook_dispatcher is None:
         from app.loop.hooks.runtime import build_hook_dispatcher
 
         hook_dispatcher = build_hook_dispatcher(
             run_settings_locations(config, root_dir, home, managed_dir),
             session_id=run_id,
-            cwd=str(getattr(ws, "root", None) or root_dir),
+            cwd=cwd,
             project_dir=str(root_dir),
             model=config.model,
-            transcript_path=str(transcript.file_path),
+            transcript_path=str(transcript.path),
         )
 
     memory_store, memory_root = run_agent_memory_store(transcript_dir)
@@ -244,10 +250,12 @@ async def tdd_loop_runner(
         refresh_tools=refresh_tools,
         run_id=run_id,
         agent_memory_store=memory_store,
+        cost_tracker=CostTracker(config.model),
+        transcript_path=str(transcript.path),
     )
     try:
         return await _run_with_hooks(
-            sub_req, idx, run_id, initial_message, ctx, store, config, deps, transcript, with_transcript_logger
+            sub_req, idx, run_id, initial_message, ctx, store, config, deps, transcript, events_path(run_id, cwd)
         )
     finally:
         from app.loop.hooks.execute import execute_session_end_hooks
@@ -260,6 +268,16 @@ async def tdd_loop_runner(
             shutil.rmtree(memory_root, ignore_errors=True)
 
 
+def _both(first: Any, second: Any) -> Any:
+    """The run's event recorder, then whatever sink the caller's deps already had."""
+
+    def emit(event: Any) -> None:
+        first(event)
+        second(event)
+
+    return emit
+
+
 async def _run_with_hooks(
     sub_req: str,
     idx: int,
@@ -269,8 +287,8 @@ async def _run_with_hooks(
     store: AppStateStore,
     config: RunConfig,
     deps: LoopDeps,
-    transcript: Any,
-    with_transcript_logger: Any,
+    transcript: TranscriptStore,
+    events_file: Path,
 ) -> PlanItemResult:
     """SessionStart and UserPromptSubmit, then the loop itself."""
     from app.loop.hooks.session import (
@@ -306,12 +324,20 @@ async def _run_with_hooks(
     loop_state = initial_loop_state(messages, ctx)
 
     logger.info("Launching TDD loop %s for sub-requirement %d: %s", run_id, idx, sub_req)
+    recorder = TransitionEventRecorder(store, events_file, session_id=run_id, plan_index=idx)
+    engine = QueryEngine(
+        config, replace(deps, emit_event=_both(recorder, deps.emit_event)), transcript=transcript, session_id=run_id,
+        cost_tracker=ctx.cost_tracker,
+    )
     try:
-        terminal = await drain(with_transcript_logger(run_loop(loop_state, config, deps), transcript))
-        reason = terminal.reason
+        async for _ in engine.submit(loop_state):
+            pass
+        reason = engine.terminal.reason if engine.terminal is not None else Terminal.MODEL_ERROR
     except Exception:
         logger.exception("Loop %s crashed", run_id)
         reason = Terminal.MODEL_ERROR
+    if engine.result is not None:
+        logger.info("Loop %s result: %s", run_id, engine.result)
 
     final = store.get().phase_ledger
     succeeded = reason == Terminal.COMPLETED

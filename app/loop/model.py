@@ -125,9 +125,13 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
     if lc_tools:
         model = model.bind_tools(lc_tools)
 
+    callbacks: list[Any] = [_global_token_tracker]
+    cost_tracker = state.tool_context.cost_tracker
+    if cost_tracker is not None:
+        callbacks.append(cost_tracker)
     try:
         stream: AsyncIterable[Any] = model.astream(
-            messages_to_send, config={"callbacks": [_global_token_tracker]}, **cache_kwargs
+            messages_to_send, config={"callbacks": callbacks}, **cache_kwargs
         )
     except TypeError:
         stream = model.astream(messages_to_send, **cache_kwargs)

@@ -99,3 +99,25 @@ def test_production_deps_bind_the_compaction_slots():
     assert deps.autocompact is factory.production_autocompact
     assert deps.microcompact is factory.production_microcompact
     assert deps.compact is factory.production_compact
+
+
+def test_both_compactions_point_the_summary_at_the_runs_transcript(monkeypatch):
+    """Phase 6: `compact.ts` passes `getTranscriptPath()` to the summary message."""
+    seen: list[Any] = []
+
+    async def fake_auto(messages, context, **kwargs):
+        seen.append(kwargs["transcript_path"])
+        return AutoCompactOutcome(was_compacted=False)
+
+    async def fake_compact(messages, context, **kwargs):
+        seen.append(kwargs["transcript_path"])
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(factory, "auto_compact_if_needed", fake_auto)
+    monkeypatch.setattr(factory, "compact_conversation", fake_compact)
+    monkeypatch.setattr(factory, "build_compact_summarizer", lambda: "summarizer")
+    store = AppStateStore(AppState())
+    state = initial_loop_state((HumanMessage(content="task"),), tool_context_for(store, transcript_path="/p/r.jsonl"))
+    asyncio.run(factory.production_autocompact(state.messages, state, CONFIG))
+    asyncio.run(factory.production_compact(state, CONFIG))
+    assert seen == ["/p/r.jsonl", "/p/r.jsonl"]

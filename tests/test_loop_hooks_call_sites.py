@@ -330,12 +330,9 @@ def test_stop_failure_fires_on_an_unrecovered_prompt_too_long():
 # ── runner ──────────────────────────────────────────────────────────────────
 
 def run_runner(monkeypatch, tmp_path: Path, d: ScriptedDispatcher, model: Model) -> Any:
-    from app.loop import transcript as transcript_mod
     from app.loop.runner import tdd_loop_runner
     from tests.conftest import FakeWorkspace
 
-    real = transcript_mod.TranscriptLogger
-    monkeypatch.setattr(transcript_mod, "TranscriptLogger", lambda run_id, base_dir=None: real(run_id, tmp_path))
     finalized: list[bool] = []
     original = d.registry.finalize_pending
 

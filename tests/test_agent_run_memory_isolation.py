@@ -73,3 +73,10 @@ def test_the_runner_discards_run_memory_when_the_run_ends(tmp_path, make_fake_wo
     assert not (Path(store.base_dir) / ".tddagents" / "run-memory").exists() or not any(
         (Path(store.base_dir) / ".tddagents" / "run-memory").iterdir()
     )
+
+
+def test_a_worker_points_at_the_sessions_transcript(tmp_path):
+    """Upstream's `getTranscriptPath()` is session-global: a worker compacts against it too."""
+    parent = tool_context_for(AppStateStore(), workspace=SimpleNamespace(root=str(tmp_path)), run_id="loop-1",
+                              transcript_path="/p/loop-1.jsonl")
+    assert create_subagent(_worker_def("none"), parent, directive="go").context.transcript_path == "/p/loop-1.jsonl"

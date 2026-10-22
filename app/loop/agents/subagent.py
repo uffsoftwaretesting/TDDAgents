@@ -232,6 +232,9 @@ def create_subagent(
         read_file_state=dict(parent_context.read_file_state),
         run_id=parent_context.run_id,
         agent_memory_store=store,
+        # A worker's API calls count toward the run's cost, as a subagent's toward the session.
+        cost_tracker=parent_context.cost_tracker,
+        transcript_path=parent_context.transcript_path,
         # Upstream `agentId`/`agentType`: a worker's stop hooks fire `SubagentStop`
         # (matched on the agent type), never the coordinator's `Stop`.
         agent_id=agent_id,

@@ -334,7 +334,6 @@ def loop_deps(model: Model) -> LoopDeps:
 
 
 def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
-    from app.loop import transcript as transcript_mod
     from app.loop.hooks import runtime
     from app.loop.runner import run_settings_locations, tdd_loop_runner
     from tests.conftest import FakeWorkspace
@@ -348,8 +347,6 @@ def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
     # context is anchored at the workspace — which is how the runner builds it.
     (project / ".tddagents" / "settings.json").write_text(
         json.dumps({"permissions": {"additionalDirectories": [str(ws_root / "sub")]}}))
-    real_logger = transcript_mod.TranscriptLogger
-    monkeypatch.setattr(transcript_mod, "TranscriptLogger", lambda run_id, base_dir=None: real_logger(run_id, tmp_path))
     seen: dict[str, Any] = {}
     real_build = runtime.build_hook_dispatcher
 
@@ -370,19 +367,17 @@ def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
     assert seen["cwd"] == str(ws_root)
     assert seen["project_dir"] == str(project)
     assert seen["model"] == config.model
-    transcript = tmp_path / ".tddagents" / "transcripts" / f"transcript_{config.run_id}.jsonl"
-    assert seen["transcript_path"] == str(transcript)
+    from app.loop.storage.paths import get_transcript_path
+
+    assert seen["transcript_path"] == str(get_transcript_path(config.run_id, str(ws_root)))
     perm = state.tool_context.get_app_state().tool_permission_context
     assert perm.additional_working_directories == ()
 
 
 def test_a_stopped_prompt_reports_its_plan_item(monkeypatch, tmp_path):
-    from app.loop import transcript as transcript_mod
     from app.loop.runner import tdd_loop_runner
     from tests.conftest import FakeWorkspace
 
-    real_logger = transcript_mod.TranscriptLogger
-    monkeypatch.setattr(transcript_mod, "TranscriptLogger", lambda run_id, base_dir=None: real_logger(run_id, tmp_path))
     d = ScriptedDispatcher(script={"UserPromptSubmit": [
         AggregatedHookResult(blocking_error=HookBlockingError(blocking_error="no", command="c"))]})
     result = asyncio.run(tdd_loop_runner("the spec", 7, {"session_id": "s"}, workspace=FakeWorkspace(),

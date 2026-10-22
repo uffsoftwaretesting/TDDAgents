@@ -304,6 +304,18 @@ sub-requirement, outside the workspace, discarded at its end.
   flow derivation.
 - Resume: load the chain, filter unresolved tool uses, detect interrupted turns.
 
+*Phase 6 outcome (2026-10-22), per the interview ("follow claude-code's source and
+architecture, while enforcing the TDD cycle"):* the runner drives each sub-requirement through
+`app/loop/query_engine.py` — transcript recorded before the loop, whole messages after, the
+result (`success` / `error_during_execution`, usage, cost, terminal reason) yielded and logged.
+`app/loop/storage/` ports `recordTranscript` / `recordSidechainTranscript` at upstream's
+`<config>/projects/<cwd>/<session>.jsonl` layout, and the resume read path
+(`load_conversation_for_resume`), wired by the Phase 9 entry point. `app/loop/events.py` is the
+run's `emit_event`: transitions with the ledger snapshot and the last `RunTests` exit code in
+`<session>/events.jsonl` — Part L's input. `app/loop/cost/` ports the Claude price table and
+adds an OpenAI one; unknown models cost 0 with a flag. The ledger is never restored from a
+transcript.
+
 ### Phase 7 — Agents and the TDD coordinator
 
 - Code: `claude-code/src/tools/AgentTool/AgentTool.tsx` → `AgentTool`; `claude-code/src/tools/AgentTool/runAgent.ts` → `runAgent`; `claude-code/src/tools/AgentTool/agentToolUtils.ts` → `resolveAgentTools`, `finalizeAgentTool`; `claude-code/src/utils/forkedAgent.ts` → `createSubagentContext`; `claude-code/src/tools/AgentTool/loadAgentsDir.ts` → `parseAgentFromMarkdown`; `claude-code/src/coordinator/coordinatorMode.ts` → `getCoordinatorSystemPrompt`

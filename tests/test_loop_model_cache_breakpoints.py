@@ -119,3 +119,33 @@ def test_the_request_sends_stored_history_as_is(monkeypatch, tmp_path):
     assert isinstance(request[0], SystemMessage)
     sent = [m for m in request[1:] if not str(m.content).startswith("<system-reminder>\nAs you answer")]
     assert [m.content for m in sent] == [m.content for m in history]
+
+
+def test_the_runs_cost_tracker_rides_on_the_model_call(monkeypatch):
+    from app.config.config import Config
+    from app.loop import model as model_mod
+    from app.loop.config import build_run_config
+    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.cost import CostTracker
+    from app.loop.retry import RetryContext
+    from app.loop.state import initial_loop_state
+
+    seen: dict = {}
+
+    class FakeModel:
+        def astream(self, messages, config=None, **kwargs):
+            seen["config"] = config
+            return iter(())
+
+    monkeypatch.setattr(Config, "CHAT_MODEL", "openai")
+    monkeypatch.setattr(model_mod, "get_chat_model", lambda *a, **k: FakeModel())
+    monkeypatch.setattr(model_mod, "build_request_messages", lambda state, config: [HumanMessage(content="hi")])
+    monkeypatch.setattr(model_mod, "request_system_texts", lambda state, config: [])
+    run = build_run_config("r", postgres_checkpointing=False)
+    tracker = CostTracker(model="m")
+    ctx = tool_context_for(AppStateStore(), cost_tracker=tracker)
+    model_mod.open_model_stream(initial_loop_state((HumanMessage(content="hi"),), ctx), run, RetryContext(model="m"))
+    assert seen["config"]["callbacks"] == [model_mod.get_global_token_tracker(), tracker]
+    plain = tool_context_for(AppStateStore())
+    model_mod.open_model_stream(initial_loop_state((HumanMessage(content="hi"),), plain), run, RetryContext(model="m"))
+    assert seen["config"]["callbacks"] == [model_mod.get_global_token_tracker()]

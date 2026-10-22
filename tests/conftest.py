@@ -47,6 +47,16 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:
             item.add_marker(skip)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config_home(tmp_path_factory: Any, monkeypatch: Any) -> None:
+    """
+    Transcripts, events and tool results live under the config home
+    (`<config>/projects/...`, as upstream's `~/.claude/projects`). No test may write to the
+    real `~/.tddagents`; a test that needs a specific home sets `TDDAGENTS_CONFIG_DIR` itself.
+    """
+    monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path_factory.mktemp("config-home")))
+
+
 def read_dotenv_key(name: str) -> str | None:
     """A real credential from the repo's .env (the conftest placeholders do not count)."""
     env_path = REPO_ROOT / ".env"

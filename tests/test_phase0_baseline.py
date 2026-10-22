@@ -441,24 +441,30 @@ def test_runner_reports_failure_without_inventing_progress(python_workspace):
 
 
 def test_runner_crash_is_a_model_error(python_workspace, monkeypatch):
+    from app.loop import query_engine
     from app.loop import runner as runner_mod
 
     def boom(*a: Any, **k: Any) -> Any:
         raise RuntimeError("engine exploded")
 
-    monkeypatch.setattr(runner_mod, "run_loop", boom)
+    monkeypatch.setattr(query_engine, "run_loop", boom)
     result = asyncio.run(runner_mod.tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=python_workspace,
                                                     deps=_scripted_deps([])))
     assert result.terminal_reason == "model_error" and result.status == "failed"
 
 
-def test_runner_writes_the_transcript_beside_the_workspace(python_workspace):
+def test_runner_writes_the_transcript_outside_the_workspace(python_workspace):
+    """Phase 6: upstream's `<config>/projects/<sanitized cwd>/<session>.jsonl`, plus the
+    session's `events.jsonl`; nothing lands in the workspace."""
     from app.loop.runner import tdd_loop_runner
+    from app.loop.storage.paths import get_project_dir
 
     asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=python_workspace,
                                 deps=_scripted_deps([[AIMessage(content="done")]])))
-    transcripts = list((python_workspace.run_dir / ".tddagents" / "transcripts").glob("transcript_loop-*.jsonl"))
+    project = get_project_dir(str(python_workspace.root))
+    transcripts = list(project.glob("loop-*.jsonl"))
     assert len(transcripts) == 1
+    assert (project / transcripts[0].stem / "events.jsonl").is_file()
     assert not (python_workspace.root / ".tddagents").exists()
 
 
@@ -483,8 +489,9 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     state, config = seen[0]
     assert re.fullmatch(r"loop-[0-9a-f]{8}", config.run_id)
     assert config.gates.postgres_checkpointing is False
-    [transcript] = (python_workspace.run_dir / ".tddagents" / "transcripts").glob("*.jsonl")
-    assert transcript.name == f"transcript_{config.run_id}.jsonl"
+    from app.loop.storage.paths import get_transcript_path
+
+    assert get_transcript_path(config.run_id, str(python_workspace.root)).is_file()
     assert [m.content for m in state.tool_context.messages] == ["spec", INITIAL_TDD_STATE]
 
 
@@ -513,22 +520,12 @@ def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatc
     assert result.status == "failed"
 
 
-def test_runner_tolerates_a_workspace_without_a_run_dir(monkeypatch, make_fake_workspace, tmp_path):
-    from app.loop import transcript as transcript_mod
+def test_runner_tolerates_a_workspace_without_a_run_dir(make_fake_workspace):
     from app.loop.runner import tdd_loop_runner
 
-    bases: list[Any] = []
-    real = transcript_mod.TranscriptLogger
-
-    def logger(run_id: str, base_dir: Any = None) -> Any:
-        bases.append(base_dir)
-        return real(run_id=run_id, base_dir=tmp_path)
-
-    monkeypatch.setattr(transcript_mod, "TranscriptLogger", logger)
     ws = make_fake_workspace()
     assert not hasattr(ws, "run_dir")
     result = asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=ws, deps=_recording_deps([])))
-    assert bases == [None]
     assert result.terminal_reason == "stop_hook_prevented"
 
 

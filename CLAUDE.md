@@ -77,6 +77,10 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `app/loop/attachments/` | `getAttachments` / `getAttachmentMessages`: per-turn sources persisted into `state.messages` — queued commands, date change, changed files, nested memory, todo and auto-mode reminders, agent/MCP deltas, async hook responses, token usage, **TDD state** (+ `create_tdd_state_attachment_message` for the post-compaction re-attach) (Phase 5) |
 | `app/loop/compact/` | `compactConversation` (no kept tail, file restoration, PTL retry, boundary), `autoCompactIfNeeded` (window arithmetic, circuit breaker 3), the compact prompt + **TDD sections**, post-compact cleanup, microcompact (time-based, off externally), the summarizer seam (Phase 5) |
 | `app/prompts/` | Complete composition roster: 7 static system instructions + dynamic, 7 core tools, and 6 TDD agents (`tester`, `developer`, `refactorer` + catalogue, `verification`, `explore`, `plan`) |
+| `query_engine.py` | `QueryEngine.submit` (`submitMessage`): transcript recorded before the loop, whole messages recorded on the growing history (boundary restarts it), `isResultSuccessful`, `ResultMessage` (`success` / `error_during_execution`) with usage, cost and the loop's `terminal_reason` (Phase 6) |
+| `events.py` | `TransitionEventRecorder`, the run's `emit_event`: every `Transition`/`Terminated` with the ledger snapshot, last `RunTests` exit code and plan index, appended to `<project dir>/<run id>/events.jsonl` (Phase 6) |
+| `app/loop/storage/` | `sessionStorage.ts` + `conversationRecovery.ts`: entry format (`entries.py`), upstream paths (`paths.py`), `TranscriptStore` (`recordTranscript` prefix dedup, sidechains, boundary `logicalParentUuid`, tool results chained to their assistant), `loader.py` (leaf, chain, orphaned parallel tool results), `recovery.py` (`load_conversation_for_resume`, the three filters, interruption detection) (Phase 6) |
+| `app/loop/cost/` | `modelCost.ts` Claude table + a hand-maintained OpenAI table (unknown model = cost 0 + flag), `CostTracker` callback (`cost-tracker.ts`), per run on `ToolContext.cost_tracker` (Phase 6) |
 | `transitions.py` | `Continue` / `Terminal` `StrEnum`s, `Transition`, `Terminated` |
 | `deps.py` | `LoopDeps` — the injected 7-member DI seam (A4), plus `CompactionResult` and `StopHookResult` |
 | `engine.py` | `run_loop`, an async generator (A3–A7), plus `drain`, handling all terminal returns, continue sites, and ledger reconciliation |
@@ -566,6 +570,52 @@ Triage killed 715 mutants, each verified inside `mutants/` against the
 venv in a fresh pytest temp dir, which filled the 9.8G `/tmp` tmpfs mid-run ("No space left
 on device", every remaining mutant "not checked"). Run mutmut with
 `TMPDIR=<a directory on disk>` and clear it afterwards.
+
+### What Phase 6 changed (2026-10-22)
+
+Session wrapper, transcripts and the evidence layer, ported test-first. The user's direction:
+"follow claude-code's source and architecture, while enforcing the TDD cycle".
+
+- **One `QueryEngine` per sub-requirement** (`query_engine.py`, `QueryEngine.ts`). The runner
+  no longer drains `run_loop` itself: the engine records the starting messages **before**
+  the first model call, records every whole message as it arrives, and yields a
+  `ResultMessage` last. The result is yielded to the caller and logged, never persisted, as
+  upstream's SDK result. Success follows `isResultSuccessful`; the TDD outcome is still the
+  terminal plus the ledger (`PlanItemResult` is unchanged).
+- **Transcript at upstream's location**: `<config home>/projects/<sanitized cwd>/<run id>.jsonl`
+  (`TDDAGENTS_CONFIG_DIR`, default `~/.tddagents`), workers at
+  `<run id>/subagents/agent-<id>.jsonl`. The cwd is the workspace root (the project root when
+  the workspace has none). One whole LangChain message per line under `message`, with
+  upstream's chain fields and stamp; the uuid lives in `additional_kwargs["uuid"]`.
+  Append-only. **Attachments are not logged** (external build's `isLoggableMessage`), so the
+  TDD-state reminders are not in the transcript — the events file carries the ledger.
+- **`emit_event` is real** (`events.py`): each transition and the terminal, with the ledger,
+  the last `RunTests` exit code/path and the plan index, appended to
+  `<run id>/events.jsonl` (inside the session directory so it is never taken for a
+  transcript). Sidechains do not get this sink.
+- **Cost**: `CostTracker` is a LangChain callback on every model call (framed messages lose
+  usage, so they are not read). LangChain's `input_tokens` includes cache reads/creation;
+  the tracker subtracts them. Unknown model: cost 0 and `has_unknown_model_cost` (deliberate
+  divergence from upstream's default-model fallback). The OpenAI table: only o4-mini was
+  confirmed on OpenAI's own page; the other 9 entries are kept at the user's direction and
+  must be re-verified before a figure is relied on.
+- **Resume is a library** (`storage/loader.py`, `storage/recovery.py`), wired by the entry
+  point in Phase 9 together with SessionStart(`resume`). **The ledger is never restored from
+  a transcript**: a resumed run starts from whatever ledger its caller seeds — fail-safe,
+  since RED must be re-observed.
+- Compaction summaries name the transcript path (`ToolContext.transcript_path`), as
+  `compact.ts` does; workers share it.
+- Deleted: `app/loop/transcript.py` (`TranscriptLogger`, `state_checkpoint` records — an
+  invention).
+- Tests: an autouse fixture points `TDDAGENTS_CONFIG_DIR` at a temp dir, so no test writes
+  to the real home.
+
+*Divergences, all recorded:* writes are synchronous (upstream batches); sidechain writes are
+not deduplicated (as upstream); `version` is this checkout's short git sha; no
+`permission_denials`, `structured_output`, `fast_mode_state` in the result; resume skips the
+>5 MB pre-boundary scan, legacy progress bridging, preserved-segment relinks, snip removals,
+metadata entries and skill-state restore; brief-mode terminal tool results have no TDDAgents
+tool (hook point kept).
 
 ### The three things that change most
 

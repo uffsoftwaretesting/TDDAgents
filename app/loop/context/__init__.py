@@ -178,6 +178,12 @@ class ToolContext:
     #: The run's agent-memory store (`agents/memory.py`), owned by the runner: rooted outside
     #: the workspace, and its run-scoped memory discarded when the run ends (Part I5).
     agent_memory_store: Any = None
+    #: The run's `CostTracker` (`app/loop/cost/`), upstream's session-global cost state made
+    #: per run. Fed as a callback on every model call; a worker shares its parent's.
+    cost_tracker: Any = None
+    #: The session transcript's path (upstream's `getTranscriptPath()`, session-global): what
+    #: a compaction's summary points at. A worker shares its parent's.
+    transcript_path: str | None = None
     #: Upstream `nestedMemoryAttachmentTriggers`: paths `ReadFile` read this turn, whose
     #: nested `TDDAGENTS.md` / conditional rules the `nested_memory` attachment loads next.
     nested_memory_attachment_triggers: set[str] = field(default_factory=set)
@@ -213,6 +219,8 @@ def tool_context_for(
     agent_id: str | None = None,
     agent_type: str | None = None,
     agent_memory_store: Any = None,
+    cost_tracker: Any = None,
+    transcript_path: str | None = None,
 ) -> ToolContext:
     """
     Build a context wired to a store, which is what the main loop wants.
@@ -235,6 +243,8 @@ def tool_context_for(
         agent_id=agent_id,
         agent_type=agent_type,
         agent_memory_store=agent_memory_store,
+        cost_tracker=cost_tracker,
+        transcript_path=transcript_path,
     )
 
 

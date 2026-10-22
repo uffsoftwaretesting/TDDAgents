@@ -79,6 +79,7 @@ async def production_autocompact(
         summarizer=build_compact_summarizer(),
         post_compact_attachments=post_compact_attachments,
         query_source=query_source_of(state.tool_context),
+        transcript_path=state.tool_context.transcript_path,
     )
 
 
@@ -97,6 +98,7 @@ async def production_compact(state: LoopState, config: RunConfig) -> CompactionR
             trigger="auto",
             post_compact_attachments=post_compact_attachments,
             model=config.model,
+            transcript_path=state.tool_context.transcript_path,
         )
     except Exception:  # noqa: BLE001 - upstream logs a failed compaction and carries on
         return CompactionResult(compacted=False, messages=state.messages, tracking=state.compaction_tracking)
