@@ -350,7 +350,7 @@ def test_an_agent_leaf_is_the_entry_nobody_points_at_not_the_newest(tmp_path):
 def test_a_chain_of_non_messages_that_runs_out_of_parents_has_no_leaf():
     from app.loop.storage.loader import _leaf_uuids
 
-    entries = {
+    entries: dict[str, dict[str, Any]] = {
         "s1": {"uuid": "s1", "type": "system", "parentUuid": None},
         "s2": {"uuid": "s2", "type": "system", "parentUuid": "s1"},
     }
@@ -360,7 +360,7 @@ def test_a_chain_of_non_messages_that_runs_out_of_parents_has_no_leaf():
 def test_a_cycle_of_non_messages_behind_a_terminal_ends_the_walk():
     from app.loop.storage.loader import _leaf_uuids
 
-    entries = {
+    entries: dict[str, dict[str, Any]] = {
         "t": {"uuid": "t", "type": "system", "parentUuid": "a"},
         "a": {"uuid": "a", "type": "system", "parentUuid": "b"},
         "b": {"uuid": "b", "type": "system", "parentUuid": "a"},

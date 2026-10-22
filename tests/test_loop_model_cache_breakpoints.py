@@ -149,3 +149,33 @@ def test_the_runs_cost_tracker_rides_on_the_model_call(monkeypatch):
     plain = tool_context_for(AppStateStore())
     model_mod.open_model_stream(initial_loop_state((HumanMessage(content="hi"),), plain), run, RetryContext(model="m"))
     assert seen["config"]["callbacks"] == [model_mod.get_global_token_tracker()]
+
+
+def test_the_provider_follows_the_requested_model(monkeypatch):
+    """Phase 7: a worker resolved to a Claude alias reaches Anthropic even in an OpenAI run."""
+    from app.config.config import Config
+    from app.loop import model as model_mod
+    from app.loop.config import build_run_config
+    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.retry import RetryContext
+    from app.loop.state import initial_loop_state
+
+    asked: list = []
+
+    class FakeModel:
+        def astream(self, messages, config=None, **kwargs):
+            return iter(())
+
+    def fake_factory(provider, **kwargs):
+        asked.append((provider, kwargs["model"]))
+        return FakeModel()
+
+    monkeypatch.setattr(Config, "CHAT_MODEL", "openai")
+    monkeypatch.setattr(model_mod, "get_chat_model", fake_factory)
+    monkeypatch.setattr(model_mod, "build_request_messages", lambda state, config: [HumanMessage(content="hi")])
+    monkeypatch.setattr(model_mod, "request_system_texts", lambda state, config: ["s"])
+    state = initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
+    run_config = build_run_config("r", postgres_checkpointing=False)
+    model_mod.open_model_stream(state, run_config, RetryContext(model="claude-sonnet-4-6"))
+    model_mod.open_model_stream(state, run_config, RetryContext(model="mystery"))
+    assert asked == [("anthropic", "claude-sonnet-4-6"), ("openai", "mystery")]

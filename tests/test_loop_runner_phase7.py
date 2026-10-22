@@ -1,0 +1,132 @@
+"""Phase 7: the runner with the Agent tool, and a whole Red -> Green cycle through the
+coordinator and real workers on a real workspace."""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+import json
+from typing import Any
+
+from langchain_core.messages import AIMessage
+
+from app.loop.coordinator import COORDINATOR_MODE_ENV, get_coordinator_system_prompt
+from app.loop.storage.paths import get_project_dir
+from app.metrics.event_log import EventLog
+
+CALC_TEST = "import calculator\n\ndef test_add():\n    assert calculator.add(2, 3) == 5\n"
+CALC_IMPL = "def add(a, b):\n    return a + b\n"
+
+
+def _call(name: str, cid: str, **args: Any) -> AIMessage:
+    return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": cid}])
+
+
+def _tool_results(state: Any) -> str:
+    from langchain_core.messages import ToolMessage
+
+    return "\n".join(str(m.content) for m in state.messages if isinstance(m, ToolMessage))
+
+
+def _settings(tmp_path, ws_root) -> Any:
+    project = tmp_path / "project"
+    (project / ".tddagents").mkdir(parents=True)
+    (project / ".tddagents" / "settings.json").write_text(json.dumps({
+        "permissions": {"defaultMode": "acceptEdits", "allow": ["Bash(pytest:*)"]}}))
+    return project
+
+
+def _run(workspace, tmp_path, scripts: dict[str | None, list[list[AIMessage]]], seen: list[Any]):
+    """A model scripted per agent type (`None` is the main thread)."""
+    from app.loop.factory import get_production_deps
+    from app.loop.runner import tdd_loop_runner
+
+    async def model(state: Any, config: Any):
+        agent_type = state.tool_context.agent_type
+        seen.append((agent_type, state))
+        turns = scripts[agent_type]
+        if not turns:
+            raise AssertionError(f"{agent_type} asked for more turns than scripted")
+        for message in turns.pop(0):
+            yield message
+
+    deps = dataclasses.replace(get_production_deps(), call_model=model)
+    return asyncio.run(tdd_loop_runner(
+        "add two numbers", 2, {"session_id": "s"}, workspace=workspace, deps=deps,
+        project_root=_settings(tmp_path, workspace.root), home=tmp_path / "home", managed_dir=tmp_path / "etc"))
+
+
+def test_the_coordinator_drives_a_red_green_cycle_through_workers(python_workspace, tmp_path, monkeypatch):
+    monkeypatch.setenv(COORDINATOR_MODE_ENV, "1")
+    scripts: dict[str | None, list[list[AIMessage]]] = {
+        None: [
+            [_call("Agent", "a1", description="red", subagent_type="tester",
+                   prompt="Write tests/test_calc.py testing calculator.add(2, 3) == 5 and run it.")],
+            [_call("Agent", "a2", description="green", subagent_type="developer",
+                   prompt="Create calculator.py with add(a, b) so tests/test_calc.py passes.")],
+            [AIMessage(content="Red then green observed.")],
+        ],
+        "tester": [
+            [_call("WriteFile", "t1", file_path="tests/test_calc.py", content=CALC_TEST)],
+            [_call("RunTests", "t2", test_path="tests")],
+            [AIMessage(content="The test fails: no module named calculator.")],
+        ],
+        "developer": [
+            [_call("WriteFile", "d1", file_path="calculator.py", content=CALC_IMPL)],
+            [_call("RunTests", "d2", test_path="tests")],
+            [AIMessage(content="All tests pass.")],
+        ],
+    }
+    seen: list[Any] = []
+    result = _run(python_workspace, tmp_path, scripts, seen)
+
+    assert (result.status, result.terminal_reason) == ("success", "completed")
+    assert (result.red_confirmed, result.green_passed) == (True, True)
+    assert python_workspace.read_file("calculator.py") == CALC_IMPL
+    # The coordinator holds only the Agent tool and the coordinator prompt.
+    coordinator = seen[0][1].tool_context
+    assert [t.name for t in coordinator.tools] == ["Agent"]
+    assert coordinator.agent_system_prompt == (get_coordinator_system_prompt(),)
+    assert "workerToolsContext" in coordinator.extra_user_context
+    # The developer only ran once the tester's RunTests had confirmed RED on the shared ledger.
+    first_developer = next(state for kind, state in seen if kind == "developer")
+    assert first_developer.tool_context.get_app_state().phase_ledger.red_confirmed is True
+    # The tester's report reached the coordinator as the Agent tool result.
+    second_coordinator_turn = [state for kind, state in seen if kind is None][1]
+    assert "The test fails: no module named calculator." in _tool_results(second_coordinator_turn)
+
+    project = get_project_dir(str(python_workspace.root))
+    (transcript,) = project.glob("loop-*.jsonl")
+    sidechains = sorted((project / transcript.stem / "subagents").glob("agent-*.jsonl"))
+    assert len(sidechains) == 2
+    events = EventLog.load_jsonl(project / transcript.stem / "events.jsonl")
+    # Only the coordinator's transitions are the sub-requirement's flow.
+    assert [e.transition_reason for e in events.get_transitions()] == ["next_turn", "next_turn", "completed"]
+    assert {e.payload["plan_index"] for e in events} == {2}
+
+
+def test_a_developer_before_red_is_refused_and_the_coordinator_is_told(python_workspace, tmp_path, monkeypatch):
+    monkeypatch.setenv(COORDINATOR_MODE_ENV, "1")
+    scripts: dict[str | None, list[list[AIMessage]]] = {
+        None: [
+            [_call("Agent", "a1", description="green", subagent_type="developer", prompt="Implement add.")],
+            [AIMessage(content="stop")],
+            [AIMessage(content="stop again")],
+        ],
+    }
+    seen: list[Any] = []
+    result = _run(python_workspace, tmp_path, scripts, seen)
+    second = [state for kind, state in seen if kind is None][1]
+    assert "Agent 'developer' cannot start: Cannot transition to GREEN" in _tool_results(second)
+    assert result.terminal_reason == "stop_hook_prevented"
+    assert not any(kind == "developer" for kind, _ in seen)
+
+
+def test_the_main_thread_has_the_agent_tool_outside_coordinator_mode(python_workspace, tmp_path, monkeypatch):
+    monkeypatch.delenv(COORDINATOR_MODE_ENV, raising=False)
+    seen: list[Any] = []
+    _run(python_workspace, tmp_path, {None: [[AIMessage(content="d")], [AIMessage(content="d")]]}, seen)
+    ctx = seen[0][1].tool_context
+    assert "Agent" in [t.name for t in ctx.tools]
+    assert ctx.agent_system_prompt is None and ctx.extra_user_context is None
+    assert ctx.transcript_store is not None

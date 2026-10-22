@@ -3,7 +3,6 @@ name: tester
 description: Writes failing unit tests to establish the RED phase of TDD.
 phase: RED
 tools: [ReadFile, Grep, Glob, WriteFile, Edit, RunTests, Bash]
-permissionMode: workspace_write
 memory: run
 model: inherit
 ---

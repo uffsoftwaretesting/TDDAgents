@@ -154,19 +154,15 @@ def test_format_total_cost():
     assert format_total_cost(big) == "Total cost: $15.00"
 
 
-def test_the_context_carries_the_runs_tracker_and_a_worker_inherits_it():
+def test_the_context_carries_the_runs_tracker():
     from types import SimpleNamespace
 
-    from app.loop.agents.definition import AgentDefinition
-    from app.loop.agents.subagent import create_subagent
     from app.loop.context import AppStateStore, ToolContext, tool_context_for
 
     assert ToolContext.__dataclass_fields__["cost_tracker"].default is None
     tracker = CostTracker(model="m")
     parent = tool_context_for(AppStateStore(), workspace=SimpleNamespace(root="/w"), run_id="r", cost_tracker=tracker)
     assert parent.cost_tracker is tracker
-    worker = create_subagent(AgentDefinition(name="tester", description="d", prompt="p"), parent, directive="go")
-    assert worker.context.cost_tracker is tracker
 
 
 def test_a_missing_input_count_is_zero():

@@ -1,50 +1,51 @@
 """
-Agent definition loader and multi-tier override resolution.
+Agent definitions from Markdown (`reference/claude-code/src/tools/AgentTool/loadAgentsDir.ts`).
 
-Implements I1 conforming to §4.5:
-- 4 parser discipline rules: omission unset, invalid logged and ignored,
-  loud phase validation, inherit is sentinel.
-- Multi-tier discovery: built-in, user (~/.tddagents/agents/), project (.tddagents/agents/).
-- Precedence: project > user > built-in.
+* `load_agent_definition` is `parseAgentFromMarkdown`: `name` and `description` are required
+  (without them the file is not an agent), every other invalid value is logged and ignored,
+  and only upstream's `PERMISSION_MODES` parse. `phase` is the one TDDAgents field that fails
+  the load loudly.
+* `get_agent_definitions_with_overrides` is `getAgentDefinitionsWithOverrides` +
+  `getActiveAgentsFromList`: the built-in roster in `app/prompts/agents/`, then user
+  (`~/.tddagents/agents/`), then project (`.tddagents/agents/`), a later source replacing an
+  earlier agent of the same name. No prompt registry is consulted.
+
+Not ported (no subsystem here): `color`, `effort`, `isolation`, `mcpServers`, `skills`,
+`initialPrompt`, and `omitClaudeMd` on file agents (upstream sets it on built-ins only).
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 import yaml
 
 from app.loop.agents.definition import AgentDefinition, AgentFrontmatterError
 from app.loop.context.instructions import strip_html_comments
+from app.loop.context.memory import is_auto_memory_enabled
 from app.loop.ledger import TddPhase
+from app.loop.permissions.settings import parse_tool_list_from_cli
+from app.loop.permissions.types import PERMISSION_MODES
 
 logger = logging.getLogger(__name__)
 
 _VAR_RE = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}|\$\{([A-Za-z0-9_]+)\}|\{([A-Za-z0-9_]+)\}")
 
-_VALID_PERMISSION_MODES = frozenset({
-    "default",
-    "plan",
-    "read_only",
-    "workspace_write",
-    "full",
-    "bypass",
-    "bypass_permissions",
-    "accept_edits",
-    "dont_ask",
-})
+#: `parseInt(String(value), 10)`: the leading integer of a string.
+_LEADING_INT_RE = re.compile(r"^\s*[+-]?\d+")
 
-_VALID_MEMORIES = frozenset({
-    "run",
-    "session",
-    "local",
-    "project",
-    "user",
-    "none",
-})
+#: Upstream's `PERMISSION_MODES` (with `auto`, which the classifier build adds).
+_VALID_PERMISSION_MODES: tuple[str, ...] = tuple(str(mode) for mode in PERMISSION_MODES)
+
+#: Upstream's `user`/`project`/`local`, plus TDDAgents' run-scoped memory (Part I5).
+_VALID_MEMORIES = frozenset({"user", "project", "local", "run", "session", "none"})
+
+#: `FILE_WRITE_TOOL_NAME`, `FILE_EDIT_TOOL_NAME`, `FILE_READ_TOOL_NAME`, in upstream's order.
+_MEMORY_FILE_TOOLS = ("WriteFile", "Edit", "ReadFile")
 
 
 def render_prompt(
@@ -90,7 +91,7 @@ def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
             try:
                 data = yaml.safe_load(raw_fm)
                 fm = data if isinstance(data, dict) else {}
-            except Exception as e:
+            except yaml.YAMLError as e:
                 logger.warning("Failed to parse YAML frontmatter: %s", e)
                 fm = {}
             return fm, body.strip()
@@ -102,7 +103,7 @@ def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
             try:
                 data = yaml.safe_load(raw_fm)
                 fm = data if isinstance(data, dict) else {}
-            except Exception as e:
+            except yaml.YAMLError as e:
                 logger.warning("Failed to parse HTML comment frontmatter: %s", e)
                 fm = {}
             return fm, body.strip()
@@ -110,138 +111,155 @@ def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     return {}, content.strip()
 
 
+def _parse_positive_int(value: Any) -> int | None:
+    """`parsePositiveIntFromFrontmatter`."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        parsed: int | None = value
+    elif isinstance(value, float):
+        parsed = int(value) if value.is_integer() else None
+    else:
+        match = _LEADING_INT_RE.match(str(value))
+        parsed = int(match.group(0)) if match else None
+    return parsed if parsed is not None and parsed > 0 else None
+
+
+def _parse_tool_list(value: Any) -> list[str] | None:
+    """`parseToolListString`: `None` when missing, `[]` for an empty value."""
+    if value is None:
+        return None
+    if not value:
+        return []
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, (list, tuple)):
+        items = [item for item in value if isinstance(item, str)]
+    else:
+        items = []
+    if not items:
+        return []
+    parsed = parse_tool_list_from_cli(items)
+    return ["*"] if "*" in parsed else parsed
+
+
+def parse_agent_tools_from_frontmatter(value: Any) -> tuple[str, ...] | None:
+    """`parseAgentToolsFromFrontmatter`: missing or `*` = every tool (`None`), empty = none."""
+    parsed = _parse_tool_list(value)
+    if parsed is None:
+        return None
+    if "*" in parsed:
+        return None
+    return tuple(parsed)
+
+
 def load_agent_definition(
     content: str,
     vars: Mapping[str, Any] | None = None,
     source: str = "built-in",
     base_dir: str = "",
-) -> AgentDefinition:
+) -> AgentDefinition | None:
     """
-    Parse an AGENT.md content into a validated AgentDefinition.
+    `parseAgentFromMarkdown`: the definition, or `None` when the file is not an agent.
 
-    Follows the 4 discipline rules (§4.5):
-    1. Omission means unset (None).
-    2. Invalid value is logged and ignored (except phase).
-    3. Enumerations validate against explicit list.
-    4. inherit is a sentinel.
+    A missing `name` or `description` is not an agent (upstream returns `null`); every other
+    invalid value is logged and ignored. The one exception is `phase`, which raises
+    `AgentFrontmatterError`, because dropping it would silently disable the TDD invariant.
     """
     fm, raw_body = parse_markdown_frontmatter(content)
-    prompt = render_prompt(raw_body, vars, strip_comments=True)
+    name = fm.get("name")
+    if not name or not isinstance(name, str):
+        return None
+    description = fm.get("description")
+    if not description or not isinstance(description, str):
+        logger.debug("Agent file %s is missing required 'description' in frontmatter", base_dir or name)
+        return None
+    description = description.replace("\\n", "\n")
 
-    name = str(fm.get("name") or "unnamed_agent")
-    description = str(fm.get("description") or "")
-
-    # Phase validation (The one field that fails loudly §4.5)
     phase: TddPhase | None = None
-    if "phase" in fm:
-        raw_phase = fm["phase"]
-        if raw_phase is not None:
-            norm_phase = str(raw_phase).strip().upper()
-            if norm_phase == "POST_GREEN":
-                norm_phase = "REFACTOR"
-            try:
-                phase = TddPhase(norm_phase)
-            except ValueError:
-                allowed = [p.value for p in TddPhase] + ["post_green"]
-                raise AgentFrontmatterError(
-                    f"Invalid phase '{raw_phase}' in agent '{name}'. Allowed phases: {allowed}"
-                ) from None
+    raw_phase = fm.get("phase")
+    if raw_phase is not None:
+        norm_phase = str(raw_phase).strip().upper()
+        if norm_phase == "POST_GREEN":  # the plan's name for REFACTOR (§4.5)
+            norm_phase = "REFACTOR"
+        try:
+            phase = TddPhase(norm_phase)
+        except ValueError:
+            allowed = [p.value for p in TddPhase] + ["post_green"]
+            raise AgentFrontmatterError(
+                f"Invalid phase '{raw_phase}' in agent '{name}'. Allowed phases: {allowed}"
+            ) from None
 
-    # Tools validation
-    tools: tuple[str, ...] | None = None
-    if "tools" in fm:
-        raw_tools = fm["tools"]
-        if isinstance(raw_tools, (list, tuple)) and all(isinstance(t, str) for t in raw_tools):
-            tools = tuple(raw_tools)
-        else:
-            logger.warning("Invalid tools list in agent '%s': %r", name, raw_tools)
-
-    # Disallowed tools validation
-    disallowed_tools: tuple[str, ...] | None = None
-    raw_disallowed = fm.get("disallowedTools", fm.get("disallowed_tools"))
-    if raw_disallowed is not None:
-        if isinstance(raw_disallowed, (list, tuple)) and all(isinstance(t, str) for t in raw_disallowed):
-            disallowed_tools = tuple(raw_disallowed)
-        else:
-            logger.warning("Invalid disallowed_tools in agent '%s': %r", name, raw_disallowed)
-
-    # PermissionMode validation
-    permission_mode: str | None = None
-    if "permissionMode" in fm:
-        raw_pm = fm["permissionMode"]
-        if isinstance(raw_pm, str) and raw_pm.lower() in _VALID_PERMISSION_MODES:
-            permission_mode = raw_pm.lower()
-        else:
-            logger.warning("Invalid permissionMode in agent '%s': %r", name, raw_pm)
-
-    # Memory validation
-    memory: str | None = None
-    if "memory" in fm:
-        raw_mem = fm["memory"]
-        if isinstance(raw_mem, str) and raw_mem.lower() in _VALID_MEMORIES:
-            memory = raw_mem.lower()
-        else:
-            logger.warning("Invalid memory in agent '%s': %r", name, raw_mem)
-
-    # Model validation
     model: str | None = None
-    if "model" in fm:
-        raw_model = fm["model"]
-        if isinstance(raw_model, str):
-            model = raw_model
-        else:
-            logger.warning("Invalid model in agent '%s': %r", name, raw_model)
+    raw_model = fm.get("model")
+    if isinstance(raw_model, str) and raw_model.strip():
+        trimmed = raw_model.strip()
+        model = "inherit" if trimmed.lower() == "inherit" else trimmed
 
-    # ForkFrom validation
-    fork_from: str | None = None
-    if "forkFrom" in fm:
-        raw_fork = fm["forkFrom"]
-        if isinstance(raw_fork, str):
-            fork_from = raw_fork
-        else:
-            logger.warning("Invalid forkFrom in agent '%s': %r", name, raw_fork)
+    raw_background = fm.get("background")
+    if raw_background not in (None, "true", "false", True, False):
+        logger.debug(
+            "Agent %s has invalid background value '%s'. Must be 'true', 'false', or omitted.", name, raw_background
+        )
+    background = True if raw_background in ("true", True) else None
 
-    # RevertOnRed validation
-    revert_on_red: bool | None = None
-    if "revertOnRed" in fm:
-        raw_ror = fm["revertOnRed"]
-        if isinstance(raw_ror, bool):
-            revert_on_red = raw_ror
+    memory: str | None = None
+    raw_memory = fm.get("memory")
+    if raw_memory is not None:
+        if raw_memory in _VALID_MEMORIES:
+            memory = raw_memory
         else:
-            logger.warning("Invalid revertOnRed in agent '%s': %r", name, raw_ror)
+            logger.debug("Agent %s has invalid memory value '%s'.", name, raw_memory)
 
-    # Background validation
-    background: bool | None = None
-    if "background" in fm:
-        raw_bg = fm["background"]
-        if isinstance(raw_bg, bool):
-            background = raw_bg
+    permission_mode: str | None = None
+    raw_mode = fm.get("permissionMode")
+    if raw_mode:
+        if raw_mode in _VALID_PERMISSION_MODES:
+            permission_mode = raw_mode
         else:
-            logger.warning("Invalid background in agent '%s': %r", name, raw_bg)
+            logger.debug(
+                "Agent %s has invalid permissionMode '%s'. Valid options: %s",
+                name, raw_mode, ", ".join(_VALID_PERMISSION_MODES),
+            )
 
-    # Hooks validation
+    raw_max_turns = fm.get("maxTurns")
+    max_turns = _parse_positive_int(raw_max_turns)
+    if raw_max_turns is not None and max_turns is None:
+        logger.debug("Agent %s has invalid maxTurns '%s'. Must be a positive integer.", name, raw_max_turns)
+
+    tools = parse_agent_tools_from_frontmatter(fm.get("tools"))
+    # `isAutoMemoryEnabled() && memory && tools !== undefined`: memory needs the file tools.
+    if is_auto_memory_enabled() and memory and tools is not None:
+        for tool in _MEMORY_FILE_TOOLS:
+            if tool not in tools:
+                tools = (*tools, tool)
+
+    disallowed_tools = (
+        parse_agent_tools_from_frontmatter(fm["disallowedTools"]) if "disallowedTools" in fm else None
+    )
+
     hooks: dict[str, Any] | None = None
-    if "hooks" in fm:
-        raw_hooks = fm["hooks"]
+    raw_hooks = fm.get("hooks")
+    if raw_hooks is not None:
         if isinstance(raw_hooks, dict):
             hooks = raw_hooks
         else:
-            logger.warning("Invalid hooks dict in agent '%s': %r", name, raw_hooks)
+            logger.debug("Agent %s has invalid hooks: %r", name, raw_hooks)
 
     return AgentDefinition(
         name=name,
         description=description,
-        prompt=prompt,
+        prompt=render_prompt(raw_body, vars, strip_comments=True),
         phase=phase,
         tools=tools,
         disallowed_tools=disallowed_tools,
         permission_mode=permission_mode,
         memory=memory,
-        fork_from=fork_from,
-        revert_on_red=revert_on_red,
+        max_turns=max_turns,
         hooks=hooks,
         model=model,
         background=background,
+        omit_claude_md=source == "built-in" and fm.get("omitClaudeMd") is True,
         source=source,
         base_dir=base_dir,
         raw_frontmatter=dict(fm),
@@ -252,14 +270,23 @@ def load_agent_definition_from_path(
     path: Path | str,
     vars: Mapping[str, Any] | None = None,
     source: str = "built-in",
-) -> AgentDefinition:
-    """Load and parse an AGENT.md file from disk."""
+) -> AgentDefinition | None:
+    """Load and parse an agent Markdown file; `None` when it is not an agent."""
     file_path = Path(path)
     if not file_path.is_file():
         raise FileNotFoundError(f"Agent definition file not found: {file_path}")
-
     content = file_path.read_text(encoding="utf-8")
     return load_agent_definition(content, vars, source=source, base_dir=str(file_path.parent))
+
+
+def _load_if_agent(path: Path, source: str, vars: Mapping[str, Any] | None) -> AgentDefinition | None:
+    try:
+        return load_agent_definition_from_path(path, vars=vars, source=source)
+    except AgentFrontmatterError:
+        raise
+    except Exception as e:  # noqa: BLE001 - upstream logs a failed agent file and skips it
+        logger.warning("Failed loading agent from %s: %s", path, e)
+        return None
 
 
 def _scan_agent_dir(
@@ -267,32 +294,27 @@ def _scan_agent_dir(
     source: str,
     vars: Mapping[str, Any] | None = None,
 ) -> dict[str, AgentDefinition]:
-    """Scan a directory for AGENT.md files or .md files."""
+    """Every agent in a directory: `<dir>/AGENT.md` entries and flat `.md` files."""
     agents: dict[str, AgentDefinition] = {}
     if not directory.is_dir():
         return agents
-
     for entry in sorted(directory.iterdir()):
         if entry.is_dir():
-            agent_md = entry / "AGENT.md"
-            if agent_md.is_file():
-                try:
-                    agent_def = load_agent_definition_from_path(agent_md, vars=vars, source=source)
-                    agents[agent_def.name] = agent_def
-                except AgentFrontmatterError:
-                    raise
-                except Exception as e:
-                    logger.warning("Failed loading agent from %s: %s", agent_md, e)
+            candidate = entry / "AGENT.md"
+            if not candidate.is_file():
+                continue
         elif entry.is_file() and entry.suffix == ".md" and entry.name != "README.md":
-            try:
-                agent_def = load_agent_definition_from_path(entry, vars=vars, source=source)
-                agents[agent_def.name] = agent_def
-            except AgentFrontmatterError:
-                raise
-            except Exception as e:
-                logger.warning("Failed loading agent from %s: %s", entry, e)
-
+            candidate = entry
+        else:
+            continue
+        agent_def = _load_if_agent(candidate, source, vars)
+        if agent_def is not None:
+            agents[agent_def.name] = agent_def
     return agents
+
+
+#: The built-in roster: `app/prompts/agents/`.
+BUILT_IN_AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts" / "agents"
 
 
 def get_agent_definitions_with_overrides(
@@ -301,37 +323,11 @@ def get_agent_definitions_with_overrides(
     built_in_dir: Path | str | None = None,
     vars: Mapping[str, Any] | None = None,
 ) -> dict[str, AgentDefinition]:
-    from app.loop.prompts.registry import global_prompt_registry
-    
+    """`getAgentDefinitionsWithOverrides`: the active agents, built-in < user < project."""
     definitions: dict[str, AgentDefinition] = {}
-
-    # 1. Built-in
-    if built_in_dir is not None:
-        built_in_path = Path(built_in_dir)
-        if built_in_path.is_dir():
-            definitions.update(_scan_agent_dir(built_in_path, source="built-in", vars=vars))
-    else:
-        built_in_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "agents"
-        if built_in_path.is_dir():
-            definitions.update(_scan_agent_dir(built_in_path, source="built-in", vars=vars))
-
-    # 2. User
-    if user_home is not None:
-
-        user_path = Path(user_home) / ".tddagents" / "agents"
-    else:
-        user_path = Path.home() / ".tddagents" / "agents"
-
-    if user_path.is_dir():
-        definitions.update(_scan_agent_dir(user_path, source="user", vars=vars))
-
-    # 3. Project
-    if project_dir is not None:
-        proj_path = Path(project_dir) / ".tddagents" / "agents"
-    else:
-        proj_path = Path.cwd() / ".tddagents" / "agents"
-
-    if proj_path.is_dir():
-        definitions.update(_scan_agent_dir(proj_path, source="project", vars=vars))
-
+    definitions.update(_scan_agent_dir(Path(built_in_dir or BUILT_IN_AGENTS_DIR), "built-in", vars))
+    home = Path(user_home) if user_home is not None else Path.home()
+    definitions.update(_scan_agent_dir(home / ".tddagents" / "agents", "user", vars))
+    project = Path(project_dir) if project_dir is not None else Path.cwd()
+    definitions.update(_scan_agent_dir(project / ".tddagents" / "agents", "project", vars))
     return definitions

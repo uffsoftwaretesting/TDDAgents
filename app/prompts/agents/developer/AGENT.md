@@ -3,7 +3,6 @@ name: developer
 description: Writes minimal implementation to satisfy failing tests and achieve GREEN.
 phase: GREEN
 tools: [ReadFile, Grep, Glob, WriteFile, Edit, RunTests, Bash]
-permissionMode: workspace_write
 memory: run
 model: inherit
 ---

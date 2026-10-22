@@ -145,3 +145,11 @@ def test_build_worktree_notice() -> None:
     assert "/home/user/repo" in notice
     assert "/tmp/worktree-123" in notice
     assert "isolated git worktree" in notice
+
+
+def test_the_fork_path_is_off_in_a_headless_run():
+    """`isForkSubagentEnabled` is false in a non-interactive session; no mode is invented."""
+    from app.loop.agents.fork import FORK_AGENT, is_fork_subagent_enabled
+
+    assert is_fork_subagent_enabled() is False
+    assert FORK_AGENT.permission_mode is None

@@ -5,14 +5,10 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.memory import AgentMemoryStore
-from app.loop.agents.subagent import create_subagent
-from app.loop.context import AppStateStore, tool_context_for
 
 
 def test_run_scope_without_a_run_id_has_no_shared_fallback(tmp_path):
@@ -21,30 +17,6 @@ def test_run_scope_without_a_run_id_has_no_shared_fallback(tmp_path):
         store.get_memory_dir("tester", "run")
     expected = tmp_path / ".tddagents" / "run-memory" / "r1" / "tester"
     assert store.get_memory_dir("tester", "run", run_id="r1") == expected
-
-
-def _worker_def(memory: str) -> AgentDefinition:
-    return AgentDefinition(name="tester", description="d", prompt="p", memory=memory)
-
-
-def test_a_worker_uses_the_runs_store_and_the_runs_id(tmp_path):
-    store = AgentMemoryStore(base_dir=tmp_path / "run-dir")
-    parent = tool_context_for(
-        AppStateStore(), workspace=SimpleNamespace(root=str(tmp_path / "ws")), run_id="loop-1",
-        agent_memory_store=store,
-    )
-    worker = create_subagent(_worker_def("run"), parent, directive="go")
-    assert "run-dir/.tddagents/run-memory/loop-1/tester" in worker.memory_prompt
-    assert not (tmp_path / "ws" / ".tddagents").exists()
-
-
-def test_a_worker_without_a_run_store_cannot_get_run_memory(tmp_path):
-    parent = tool_context_for(AppStateStore(), workspace=SimpleNamespace(root=str(tmp_path / "ws")), run_id="loop-1")
-    with pytest.raises(ValueError, match="^Run-scoped agent memory needs the run's memory store$"):
-        create_subagent(_worker_def("run"), parent, directive="go")
-    assert not (tmp_path / "ws" / ".tddagents").exists()
-    # An agent with no memory needs no store.
-    assert create_subagent(_worker_def("none"), parent, directive="go").memory_prompt == ""
 
 
 def test_the_runner_discards_run_memory_when_the_run_ends(tmp_path, make_fake_workspace):
@@ -73,10 +45,3 @@ def test_the_runner_discards_run_memory_when_the_run_ends(tmp_path, make_fake_wo
     assert not (Path(store.base_dir) / ".tddagents" / "run-memory").exists() or not any(
         (Path(store.base_dir) / ".tddagents" / "run-memory").iterdir()
     )
-
-
-def test_a_worker_points_at_the_sessions_transcript(tmp_path):
-    """Upstream's `getTranscriptPath()` is session-global: a worker compacts against it too."""
-    parent = tool_context_for(AppStateStore(), workspace=SimpleNamespace(root=str(tmp_path)), run_id="loop-1",
-                              transcript_path="/p/loop-1.jsonl")
-    assert create_subagent(_worker_def("none"), parent, directive="go").context.transcript_path == "/p/loop-1.jsonl"

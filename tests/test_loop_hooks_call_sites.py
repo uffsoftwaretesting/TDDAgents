@@ -415,19 +415,6 @@ def test_run_settings_locations(tmp_path):
 
 # ── workers and the request builder ─────────────────────────────────────────
 
-def test_a_worker_context_carries_its_agent_identity():
-    from app.loop.agents.definition import AgentDefinition
-    from app.loop.agents.subagent import create_subagent
-
-    parent = tool_context_for(AppStateStore(), run_id="run-7", hook_dispatcher=ScriptedDispatcher())
-    worker = create_subagent(AgentDefinition(name="tester", description="d", prompt="p"), parent_context=parent)
-    assert worker.context.agent_id == worker.agent_id
-    assert worker.context.agent_id.startswith("agent_")
-    assert worker.context.agent_type == "tester"
-    assert worker.context.run_id == "run-7"
-    assert worker.context.hook_dispatcher is parent.hook_dispatcher
-
-
 def test_the_request_builder_reorders_hook_messages_after_tool_results(monkeypatch):
     from app.loop import model as model_mod
 

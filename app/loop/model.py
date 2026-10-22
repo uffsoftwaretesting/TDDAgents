@@ -30,6 +30,7 @@ from app.loop.context.assembly import (
 from app.loop.context.cache import prepare_cached_request
 from app.loop.hooks.messages import reorder_attachments_for_api
 from app.loop.messages import Message
+from app.loop.model_aliases import provider_for_model
 from app.loop.prompts.sections import resolve_system_prompt_sections
 from app.loop.retry import RetryContext, RetryOptions, with_retry
 from app.loop.state import LoopState
@@ -53,12 +54,47 @@ def convert_tool_to_langchain(tool: Tool) -> dict[str, Any]:
     }
 
 
+def request_system_context(state: LoopState, config: RunConfig) -> dict[str, str]:
+    """
+    The run's memoized system context, as this context sends it: without `gitStatus` for an
+    agent that omits it (`runAgent.ts` -> `systemContextNoGit`). Filtered per request, so a
+    worker sharing the run's session never changes what the main thread sends.
+    """
+    ctx = state.tool_context
+    context = dict(get_session_context(config.run_id, ctx.workspace).system_context)
+    if ctx.omit_git_status:
+        context.pop("gitStatus", None)
+    return context
+
+
+def request_user_context(state: LoopState, config: RunConfig) -> dict[str, str]:
+    """
+    The run's memoized user context, as this context sends it: without `claudeMd` when the
+    agent omits it (`shouldOmitClaudeMd`), then any extra keys (`getCoordinatorUserContext`).
+    """
+    ctx = state.tool_context
+    context = dict(get_session_context(config.run_id, ctx.workspace).user_context)
+    if ctx.omit_claude_md:
+        context.pop("claudeMd", None)
+    context.update(ctx.extra_user_context or {})
+    return context
+
+
 def request_system_texts(state: LoopState, config: RunConfig) -> list[str]:
-    """The system prompt sections with the system context appended (`appendSystemContext`)."""
-    ws = state.tool_context.workspace
-    session = get_session_context(config.run_id, ws)
-    sections = resolve_system_prompt_sections(get_system_prompt(ws, Config.MODEL), session.section_cache)
-    return append_system_context(sections, session.system_context)
+    """
+    The system prompt sections with the system context appended (`appendSystemContext`).
+
+    A context with its own `agent_system_prompt` sends that instead of the default
+    sections, as `runAgent` hands `query()` the agent's prompt. The default sections stay
+    memoized in the run's section cache, which an override never touches.
+    """
+    ctx = state.tool_context
+    if ctx.agent_system_prompt is not None:
+        sections = list(ctx.agent_system_prompt)
+    else:
+        session = get_session_context(config.run_id, ctx.workspace)
+        sections = resolve_system_prompt_sections(get_system_prompt(ctx.workspace, Config.MODEL), session.section_cache)
+    return append_system_context(sections, request_system_context(state, config))
 
 
 def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]:
@@ -70,12 +106,10 @@ def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]
     `messagesForQuery` pipeline does, so the request adds nothing per call and its prefix
     stays byte-stable between turns.
     """
-    ws = state.tool_context.workspace
-    session = get_session_context(config.run_id, ws)
     system = SystemMessage(content="\n\n".join(request_system_texts(state, config)))
     # The compact boundary is a bookkeeping record (upstream's `system` message), never input.
     sendable = [m for m in state.messages if not is_compact_boundary_message(m)]
-    history = prepend_user_context(reorder_attachments_for_api(sendable), session.user_context)
+    history = prepend_user_context(reorder_attachments_for_api(sendable), request_user_context(state, config))
     return [system, *history]
 
 
@@ -114,14 +148,17 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
     been emitted. `RetryContext` carries what the previous failure asked to change — today
     only the model, which the 529 fallback swaps.
     """
+    # The provider follows the model: a worker resolved to a Claude alias reaches Anthropic
+    # even when the run's configured provider is OpenAI (`model_aliases.py`).
+    provider = provider_for_model(context.model, default=Config.CHAT_MODEL)
     messages_to_send, cache_kwargs = prepare_cached_request(
         build_request_messages(state, config),
-        provider=Config.CHAT_MODEL,
+        provider=provider,
         system_texts=request_system_texts(state, config),
     )
     lc_tools = [convert_tool_to_langchain(t) for t in state.tool_context.tools]
 
-    model = get_chat_model(Config.CHAT_MODEL, model=context.model, temperature=Config.TEMPERATURE)
+    model = get_chat_model(provider, model=context.model, temperature=Config.TEMPERATURE)
     if lc_tools:
         model = model.bind_tools(lc_tools)
 

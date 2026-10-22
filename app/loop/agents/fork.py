@@ -6,11 +6,12 @@ Implements I4 conforming to §4.5:
 - build_forked_messages: builds cache-friendly forked message sequence with placeholder tool results.
 - is_in_fork_child: guards against recursive forking.
 - FORK_AGENT: synthetic agent definition for implicit fork path.
+- is_fork_subagent_enabled: off, as upstream in a non-interactive session.
 """
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -22,16 +23,26 @@ FORK_BOILERPLATE_TAG = "fork_boilerplate"
 FORK_DIRECTIVE_PREFIX = "Your assigned directive: "
 FORK_PLACEHOLDER_RESULT = "Fork started — processing in background"
 
+#: Upstream's `FORK_AGENT` runs in the internal `bubble` mode, which this build lacks; the
+#: fork path is never reached here (`is_fork_subagent_enabled`), so no mode is invented.
 FORK_AGENT = AgentDefinition(
     name=FORK_SUBAGENT_TYPE,
     description="Implicit fork — inherits conversation context and prompt cache.",
     prompt="",
     tools=("*",),
-    permission_mode="workspace_write",
     memory="run",
     model="inherit",
     source="synthetic",
 )
+
+
+def is_fork_subagent_enabled() -> bool:
+    """
+    `forkSubagent.ts` -> `isForkSubagentEnabled`: never in coordinator mode, never in a
+    non-interactive session. Every TDDAgents run is headless, so the fork path is off and the
+    Agent tool requires `subagent_type` (Phase 7).
+    """
+    return False
 
 
 def _get_tool_use_ids_from_assistant(message: Message) -> list[str]:
@@ -43,8 +54,8 @@ def _get_tool_use_ids_from_assistant(message: Message) -> list[str]:
         for tc in tool_calls:
             if isinstance(tc, dict) and tc.get("id"):
                 ids.append(str(tc["id"]))
-            elif hasattr(tc, "id") and getattr(tc, "id"):
-                ids.append(str(getattr(tc, "id")))
+            elif hasattr(tc, "id") and tc.id:
+                ids.append(str(tc.id))
 
     # Content blocks list
     content = getattr(message, "content", None)

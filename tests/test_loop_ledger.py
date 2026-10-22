@@ -145,6 +145,6 @@ class TestTransitionTo:
     def test_transition_to_other_phases_succeeds(self):
         from app.loop.ledger import TddPhase
 
-        initial = PhaseLedger(phase=TddPhase.RED)
+        initial = PhaseLedger(phase=TddPhase.RED, red_confirmed=True)
         green = initial.transition_to(TddPhase.GREEN)
         assert green.phase == TddPhase.GREEN

@@ -3,6 +3,7 @@ Unit tests for I1: Agent definition parsing and multi-tier override resolution.
 """
 
 from pathlib import Path
+
 import pytest
 
 from app.loop.agents.definition import AgentDefinition, AgentFrontmatterError
@@ -23,7 +24,7 @@ def test_agent_definition_dataclass_fields() -> None:
         phase=TddPhase.RED,
         tools=("ReadFile", "WriteFile"),
         disallowed_tools=("Bash",),
-        permission_mode="workspace_write",
+        permission_mode="acceptEdits",
         memory="run",
         fork_from="developer",
         revert_on_red=True,
@@ -39,7 +40,7 @@ def test_agent_definition_dataclass_fields() -> None:
     assert defn.phase == TddPhase.RED
     assert defn.tools == ("ReadFile", "WriteFile")
     assert defn.disallowed_tools == ("Bash",)
-    assert defn.permission_mode == "workspace_write"
+    assert defn.permission_mode == "acceptEdits"
     assert defn.memory == "run"
     assert defn.fork_from == "developer"
     assert defn.revert_on_red is True
@@ -57,6 +58,7 @@ description: Only the essentials
 Execute instructions.
 """
     defn = load_agent_definition(content)
+    assert defn is not None
     assert defn.name == "minimal"
     assert defn.description == "Only the essentials"
     assert defn.prompt == "Execute instructions."
@@ -89,8 +91,10 @@ hooks: "not a dict"
 Prompt here.
 """
     defn = load_agent_definition(content)
-    assert defn.tools is None
-    assert defn.disallowed_tools is None
+    assert defn is not None
+    # `parseToolListString`: a string is a CLI tool list; a non-list value is no tools.
+    assert defn.tools == ("not", "a", "list")
+    assert defn.disallowed_tools == ()
     assert defn.permission_mode is None
     assert defn.memory is None
     assert defn.model is None
@@ -122,6 +126,7 @@ phase: post_green
 Body
 """
     defn = load_agent_definition(content)
+    assert defn is not None
     assert defn.phase == TddPhase.REFACTOR
 
 
@@ -135,6 +140,7 @@ disallowedTools: [Bash, WriteFile]
 Body
 """
     defn = load_agent_definition(content)
+    assert defn is not None
     assert defn.tools == ("ReadFile", "Bash")
     assert defn.disallowed_tools == ("Bash", "WriteFile")
 
@@ -152,6 +158,7 @@ Disk body
         encoding="utf-8",
     )
     defn = load_agent_definition_from_path(p, source="project")
+    assert defn is not None
     assert defn.name == "on_disk"
     assert defn.source == "project"
     assert defn.base_dir == str(tmp_path)

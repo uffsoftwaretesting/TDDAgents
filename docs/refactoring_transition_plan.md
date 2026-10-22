@@ -337,6 +337,23 @@ transcript.
   `tdd_phase_incomplete` Stop hook guards the **coordinator**; workers fire `SubagentStop`.
 - Agent-scoped memory is run-scoped (I5): one store per sub-requirement, discarded at its end.
 
+*Phase 7 outcome (2026-10-22), per the interview ("follow claude-code's source and
+architecture, while enforcing the TDD cycle"):*
+- `run_agent` ports `runAgent` and `agents/tool.py` ports `AgentTool.call` (sync path).
+  Sync workers share the parent's `set_app_state`, so a tester's `RunTests` confirms RED on
+  the coordinator's ledger.
+- Phase-on-spawn goes through `PhaseLedger.transition_to`: GREEN needs `red_confirmed`,
+  REFACTOR a completed cycle, and RED restarts the cycle.
+- Coordinator mode is upstream's env switch (`TDDAGENTS_COORDINATOR_MODE`, default off): the
+  pool is filtered to `Agent`, and the system prompt is a TDDAgents-authored coordinator
+  prompt.
+- Agent definitions resolve from `app/prompts/agents` (+ user/project) only, with upstream's
+  frontmatter; `resolveAgentTools` keeps Agent out of every worker.
+- `subagent_type` is required and fork is off. The Agent tool stays concurrency-safe.
+  `model` takes the Claude aliases plus an OpenAI table (default `o4-mini`).
+- An end-to-end test drives coordinator → tester → developer to `completed` on a real
+  workspace.
+
 ### Phase 8 — Background work, skills, MCP (only what the coordinator needs)
 
 - Code: `claude-code/src/Task.ts` → `generateTaskId`; `claude-code/src/tasks/LocalAgentTask/LocalAgentTask.tsx` → `enqueueAgentNotification`; `claude-code/src/skills/loadSkillsDir.ts` → `parseSkillFrontmatterFields`; `claude-code/src/services/mcp/mcpStringUtils.ts` → `buildMcpToolName`

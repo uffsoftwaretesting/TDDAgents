@@ -100,9 +100,18 @@ class PhaseLedger:
 
     def transition_to(self, new_phase: TddPhase | str) -> PhaseLedger:
         """
-        Explicitly transition to a new phase (e.g. from GREEN to REFACTOR).
+        Explicitly transition to a new phase: the Agent tool's phase-on-spawn (Phase 7).
+
+        The guards are the cycle's order, so a spawn can never skip an observation: GREEN
+        needs a confirmed RED and REFACTOR a completed cycle. Going back to RED (a tester
+        re-spawned to rewrite the test, user decision 2026-10-22) restarts the cycle: the
+        observations belonged to a test that is about to change, so none of them survive.
         """
         target = TddPhase(new_phase) if isinstance(new_phase, str) else new_phase
+        if target == TddPhase.RED:
+            return PhaseLedger()
+        if target == TddPhase.GREEN and not self.red_confirmed:
+            raise ValueError("Cannot transition to GREEN before a failing test was observed (RED).")
         if target == TddPhase.REFACTOR and not self.is_cycle_complete:
             raise ValueError("Cannot transition to REFACTOR before cycle has passed GREEN (red-then-green).")
         return replace(self, phase=target)

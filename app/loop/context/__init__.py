@@ -184,6 +184,21 @@ class ToolContext:
     #: The session transcript's path (upstream's `getTranscriptPath()`, session-global): what
     #: a compaction's summary points at. A worker shares its parent's.
     transcript_path: str | None = None
+    #: The session's `TranscriptStore` (`app/loop/storage/`), upstream's session-global
+    #: `Project`: a worker records its sidechain through it (`recordSidechainTranscript`).
+    transcript_store: Any = None
+    #: The system prompt this context's model calls send instead of the default sections
+    #: (`runAgent.ts`: `query({ systemPrompt: agentSystemPrompt })`). `None` is the main
+    #: thread's `getSystemPrompt`; the system context is appended either way.
+    agent_system_prompt: tuple[str, ...] | None = None
+    #: `runAgent.ts` -> `shouldOmitClaudeMd`: the user context goes without `claudeMd`.
+    omit_claude_md: bool = False
+    #: `runAgent.ts` -> `systemContextNoGit` (Explore/Plan): the system context goes without
+    #: `gitStatus`.
+    omit_git_status: bool = False
+    #: Keys merged into the user context after the session's own, as upstream's
+    #: `getCoordinatorUserContext` adds `workerToolsContext` on the coordinator.
+    extra_user_context: Mapping[str, str] | None = None
     #: Upstream `nestedMemoryAttachmentTriggers`: paths `ReadFile` read this turn, whose
     #: nested `TDDAGENTS.md` / conditional rules the `nested_memory` attachment loads next.
     nested_memory_attachment_triggers: set[str] = field(default_factory=set)
@@ -221,6 +236,11 @@ def tool_context_for(
     agent_memory_store: Any = None,
     cost_tracker: Any = None,
     transcript_path: str | None = None,
+    transcript_store: Any = None,
+    agent_system_prompt: tuple[str, ...] | None = None,
+    omit_claude_md: bool = False,
+    omit_git_status: bool = False,
+    extra_user_context: Mapping[str, str] | None = None,
 ) -> ToolContext:
     """
     Build a context wired to a store, which is what the main loop wants.
@@ -245,6 +265,11 @@ def tool_context_for(
         agent_memory_store=agent_memory_store,
         cost_tracker=cost_tracker,
         transcript_path=transcript_path,
+        transcript_store=transcript_store,
+        agent_system_prompt=agent_system_prompt,
+        omit_claude_md=omit_claude_md,
+        omit_git_status=omit_git_status,
+        extra_user_context=extra_user_context,
     )
 
 

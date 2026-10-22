@@ -44,7 +44,7 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–4 of `docs/refactoring_transition_plan.md` are wired into the loop runner (`app/loop/runner.py`). Nothing in the legacy graph
+Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–7 of `docs/refactoring_transition_plan.md` are wired into the loop runner (`app/loop/runner.py`). Nothing in the legacy graph
 calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
 | File / Subpackage | Ships |
@@ -81,6 +81,10 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `events.py` | `TransitionEventRecorder`, the run's `emit_event`: every `Transition`/`Terminated` with the ledger snapshot, last `RunTests` exit code and plan index, appended to `<project dir>/<run id>/events.jsonl` (Phase 6) |
 | `app/loop/storage/` | `sessionStorage.ts` + `conversationRecovery.ts`: entry format (`entries.py`), upstream paths (`paths.py`), `TranscriptStore` (`recordTranscript` prefix dedup, sidechains, boundary `logicalParentUuid`, tool results chained to their assistant), `loader.py` (leaf, chain, orphaned parallel tool results), `recovery.py` (`load_conversation_for_resume`, the three filters, interruption detection) (Phase 6) |
 | `app/loop/cost/` | `modelCost.ts` Claude table + a hand-maintained OpenAI table (unknown model = cost 0 + flag), `CostTracker` callback (`cost-tracker.ts`), per run on `ToolContext.cost_tracker` (Phase 6) |
+| `agents/run_agent.py`, `agents/tool.py` | `runAgent` (worker `run_loop`: own prompt/identity/pool, sync workers share `set_app_state` so `RunTests` moves the coordinator's ledger, mode override, SubagentStart context, sidechain transcript, `maxTurns`, cleanup) and `AgentTool.call` (selection + `Agent(type)` deny rules, **phase-on-spawn**, `finalizeAgentTool`, upstream's result trailer) (Phase 7) |
+| `agents/{definition,loader,resolution,prompt}.py` | `parseAgentFromMarkdown` (upstream fields + `phase`), built-in < user < project overrides from `app/prompts/agents` only, `filterToolsForAgent`/`resolveAgentTools` (Agent disallowed for workers), `filterDeniedAgents`, the Agent tool prompt (`getPrompt`) (Phase 7) |
+| `coordinator.py` + `app/prompts/system/coordinator.md` | Coordinator mode (`TDDAGENTS_COORDINATOR_MODE` → `Gates.coordinator_mode`): `applyCoordinatorToolFilter`, `getCoordinatorUserContext`, a TDDAgents-authored coordinator prompt (Phase 7) |
+| `model_aliases.py` | `parseUserSpecifiedModel` (Claude aliases + an OpenAI table, default `o4-mini`), `getAgentModel`, `provider_for_model` (Phase 7) |
 | `transitions.py` | `Continue` / `Terminal` `StrEnum`s, `Transition`, `Terminated` |
 | `deps.py` | `LoopDeps` — the injected 7-member DI seam (A4), plus `CompactionResult` and `StopHookResult` |
 | `engine.py` | `run_loop`, an async generator (A3–A7), plus `drain`, handling all terminal returns, continue sites, and ledger reconciliation |
@@ -650,6 +654,59 @@ Triage killed ~110 mutants and deleted ~46 by simplifying code, each kill verifi
   - `>= 0` → `> 0` on an index whose message the loop skips anyway;
   - the arguments to the brief-mode hook point `_is_terminal_tool_result`, which always
     returns `False`.
+
+### What Phase 7 changed (2026-10-22)
+
+Agents and the TDD coordinator, ported test-first. The user's direction: "follow claude-code's
+source and architecture, while enforcing the TDD cycle".
+
+- **Workers really run.** The `default_subagent_runner` stub (which fabricated a "completed
+  successfully" report) and `create_subagent` are deleted. `run_agent` ports `runAgent`:
+  - a second `run_loop` with the agent's system prompt (+ `enhanceSystemPromptWithEnvDetails`)
+    and its own identity;
+  - a pool from `resolveAgentTools`, filtered by the live phase and refreshed between turns;
+  - a fresh `readFileState`, SubagentStart context and a sidechain transcript.
+- **The ledger is shared, as upstream shares app state.** A sync worker writes through the
+  parent's `set_app_state` (`shareSetAppState: !isAsync`), so a tester's `RunTests` confirms
+  RED on the coordinator's ledger. Workers' transitions never reach the events file.
+- **Phase-on-spawn** (`agents/tool.py::phase_on_spawn`) moves the shared ledger to the agent's
+  `phase` through `PhaseLedger.transition_to`:
+  - GREEN now needs `red_confirmed`;
+  - REFACTOR needs a completed cycle;
+  - **RED restarts the cycle** (user decision: a tester re-spawned to fix a wrong test).
+
+  A refused spawn raises before any worker runs. The Agent tool is now the ledger's second
+  writer: it can move the phase or erase evidence, never create an observation, and
+  `test_run_tests_is_the_only_ledger_writer` pins exactly that.
+- **Coordinator mode is upstream's switch**, off by default (`TDDAGENTS_COORDINATOR_MODE`,
+  frozen as `Gates.coordinator_mode`). In it the main thread's pool is
+  `applyCoordinatorToolFilter`'d to `Agent`, its system prompt is the coordinator's, and the
+  user context names the worker tools. The `tdd_phase_incomplete` stop hook guards it. Outside
+  it the main thread also holds the Agent tool, as upstream's does.
+- **Frontmatter is upstream's.**
+  - Only upstream permission modes parse (`workspace_write`/`read_only` are gone).
+  - Explore, Plan and verification are read-only through `disallowedTools`.
+  - Explore and Plan are named as upstream and omit the memory files and `gitStatus`.
+  - `description` is required.
+  - Agent lookup no longer touches the prompt registry.
+- **Model aliases:** the `model` input keeps upstream's Claude aliases and adds an OpenAI table
+  (default `o4-mini`). The provider follows the model id (`provider_for_model`).
+- The Agent tool stays **concurrency-safe**, as upstream; the gate re-checks the live ledger on
+  every write. Fork is off (`is_fork_subagent_enabled`, headless).
+
+*Divergences, all recorded:*
+- `subagent_type` is required (no general-purpose agent; fork off).
+- Coordinator workers run **synchronously**. Upstream forces them async, but an async worker's
+  `RunTests` could not move the ledger. Background work is Phase 8.
+- The result trailer keeps upstream's `SendMessage` hint verbatim (user decision), though that
+  tool arrives in Phase 8.
+- `ASYNC_AGENT_ALLOWED_TOOLS` includes `RunTests`.
+- The coordinator prompt is TDDAgents-authored (upstream's `workerAgent.ts` is absent from the
+  snapshot).
+- Not ported: per-agent MCP servers, skill preloading and frontmatter hooks (no session-hook
+  store), effort, worktree/remote isolation, `classifyHandoffIfNeeded`, agent metadata files,
+  progress UI and auto-backgrounding.
+- `app/loop/prompts/loader.py` still holds an older duplicate agent parser, left for Phase 10.
 
 ### The three things that change most
 

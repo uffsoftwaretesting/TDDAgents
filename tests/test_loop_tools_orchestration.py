@@ -8,7 +8,6 @@ import asyncio
 from dataclasses import replace
 
 import pytest
-
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.loop.config import Gates, RunConfig
@@ -45,7 +44,7 @@ def run_tools_sync(calls, tools):
 def make_config() -> RunConfig:
     return RunConfig(
         run_id="test_run",
-        gates=Gates(web_tools_available=False, postgres_checkpointing=False),
+        gates=Gates(web_tools_available=False, postgres_checkpointing=False, coordinator_mode=False),
     )
 
 

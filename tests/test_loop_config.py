@@ -51,7 +51,7 @@ class TestTheSnapshotIsImmutable:
 
     def test_the_gates_are_frozen(self):
         """A gate that could flip mid-run would defeat the reason for snapshotting it."""
-        gates = Gates(web_tools_available=True, postgres_checkpointing=True)
+        gates = Gates(web_tools_available=True, postgres_checkpointing=True, coordinator_mode=False)
         with pytest.raises(FrozenInstanceError):
             gates.web_tools_available = False  # type: ignore[misc]
 

@@ -1,10 +1,11 @@
 ---
-name: explore
+name: Explore
 description: Fast read-only specialist for navigating and searching codebases.
 tools: [ReadFile, Grep, Glob, Bash]
-permissionMode: read_only
 memory: run
 model: inherit
+disallowedTools: [Agent, WriteFile, Edit]
+omitClaudeMd: true
 ---
 You are a file search and exploration specialist. You excel at navigating and mapping codebases.
 

@@ -275,7 +275,20 @@ def _ledger_writers() -> list[str]:
 
 
 def test_run_tests_is_the_only_ledger_writer():
-    assert _ledger_writers() == ["app/loop/tools/run_tests.py"]
+    """
+    `RunTests` writes every observation. Since Phase 7 the Agent tool also writes the ledger,
+    but only through `phase_on_spawn` (`PhaseLedger.transition_to`), which can move the phase
+    or erase evidence and never create an observation — pinned here so a third writer, or an
+    Agent-tool write that bypasses `transition_to`, cannot appear unnoticed.
+    """
+    assert _ledger_writers() == ["app/loop/agents/tool.py", "app/loop/tools/run_tests.py"]
+    import inspect
+
+    from app.loop.agents import tool
+
+    source = inspect.getsource(tool)
+    assert source.count("set_app_state(") == 1
+    assert "phase_ledger=spawn_ledger" in source and "spawn_ledger = phase_on_spawn(" in source
 
 
 def test_initial_state_reads_the_store_and_never_writes_it():
@@ -388,8 +401,9 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     assert [r.rule_content for r in perm.always_deny_rules] == ["from-home"]
     assert [r.rule_content for r in perm.always_ask_rules] == ["from-policy"]
     assert perm.additional_working_directories == (str(tmp_path),)
+    # Phase 7: the main thread also holds the Agent tool, as upstream's always does.
     assert {t.name for t in ctx.tools} == {
-        "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite"}
+        "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite", "Agent"}
     assert seen[0].messages[0].content == "add two numbers"
     # Phase 5: the user-input attachments (the initial TDD state) follow the prompt.
     assert seen[0].messages[1].additional_kwargs["attachment"]["type"] == "tdd_state"

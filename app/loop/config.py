@@ -27,6 +27,7 @@ saw these values.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from app.config.config import Config
@@ -51,6 +52,9 @@ class Gates:
 
     web_tools_available: bool
     postgres_checkpointing: bool
+    #: Upstream `isCoordinatorMode()` (`CLAUDE_CODE_COORDINATOR_MODE`), here
+    #: `TDDAGENTS_COORDINATOR_MODE`: the main thread orchestrates workers (Phase 7).
+    coordinator_mode: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +117,8 @@ def build_run_config(
         gates=Gates(
             web_tools_available=bool(Config.TAVILY_API_KEY),
             postgres_checkpointing=postgres_checkpointing,
+            coordinator_mode=os.environ.get("TDDAGENTS_COORDINATOR_MODE", "").strip().lower()
+            in ("1", "true", "yes", "on"),
         ),
         model=Config.MODEL,
         fallback_model=getattr(Config, "FALLBACK_MODEL", None),

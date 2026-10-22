@@ -6,7 +6,10 @@ from pathlib import Path
 
 from app.loop.context.instructions import load_instruction_file
 from app.loop.ledger import TddPhase
-from app.loop.prompts.loader import load_agent_definition_from_path, parse_markdown_frontmatter
+from app.loop.prompts.loader import (
+    load_agent_definition_from_path,
+    parse_markdown_frontmatter,
+)
 
 PROMPTS_ROOT = Path(__file__).parent.parent / "app" / "prompts"
 
@@ -61,8 +64,11 @@ def test_agent_roster_loads_cleanly() -> None:
         "explore": None,
         "plan": None,
     }
-    for name, expected_phase in expected_agents.items():
-        agent_path = agents_dir / name / "AGENT.md"
+    # Upstream's agent types for the two one-shot built-ins (`ONE_SHOT_BUILTIN_AGENT_TYPES`).
+    agent_types = {"explore": "Explore", "plan": "Plan"}
+    for directory, expected_phase in expected_agents.items():
+        name = agent_types.get(directory, directory)
+        agent_path = agents_dir / directory / "AGENT.md"
         assert agent_path.is_file(), f"Missing agent AGENT.md: {agent_path}"
         agent = load_agent_definition_from_path(agent_path)
         assert agent.name == name

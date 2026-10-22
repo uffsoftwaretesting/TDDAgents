@@ -40,6 +40,12 @@ from langchain_core.messages import HumanMessage
 from app.loop.agents.memory import AgentMemoryStore
 from app.loop.config import RunConfig, build_run_config
 from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.coordinator import (
+    apply_coordinator_tool_filter,
+    get_coordinator_system_prompt,
+    get_coordinator_user_context,
+    is_coordinator_mode,
+)
 from app.loop.cost import CostTracker
 from app.loop.deps import LoopDeps
 from app.loop.events import TransitionEventRecorder, events_path
@@ -89,6 +95,36 @@ def build_builtin_tools() -> list[Tool]:
         build_run_tests_tool(),
         build_todo_write_tool(),
     ]
+
+
+def main_thread_tools(config: RunConfig, deps: LoopDeps, project_root: Path, home: Path | None) -> list[Tool]:
+    """
+    The main thread's roster: the built-ins plus the Agent tool, as upstream's main thread
+    always has it. Workers draw from the built-ins alone (upstream's `assembleToolPool` for
+    the worker), and `resolveAgentTools` keeps Agent out of every worker. In coordinator mode
+    the main thread keeps only the orchestration tools (`applyCoordinatorToolFilter`).
+    """
+    from app.loop.agents.loader import get_agent_definitions_with_overrides
+    from app.loop.agents.tool import build_agent_tool
+
+    built_ins = build_builtin_tools()
+    coordinator = is_coordinator_mode(config)
+    definitions = get_agent_definitions_with_overrides(project_dir=project_root, user_home=home)
+    agent_tool = build_agent_tool(
+        definitions=definitions, worker_tools=built_ins, config=config, deps=deps, is_coordinator=coordinator
+    )
+    tools: list[Tool] = [*built_ins, agent_tool]
+    return apply_coordinator_tool_filter(tools) if coordinator else tools
+
+
+def coordinator_context(config: RunConfig) -> dict[str, Any]:
+    """The coordinator's system prompt and user context; nothing outside coordinator mode."""
+    if not is_coordinator_mode(config):
+        return {}
+    return {
+        "agent_system_prompt": (get_coordinator_system_prompt(),),
+        "extra_user_context": get_coordinator_user_context(),
+    }
 
 
 def session_workspace(thread_id: str) -> LocalWorkspace:
@@ -199,7 +235,8 @@ async def tdd_loop_runner(
 
     store = AppStateStore(state=AppState(tool_permission_context=perm))
     ledger = store.get().phase_ledger
-    built_ins = build_builtin_tools()
+    root_dir = Path(project_root) if project_root is not None else Path.cwd()
+    built_ins = main_thread_tools(config, deps, root_dir, home)
     pool_cache: dict[str, Any] = {
         "phase": ledger.phase,
         "tools": assemble_tool_pool(built_ins, phase_ledger=ledger),
@@ -223,7 +260,6 @@ async def tdd_loop_runner(
 
     run_dir = getattr(ws, "run_dir", None)
     transcript_dir = Path(run_dir) if run_dir is not None else None
-    root_dir = Path(project_root) if project_root is not None else Path.cwd()
     cwd = str(getattr(ws, "root", None) or root_dir)
     transcript = TranscriptStore(run_id, cwd)
 
@@ -252,6 +288,8 @@ async def tdd_loop_runner(
         agent_memory_store=memory_store,
         cost_tracker=CostTracker(config.model),
         transcript_path=str(transcript.path),
+        transcript_store=transcript,
+        **coordinator_context(config),
     )
     try:
         return await _run_with_hooks(
@@ -357,7 +395,9 @@ async def _run_with_hooks(
 
 __all__ = [
     "build_builtin_tools",
+    "coordinator_context",
     "default_workspace",
+    "main_thread_tools",
     "run_agent_memory_store",
     "run_permission_context",
     "run_settings_locations",

@@ -23,15 +23,15 @@ from __future__ import annotations
 
 import datetime
 import os
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 
 from app.loop.context.memory import get_claude_mds, get_memory_files, is_env_truthy
 from app.loop.messages import Message
-from app.loop.prompts.registry import global_prompt_registry
 from app.loop.prompts.sections import (
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     PromptSectionCache,
@@ -75,7 +75,7 @@ def _run(ws: Any, cmd: str) -> tuple[int, str]:
     """Run in the workspace; any infrastructure failure reads as a failed command."""
     try:
         res = ws.execute(cmd)
-    except Exception:
+    except Exception:  # noqa: BLE001 - a workspace failure reads as a failed command
         return 1, ""
     return int(res.exit_code), str(res.stdout).strip()
 
@@ -113,6 +113,56 @@ def compute_simple_env_info(ws: Any, model_id: str) -> str:
         f"You are powered by the model {model_id}.",
     ]
     return "\n".join(["# Environment", "You have been invoked in the following environment: ", *prepend_bullets(items)])
+
+
+def compute_env_info(ws: Any, model_id: str, additional_working_directories: Sequence[str] = ()) -> str:
+    """
+    `constants/prompts.ts` -> `computeEnvInfo`, the `<env>` block subagents get. No marketing
+    name or knowledge cutoff: upstream knows them only for Claude models, and prints neither
+    for a model it does not know.
+    """
+    cwd = str(getattr(ws, "root", ".")) if ws is not None else "."
+    git = is_git_repo(ws) if ws is not None else False
+    platform = _run(ws, "uname -s")[1].lower() if ws is not None else ""
+    uname_sr = _run(ws, "uname -sr")[1] if ws is not None else ""
+    dirs = list(additional_working_directories)
+    additional = f"Additional working directories: {', '.join(dirs)}\n" if dirs else ""
+    return (
+        "Here is useful information about the environment you are running in:\n"
+        "<env>\n"
+        f"Working directory: {cwd}\n"
+        f"Is directory a git repo: {'Yes' if git else 'No'}\n"
+        f"{additional}Platform: {platform or 'unknown'}\n"
+        "Shell: bash\n"
+        f"OS Version: {uname_sr or 'unknown'}\n"
+        "</env>\n"
+        f"You are powered by the model {model_id}."
+    )
+
+
+#: `enhanceSystemPromptWithEnvDetails`' notes, verbatim.
+AGENT_NOTES = """Notes:
+- Agent threads always have their cwd reset between bash calls, as a result please only use absolute file paths.
+- In your final response, share file paths (always absolute, never relative) that are relevant to the task. \
+Include code snippets only when the exact text is load-bearing (e.g., a bug you found, a function signature the \
+caller asked for) — do not recap code you merely read.
+- For clear communication with the user the assistant MUST avoid using emojis.
+- Do not use a colon before tool calls. Text like "Let me read the file:" followed by a read tool call should just \
+be "Let me read the file." with a period."""
+
+
+def enhance_system_prompt_with_env_details(
+    prompt_sections: Sequence[str],
+    model: str,
+    additional_working_directories: Sequence[str] = (),
+    workspace: Any = None,
+) -> tuple[str, ...]:
+    """
+    `constants/prompts.ts` -> `enhanceSystemPromptWithEnvDetails`: the agent's prompt, the
+    notes, then the env block. The skill-discovery guidance is not ported (its tool is
+    behind `EXPERIMENTAL_SKILL_SEARCH`, off in the external build).
+    """
+    return (*prompt_sections, AGENT_NOTES, compute_env_info(workspace, model, additional_working_directories))
 
 
 def _file_section(filename: str) -> Callable[[], str]:
@@ -158,8 +208,10 @@ def get_git_status(ws: Any) -> str | None:
         status = (status[:MAX_STATUS_CHARS] + "\n... (truncated because it exceeds 2k characters. "
                   'If you need more information, run "git status" using BashTool)')
     parts = [
-        "This is the git status at the start of the conversation. Note that this status is a snapshot "
-        "in time, and will not update during the conversation.",
+        (
+            "This is the git status at the start of the conversation. Note that this status is a snapshot "
+            "in time, and will not update during the conversation."
+        ),
         f"Current branch: {branch}",
         f"Main branch (you will usually use this for PRs): {main_branch}",
         *([f"Git user: {user_name}"] if user_name else []),
@@ -247,14 +299,17 @@ def reset_session_context(run_id: str | None = None) -> None:
 
 
 __all__ = [
+    "AGENT_NOTES",
     "SessionContext",
-    "get_session_context",
-    "reset_session_context",
     "append_system_context",
+    "compute_env_info",
     "compute_simple_env_info",
+    "enhance_system_prompt_with_env_details",
     "get_git_status",
+    "get_session_context",
     "get_system_context",
     "get_system_prompt",
     "get_user_context",
     "prepend_user_context",
+    "reset_session_context",
 ]
