@@ -24,10 +24,12 @@ import json
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Iterator, Sequence
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from app.loop.hooks.messages import HookAttachment, create_attachment_message, messages_for
 from app.loop.hooks.tool_hooks import (
+    PERMISSION_DENIED_RETRY_MESSAGE,
+    run_permission_denied_hooks,
     run_post_tool_use_failure_hooks,
     run_post_tool_use_hooks,
     run_pre_tool_use_hooks,
@@ -184,6 +186,17 @@ async def run_tool_use(
             status="error",
             additional_kwargs={"is_error": True, "permission_behavior": permission.behavior},
         )
+        reason = permission.decision_reason or {}
+        if reason.get("type") == "classifier" and reason.get("classifier") == "auto-mode":
+            # Upstream: an auto-mode denial gives PermissionDenied hooks the chance to say
+            # the call is now approved, which the model hears as a meta message.
+            retry = await run_permission_denied_hooks(
+                context, tool_name, resolved.input, call_id, str(reason.get("reason") or "Permission denied")
+            )
+            if retry:
+                hook_messages.append(
+                    HumanMessage(content=PERMISSION_DENIED_RETRY_MESSAGE, additional_kwargs={"is_meta": True})
+                )
         return ToolExecutionOutcome(message=msg, extra_messages=tuple(hook_messages))
 
     effective_args = permission.updated_input if permission.updated_input is not None else resolved.input

@@ -29,6 +29,7 @@ from typing import Any, Callable, Mapping
 from app.loop.context.file_state import FileState
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
+from app.loop.permissions.denial_tracking import DenialTrackingState
 from app.loop.permissions.types import ToolPermissionContext
 
 
@@ -75,6 +76,9 @@ class AppState:
     #: `ToolContext` so a synchronous worker, which reads its parent's app state, is held
     #: to the same rules (`ToolContext.permission_context` still overrides it when set).
     tool_permission_context: ToolPermissionContext = ToolPermissionContext()
+    #: Upstream `appState.denialTracking`: the auto-mode classifier's denial streak and total
+    #: (`permissions/denial_tracking.py`), `None` until auto mode first records one.
+    denial_tracking: DenialTrackingState | None = None
 
 
 @dataclass(slots=True)
@@ -155,6 +159,19 @@ class ToolContext:
     #: The worker's agent type (upstream `agentType`), `None` on the main thread. Hooks read
     #: it: `SubagentStop` matches on it and every hook input carries it.
     agent_type: str | None = None
+    #: Upstream `localDenialTracking`: a worker whose app-state writes are discarded keeps its
+    #: own denial tally here (a mutable box, mutated in place as upstream mutates its object).
+    local_denial_tracking: DenialTrackingBox | None = None
+    #: The auto-mode classifier to call (`classify_yolo_action`'s signature); `None` means the
+    #: production classifier. A seam for tests, which must never reach a live model.
+    auto_mode_classifier: Callable[..., Any] | None = None
+
+
+@dataclass
+class DenialTrackingBox:
+    """A worker's local denial tally (`localDenialTracking`), mutated in place."""
+
+    state: DenialTrackingState = field(default_factory=lambda: DenialTrackingState())
 
 
 def tool_context_for(

@@ -98,6 +98,8 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `permissions/dangerous.py` | `DANGEROUS_BASH_PATTERNS`, `isDangerousBashPermission`, `stripDangerousPermissionsForAutoMode` run for **every** TDD context — the TDD managed tier (Phase 3) |
 | `permissions/permission_request.py` | `runPermissionRequestHooksForHeadlessAgent` over `ToolContext.hook_dispatcher` (Phase 3) |
 | `permissions/messages.py` | `createPermissionRequestMessage`, `AUTO_REJECT_MESSAGE`, `DONT_ASK_REJECT_MESSAGE`, source/mode display names (Phase 3) |
+| `permissions/auto_mode.py`, `permissions/denial_tracking.py`, `permissions/classifier_decision.py` | The `mode === 'auto'` branch of `hasPermissionsToUseTool` (safety-check guard, acceptEdits fast path, allowlist, classifier, fail-closed, denial limits), `DENIAL_LIMITS` 3/20, `SAFE_YOLO_ALLOWLISTED_TOOLS` (Phase 4b) |
+| `permissions/yolo_classifier.py` + `app/prompts/permissions/` | Port of `yoloClassifier.ts`: transcript building, `classify_result` tool path, two-stage XML path, `formatActionForClassifier`, rejection/unavailable messages; **TDDAgents-authored prompts** (upstream's compiled out) (Phase 4b) |
 | `permissions/tdd.py` | `get_phase_deny_rules`, tool classification (`is_implementation_writing_tool`, `is_test_writing_tool`, `is_test_path`), `check_tdd_phase_permission` (D3 & D4) |
 | `tdd/hooks.py` | `tdd_phase_incomplete_hook`, stop hook honoring `stop_hook_active` without infinite loops (D5) |
 | `streaming/abort.py` | Three-controller abort tree (`AbortSignal`, `AbortController`, `create_child_abort_controller`, `bridge_cancel_token`) (F3) |
@@ -393,6 +395,51 @@ code in `ssrf_guard.py` and `tool_hooks.py`.
 **Verifying a survivor inside `mutants/`:** the baseline is `MUTANT_UNDER_TEST=""`. Left
 unset, mutmut's trampoline raises `KeyError` in every test, which makes every mutant look
 killed.
+
+### What Phase 4b changed (2026-10-22)
+
+The auto-mode ("YOLO") classifier, added to the plan by the user and ported whole.
+
+- **`auto` is user-addressable** (`PERMISSION_MODES` = external modes + `auto`, as the
+  `TRANSCRIPT_CLASSIFIER` build has it) but **opt-in**: the shipped default stays
+  `acceptEdits`.
+- **The gate's auto branch is upstream's order** (`permissions/auto_mode.py`). It runs on an
+  'ask' after `dontAsk` and before the headless deny:
+  1. a safety check that is not `classifierApprovable` stays an ask (headless: deny);
+  2. a tool needing a person keeps its ask;
+  3. the **acceptEdits fast path**;
+  4. the **allowlist**;
+  5. otherwise the classifier. An unavailable classifier **fails closed**. A block records
+     a denial, and at 3 consecutive / 20 total denials a headless run aborts.
+
+  An allow by any route resets the streak. Workers keep a local denial box.
+- **TDD:** the phase tier runs in the inner gate, before the auto branch. A phase-forbidden
+  write is already denied, so neither the classifier nor the fast path can open it, and a
+  test pins this.
+- `classifierApprovable` now rides on the filesystem safety check: sensitive files `true`,
+  suspicious Windows paths `false`.
+- PermissionDenied hooks fire after an auto-mode denial; a hook's `retry` reaches the model
+  as a meta message.
+- **The classifier** (`permissions/yolo_classifier.py`) follows upstream:
+  - the external defaults: tool-call path, text transcript, main-loop model;
+  - the two-stage XML path is ported but switchable only through `ClassifierOptions`,
+    because upstream gates it on GrowthBook, which this build lacks;
+  - the transcript holds user text and assistant tool calls only;
+  - `TDDAGENTS.md` comes from the context-assembly cache;
+  - a tool with no classifier projection (e.g. `RunTests`) is never classified.
+
+*Divergences, all recorded:*
+- **The system prompt and default rules are TDDAgents-authored**
+  (`app/prompts/permissions/`), reconstructed from the code's markers because upstream's
+  `.txt` files were compiled out. The rules ship as reconstructed, at the user's direction.
+- A headless abort (`AbortError` upstream) fires the cancel token and denies, so the run
+  ends `aborted_tools`.
+- Per-tool classifier projections live in a table keyed by our tool names.
+- The production caller does not forward temperature or max_tokens.
+- Not ported: the PowerShell guard, `plan` mode with auto active, debug dumps, and the Bash
+  classifier (all off in the external build).
+
+The Phase 4b modules join the pre-push mutation run.
 
 ### The three things that change most
 

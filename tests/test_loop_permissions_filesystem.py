@@ -119,12 +119,13 @@ def test_ordinary_paths_are_not_suspicious(path):
 
 
 def test_safety_check_messages_and_order():
-    assert check_path_safety_for_auto_edit("/w/a.py", ("/w/a.py",)) == (True, "")
+    assert check_path_safety_for_auto_edit("/w/a.py", ("/w/a.py",)) == (True, "", False)
+    # A suspicious Windows path needs a human; a sensitive file the classifier may approve.
     assert check_path_safety_for_auto_edit("/w/x~1", ("/w/x~1",)) == (False, (
         "The agent requested permissions to write to /w/x~1, which contains a suspicious Windows path pattern "
-        "that requires manual approval."))
+        "that requires manual approval."), False)
     assert check_path_safety_for_auto_edit("/w/.git/x", ("/w/.git/x",)) == (
-        False, "The agent requested permissions to edit /w/.git/x which is a sensitive file.")
+        False, "The agent requested permissions to edit /w/.git/x which is a sensitive file.", True)
     # Every candidate is checked, so a resolved form pointing somewhere dangerous counts.
     assert check_path_safety_for_auto_edit("/w/link", ("/w/link", "/home/u/.bashrc"))[0] is False
     assert check_path_safety_for_auto_edit("/w/link", ("/w/link", "/w/x~2"))[0] is False
@@ -270,7 +271,8 @@ def test_is_path_allowed_safety_check_on_writes_only():
     res = is_path_allowed(f"{CWD}/.git/config", ctx, CWD, "write")
     assert res == PathCheckResult(False, {
         "type": "safetyCheck",
-        "reason": f"The agent requested permissions to edit {CWD}/.git/config which is a sensitive file."})
+        "reason": f"The agent requested permissions to edit {CWD}/.git/config which is a sensitive file.",
+        "classifierApprovable": True})
     assert is_path_allowed(f"{CWD}/.git/config", ctx, CWD, "read") == PathCheckResult(True)
 
 
@@ -314,7 +316,7 @@ def test_write_safety_check_asks_before_ask_and_allow_rules():
     res = check_write_permission_for_tool(f"{CWD}/.git/config", {}, ctx, CWD)
     message = f"The agent requested permissions to edit {CWD}/.git/config which is a sensitive file."
     assert (res.behavior, res.message, res.decision_reason) == (
-        ASK, message, {"type": "safetyCheck", "reason": message})
+        ASK, message, {"type": "safetyCheck", "reason": message, "classifierApprovable": True})
 
 
 def test_write_ask_rule_beats_accept_edits():

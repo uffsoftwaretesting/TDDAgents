@@ -171,18 +171,22 @@ def has_suspicious_windows_path_pattern(path: str) -> bool:
     return contains_vulnerable_unc_path(path)
 
 
-def check_path_safety_for_auto_edit(path: str, paths_to_check: Sequence[str]) -> tuple[bool, str]:
-    """`checkPathSafetyForAutoEdit`: `(safe, message)`, over the original and resolved paths."""
+def check_path_safety_for_auto_edit(path: str, paths_to_check: Sequence[str]) -> tuple[bool, str, bool]:
+    """
+    `checkPathSafetyForAutoEdit`: `(safe, message, classifier_approvable)`, over the original
+    and resolved paths. A suspicious Windows path needs a human (`classifierApprovable:
+    false`); a sensitive file may be approved by the auto-mode classifier (`true`).
+    """
     for candidate in paths_to_check:
         if has_suspicious_windows_path_pattern(candidate):
             return False, (
                 f"The agent requested permissions to write to {path}, which contains a suspicious "
                 "Windows path pattern that requires manual approval."
-            )
+            ), False
     for candidate in paths_to_check:
         if is_dangerous_file_path_to_auto_edit(candidate):
-            return False, f"The agent requested permissions to edit {path} which is a sensitive file."
-    return True, ""
+            return False, f"The agent requested permissions to edit {path} which is a sensitive file.", True
+    return True, "", False
 
 
 # ── working directories ──────────────────────────────────────────────────────
@@ -323,9 +327,11 @@ def is_path_allowed(
 
     candidates = paths_to_check if paths_to_check is not None else get_paths_for_permission_check(resolved_path)
     if operation != "read":
-        safe, message = check_path_safety_for_auto_edit(resolved_path, candidates)
+        safe, message, approvable = check_path_safety_for_auto_edit(resolved_path, candidates)
         if not safe:
-            return PathCheckResult(False, {"type": "safetyCheck", "reason": message})
+            return PathCheckResult(
+                False, {"type": "safetyCheck", "reason": message, "classifierApprovable": approvable}
+            )
 
     if path_in_allowed_working_path(resolved_path, context, cwd, candidates):
         if operation == "read" or context.mode == PermissionMode.ACCEPT_EDITS:
@@ -364,12 +370,12 @@ def check_write_permission_for_tool(
                 decision_reason={"type": "rule", "rule": deny_rule},
             )
 
-    safe, message = check_path_safety_for_auto_edit(absolute, candidates)
+    safe, message, approvable = check_path_safety_for_auto_edit(absolute, candidates)
     if not safe:
         return PermissionResult(
             behavior=PermissionBehavior.ASK,
             message=message,
-            decision_reason={"type": "safetyCheck", "reason": message},
+            decision_reason={"type": "safetyCheck", "reason": message, "classifierApprovable": approvable},
         )
 
     for candidate in candidates:

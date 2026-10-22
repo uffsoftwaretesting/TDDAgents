@@ -684,6 +684,33 @@ def execute_permission_request_hooks(
     )
 
 
+def execute_permission_denied_hooks(
+    context: Any,
+    tool_name: str,
+    tool_use_id: str,
+    tool_input: Mapping[str, Any],
+    reason: str,
+    permission_mode: str | None,
+    signal: Any = None,
+) -> AsyncIterator[AggregatedHookResult]:
+    """`executePermissionDeniedHooks`: after the auto-mode classifier refused a call."""
+    dispatcher = dispatcher_of(context)
+    if dispatcher is None or not dispatcher.has_hook_for_event(HookEvent.PERMISSION_DENIED):
+        return _empty()
+    agent_id, agent_type = _agent_fields(context)
+    hook_input = {
+        **dispatcher.create_base_hook_input(permission_mode, agent_id, agent_type),
+        "hook_event_name": HookEvent.PERMISSION_DENIED.value,
+        "tool_name": tool_name,
+        "tool_input": dict(tool_input),
+        "tool_use_id": tool_use_id,
+        "reason": reason,
+    }
+    return dispatcher.execute_hooks(
+        hook_input, tool_use_id, match_query=tool_name, signal=signal, tool_context=context
+    )
+
+
 def last_assistant_text(messages: Sequence[Message] | None) -> str | None:
     """The last assistant message's text, trimmed, or `None` (`getLastAssistantMessage`)."""
     for message in reversed(list(messages or ())):
@@ -917,6 +944,7 @@ __all__ = [
     "PreCompactHookResult",
     "PromptHookExecutor",
     "dispatcher_of",
+    "execute_permission_denied_hooks",
     "execute_permission_request_hooks",
     "execute_post_compact_hooks",
     "execute_post_tool_hooks",

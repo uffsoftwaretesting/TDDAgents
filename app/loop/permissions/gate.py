@@ -62,10 +62,20 @@ async def has_permissions_to_use_tool(
     tool_use_id: str = "",
 ) -> PermissionResult:
     """
-    `hasPermissionsToUseTool`, the outer gate: the inner decision, with an 'ask' resolved
-    by `resolve_ask_without_prompt`.
+    `hasPermissionsToUseTool`, the outer gate: the inner decision; in auto mode an allow
+    resets the denial streak and an 'ask' (not denied by `dontAsk`) goes to the classifier
+    (`auto_mode.py`) before the headless deny; any other 'ask' is resolved by
+    `resolve_ask_without_prompt`.
     """
+    from app.loop.permissions.auto_mode import auto_mode_decision, reset_denials_on_allow
+
     result = await _has_permissions_to_use_tool_inner(tool, input_args, context)
+    perm_ctx = extract_permission_context(context)
+    if result.behavior == PermissionBehavior.ALLOW:
+        reset_denials_on_allow(context, perm_ctx)
+        return result
+    if result.behavior == PermissionBehavior.ASK and perm_ctx.mode == PermissionMode.AUTO:
+        return await auto_mode_decision(result, tool, input_args, context, perm_ctx)
     return await resolve_ask_without_prompt(result, tool, input_args, context, tool_use_id)
 
 

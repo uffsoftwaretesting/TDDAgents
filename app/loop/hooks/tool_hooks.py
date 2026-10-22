@@ -41,6 +41,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger("TDDOrchestrator.Hooks")
 
 
+PERMISSION_DENIED_RETRY_MESSAGE = (
+    "The PermissionDenied hook indicated this command is now approved. You may retry it if you would like."
+)
+
+
+async def run_permission_denied_hooks(
+    context: Any, tool_name: str, tool_input: Mapping[str, Any], tool_use_id: str, reason: str
+) -> bool:
+    """
+    The PermissionDenied block of `checkPermissionsAndCallTool`: after an auto-mode classifier
+    denial, whether any hook said `retry`.
+    """
+    from app.loop.hooks.execute import execute_permission_denied_hooks
+
+    retry = False
+    async for result in execute_permission_denied_hooks(
+        context, tool_name, tool_use_id, tool_input, reason, _permission_mode(context), getattr(context, "cancel", None)
+    ):
+        if result.retry:
+            retry = True
+    return retry
+
+
 def get_rule_behavior_description(behavior: str) -> str:
     """`getRuleBehaviorDescription`."""
     if behavior == "allow":
@@ -268,10 +291,12 @@ async def _run_post(
 
 
 __all__ = [
+    "PERMISSION_DENIED_RETRY_MESSAGE",
     "PostToolHooksOutcome",
     "PreToolHooksOutcome",
     "get_rule_behavior_description",
     "run_post_tool_use_failure_hooks",
+    "run_permission_denied_hooks",
     "run_post_tool_use_hooks",
     "run_pre_tool_use_hooks",
 ]

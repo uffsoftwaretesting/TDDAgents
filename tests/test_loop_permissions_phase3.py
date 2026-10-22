@@ -343,7 +343,8 @@ def test_parse_tool_list_from_cli(tools, expected):
 def test_permission_mode_from_string():
     for mode in ("default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"):
         assert st.permission_mode_from_string(mode) == PermissionMode(mode)
-    assert st.permission_mode_from_string("auto") == PermissionMode.DEFAULT
+    # Phase 4b ports the classifier, so `auto` is a user-addressable mode; `bubble` never is.
+    assert st.permission_mode_from_string("auto") == PermissionMode.AUTO
     assert st.permission_mode_from_string("bubble") == PermissionMode.DEFAULT
     assert st.permission_mode_from_string("nope") == PermissionMode.DEFAULT
 

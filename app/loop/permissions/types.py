@@ -64,6 +64,11 @@ INTERNAL_PERMISSION_MODES: tuple[PermissionMode, ...] = (
     PermissionMode.BUBBLE,
 )
 
+#: Upstream's runtime `INTERNAL_PERMISSION_MODES` / `PERMISSION_MODES`: the modes a user can
+#: name in settings `defaultMode` or the run config — the external ones plus `auto`, which the
+#: `TRANSCRIPT_CLASSIFIER` build adds (Phase 4b ports the classifier). `bubble` is internal only.
+PERMISSION_MODES: tuple[PermissionMode, ...] = (*EXTERNAL_PERMISSION_MODES, PermissionMode.AUTO)
+
 
 class PermissionBehavior(StrEnum):
     """

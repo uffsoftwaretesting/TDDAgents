@@ -250,6 +250,14 @@ writes discarded, so it can never move the ledger. `app/hooks/` and `app/tools/`
 - `auto` is opt-in (`RunConfig.permission_mode` or settings `defaultMode: auto`); the shipped
   default stays `acceptEdits`.
 
+*Phase 4b outcome (2026-10-22):* built as specified. `permissions/auto_mode.py` ports the auto
+branch step for step (fail-closed, `DENIAL_LIMITS` 3/20 with a headless abort mapped to the
+cancel token), and `permissions/yolo_classifier.py` ports the classifier with upstream's
+external defaults. The two-stage XML path is reachable only through `ClassifierOptions`
+(upstream's switch is GrowthBook). The prompt and default rules under `app/prompts/permissions/`
+ship as reconstructed. A test pins that RED denies a production write before the classifier is
+consulted.
+
 ### Phase 5 — Context assembly, attachments and compaction
 
 - Code: `claude-code/src/services/compact/autoCompact.ts` → `autoCompactIfNeeded`, `AUTOCOMPACT_BUFFER_TOKENS`; `claude-code/src/services/compact/compact.ts` → `compactConversation`; `claude-code/src/services/compact/postCompactCleanup.ts` → `runPostCompactCleanup`; `claude-code/src/utils/attachments.ts` → `getAttachments`; `claude-code/src/services/api/claude.ts` → `addCacheBreakpoints`

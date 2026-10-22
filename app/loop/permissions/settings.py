@@ -46,7 +46,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from app.loop.permissions.messages import escape_rule_content
 from app.loop.permissions.types import (
-    EXTERNAL_PERMISSION_MODES,
+    PERMISSION_MODES,
     PermissionBehavior,
     PermissionMode,
     PermissionRule,
@@ -403,8 +403,8 @@ def parse_tool_list_from_cli(tools: Iterable[str]) -> list[str]:
 # ── mode and context ──────────────────────────────────────────────────────────
 
 def permission_mode_from_string(value: str) -> PermissionMode:
-    """`permissionModeFromString`: an unknown mode (or `auto`, absent here) is `default`."""
-    return PermissionMode(value) if value in EXTERNAL_PERMISSION_MODES else PermissionMode.DEFAULT
+    """`permissionModeFromString` over `PERMISSION_MODES`: an unknown mode is `default`."""
+    return PermissionMode(value) if value in PERMISSION_MODES else PermissionMode.DEFAULT
 
 
 def _bypass_disabled(settings: Mapping[str, Any]) -> bool:

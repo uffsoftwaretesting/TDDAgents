@@ -159,7 +159,7 @@ def test_dangerous_files_and_directories_blocked(tmp_path: Path) -> None:
             target_path = str(tmp_path / target)
             res = check_write_permission_for_tool(target_path, {}, ctx, str(tmp_path))
             assert res.behavior == PermissionBehavior.ASK
-            assert res.decision_reason == {"type": "safetyCheck", "reason": res.message}
+            assert res.decision_reason == {"type": "safetyCheck", "reason": res.message, "classifierApprovable": True}
             assert "sensitive file" in res.message
 
 
