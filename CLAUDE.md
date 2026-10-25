@@ -44,7 +44,7 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–7 of `docs/refactoring_transition_plan.md` are wired into the loop runner (`app/loop/runner.py`). Nothing in the legacy graph
+Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–8 of `docs/refactoring_transition_plan.md` are wired into the loop runner (`app/loop/runner.py`). Nothing in the legacy graph
 calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
 
 | File / Subpackage | Ships |
@@ -84,6 +84,11 @@ calls them yet; the package stands on its own and is driven entirely by fakes an
 | `agents/run_agent.py`, `agents/tool.py` | `runAgent` (worker `run_loop`: own prompt/identity/pool, sync workers share `set_app_state` so `RunTests` moves the coordinator's ledger, mode override, SubagentStart context, sidechain transcript, `maxTurns`, cleanup) and `AgentTool.call` (selection + `Agent(type)` deny rules, **phase-on-spawn**, `finalizeAgentTool`, upstream's result trailer) (Phase 7) |
 | `agents/{definition,loader,resolution,prompt}.py` | `parseAgentFromMarkdown` (upstream fields + `phase`), built-in < user < project overrides from `app/prompts/agents` only, `filterToolsForAgent`/`resolveAgentTools` (Agent disallowed for workers), `filterDeniedAgents`, the Agent tool prompt (`getPrompt`) (Phase 7) |
 | `coordinator.py` + `app/prompts/system/coordinator.md` | Coordinator mode (`TDDAGENTS_COORDINATOR_MODE` → `Gates.coordinator_mode`): `applyCoordinatorToolFilter`, `getCoordinatorUserContext`, a TDDAgents-authored coordinator prompt (Phase 7) |
+| `command_queue.py` | `messageQueueManager.ts`: one `CommandQueue` per run (`ToolContext.command_queue`, the hook registry's), priorities `now`/`next`/`later`, `enqueuePendingNotification` (Phase 8) |
+| `app/loop/tasks/` | `Task.ts`/`tasks/types.ts` (`generateTaskId`, `isBackgroundTask`), `framework.ts` over `AppState.tasks`, `diskOutput.ts` (output file = symlink to the sidechain), `LocalAgentTask` + `runAsyncAgentLifecycle` + the `<task-notification>`, `stopTask` (Phase 8) |
+| `tools/task_output.py`, `tools/task_stop.py`, `tools/send_message.py`, `agents/resume.py` | `TaskOutput`, `TaskStop`, opt-in `SendMessage` (local agents only, `TDDAGENTS_EXPERIMENTAL_AGENT_TEAMS`) and `resumeAgentBackground` from the sidechain + `.meta.json` (Phase 8) |
+| `app/loop/skills/` + `attachments/skills.py` | `loadSkillsDir.ts` (bundled `app/prompts/skills` < policy < user < project, conditional `paths`), argument substitution, the `Skill` tool (inline `newMessages` + allowed-tools/model context modifier, fork via `run_agent` with phase-on-spawn), the listing budget and `skill_listing` attachment, agent `skills` preload (Phase 8) |
+| `app/loop/mcp/` | `services/mcp/`: config scopes (`.mcp.json`, user/local in `~/.tddagents.json`, `managed-mcp.json`, policy allow/deny), env expansion, stdio/sse/http/ws transports, `McpConnectionManager` (3 local / 20 remote at a time), `mcp__server__tool` wrappers (passthrough permissions), resource tools, result transformation and output limits, `mcp_instructions` (Phase 8) |
 | `model_aliases.py` | `parseUserSpecifiedModel` (Claude aliases + an OpenAI table, default `o4-mini`), `getAgentModel`, `provider_for_model` (Phase 7) |
 | `transitions.py` | `Continue` / `Terminal` `StrEnum`s, `Transition`, `Terminated` |
 | `deps.py` | `LoopDeps` — the injected 7-member DI seam (A4), plus `CompactionResult` and `StopHookResult` |
@@ -760,6 +765,109 @@ tool,resolution,loader,prompt,fork}.py`, `coordinator.py`, `model_aliases.py`, `
   - the unreachable CUSTOM-disallowed check (equal to ALL, as upstream);
   - the `"settings"` deny-rule fallback, which upstream keeps too;
   - messages the engine overwrites before every model call.
+
+### What Phase 8 changed (2026-10-25)
+
+Background work, skills and MCP, ported test-first. The user's direction: "follow claude-code's
+source and architecture, while enforcing the TDD cycle"; MCP: "port the main MCP
+functionalities available for Claude Code".
+
+- **Background agents, only without a phase.** `run_in_background` (in the Agent schema unless
+  `TDDAGENTS_DISABLE_BACKGROUND_TASKS`), a definition's `background: true` and coordinator-forced
+  async apply to agents **without** a TDD `phase`; a phase agent asked to go async is refused
+  before any worker runs. An async worker's app-state writes are discarded upstream
+  (`shareSetAppState: !isAsync`), so a background tester could never confirm RED. A background
+  worker gets its own cancel token, writes only its task state through the root setter
+  (`setAppStateForTasks`), and ends in one upstream `<task-notification>` at `later` priority.
+- **The runner waits as `print.ts` does.** After a turn, while a background task runs or a
+  main-thread command is queued, it feeds each notification back as a new turn of the same
+  conversation (`QueryEngine.mutable_messages`); the outcome is the last turn's terminal, and
+  the stop hook guards every turn. No ceiling, as upstream.
+- **One command queue per run** (the hook registry's), shared with every worker: `asyncRewake`
+  notes and task notifications wait at `later` for the runner; `queued_commands` drains only
+  `next` and above mid-turn. Workers receive `SendMessage` text through the
+  `agent_pending_messages` attachment.
+- **Task tools:** `TaskOutput`, `TaskStop` on the main thread (workers are denied them), and
+  `SendMessage` (local agents only) behind `TDDAGENTS_EXPERIMENTAL_AGENT_TEAMS`, upstream's
+  `isAgentSwarmsEnabled` opt-in. A stopped agent is resumed in the background from its sidechain
+  and `.meta.json` sidecar — so a phase agent cannot be resumed.
+- **Skills replace the pre-refactor package.** Upstream's loader and frontmatter; the three TDD
+  skills are the bundled roster. The `Skill` tool returns `Launching skill: …` with the body as a
+  meta message (`ToolResult.new_messages`); `allowed-tools` become `command`-source allow rules —
+  ordinary rules, so the TDD tier still refuses a phase-forbidden write (a test drives one
+  through the real gate). A skill's `model` sets `ToolContext.main_loop_model` (upstream's
+  `mainLoopModel`; workers reset it). **A forked skill on a phase agent goes through
+  phase-on-spawn** (user decision), so `skills/tool.py` is the ledger's third writer, held to the
+  same `spawn_ledger = phase_on_spawn(...)` shape as the Agent tool by
+  `test_run_tests_is_the_only_ledger_writer`. The `skill_listing` attachment, agent `skills`
+  preload and conditional `paths` activation in ReadFile/WriteFile/Edit are wired.
+- **MCP is ported** (`mcp==2.3.0`). Servers connect once per run from the project root's
+  `.mcp.json` and the user/local/policy scopes (headless: project servers load without a
+  prompt) and close when the run ends. Their tools join the main pool through
+  `assemble_tool_pool(mcp_tools=…)` and the workers' roster; in coordinator mode the
+  coordinator filter removes them from the main thread (`mergeAndFilterTools`). **An MCP call
+  needs an allow rule** (`MCPTool.checkPermissions` is passthrough, so headless denies it); the
+  TDD tier runs first. An allowed MCP tool that writes files is outside barrier 2's
+  classification; barriers 1 and 3 still hold. MCP input is not schema-validated locally
+  (upstream's passthrough schema). Server instructions are the uncached `mcp_instructions`
+  system-prompt section unless `TDDAGENTS_MCP_INSTR_DELTA` moves them to the delta attachment.
+- Deleted: `app/loop/tools/mcp.py` and `skills/activation.py` (pre-refactor inventions), with
+  `tests/test_skills.py`, `test_skill_mutation_booster.py` and `test_plan_b_extensibility.py`.
+
+*Divergences, all recorded:*
+- background is refused for phase agents, and a resumed agent always runs in the background;
+- `SendMessage`: local agents only (no teammates, mailbox, broadcast, shutdown/plan protocol,
+  UDS/bridge peers); `to` must be an agent id; plain-text messages; trimmed prompt;
+- no general-purpose agent: a resume with no recorded type fails, and a forked skill without
+  `agent:` falls back to the first defined agent (upstream's last fallback);
+- the task output dir is `<config>/projects/<cwd>/<run id>/tasks/`, not the temp dir, and resume
+  re-creates the output symlink;
+- headless queue: each command is its own turn (no prompt batching — nothing enqueues a
+  main-thread prompt);
+- MCP: ws transport is 1.x's client ported onto `websockets` (2.x has none); stdio servers get
+  the full environment as `subprocessEnv()`; content blocks ride in `ToolResult.metadata`, with
+  a string form for hooks and result governance;
+- skills: listing widths use `len()`; result messages are not tagged with the tool-use id.
+- Not ported: progress UI, OAuth/claude.ai connectors/IDE transports, session-expiry reconnect,
+  `list_changed`, URL elicitation (answered `cancel`), MCP prompts/skills as commands, remote
+  skills, skill hooks, `addInvokedSkill`, skill search, effort, worktrees, fork resume.
+
+`ToolContext.tool_use_id` is upstream's `toolUseContext.toolUseId`: the pipeline hands each
+`tool.call` a copy carrying its own call id, so a background agent's `<task-notification>`
+names the `Agent`/`SendMessage` call that started it.
+
+**Pre-push gate, Phase 8 (2026-10-25).** Measured under `paths_to_mutate` = `command_queue.py`,
+`tasks/`, `tools/{task_output,task_stop,send_message}.py`, `agents/{resume,run_agent,tool}.py`,
+`attachments/{agent_messages,skills,queued}.py`, `skills/`, `mcp/`, `runner.py`,
+`hooks/async_registry.py`, `query_engine.py`, at 6248 tests:
+
+| | |
+|---|---|
+| Mutants | 6758 first run (132 timeout); 6679 after triage removed dead code (151 timeout) |
+| Killed (gate run) | 5733 — **86.5%** |
+| Killed after triage (confirmed by a second full run) | 6239 — **95.6%** (6239 / 6528) |
+| flake8 / ruff / mypy | 0 / 0 / 0 (strict, 357 files) |
+
+Triage killed ≈550 mutants with tests, each verified inside `mutants/` against the
+`MUTANT_UNDER_TEST=""` baseline (MCP ≈400, tasks/agents/runner 122, skills 50).
+- **Real gap:** `<tool-use-id>` never reached a background notification, because the context
+  carried no call id (fixed above).
+- **Dead code removed:**
+  - `McpServerConfig.extra` and the server-schema reason strings (the caller only asked
+    pass/fail; the error is always upstream's `SCHEMA_ERROR`);
+  - `TaskOutput`'s unread `description`, a redundant `replace` in the wait loop;
+  - `getattr` reads of `ToolContext` fields that always exist, `parse_arguments`' blank guard
+    (`shlex.split` already returns `[]`), and `args.get("skill")` behind the required schema.
+- **Remaining survivors are the recorded equivalent classes:**
+  - log wording and arguments (the bulk, ≈180);
+  - default arguments, codec aliases, `False`→`None` (incl. `ensure_ascii`), dataclass and
+    `getattr`/env defaults that miss the same way;
+  - schema- or validation-guaranteed inputs, messages the engine overwrites, values nothing
+    reads (`finalize_agent_tool`'s ids in the background lifecycle);
+  - the connection task's `gather` variants (it catches everything and has finished when
+    `ready` fires), `subprocess.run` `check`/`text` flags on a caught error, timing granularity;
+  - the `.mcp.json` walk's `parents[:-2]` (needs a file in a top-level directory);
+  - the Phase 0/7 runner classes (pool `phase_ledger`, `user_input`, the `"settings"` fallback).
 
 ### The three things that change most
 
