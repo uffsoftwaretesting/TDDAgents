@@ -83,9 +83,9 @@ def test_the_coordinator_drives_a_red_green_cycle_through_workers(python_workspa
     assert (result.status, result.terminal_reason) == ("success", "completed")
     assert (result.red_confirmed, result.green_passed) == (True, True)
     assert python_workspace.read_file("calculator.py") == CALC_IMPL
-    # The coordinator holds only the Agent tool and the coordinator prompt.
+    # The coordinator holds only the orchestration tools and the coordinator prompt.
     coordinator = seen[0][1].tool_context
-    assert [t.name for t in coordinator.tools] == ["Agent"]
+    assert [t.name for t in coordinator.tools] == ["Agent", "TaskStop"]
     assert coordinator.agent_system_prompt == (get_coordinator_system_prompt(),)
     assert "workerToolsContext" in coordinator.extra_user_context
     # The developer only ran once the tester's RunTests had confirmed RED on the shared ledger.
@@ -166,7 +166,9 @@ def test_the_coordinators_agent_tool_has_the_coordinator_prompt(tmp_path, monkey
 
     monkeypatch.setenv(COORDINATOR_MODE_ENV, "1")
     config = build_run_config("r", postgres_checkpointing=False)
-    (tool,) = main_thread_tools(config, get_production_deps(), tmp_path, tmp_path / "home")
+    tools = main_thread_tools(config, get_production_deps(), tmp_path, tmp_path / "home")
+    assert sorted(t.name for t in tools) == ["Agent", "SendMessage", "TaskStop"]
+    (tool,) = [t for t in tools if t.name == "Agent"]
     definitions = get_agent_definitions_with_overrides(project_dir=tmp_path, user_home=tmp_path / "home")
     assert tool.prompt == get_prompt(list(definitions.values()), True, default_agent_type=None)
     assert tool.prompt != get_prompt(list(definitions.values()), False, default_agent_type=None)

@@ -4,10 +4,19 @@ The Agent tool (Phase 7): delegation to a worker that runs its own loop.
 Ported from `reference/claude-code/src/tools/AgentTool/AgentTool.tsx` -> `AgentTool`
 (`call`, `checkPermissions`, `isReadOnly`, `isConcurrencySafe`,
 `mapToolResultToToolResultBlockParam`) and `agentToolUtils.ts` -> `finalizeAgentTool`,
-`countToolUses`. The sync path only: background workers, teammates, worktree and remote
-isolation arrive with Phase 8 or not at all, so `run_in_background`, `name`, `team_name`,
-`mode`, `isolation` and `cwd` are absent from the schema — upstream omits them the same way
-when their gates are off.
+`countToolUses`. Teammates, worktree and remote isolation are not ported, so `name`,
+`team_name`, `mode`, `isolation` and `cwd` are absent from the schema — upstream omits them the
+same way when their gates are off.
+
+**Background agents (Phase 8)** follow the async branch of `call`: `run_in_background`, a
+definition's `background: true`, or coordinator mode (`isCoordinator`) start the worker as a
+background task (`tasks/local_agent_task.py`) and return at once; `TDDAGENTS_DISABLE_BACKGROUND_TASKS`
+(upstream's `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`, read when the tool is built) removes the field
+and runs everything in the foreground. **TDD:** only agents without a `phase` may run in the
+background. An async worker's app-state writes are discarded upstream (`shareSetAppState:
+!isAsync`), so a background tester could never confirm RED; asking for a phase agent in the
+background is refused before anything runs, and coordinator mode's forced async applies to agents
+without a phase only — forcing it on the TDD agents would make the cycle uncompletable.
 
 Where this diverges, each by decision:
 
@@ -27,8 +36,9 @@ Errors raise, and `run_tool_use`'s outer handler turns them into the call's
 
 from __future__ import annotations
 
+import os
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -39,12 +49,18 @@ from app.loop.agents.prompt import get_prompt
 from app.loop.agents.resolution import filter_denied_agents, get_deny_rule_for_agent
 from app.loop.agents.run_agent import create_agent_id, run_agent
 from app.loop.config import RunConfig
-from app.loop.context import ToolContext
+from app.loop.context import CancelToken, ToolContext
 from app.loop.context.assembly import enhance_system_prompt_with_env_details
 from app.loop.deps import LoopDeps
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message, tool_calls_in
 from app.loop.model_aliases import MODEL_ALIASES, get_agent_model
+from app.loop.tasks.disk_output import get_task_output_path, init_task_output_as_symlink
+from app.loop.tasks.local_agent_task import (
+    register_async_agent,
+    run_async_agent_lifecycle,
+    start_background_lifecycle,
+)
 from app.loop.tools.base import BuiltTool, Tool, build_tool
 from app.loop.tools.types import ToolResult
 
@@ -75,6 +91,62 @@ AGENT_TOOL_SCHEMA: dict[str, Any] = {
     "required": ["description", "prompt", "subagent_type"],
     "additionalProperties": False,
 }
+
+#: The `run_in_background` field upstream adds unless background tasks are disabled.
+RUN_IN_BACKGROUND_FIELD: dict[str, Any] = {
+    "type": "boolean",
+    "description": "Set to true to run this agent in the background. You will be notified when it completes.",
+}
+
+DISABLE_BACKGROUND_TASKS_ENV = "TDDAGENTS_DISABLE_BACKGROUND_TASKS"
+
+FILE_READ_TOOL_NAME = "ReadFile"
+BASH_TOOL_NAME = "Bash"
+
+
+def is_background_tasks_disabled() -> bool:
+    """`isBackgroundTasksDisabled`, read from the environment when called."""
+    return os.environ.get(DISABLE_BACKGROUND_TASKS_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def agent_tool_schema(background_enabled: bool) -> dict[str, Any]:
+    """`inputSchema()`: the base fields, plus `run_in_background` when background tasks are on."""
+    if not background_enabled:
+        return AGENT_TOOL_SCHEMA
+    properties = {**AGENT_TOOL_SCHEMA["properties"], "run_in_background": RUN_IN_BACKGROUND_FIELD}
+    return {**AGENT_TOOL_SCHEMA, "properties": properties}
+
+
+def refuse_background_phase_agent(agent: AgentDefinition, requested: bool) -> None:
+    """A phase agent asked to run in the background is refused with the reason (TDD)."""
+    if agent.phase is not None and requested:
+        raise ValueError(
+            f"Agent '{agent.name}' declares TDD phase {agent.phase} and cannot run in the background: a "
+            "background worker's state changes are discarded, so its RunTests could not move the phase "
+            "ledger. Run it in the foreground."
+        )
+
+
+def map_async_launched(agent_id: str, output_file: str, can_read_output_file: bool) -> str:
+    """`mapToolResultToToolResultBlockParam` for `async_launched`."""
+    prefix = (
+        f"Async agent launched successfully.\nagentId: {agent_id} (internal ID - do not mention to user. Use "
+        f"SendMessage with to: '{agent_id}' to continue this agent.)\nThe agent is working in the background. "
+        "You will be notified automatically when it completes."
+    )
+    if can_read_output_file:
+        instructions = (
+            "Do not duplicate this agent's work — avoid working with the same files or topics it is using. "
+            "Work on non-overlapping tasks, or briefly tell the user what you launched and end your response."
+            f"\noutput_file: {output_file}\nIf asked, you can check progress before completion by using "
+            f"{FILE_READ_TOOL_NAME} or {BASH_TOOL_NAME} tail on the output file."
+        )
+    else:
+        instructions = (
+            "Briefly tell the user what you launched and end your response. Do not generate any other text — "
+            "agent results will arrive in a subsequent message."
+        )
+    return f"{prefix}\n{instructions}"
 
 
 class AbortError(Exception):
@@ -168,7 +240,7 @@ def _select_agent(definitions: Mapping[str, AgentDefinition], context: ToolConte
     raise ValueError(f"Agent type '{agent_type}' not found. Available agents: {', '.join(a.name for a in agents)}")
 
 
-def _agent_prompt(agent: AgentDefinition, context: ToolContext) -> str:
+def agent_system_prompt(agent: AgentDefinition, context: ToolContext) -> str:
     """`getSystemPrompt()` of a file agent: its body, plus its memory prompt when it has one."""
     if not agent.memory or agent.memory == "none":
         return agent.prompt
@@ -194,9 +266,15 @@ def build_agent_tool(
     loop dependencies each worker's `run_loop` is driven with.
     """
 
+    background_enabled = not is_background_tasks_disabled()
+
     async def call(args: dict[str, Any], context: ToolContext) -> ToolResult:
         start = now()
         agent = _select_agent(definitions, context, str(args["subagent_type"]))
+        requested_background = bool(args.get("run_in_background")) or agent.background is True
+        if background_enabled:
+            refuse_background_phase_agent(agent, requested_background)
+        run_async = background_enabled and agent.phase is None and (requested_background or is_coordinator)
         ledger = context.get_app_state().phase_ledger
         spawn_ledger = phase_on_spawn(ledger, agent)
         if spawn_ledger is not ledger:
@@ -206,13 +284,12 @@ def build_agent_tool(
         model = get_agent_model(agent.model, config.model, model_override)
         additional = context.get_app_state().tool_permission_context.additional_working_directories
         system_prompt = enhance_system_prompt_with_env_details(
-            [_agent_prompt(agent, context)], model, additional, context.workspace
+            [agent_system_prompt(agent, context)], model, additional, context.workspace
         )
         agent_id = create_agent_id()
-        messages: list[Message] = []
-        error: Exception | None = None
-        try:
-            async for message in run_agent(
+
+        def worker(cancel: CancelToken | None = None) -> AsyncIterator[Message]:
+            return run_agent(
                 agent_definition=agent,
                 prompt_messages=[HumanMessage(content=str(args["prompt"]))],
                 tool_context=context,
@@ -220,9 +297,20 @@ def build_agent_tool(
                 deps=deps,
                 available_tools=worker_tools,
                 system_prompt=system_prompt,
+                is_async=run_async,
                 model_override=model_override,
                 agent_id=agent_id,
-            ):
+                cancel=cancel,
+                description=str(args.get("description", "")) or None,
+            )
+
+        if run_async:
+            return _launch_background(agent, agent_id, args, context, worker, start)
+
+        messages: list[Message] = []
+        error: Exception | None = None
+        try:
+            async for message in worker():
                 messages.append(message)
         except Exception as exc:  # noqa: BLE001 - upstream keeps partial progress (`syncAgentError`)
             error = exc
@@ -236,11 +324,43 @@ def build_agent_tool(
             metadata={"agent_id": agent_id, "agent_type": agent.name, "status": "completed"},
         )
 
+    def _launch_background(
+        agent: AgentDefinition,
+        agent_id: str,
+        args: dict[str, Any],
+        context: ToolContext,
+        worker: Callable[[CancelToken | None], AsyncIterator[Message]],
+        start: float,
+    ) -> ToolResult:
+        """`call`'s `shouldRunAsync` branch: register the task, start the lifecycle, return at once."""
+        output_path = get_task_output_path(context, agent_id)
+        store = context.transcript_store
+        if store is not None:
+            init_task_output_as_symlink(output_path, store.agent_transcript_path(agent_id))
+        description = str(args.get("description", ""))
+        task = register_async_agent(
+            agent_id=agent_id, description=description, prompt=str(args["prompt"]), agent_type=agent.name,
+            set_app_state=context.set_app_state, output_file=str(output_path), now=start,
+            tool_use_id=context.tool_use_id,
+        )
+        start_background_lifecycle(run_async_agent_lifecycle(
+            task_id=agent_id, cancel=task.cancel, stream=worker(task.cancel), description=description,
+            agent_type=agent.name, start_time=start, root_set_app_state=context.set_app_state,
+            queue=context.command_queue, output_file=str(output_path), now=now,
+            tool_use_id=context.tool_use_id,
+        ))
+        can_read = any(t.name in (FILE_READ_TOOL_NAME, BASH_TOOL_NAME) for t in context.tools)
+        return ToolResult(
+            content=map_async_launched(agent_id, str(output_path), can_read),
+            metadata={"agent_id": agent_id, "agent_type": agent.name, "status": "async_launched"},
+        )
+
     return build_tool(
         name=AGENT_TOOL_NAME,
-        prompt=get_prompt(list(definitions.values()), is_coordinator, default_agent_type=None),
+        prompt=get_prompt(list(definitions.values()), is_coordinator, default_agent_type=None,
+                          background_tasks_enabled=background_enabled),
         call=call,
-        input_schema=AGENT_TOOL_SCHEMA,
+        input_schema=agent_tool_schema(background_enabled),
         aliases=(LEGACY_AGENT_TOOL_NAME,),
         is_read_only=lambda args: True,
         is_concurrency_safe=lambda args: True,
@@ -252,13 +372,20 @@ def build_agent_tool(
 __all__ = [
     "AGENT_TOOL_NAME",
     "AGENT_TOOL_SCHEMA",
+    "DISABLE_BACKGROUND_TASKS_ENV",
     "LEGACY_AGENT_TOOL_NAME",
     "NO_OUTPUT_MARKER",
     "ONE_SHOT_BUILTIN_AGENT_TYPES",
+    "RUN_IN_BACKGROUND_FIELD",
     "AbortError",
     "AgentToolResult",
+    "agent_system_prompt",
+    "agent_tool_schema",
     "build_agent_tool",
     "finalize_agent_tool",
+    "is_background_tasks_disabled",
     "map_agent_result",
+    "map_async_launched",
     "phase_on_spawn",
+    "refuse_background_phase_agent",
 ]

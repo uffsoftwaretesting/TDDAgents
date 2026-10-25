@@ -343,3 +343,14 @@ def test_a_failed_git_is_none_even_with_output(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout="junk"))
     assert session_storage._git(["status"], "/") is None
+
+
+def test_agent_metadata_is_a_sidecar_of_the_agent_transcript():
+    """`writeAgentMetadata` / `readAgentMetadata` / `getAgentMetadataPath` (Phase 8)."""
+    store = make_store()
+    path = store.agent_metadata_path("a1")
+    assert path == store.agent_transcript_path("a1").with_name("agent-a1.meta.json")
+    assert store.read_agent_metadata("a1") is None
+    store.write_agent_metadata("a1", {"agentType": "Explore", "description": "survey"})
+    assert path.read_text() == '{"agentType":"Explore","description":"survey"}'
+    assert store.read_agent_metadata("a1") == {"agentType": "Explore", "description": "survey"}

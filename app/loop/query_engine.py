@@ -164,6 +164,9 @@ class QueryEngine:
         self._uuid = uuid
         self.terminal: Terminated | None = None
         self.result: ResultMessage | None = None
+        #: Upstream `mutableMessages`: the conversation as recorded, kept across submits so a
+        #: follow-up turn (a task notification, Phase 8) continues it; restarted at a boundary.
+        self.mutable_messages: list[Message] = []
 
     def _record(self, messages: list[Message]) -> None:
         if self.persist_session:
@@ -172,8 +175,8 @@ class QueryEngine:
     async def submit(self, state: LoopState) -> AsyncIterator[Any]:
         """`submitMessage`: run the loop from `state`, then yield the result."""
         start = self._now()
-        messages: list[Message] = list(state.messages)
-        self._record(messages)
+        self.mutable_messages = list(state.messages)
+        self._record(self.mutable_messages)
 
         turn_count = 1
         last_stop_reason: str | None = None
@@ -182,10 +185,10 @@ class QueryEngine:
             if isinstance(event, BaseMessage):
                 boundary = is_compact_boundary_message(event)
                 if boundary or isinstance(event, (AIMessage, HumanMessage, ToolMessage)):
-                    messages.append(event)
-                    self._record(messages)
+                    self.mutable_messages.append(event)
+                    self._record(self.mutable_messages)
                 if boundary:
-                    messages = [event]
+                    self.mutable_messages = [event]
                 if isinstance(event, (HumanMessage, ToolMessage)) and attachment_of(event) is None:
                     turn_count += 1
                 if isinstance(event, AIMessage):

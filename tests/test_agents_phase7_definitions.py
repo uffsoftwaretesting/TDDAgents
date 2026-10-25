@@ -539,3 +539,13 @@ class TestTriageFork:
 
         assert _get_tool_use_ids_from_assistant(HumanMessage(content="x")) == []
         assert _get_tool_result_ids_from_message(HumanMessage(content=["plain", {"type": "text", "text": "t"}])) == []
+
+
+# ── Phase 8: preloaded skills ───────────────────────────────────────────────
+
+def test_skills_parse_as_upstreams_tool_lists():
+    """`parseAgentFromMarkdown`: `skills` goes through `parseSlashCommandToolsFromFrontmatter`."""
+    assert _load(_md(name="a", description="d", skills="tdd-test-design, tdd-refactor-clean")).skills == (
+        "tdd-test-design", "tdd-refactor-clean")
+    assert _load(_md(name="a", description="d", skills=["x", "y"])).skills == ("x", "y")
+    assert _load(_md(name="a", description="d")).skills == ()

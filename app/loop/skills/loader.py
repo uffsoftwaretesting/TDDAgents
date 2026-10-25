@@ -1,382 +1,309 @@
 """
-Skill loader and multi-tier discovery conforming to §4.6 and Part J1.
+Skill discovery (Phase 8).
 
-Ported from:
-- `reference/claude-code/src/skills/loadSkillsDir.ts` ->
-  `parseSkillFrontmatterFields`, `parseSkillPaths`, `getSkillsPath`
-- `reference/claude-code/src/utils/markdownConfigLoader.ts` -> `extractDescriptionFromMarkdown`
-- `docs/transition_elaboration_plan.md` -> §4.6 (SKILL.md loader, frontmatter discipline, on-demand references)
+Ported from `reference/claude-code/src/skills/loadSkillsDir.ts` -> `parseSkillFrontmatterFields`,
+`parseSkillPaths`, `loadSkillsFromSkillsDir`, `getSkillDirCommands`,
+`activateConditionalSkillsForPaths`; `utils/markdownConfigLoader.ts` ->
+`getProjectDirsUpToHome`, `parseSlashCommandToolsFromFrontmatter`,
+`extractDescriptionFromMarkdown`; `utils/frontmatterParser.ts` -> `coerceDescriptionToString`,
+`parseBooleanFrontmatter`; `commands.ts` -> `loadAllCommands`, `getCommands`, `findCommand`,
+`getSkillToolCommands`.
+
+Sources, in upstream's `loadAllCommands` order — and `findCommand` takes the first match, so this
+order is the precedence:
+
+1. **bundled**: TDDAgents' roster in `app/prompts/skills/` (upstream's `getBundledSkills`).
+   Never conditional, description always user-specified, as `registerBundledSkill` makes them.
+2. **policy**: `<managed dir>/.tddagents/skills` (`TDDAGENTS_DISABLE_POLICY_SKILLS` turns it off).
+3. **user**: `<config home>/skills` (`~/.tddagents/skills`).
+4. **project**: every `.tddagents/skills` from the project directory up to its git root (or the
+   home directory, which is loaded as user, not project).
+
+The same file reached twice (a symlinked directory) is loaded once (`getFileIdentity`). A skill
+whose frontmatter has `paths` is *conditional*: withheld from the commands until a file tool
+touches a matching path (`activate_conditional_skills_for_paths`, called by `ReadFile`,
+`WriteFile` and `Edit` upstream).
+
+Upstream keeps this state in module globals memoized by cwd; here one `SkillRegistry` per run
+holds it, including the per-agent `sent_skill_names` of the skill-listing attachment.
+
+Not ported: legacy `/commands/` directories, plugin and MCP skills, `--add-dir` skill dirs,
+dynamic skill-dir discovery (`discoverSkillDirsForPaths`), bare mode, effort and `shell`.
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+import os
 import re
-from typing import Any, Mapping
+from collections.abc import Iterable, Mapping
+from pathlib import Path
+from typing import Any
 
+import pathspec
 import yaml
 
-from app.loop.context.instructions import strip_html_comments
-from app.loop.skills.definition import SkillDefinition, SkillFrontmatterError
+from app.loop.model_aliases import parse_user_specified_model
+from app.loop.permissions.settings import MANAGED_DIR, parse_tool_list_from_cli
+from app.loop.skills.arguments import parse_argument_names
+from app.loop.skills.definition import SkillCommand
+from app.loop.tools.result_storage import config_home
 
 logger = logging.getLogger(__name__)
 
-_FRONTMATTER_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n(.*)$", re.DOTALL)
+#: TDDAgents' bundled skills (upstream's `getBundledSkills`).
+BUNDLED_SKILLS_DIR = Path(__file__).resolve().parents[2] / "prompts" / "skills"
+
+SKILL_FILE = "SKILL.md"
+PROJECT_SKILLS_SUBDIR = Path(".tddagents") / "skills"
+DISABLE_POLICY_SKILLS_ENV = "TDDAGENTS_DISABLE_POLICY_SKILLS"
+
+_TRUTHY = ("1", "true", "yes", "on")
+_HEADING = re.compile(r"^#+\s+(.+)$")
 
 
-def extract_description_from_markdown(markdown_content: str, fallback: str = "Skill") -> str:
-    """
-    Extract the first non-empty paragraph of text from markdown content,
-    ignoring top-level markdown headers (# Header).
-
-    Ported from `extractDescriptionFromMarkdown` in `markdownConfigLoader.ts`.
-    """
-    lines = markdown_content.splitlines()
-    paragraph_lines: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            if paragraph_lines:
-                break
-            continue
-        if stripped.startswith("#"):
-            if paragraph_lines:
-                break
-            continue
-        paragraph_lines.append(stripped)
-
-    if paragraph_lines:
-        return " ".join(paragraph_lines)
-    return f"{fallback} instructions"
-
-
-def parse_skill_paths(paths_raw: Any) -> tuple[str, ...] | None:
-    """
-    Parse paths frontmatter from a skill.
-
-    Ported from `parseSkillPaths` in `loadSkillsDir.ts`:
-    - Normalizes comma-separated strings or lists of patterns.
-    - Strips '/**' suffix because wildcard matching treats 'path' as matching
-      both the path itself and everything inside it.
-    - If all patterns are '**' (match-all), treats as unconditional (None).
-    """
-    if not paths_raw:
-        return None
-
-    raw_patterns: list[str] = []
-    if isinstance(paths_raw, str):
-        raw_patterns = [p.strip() for p in paths_raw.split(",") if p.strip()]
-    elif isinstance(paths_raw, (list, tuple)):
-        raw_patterns = [str(p).strip() for p in paths_raw if str(p).strip()]
-
-    normalized: list[str] = []
-    for pattern in raw_patterns:
-        pat = pattern.rstrip()
-        if pat.endswith("/**"):
-            pat = pat[:-3]
-        if pat:
-            normalized.append(pat)
-
-    if not normalized or all(p == "**" for p in normalized):
-        return None
-
-    return tuple(normalized)
-
-
-def parse_skill_frontmatter(content: str, fallback_name: str = "") -> tuple[dict[str, Any], str]:
-    """
-    Extract and parse YAML frontmatter from SKILL.md content, stripping HTML comments
-    from the markdown body.
-    """
-    content = strip_html_comments(content)
-    match = _FRONTMATTER_RE.match(content.lstrip())
-    if not match:
-        return {}, content.strip()
-
-    frontmatter_raw, body = match.group(1), match.group(2)
+def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
+    """`parseFrontmatter`: a leading `---` YAML block; invalid YAML is logged and ignored."""
+    if not content.startswith("---"):
+        return {}, content
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return {}, content
+    body = parts[2].lstrip("\n")
     try:
-        parsed = yaml.safe_load(frontmatter_raw)
-        if not isinstance(parsed, dict):
-            return {}, body.strip()
-        return parsed, body.strip()
-    except Exception as exc:
-        logger.warning("Failed to parse YAML frontmatter for skill '%s': %s", fallback_name, exc)
-        return {}, body.strip()
+        data = yaml.safe_load(parts[1])
+    except yaml.YAMLError as exc:
+        logger.warning("Invalid skill frontmatter: %s", exc)
+        return {}, body
+    return (data if isinstance(data, dict) else {}), body
 
 
-def load_skill_references(references_dir: Path) -> dict[str, str]:
-    """
-    Load on-demand reference markdown files from a skill's references/ subdirectory.
-    """
-    references: dict[str, str] = {}
-    if not references_dir.is_dir():
-        return references
+def coerce_description_to_string(value: Any, component_name: str) -> str | None:
+    """`coerceDescriptionToString`."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    logger.warning("Description invalid for %s - omitting", component_name)
+    return None
 
-    for ref_file in sorted(references_dir.glob("*.md")):
+
+def extract_description_from_markdown(content: str, default_description: str = "Custom item") -> str:
+    """`extractDescriptionFromMarkdown`: the first non-blank line, a heading's text if a heading."""
+    for line in content.split("\n"):
+        trimmed = line.strip()
+        if trimmed:
+            heading = _HEADING.match(trimmed)
+            text = heading.group(1) if heading else trimmed
+            return text[:97] + "..." if len(text) > 100 else text
+    return default_description
+
+
+def parse_boolean_frontmatter(value: Any) -> bool:
+    """`parseBooleanFrontmatter`."""
+    return value is True or value == "true"
+
+
+def parse_slash_command_tools_from_frontmatter(value: Any) -> tuple[str, ...]:
+    """`parseSlashCommandToolsFromFrontmatter` over `parseToolListString`."""
+    if not value:
+        return ()
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, list):
+        items = [item for item in value if isinstance(item, str)]
+    else:
+        return ()
+    parsed = parse_tool_list_from_cli(items)
+    return ("*",) if "*" in parsed else tuple(parsed)
+
+
+def parse_skill_paths(frontmatter: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """`parseSkillPaths`: a trailing `/**` is dropped; all-`**` means no paths."""
+    if not frontmatter.get("paths"):
+        return None
+    # Imported here: `app.loop.context` reaches the agents loader, which imports this module.
+    from app.loop.context.memory import split_path_in_frontmatter
+
+    patterns = [p.removesuffix("/**") for p in split_path_in_frontmatter(frontmatter["paths"])]
+    patterns = [p for p in patterns if p]
+    if not patterns or all(p == "**" for p in patterns):
+        return None
+    return tuple(patterns)
+
+
+def parse_skill_frontmatter_fields(
+    frontmatter: Mapping[str, Any], markdown_content: str, resolved_name: str, fallback_label: str = "Skill"
+) -> dict[str, Any]:
+    """`parseSkillFrontmatterFields`: every field shared by file skills (snake_case keys)."""
+    validated = coerce_description_to_string(frontmatter.get("description"), resolved_name)
+    model = frontmatter.get("model")
+    return {
+        "display_name": str(frontmatter["name"]) if frontmatter.get("name") is not None else None,
+        "description": validated or extract_description_from_markdown(markdown_content, fallback_label),
+        "has_user_specified_description": validated is not None,
+        "allowed_tools": parse_slash_command_tools_from_frontmatter(frontmatter.get("allowed-tools")),
+        "argument_hint": str(frontmatter["argument-hint"]) if frontmatter.get("argument-hint") is not None
+        else None,
+        "argument_names": tuple(parse_argument_names(frontmatter.get("arguments"))),
+        "when_to_use": frontmatter.get("when_to_use"),
+        "version": frontmatter.get("version"),
+        "model": parse_user_specified_model(str(model)) if model and model != "inherit" else None,
+        "disable_model_invocation": parse_boolean_frontmatter(frontmatter.get("disable-model-invocation")),
+        "user_invocable": True if frontmatter.get("user-invocable") is None
+        else parse_boolean_frontmatter(frontmatter["user-invocable"]),
+        "hooks": frontmatter["hooks"] if isinstance(frontmatter.get("hooks"), dict) else None,
+        "context": "fork" if frontmatter.get("context") == "fork" else None,
+        "agent": frontmatter.get("agent"),
+    }
+
+
+def load_skills_from_skills_dir(
+    base_path: Path, source: str, loaded_from: str = "skills"
+) -> list[tuple[SkillCommand, Path]]:
+    """`loadSkillsFromSkillsDir`: `<name>/SKILL.md` directories only; the name is the directory's."""
+    try:
+        entries = sorted(base_path.iterdir())
+    except OSError:
+        return []
+    results: list[tuple[SkillCommand, Path]] = []
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        skill_file = entry / SKILL_FILE
         try:
-            references[ref_file.name] = strip_html_comments(ref_file.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning("Could not read skill reference file '%s': %s", ref_file, exc)
+            content = skill_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        frontmatter, markdown = parse_frontmatter(content)
+        fields = parse_skill_frontmatter_fields(frontmatter, markdown, entry.name)
+        bundled = loaded_from == "bundled"
+        if bundled:
+            fields["has_user_specified_description"] = True
+        results.append((
+            SkillCommand(
+                name=entry.name, markdown_content=markdown, source=source, loaded_from=loaded_from,
+                skill_root=str(entry), paths=None if bundled else parse_skill_paths(frontmatter), **fields,
+            ),
+            skill_file,
+        ))
+    return results
 
-    return references
+
+def get_project_dirs_up_to_home(cwd: Path, home: Path | None = None) -> list[Path]:
+    """`getProjectDirsUpToHome`: each existing `.tddagents/skills` from `cwd` to the git root."""
+    stop_at = (home if home is not None else Path.home()).resolve()
+    current = cwd.resolve()
+    dirs: list[Path] = []
+    while current != stop_at:
+        candidate = current / PROJECT_SKILLS_SUBDIR
+        if candidate.is_dir():
+            dirs.append(candidate)
+        if (current / ".git").exists() or current.parent == current:
+            break
+        current = current.parent
+    return dirs
 
 
-def load_skill_from_path(
-    path: Path | str,
-    *,
-    source: str = "built-in",
-    expected_name: str | None = None,
-) -> SkillDefinition:
-    """
-    Load a SkillDefinition from a SKILL.md file or directory containing SKILL.md.
-    """
-    p = Path(path).resolve()
-    skill_file: Path
-    base_dir: Path
-
-    if p.is_dir():
-        skill_file = p / "SKILL.md"
-        base_dir = p
-        default_name = expected_name or p.name
-    else:
-        skill_file = p
-        base_dir = p.parent
-        default_name = expected_name or (p.parent.name if p.name == "SKILL.md" else p.stem)
-
-    if not skill_file.is_file():
-        raise FileNotFoundError(f"SKILL.md not found at {skill_file}")
-
+def _file_identity(path: Path) -> str | None:
+    """`getFileIdentity`: the canonical path, or `None` when it cannot be resolved."""
     try:
-        content = skill_file.read_text(encoding="utf-8")
-    except Exception as exc:
-        raise SkillFrontmatterError(f"Cannot read skill file at {skill_file}: {exc}") from exc
-
-    frontmatter, body = parse_skill_frontmatter(content, fallback_name=default_name)
-
-    name = str(frontmatter.get("name") or default_name).strip()
-    desc_val = frontmatter.get("description")
-    if desc_val:
-        description = str(desc_val).strip()
-    else:
-        description = extract_description_from_markdown(body, fallback=name)
-
-    when_to_use = str(frontmatter.get("when_to_use") or frontmatter.get("whenToUse") or "").strip() or None
-    argument_hint = str(frontmatter.get("argument_hint") or frontmatter.get("argumentHint") or "").strip() or None
-
-    # Parse argument names
-    arg_names_raw = frontmatter.get("arguments")
-    if arg_names_raw is None:
-        arg_names_raw = frontmatter.get("argument_names")
-    if arg_names_raw is None:
-        arg_names_raw = ()
-
-    if isinstance(arg_names_raw, str):
-        arg_names = tuple(a.strip() for a in arg_names_raw.split(",") if a.strip())
-    elif isinstance(arg_names_raw, (list, tuple)):
-        arg_names = tuple(str(a).strip() for a in arg_names_raw if str(a).strip())
-    else:
-        arg_names = ()
-
-    # Parse allowed tools
-    allowed_tools_raw = frontmatter.get("allowed_tools")
-    if allowed_tools_raw is None:
-        allowed_tools_raw = frontmatter.get("allowed-tools")
-    if allowed_tools_raw is None:
-        allowed_tools_raw = ()
-
-    if isinstance(allowed_tools_raw, str):
-        allowed_tools = tuple(t.strip() for t in allowed_tools_raw.split(",") if t.strip())
-    elif isinstance(allowed_tools_raw, (list, tuple)):
-        allowed_tools = tuple(str(t).strip() for t in allowed_tools_raw if str(t).strip())
-    else:
-        allowed_tools = ()
-
-    # User invocable boolean
-    user_invocable_raw = frontmatter.get("user_invocable")
-    if user_invocable_raw is None:
-        user_invocable_raw = frontmatter.get("user-invocable")
-
-    if user_invocable_raw is None:
-        user_invocable = True
-    elif isinstance(user_invocable_raw, bool):
-        user_invocable = user_invocable_raw
-    else:
-        user_invocable = str(user_invocable_raw).strip().lower() not in ("false", "0", "no")
-
-    context_val = frontmatter.get("context")
-    context = "fork" if context_val == "fork" else ("inline" if context_val == "inline" else None)
-
-    agent = str(frontmatter.get("agent") or "").strip() or None
-    model = str(frontmatter.get("model") or "").strip() or None
-    effort = str(frontmatter.get("effort") or "").strip() or None
-    hooks = frontmatter.get("hooks") if isinstance(frontmatter.get("hooks"), dict) else None
-
-    # Paths frontmatter
-    paths = parse_skill_paths(frontmatter.get("paths"))
-
-    # References from references/ subdirectory
-    references = load_skill_references(base_dir / "references")
-
-    return SkillDefinition(
-        name=name,
-        description=description,
-        body=body,
-        when_to_use=when_to_use,
-        argument_hint=argument_hint,
-        argument_names=arg_names,
-        allowed_tools=allowed_tools,
-        model=model,
-        user_invocable=user_invocable,
-        context=context,
-        agent=agent,
-        paths=paths,
-        hooks=hooks,
-        effort=effort,
-        source=source,
-        base_dir=str(base_dir),
-        skill_file_path=str(skill_file),
-        references=references,
-        raw_frontmatter=dict(frontmatter),
-    )
+        return str(path.resolve(strict=True))
+    except OSError:
+        return None
 
 
 class SkillRegistry:
-    """
-    Registry for holding and querying discovered skills.
-    Supports canonical alias resolution (e.g. artifact-diagramming for Skill: Artifact diagramming).
-    """
+    """One run's skills: the base commands, the conditional ones, and the listing's memory."""
 
-    __slots__ = ("_skills", "_aliases")
+    def __init__(self, commands: Iterable[SkillCommand], conditional: Iterable[SkillCommand] = (),
+                 *, model: str | None = None) -> None:
+        self._base = list(commands)
+        self._conditional = {c.name: c for c in conditional}
+        self._dynamic: dict[str, SkillCommand] = {}
+        self.model = model
+        #: `attachments.ts` -> `sentSkillNames`, keyed by agent id (`""` is the main thread).
+        self.sent_skill_names: dict[str | None, set[str]] = {}
 
-    def __init__(self, skills: Mapping[str, SkillDefinition] | None = None) -> None:
-        self._skills: dict[str, SkillDefinition] = dict(skills) if skills else {}
-        self._aliases: dict[str, str] = {}
-        for skill in self._skills.values():
-            self._index_aliases(skill)
+    def commands(self) -> list[SkillCommand]:
+        """`getCommands`: the base commands, then activated skills no base command shadows."""
+        names = {c.name for c in self._base}
+        return [*self._base, *(c for c in self._dynamic.values() if c.name not in names)]
 
-    def _index_aliases(self, skill: SkillDefinition) -> None:
-        raw_name = skill.name
-        self._aliases[raw_name.lower()] = skill.name
-        norm = raw_name.lower().strip()
-        if norm.startswith("skill:"):
-            norm = norm[6:].strip()
-        slug = re.sub(r"[\s_]+", "-", norm)
-        self._aliases[norm] = skill.name
-        self._aliases[slug] = skill.name
-        if skill.skill_file_path:
-            p = Path(skill.skill_file_path)
-            stem = p.stem.lower()
-            if stem.startswith("skill-"):
-                self._aliases[stem[6:]] = skill.name
-            self._aliases[stem] = skill.name
+    def find_command(self, name: str) -> SkillCommand | None:
+        """`findCommand`: the first command whose name or user-facing name matches."""
+        return next((c for c in self.commands() if name in (c.name, c.user_facing_name())), None)
 
-    def register(self, skill: SkillDefinition, overwrite: bool = True) -> None:
-        if not overwrite and skill.name in self._skills:
-            return
-        self._skills[skill.name] = skill
-        self._index_aliases(skill)
+    def get_skill_tool_commands(self) -> list[SkillCommand]:
+        """`getSkillToolCommands`: what the model may invoke (bundled and skills-dir only here)."""
+        return [c for c in self.commands() if not c.disable_model_invocation]
 
-    def get(self, name: str) -> SkillDefinition | None:
-        if name in self._skills:
-            return self._skills[name]
-        norm = name.lower().strip()
-        if norm in self._aliases:
-            return self._skills.get(self._aliases[norm])
-        slug = re.sub(r"[\s_]+", "-", norm)
-        if slug in self._aliases:
-            return self._skills.get(self._aliases[slug])
-        return None
-
-    def list_skills(self) -> tuple[SkillDefinition, ...]:
-        return tuple(self._skills.values())
-
-    def names(self) -> tuple[str, ...]:
-        return tuple(self._skills.keys())
-
-    def __contains__(self, name: str) -> bool:
-        return self.get(name) is not None
-
-    def __len__(self) -> int:
-        return len(self._skills)
+    def activate_conditional_skills_for_paths(self, file_paths: Iterable[str], cwd: str) -> list[str]:
+        """`activateConditionalSkillsForPaths`: gitignore-style matching, relative to `cwd`."""
+        activated: list[str] = []
+        for name, skill in list(self._conditional.items()):
+            spec = pathspec.GitIgnoreSpec.from_lines(skill.paths or ())
+            for file_path in file_paths:
+                relative = os.path.relpath(file_path, cwd) if os.path.isabs(file_path) else file_path
+                if not relative or relative.startswith("..") or os.path.isabs(relative):
+                    continue
+                if spec.match_file(relative):
+                    self._dynamic[name] = skill
+                    del self._conditional[name]
+                    activated.append(name)
+                    logger.debug("[skills] Activated conditional skill '%s' (matched path: %s)", name, relative)
+                    break
+        return activated
 
 
-def _scan_skills_in_directory(dir_path: Path, source: str) -> list[SkillDefinition]:
-    """
-    Scan a directory for skills. Supports both directory format (`<name>/SKILL.md`)
-    and standalone markdown files (`<name>.md`).
-    """
-    skills: list[SkillDefinition] = []
-    if not dir_path.is_dir():
-        return skills
-
-    # First check subdirectories for <name>/SKILL.md
-    for entry in sorted(dir_path.iterdir()):
-        if entry.is_dir():
-            skill_md = entry / "SKILL.md"
-            if skill_md.is_file():
-                try:
-                    skills.append(load_skill_from_path(entry, source=source))
-                except Exception as exc:
-                    logger.warning("Error loading skill from '%s': %s", skill_md, exc)
-        elif entry.is_file() and entry.suffix == ".md" and entry.name != "SKILL.md" and entry.name != "README.md":
-            try:
-                skills.append(load_skill_from_path(entry, source=source))
-            except Exception as exc:
-                logger.warning("Error loading skill file '%s': %s", entry, exc)
-
-    return skills
-
-
-def discover_skills(
-    project_root: Path | str = ".",
-    user_skills_dir: Path | str | None = None,
-    built_in_dir: Path | str | None = None,
+def get_skill_registry(
+    project_dir: Path | str,
+    user_home: Path | str | None = None,
+    managed_dir: Path | str | None = None,
+    *,
+    bundled_dir: Path | str = BUNDLED_SKILLS_DIR,
+    model: str | None = None,
 ) -> SkillRegistry:
-    """
-    Discover skills following 3-tier precedence (§4.6):
-    Project (.tddagents/skills, .claude/skills) > User (~/.tddagents/skills, ~/.claude/skills) > Built-in.
-    """
-    root = Path(project_root).resolve()
-    registry = SkillRegistry()
-
-    # 1. Built-in skills
-    if built_in_dir is not None:
-        built_in = Path(built_in_dir).resolve()
-        if built_in.is_dir():
-            for skill in _scan_skills_in_directory(built_in, source="built-in"):
-                registry.register(skill, overwrite=True)
-    else:
-        # Default built-ins: prompts/skills and prompts/skill-prompts
-        built_in_prompts = Path(__file__).resolve().parent.parent / "prompts" / "skill-prompts"
-        if built_in_prompts.is_dir():
-            for skill in _scan_skills_in_directory(built_in_prompts, source="built-in"):
-                registry.register(skill, overwrite=True)
-
-        legacy_built_in = Path(__file__).resolve().parent.parent.parent / "prompts" / "skills"
-        if legacy_built_in.is_dir():
-            for skill in _scan_skills_in_directory(legacy_built_in, source="built-in"):
-                registry.register(skill, overwrite=False)
-
-    # 2. User skills (~/.tddagents/skills and ~/.claude/skills)
-    user_dirs = [
-        Path(user_skills_dir).resolve() if user_skills_dir else Path.home() / ".tddagents" / "skills",
-        Path.home() / ".claude" / "skills",
+    """`getSkills` + `getSkillDirCommands` for one run, as a registry."""
+    home = Path(user_home) if user_home is not None else None
+    user_dir = home / ".tddagents" / "skills" if home is not None else config_home() / "skills"
+    policy_dir = Path(managed_dir if managed_dir is not None else MANAGED_DIR) / ".tddagents" / "skills"
+    policy_off = os.environ.get(DISABLE_POLICY_SKILLS_ENV, "").strip().lower() in _TRUTHY
+    loaded = [
+        *load_skills_from_skills_dir(Path(bundled_dir), "bundled", loaded_from="bundled"),
+        *([] if policy_off else load_skills_from_skills_dir(policy_dir, "policySettings")),
+        *load_skills_from_skills_dir(user_dir, "userSettings"),
+        *(s for d in get_project_dirs_up_to_home(Path(project_dir), home) for s in
+          load_skills_from_skills_dir(d, "projectSettings")),
     ]
-    for udir in user_dirs:
-        if udir.is_dir():
-            for skill in _scan_skills_in_directory(udir, source="user"):
-                registry.register(skill, overwrite=True)
+    seen: dict[str, str] = {}
+    base: list[SkillCommand] = []
+    conditional: list[SkillCommand] = []
+    for skill, path in loaded:
+        identity = _file_identity(path)
+        if identity is not None and identity in seen:
+            logger.debug("Skipping duplicate skill '%s' from %s (same file already loaded from %s)",
+                         skill.name, skill.source, seen[identity])
+            continue
+        if identity is not None:
+            seen[identity] = skill.source
+        (conditional if skill.paths else base).append(skill)
+    return SkillRegistry(base, conditional, model=model)
 
-    # 3. Project skills (.tddagents/skills and .claude/skills) - highest precedence
-    project_dirs = [
-        root / ".tddagents" / "skills",
-        root / ".claude" / "skills",
-    ]
-    for pdir in project_dirs:
-        if pdir.is_dir():
-            for skill in _scan_skills_in_directory(pdir, source="project"):
-                registry.register(skill, overwrite=True)
 
-    return registry
+__all__ = [
+    "BUNDLED_SKILLS_DIR",
+    "SkillRegistry",
+    "coerce_description_to_string",
+    "extract_description_from_markdown",
+    "get_project_dirs_up_to_home",
+    "get_skill_registry",
+    "load_skills_from_skills_dir",
+    "parse_boolean_frontmatter",
+    "parse_frontmatter",
+    "parse_skill_frontmatter_fields",
+    "parse_skill_paths",
+    "parse_slash_command_tools_from_frontmatter",
+]

@@ -196,9 +196,9 @@ def test_rewake_exit_two_queues_the_blocking_notification():
         registry.register_rewake(hook_name="Stop", capture=await _spawn("echo out; echo bad >&2; exit 2"))
         for _ in range(100):
             await asyncio.sleep(0.01)
-            if registry._notifications:
+            if registry.queue.has_commands():
                 break
-        return registry.drain_notifications()
+        return [c.value for c in registry.queue.dequeue_all_matching(lambda c: True)]
 
     assert asyncio.run(go()) == [
         '<system-reminder>\nStop hook blocking error from command "Stop": bad\n\n</system-reminder>'
@@ -212,7 +212,8 @@ def test_rewake_falls_back_to_stdout_and_drain_empties_the_queue():
         registry.register_rewake(hook_name="H", capture=capture)
         await capture.result()
         await asyncio.sleep(0.02)
-        return registry.drain_notifications(), registry.drain_notifications()
+        first = [c.value for c in registry.queue.dequeue_all_matching(lambda c: True)]
+        return first, [c.value for c in registry.queue.dequeue_all_matching(lambda c: True)]
 
     first, second = asyncio.run(go())
     assert first == ['<system-reminder>\nStop hook blocking error from command "H": only-out\n\n</system-reminder>']
@@ -227,7 +228,7 @@ def test_rewake_other_exit_codes_queue_nothing():
             registry.register_rewake(hook_name="H", capture=capture)
             await capture.result()
         await asyncio.sleep(0.02)
-        return registry.drain_notifications()
+        return [c.value for c in registry.queue.dequeue_all_matching(lambda c: True)]
 
     assert asyncio.run(go()) == []
 

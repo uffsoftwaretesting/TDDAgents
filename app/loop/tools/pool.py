@@ -9,7 +9,7 @@ Ported from:
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
 
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.tdd import (
@@ -19,7 +19,6 @@ from app.loop.permissions.tdd import (
 )
 from app.loop.permissions.types import PermissionRule
 from app.loop.tools.base import Tool
-
 
 #: `mcpStringUtils.ts` -> `buildMcpToolName`'s namespace prefix.
 MCP_TOOL_PREFIX = "mcp__"
@@ -45,7 +44,7 @@ def is_tool_denied(tool: Tool, deny_rules: set[str]) -> bool:
 
 def assemble_tool_pool(
     built_in_tools: Sequence[Tool] = (),
-    mcp_tools: Sequence[Tool] | Any = (),
+    mcp_tools: Sequence[Tool] = (),
     *,
     deny_rules: Sequence[str | PermissionRule] | set[str] = (),
     phase_ledger: PhaseLedger | None = None,
@@ -64,9 +63,6 @@ def assemble_tool_pool(
     5. Concatenate with built-ins as a contiguous prefix.
     6. Deduplicate by name, preserving insertion order (built-ins win on name conflicts).
     """
-    if hasattr(mcp_tools, "get_tools") and callable(mcp_tools.get_tools):
-        mcp_tools = mcp_tools.get_tools()
-
     deny_set: set[str] = set()
     for rule in deny_rules:
         if isinstance(rule, PermissionRule):

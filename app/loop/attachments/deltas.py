@@ -102,9 +102,14 @@ def _field(client: Any, name: str) -> Any:
     return client.get(name) if isinstance(client, Mapping) else getattr(client, name, None)
 
 
+def is_mcp_instructions_delta_enabled() -> bool:
+    """`isMcpInstructionsDeltaEnabled`: the env opt-in (GrowthBook's gate is off externally)."""
+    return _env_truthy(MCP_INSTR_DELTA_ENV)
+
+
 def get_mcp_instructions_delta_attachment(messages: Sequence[Message], context: Any) -> list[Attachment]:
     """`getMcpInstructionsDeltaAttachment` / `getMcpInstructionsDelta`."""
-    if not _env_truthy(MCP_INSTR_DELTA_ENV):
+    if not is_mcp_instructions_delta_enabled():
         return []
     announced: set[str] = set()
     for message in messages:
@@ -139,5 +144,6 @@ __all__ = [
     "get_agent_listing_delta_attachment",
     "get_mcp_instructions_delta_attachment",
     "get_tools_description",
+    "is_mcp_instructions_delta_enabled",
     "mcp_clients_for",
 ]

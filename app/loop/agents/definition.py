@@ -9,7 +9,7 @@ dropping it would silently disable the TDD invariant), and the `run`/`session`/`
 scopes (run-scoped memory, Part I5).
 
 Not ported, because their subsystems do not exist here: `color`, `effort`, `isolation`,
-`mcpServers`, `requiredMcpServers`, `skills`, `initialPrompt`, `criticalSystemReminder`.
+`mcpServers`, `requiredMcpServers`, `initialPrompt`, `criticalSystemReminder`.
 """
 
 from __future__ import annotations
@@ -46,6 +46,8 @@ class AgentDefinition:
     #: A model id, or the `inherit` sentinel.
     model: str | None = None
     background: bool | None = None
+    #: Skill names to preload into the worker's first messages (`runAgent`'s `skillsToPreload`).
+    skills: tuple[str, ...] = ()
     #: Built-in agents only (upstream sets it on Explore and Plan): drop `TDDAGENTS.md` from
     #: the worker's user context.
     omit_claude_md: bool = False

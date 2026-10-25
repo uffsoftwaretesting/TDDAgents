@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 from langchain_core.messages import AIMessage
-from typing import Any
 
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.hooks.messages import HookBlockingError
@@ -87,6 +87,28 @@ def test_a_malformed_call_is_rejected_before_any_hook_or_the_tool():
     assert outcome.message.additional_kwargs["is_error"] is True
     assert "InputValidationError" in str(outcome.message.content)
     assert "`file_path` type is expected as `string`" in str(outcome.message.content)
+
+
+def test_an_mcp_tools_input_is_left_to_its_server():
+    """`MCPTool.inputSchema` is `z.object({}).passthrough()`: the server, not us, validates it."""
+    log: list[str] = []
+    tool = recording_tool(log, name="mcp__demo__add", is_mcp=True)
+    execute(tool, call("mcp__demo__add", file_path=7), context())
+    assert log[0] == "validate_input"
+
+
+def test_the_call_sees_its_own_tool_use_id():
+    """`toolExecution.ts`: `tool.call(input, { ...toolUseContext, toolUseId })`."""
+    seen: list[Any] = []
+
+    async def do_call(args: dict[str, Any], ctx: Any) -> ToolResult:
+        seen.append(ctx.tool_use_id)
+        return ToolResult(content="ran")
+
+    ctx = context()
+    execute(recording_tool([], name="Probe", call=do_call), call("Probe", call_id="toolu_9", file_path="a.py"), ctx)
+    assert seen == ["toolu_9"]
+    assert ctx.tool_use_id is None
 
 
 def test_the_transcript_keeps_the_raw_message_alongside_the_humanized_one():

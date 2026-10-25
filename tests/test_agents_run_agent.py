@@ -350,3 +350,90 @@ def test_a_compact_boundary_is_recorded_in_the_sidechain(tmp_path):
     _run(deps=deps, agent_id="a5", transcript=store)
     entries = [json.loads(line) for line in store.agent_transcript_path("a5").read_text().splitlines()]
     assert any(e.get("subtype") == "compact_boundary" for e in entries)
+
+
+def test_an_async_worker_writes_task_state_through_to_the_root():
+    """Upstream's `setAppStateForTasks`: a background worker's task writes reach the root store,
+    while everything else it writes (the ledger above all) is discarded."""
+    store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
+    model, _ = _run(parent=_parent(store), is_async=True)
+    ctx = model.seen[0].tool_context
+    ctx.set_app_state(lambda s: dataclasses.replace(
+        s, tasks={"a9": "task"}, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)))
+    assert store.get().tasks == {"a9": "task"}
+    assert store.get().phase_ledger == PhaseLedger()
+    before = store.get()
+    ctx.set_app_state(lambda s: dataclasses.replace(s, todos={"x": ("y",)}))
+    assert store.get() is before
+
+
+def test_an_async_worker_has_its_own_cancel_token_unless_given_one():
+    from app.loop.context import CancelToken
+
+    parent = _parent()
+    model, _ = _run(parent=parent, is_async=True)
+    own = model.seen[0].tool_context.cancel
+    assert own is not parent.cancel and own.cancelled is False
+    given = CancelToken()
+    model, _ = _run(parent=parent, is_async=True, cancel=given)
+    assert model.seen[0].tool_context.cancel is given
+    model, _ = _run(parent=parent)
+    assert model.seen[0].tool_context.cancel is parent.cancel
+
+
+def test_the_worker_writes_its_metadata_sidecar(tmp_path):
+    """`runAgent`'s `writeAgentMetadata`: what a resume routes on (Phase 8)."""
+    store = TranscriptStore("sess", tmp_path, version="v", git_branch=None)
+    _run(agent_id="a9", transcript=store, description="write it")
+    assert store.read_agent_metadata("a9") == {"agentType": "tester", "description": "write it"}
+    _run(agent_id="a8", transcript=store)
+    assert store.read_agent_metadata("a8") == {"agentType": "tester"}
+
+
+# ── Phase 8: preloaded skills and the main-loop model ───────────────────────
+
+def _registry(tmp_path):
+    from app.loop.skills.loader import get_skill_registry
+
+    skill = tmp_path / "bundled" / "probe"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\ndescription: a probe skill\n---\nPROBE BODY\n")
+    return get_skill_registry(tmp_path / "project", tmp_path / "home", tmp_path / "etc",
+                              bundled_dir=tmp_path / "bundled")
+
+
+def test_preloaded_skills_follow_the_subagent_start_context(tmp_path):
+    """`runAgent`: prompt, then SubagentStart context, then each `skills` entry as a meta message."""
+    parent = dataclasses.replace(_parent(), skill_registry=_registry(tmp_path), run_id="r1")
+    definition = dataclasses.replace(TESTER, skills=("probe", "missing"))
+    model, _ = _run(definition, parent=parent)
+    messages = model.seen[0].messages
+    assert messages[0].content == "write a failing test"
+    (preloaded,) = messages[1:]
+    assert preloaded.additional_kwargs.get("is_meta") is True
+    assert "PROBE BODY" in str(preloaded.content)
+
+
+def test_a_worker_without_skills_or_registry_preloads_nothing(tmp_path):
+    parent = dataclasses.replace(_parent(), skill_registry=None)
+    model, _ = _run(dataclasses.replace(TESTER, skills=("probe",)), parent=parent)
+    assert [m.content for m in model.seen[0].messages] == ["write a failing test"]
+
+
+def test_a_worker_never_inherits_the_main_loops_model_override():
+    """`createSubagentContext`: the worker's options carry its own model, not the parent's."""
+    parent = dataclasses.replace(_parent(), main_loop_model="skill-model")
+    model, _ = _run(parent=parent)
+    assert model.seen[0].tool_context.main_loop_model is None
+
+
+def test_preloaded_skills_see_the_runs_session_id(tmp_path):
+    from app.loop.skills.loader import get_skill_registry
+
+    skill = tmp_path / "bundled" / "sid"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\ndescription: d\n---\nsession=${TDDAGENTS_SESSION_ID}\n")
+    registry = get_skill_registry(tmp_path / "p", tmp_path / "h", tmp_path / "e", bundled_dir=tmp_path / "bundled")
+    parent = dataclasses.replace(_parent(), skill_registry=registry, run_id="r1")
+    model, _ = _run(dataclasses.replace(TESTER, skills=("sid",)), parent=parent)
+    assert "session=r1" in str(model.seen[0].messages[1].content)

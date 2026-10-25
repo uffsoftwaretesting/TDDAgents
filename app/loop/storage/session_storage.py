@@ -33,7 +33,7 @@ import os
 import subprocess
 import time
 import uuid as uuid_module
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -109,6 +109,25 @@ class TranscriptStore:
 
     def agent_transcript_path(self, agent_id: str) -> Path:
         return get_agent_transcript_path(self.session_id, agent_id, self.cwd)
+
+    def agent_metadata_path(self, agent_id: str) -> Path:
+        """`getAgentMetadataPath`: the agent transcript's `.jsonl` swapped for `.meta.json`."""
+        return self.agent_transcript_path(agent_id).with_suffix(".meta.json")
+
+    def write_agent_metadata(self, agent_id: str, metadata: Mapping[str, Any]) -> None:
+        """`writeAgentMetadata`: the agent type (and description) a resume routes on."""
+        path = self.agent_metadata_path(agent_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict(metadata), separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+
+    def read_agent_metadata(self, agent_id: str) -> dict[str, Any] | None:
+        """`readAgentMetadata`: `None` when the sidecar is absent."""
+        try:
+            raw = self.agent_metadata_path(agent_id).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        loaded: dict[str, Any] = json.loads(raw)
+        return loaded
 
     def record_transcript(self, messages: Sequence[Message]) -> str | None:
         """`recordTranscript`."""

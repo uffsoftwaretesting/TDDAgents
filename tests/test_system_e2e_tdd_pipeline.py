@@ -13,18 +13,19 @@ Validates the integrated multi-turn lifecycle across Parts D, E, F, G, and H:
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import sys
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.hooks.stop_hooks import build_stop_hooks_runner
 from app.loop.config import build_run_config
 from app.loop.context import AppState, AppStateStore, ToolContext, tool_context_for
 from app.loop.deps import CompactionResult, LoopDeps
 from app.loop.engine import drain, run_loop
+from app.loop.hooks.stop_hooks import build_stop_hooks_runner
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.messages import Message, ToolCall
 from app.loop.state import initial_loop_state
@@ -42,10 +43,10 @@ from app.sync.engine import SyncEngine
 from app.sync.events import SyncConflict
 from app.workspace.local import LocalWorkspace
 
-
 # ============================================================================
 # Test Fixture Helpers & Tool Factories
 # ============================================================================
+
 
 def _make_write_file_tool(workspace: LocalWorkspace) -> BuiltTool:
     async def _write(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
@@ -426,8 +427,8 @@ async def test_live_llm_invocation_smoke() -> None:
     if not api_key:
         pytest.skip("No valid OPENAI_API_KEY configured in environment or .env")
 
-    from pydantic import SecretStr
     from langchain_openai import ChatOpenAI
+    from pydantic import SecretStr
 
     model = ChatOpenAI(model="gpt-4o-mini", api_key=SecretStr(api_key))
     response = await model.ainvoke([HumanMessage(content="Say the word 'ANTIGRAVITY_READY' and nothing else.")])
@@ -436,25 +437,33 @@ async def test_live_llm_invocation_smoke() -> None:
 
 @pytest.mark.live
 @pytest.mark.anyio
-async def test_e2e_live_openai_skill_activation_and_execution() -> None:
+async def test_e2e_live_openai_skill_activation_and_execution(tmp_path) -> None:
     api_key = _get_live_openai_key()
     if not api_key:
         pytest.skip("No valid OPENAI_API_KEY configured in environment or .env")
 
-    from pydantic import SecretStr
-    from langchain_openai import ChatOpenAI
-    from app.loop.skills.loader import discover_skills
-    from app.loop.skills.activation import render_skills_prompt_section
-    from app.loop.skills.tool import build_skill_tool
+    from types import SimpleNamespace
 
-    # 1. Discover bundled skills and render system prompt
-    registry = discover_skills()
-    skills_section = render_skills_prompt_section(registry.list_skills())
-    assert "<available_skills>" in skills_section
+    from langchain_openai import ChatOpenAI
+    from pydantic import SecretStr
+
+    from app.loop.attachments.skills import get_skill_listing_attachments
+    from app.loop.attachments.types import normalize_attachment_for_api
+    from app.loop.config import build_run_config
+    from app.loop.skills.loader import get_skill_registry
+    from app.loop.skills.tool import build_skill_tool
+    from tests.test_loop_engine import FakeModel, make_fake_deps
+
+    # 1. Discover the bundled skills and build the listing the model receives
+    registry = get_skill_registry(tmp_path, user_home=tmp_path)
+    config = build_run_config("tdd-skill-e2e", postgres_checkpointing=False)
+    skill_tool = build_skill_tool(registry, config=config, deps=make_fake_deps(FakeModel([])))
+    listing_context = SimpleNamespace(tools=(skill_tool,), agent_id=None, skill_registry=registry)
+    (listing,) = get_skill_listing_attachments([], listing_context)
+    (skills_section,) = normalize_attachment_for_api(listing)
     assert "tdd-test-design" in skills_section
 
-    # 2. Build Skill tool and bind to live model
-    skill_tool = build_skill_tool(registry)
+    # 2. Bind the Skill tool to the live model
     openai_tool_schema = {
         "type": "function",
         "function": {
@@ -487,18 +496,19 @@ async def test_e2e_live_openai_skill_activation_and_execution() -> None:
 
     selected_call = next((tc for tc in ai_msg.tool_calls if tc["name"] == "Skill"), None)
     assert selected_call is not None
-    assert selected_call["args"]["skill_name"] == "tdd-test-design"
+    assert selected_call["args"]["skill"] == "tdd-test-design"
 
-    # 4. Execute Skill tool through our real engine tool runner
+    # 4. Execute the Skill tool: the skill's text arrives as a meta message
     store = AppStateStore(AppState())
     ctx = tool_context_for(store)
     tool_result = await skill_tool.call(selected_call["args"], ctx)
 
     assert tool_result.is_error is False
-    assert '<command-message name="tdd-test-design">' in tool_result.content
-    assert "Test Isolation and Mocking Principles" in tool_result.content
+    assert tool_result.content == "Launching skill: tdd-test-design"
+    (skill_message,) = tool_result.new_messages
+    assert "TDD Test Design Skill" in skill_message.content
 
-    # 5. Return tool execution response back to live model
+    # 5. Return the result and the skill text to the live model
     tool_msg = ToolMessage(
         content=tool_result.content,
         tool_call_id=selected_call["id"],
@@ -508,6 +518,7 @@ async def test_e2e_live_openai_skill_activation_and_execution() -> None:
         HumanMessage(content=user_prompt),
         ai_msg,
         tool_msg,
+        skill_message,
     ])
 
     assert isinstance(followup_msg, AIMessage)
@@ -574,10 +585,10 @@ def test_e2e_live_openai_metrics_artifact_export_roundtrip(tmp_path: Path) -> No
     from app.config.config import Config
     Config.OPENAI_API_KEY = api_key
 
-    from app.session.shell import SessionShell
-    from app.session.state import SessionStatus
     from app.metrics.event_log import EventLog, EventType
     from app.metrics.report import export_full_metrics_artifacts
+    from app.session.shell import SessionShell
+    from app.session.state import SessionStatus
 
     shell = SessionShell()
     thread_id = "live-test-shell-session-l"

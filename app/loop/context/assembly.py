@@ -34,6 +34,7 @@ from app.loop.context.memory import get_claude_mds, get_memory_files, is_env_tru
 from app.loop.messages import Message
 from app.loop.prompts.sections import (
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    DANGEROUS_uncachedSystemPromptSection,
     PromptSectionCache,
     SystemPromptSection,
     systemPromptSection,
@@ -169,10 +170,33 @@ def _file_section(filename: str) -> Callable[[], str]:
     return lambda: read_system_prompt_file(filename)
 
 
-def get_system_prompt(ws: Any, model_id: str) -> list[SystemPromptSection]:
-    """`getSystemPrompt`: static (cacheable) sections, the boundary, then dynamic sections."""
+def get_mcp_instructions_section(mcp_clients: Sequence[Any]) -> str | None:
+    """
+    The `mcp_instructions` section's compute: `None` while the delta attachment announces the
+    instructions instead. The gate is read inside the compute, as upstream reads it, so a
+    mid-run flip never serves a stale value.
+    """
+    from app.loop.attachments.deltas import is_mcp_instructions_delta_enabled
+    from app.loop.mcp.client import get_mcp_instructions
+
+    return None if is_mcp_instructions_delta_enabled() else get_mcp_instructions(mcp_clients)
+
+
+def get_system_prompt(ws: Any, model_id: str, mcp_clients: Sequence[Any] = ()) -> list[SystemPromptSection]:
+    """
+    `getSystemPrompt`: static (cacheable) sections, the boundary, then dynamic sections —
+    `env_info_simple`, then upstream's uncached `mcp_instructions` (servers can connect between
+    turns).
+    """
     static = [systemPromptSection(name, _file_section(filename)) for name, filename in STATIC_SECTION_FILES]
-    dynamic = [systemPromptSection("env_info_simple", lambda: compute_simple_env_info(ws, model_id))]
+    dynamic = [
+        systemPromptSection("env_info_simple", lambda: compute_simple_env_info(ws, model_id)),
+        DANGEROUS_uncachedSystemPromptSection(
+            "mcp_instructions",
+            lambda: get_mcp_instructions_section(mcp_clients),
+            "MCP servers connect/disconnect between turns",
+        ),
+    ]
     return [*static, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, *dynamic]
 
 

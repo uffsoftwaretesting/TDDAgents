@@ -498,6 +498,11 @@ AUTO_CLASSIFIER_INPUTS: dict[str, Any] = {
     "TodoWrite": _todo_input,
     "Agent": _agent_input,
     "TaskStop": _task_stop_input,
+    "Skill": lambda i: i.get("skill") or "",
+    "TaskOutput": lambda i: i.get("task_id"),
+    "SendMessage": lambda i: f"to {i.get('to')}: {i.get('message')}",
+    "ListMcpResourcesTool": lambda i: i.get("server") or "",
+    "ReadMcpResourceTool": lambda i: f"{i.get('server')} {i.get('uri')}",
 }
 
 

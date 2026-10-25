@@ -157,8 +157,10 @@ async def _run_tool_use(
     # 1. Schema validation. Upstream opens `checkPermissionsAndCallTool` with this, before
     #    `validateInput`, before hooks and before permissions: "surprisingly, the model is
     #    not great at generating valid input". The model sees the humanized message; the
-    #    raw one goes to the transcript.
-    schema_error = validate_against_schema(tool_name, getattr(tool, "input_schema", None), tool_args)
+    #    raw one goes to the transcript. An MCP tool's schema is `z.object({}).passthrough()`
+    #    (`MCPTool.ts`): its server's JSON schema reaches the model, its server validates.
+    schema = None if getattr(tool, "is_mcp", False) else getattr(tool, "input_schema", None)
+    schema_error = validate_against_schema(tool_name, schema, tool_args)
     if schema_error is not None:
         msg = ToolMessage(
             content=f"<tool_use_error>{INPUT_VALIDATION_ERROR}: {schema_error}</tool_use_error>",
@@ -236,7 +238,8 @@ async def _run_tool_use(
     # Execute tool call. A tool that raises takes upstream's failure path: PostToolUseFailure
     # hooks, no governance and no PostToolUse.
     try:
-        result = await tool.call(effective_args, context)
+        # `tool.call(input, { ...toolUseContext, toolUseId })`: the call sees its own id.
+        result = await tool.call(effective_args, replace(context, tool_use_id=call_id))
     except Exception as exc:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
         content = f"<tool_use_error>Error calling tool ({tool.name}): {exc}</tool_use_error>"
         failure = await run_post_tool_use_failure_hooks(
@@ -270,6 +273,7 @@ async def _run_tool_use(
         # MCP result *after* PostToolUse, so a hook's `updatedMCPToolOutput` replaces it.
         replaced = post.updated_mcp_tool_output
         result = replace(result, content=replaced if isinstance(replaced, str) else json.dumps(replaced))
+    hook_messages.extend(result.new_messages)
     if pre.prevent_continuation:
         stopped = create_attachment_message(
             HookAttachment(

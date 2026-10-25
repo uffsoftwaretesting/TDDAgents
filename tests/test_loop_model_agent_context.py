@@ -35,7 +35,7 @@ def _session(monkeypatch):
         system_context={"gitStatus": "STATUS"},
     )
     monkeypatch.setattr(assembly, "_SESSIONS", {CONFIG.run_id: session})
-    monkeypatch.setattr("app.loop.model.get_system_prompt", lambda ws, model: ["unused"])
+    monkeypatch.setattr("app.loop.model.get_system_prompt", lambda ws, model, mcp: ["unused"])
     monkeypatch.setattr("app.loop.model.resolve_system_prompt_sections", lambda sections, cache: ["DEFAULT PROMPT"])
     return session
 

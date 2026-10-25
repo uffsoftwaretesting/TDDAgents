@@ -189,12 +189,13 @@ def test_a_failing_source_is_dropped_not_raised(monkeypatch):
 
 
 def test_disable_attachments_keeps_only_queued_commands(monkeypatch):
-    registry = AsyncHookRegistry()
-    registry._notifications.append("note")
-    dispatcher = type("D", (), {"registry": registry})()
+    from app.loop.command_queue import CommandQueue, QueuedCommand
+
+    queue = CommandQueue()
+    queue.enqueue(QueuedCommand(value="note", mode="prompt"))
     monkeypatch.setenv("TDDAGENTS_DISABLE_ATTACHMENTS", "1")
     ctx = ctx_for(AppState(phase_ledger=PhaseLedger()))
-    ctx = replace(ctx, hook_dispatcher=dispatcher)
+    ctx = replace(ctx, command_queue=queue)
     got = run(get_attachments(ctx, []))
     assert types_of(got) == ["queued_command"]
 
@@ -209,13 +210,38 @@ def test_messages_are_produced_in_attachment_order(monkeypatch):
     assert kinds == ["date_change", "tdd_state"]
 
 
+def test_the_skill_listing_follows_nested_memory(monkeypatch):
+    """Upstream's order: `nested_memory`, then `skill_listing`, then `auto_mode`/`todo_reminders`."""
+    from app.loop.attachments import pipeline
+
+    monkeypatch.setattr(pipeline, "get_nested_memory_source",
+                        lambda messages, context: [Attachment("nested_memory", {"path": "p", "content": "c"})])
+    monkeypatch.setattr(pipeline, "get_skill_listing_attachments",
+                        lambda messages, context: [Attachment("skill_listing", {"content": "- x", "skillCount": 1})])
+    monkeypatch.setattr(pipeline, "get_todo_reminder_attachments",
+                        lambda messages, context: [Attachment("todo_reminder", {"content": [], "itemCount": 0})])
+    got = run(get_attachments(ctx_for(), [HumanMessage(content="t")]))
+    assert types_of(got) == ["nested_memory", "skill_listing", "todo_reminder", "tdd_state"]
+
+
+def test_agent_pending_messages_follow_todo_reminders_and_precede_the_tdd_state(monkeypatch):
+    """Upstream's order: `todo_reminders`, then `agent_pending_messages`; `tdd_state` stays last."""
+    from app.loop.attachments import pipeline
+
+    monkeypatch.setattr(pipeline, "get_todo_reminder_attachments",
+                        lambda messages, context: [Attachment("todo_reminder", {"content": [], "itemCount": 0})])
+    monkeypatch.setattr(pipeline, "get_agent_pending_message_attachments",
+                        lambda messages, context: [Attachment("queued_command", {"prompt": "from lead"})])
+    got = run(get_attachments(ctx_for(), [HumanMessage(content="t")]))
+    assert types_of(got) == ["todo_reminder", "queued_command", "tdd_state"]
+
+
 # ── queued commands and async hook responses ─────────────────────────────────
 
-def test_rewake_notifications_and_async_responses_come_from_the_registry():
+def test_async_responses_come_from_the_registry():
     from app.loop.hooks.async_registry import AsyncHookResponse
 
     registry = AsyncHookRegistry()
-    registry._notifications.append("blocked!")
 
     async def responses() -> list[AsyncHookResponse]:
         return [AsyncHookResponse(process_id="p", response={"systemMessage": "hi"}, hook_name="PostToolUse:Bash",
@@ -225,10 +251,7 @@ def test_rewake_notifications_and_async_responses_come_from_the_registry():
     dispatcher = type("D", (), {"registry": registry})()
     ctx = replace(ctx_for(), hook_dispatcher=dispatcher)
     got = run(get_attachments(ctx, [HumanMessage(content="t")]))
-    assert types_of(got)[0] == "queued_command"
-    assert got[0].data == {"prompt": "blocked!", "commandMode": "task-notification"}
     assert "async_hook_response" in types_of(got)
-    assert registry.drain_notifications() == []  # drained once
 
 
 def test_async_responses_are_main_thread_only():

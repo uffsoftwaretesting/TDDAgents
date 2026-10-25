@@ -83,6 +83,10 @@ class AppState:
     #: The last test run the ledger observed (`ledger.TestRunRecord`), written by `RunTests`
     #: together with the ledger; the TDD state is re-attached from it after a compaction.
     last_test_run: TestRunRecord | None = None
+    #: Upstream `appState.tasks` (`Record<string, TaskState>`): the run's background tasks by
+    #: id (`app/loop/tasks/`). Written through the root setter even by a background worker,
+    #: as upstream's `setAppStateForTasks` is (Phase 8).
+    tasks: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -187,6 +191,21 @@ class ToolContext:
     #: The session's `TranscriptStore` (`app/loop/storage/`), upstream's session-global
     #: `Project`: a worker records its sidechain through it (`recordSidechainTranscript`).
     transcript_store: Any = None
+    #: The run's `CommandQueue` (`messageQueueManager.ts`): task and hook notifications, shared
+    #: by reference with every worker, as upstream's process-global queue is.
+    command_queue: Any = None
+    #: The run's `SkillRegistry` (`app/loop/skills/`), upstream's per-session commands: loaded
+    #: once by the runner and shared by reference with every worker.
+    skill_registry: Any = None
+    #: Upstream `options.mcpClients`: the run's MCP connections (`app/loop/mcp/`), read by the
+    #: `mcp_instructions` prompt section, its delta attachment and the resource tools.
+    mcp_clients: tuple[Any, ...] = ()
+    #: Upstream `options.mainLoopModel` set mid-run: a skill's `model:` override, applied by
+    #: the Skill tool's context modifier. `None` is the run's `RunConfig.model`.
+    main_loop_model: str | None = None
+    #: Upstream `toolUseContext.toolUseId`: the id of the call being executed, set only on the
+    #: copy the pipeline hands `tool.call` (a background agent's notification carries it).
+    tool_use_id: str | None = None
     #: The system prompt this context's model calls send instead of the default sections
     #: (`runAgent.ts`: `query({ systemPrompt: agentSystemPrompt })`). `None` is the main
     #: thread's `getSystemPrompt`; the system context is appended either way.
@@ -237,6 +256,10 @@ def tool_context_for(
     cost_tracker: Any = None,
     transcript_path: str | None = None,
     transcript_store: Any = None,
+    command_queue: Any = None,
+    skill_registry: Any = None,
+    mcp_clients: tuple[Any, ...] = (),
+    main_loop_model: str | None = None,
     agent_system_prompt: tuple[str, ...] | None = None,
     omit_claude_md: bool = False,
     omit_git_status: bool = False,
@@ -266,6 +289,10 @@ def tool_context_for(
         cost_tracker=cost_tracker,
         transcript_path=transcript_path,
         transcript_store=transcript_store,
+        command_queue=command_queue,
+        skill_registry=skill_registry,
+        mcp_clients=mcp_clients,
+        main_loop_model=main_loop_model,
         agent_system_prompt=agent_system_prompt,
         omit_claude_md=omit_claude_md,
         omit_git_status=omit_git_status,

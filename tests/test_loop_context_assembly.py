@@ -7,6 +7,7 @@
 import datetime
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -89,13 +90,46 @@ def test_static_sections_follow_upstream_order_and_include_tdd_contract():
 def test_get_system_prompt_structure():
     sections = get_system_prompt(Shell({"uname -s": "Linux", "uname -sr": "Linux 6"}), "m-1")
     names = [s.name for s in sections]
-    assert names == [n for n, _ in STATIC_SECTION_FILES] + [SYSTEM_PROMPT_DYNAMIC_BOUNDARY.name, "env_info_simple"]
+    assert names == [n for n, _ in STATIC_SECTION_FILES] + [
+        SYSTEM_PROMPT_DYNAMIC_BOUNDARY.name, "env_info_simple", "mcp_instructions"]
     static, dynamic = split_system_prompt_sections(sections)
-    assert len(static) == 7 and [s.name for s in dynamic] == ["env_info_simple"]
+    assert len(static) == 7 and [s.name for s in dynamic] == ["env_info_simple", "mcp_instructions"]
     rendered = resolve_system_prompt_sections(sections)
     assert rendered[0] == a.read_system_prompt_file("identity.md").strip()
     assert rendered[6] == a.read_system_prompt_file("tdd-contract.md").strip()
     assert rendered[-1].startswith("# Environment")
+
+
+def _mcp_server(name: str, instructions: str | None) -> Any:
+    from app.loop.mcp.types import ConnectedMCPServer
+
+    return ConnectedMCPServer(name=name, config=None, session=None, capabilities=None,  # type: ignore[arg-type]
+                              instructions=instructions)
+
+
+def test_mcp_instructions_are_an_uncached_section_of_the_connected_servers(monkeypatch):
+    """`getSystemPrompt`'s `DANGEROUS_uncachedSystemPromptSection('mcp_instructions', …)`."""
+    monkeypatch.delenv("TDDAGENTS_MCP_INSTR_DELTA", raising=False)
+    servers = [_mcp_server("docs", "Use search first."), _mcp_server("quiet", None)]
+    sections = get_system_prompt(Shell({"uname -s": "Linux"}), "m-1", mcp_clients=servers)
+    (section,) = [s for s in sections if s.name == "mcp_instructions"]
+    assert section.cache_break is True
+    assert section.compute() == (
+        "# MCP Server Instructions\n\n"
+        "The following MCP servers have provided instructions for how to use their tools and resources:\n\n"
+        "## docs\nUse search first.")
+    assert resolve_system_prompt_sections(sections)[-1] == section.compute()
+
+
+def test_mcp_instructions_move_to_the_delta_attachment_when_it_is_on(monkeypatch):
+    """`isMcpInstructionsDeltaEnabled`: the gate is checked inside the compute."""
+    servers = [_mcp_server("docs", "Use search first.")]
+    sections = get_system_prompt(Shell({"uname -s": "Linux"}), "m-1", mcp_clients=servers)
+    (section,) = [s for s in sections if s.name == "mcp_instructions"]
+    monkeypatch.setenv("TDDAGENTS_MCP_INSTR_DELTA", "1")
+    assert section.compute() is None
+    monkeypatch.setenv("TDDAGENTS_MCP_INSTR_DELTA", "0")
+    assert section.compute() is not None
 
 
 def test_read_system_prompt_file_missing(monkeypatch, tmp_path):

@@ -1,64 +1,36 @@
 """
-Skills package (Part J of transition elaboration plan).
+Skills (Phase 8): upstream's skill commands, ported from `skills/loadSkillsDir.ts`,
+`skills/bundledSkills.ts`, `tools/SkillTool/` and `tools/AgentTool/runAgent.ts`'s preload.
 
-Exports:
-- SkillDefinition, SkillFrontmatterError
-- SkillRegistry, load_skill_from_path, discover_skills, parse_skill_frontmatter
-- estimate_skill_frontmatter_tokens, is_skill_active_for_paths, filter_active_skills,
-  filter_skills_by_budget, render_skills_prompt_section
-- build_skill_tool, SKILL_TOOL_PROMPT
+The light modules are re-exported here. The Skill tool (`skills/tool.py`) and the agent preload
+(`skills/preload.py`) are imported directly: the tool pulls in the worker loop, which this
+package's light modules must not.
 """
 
 from __future__ import annotations
 
-from app.loop.skills.activation import (
-    estimate_skill_frontmatter_tokens,
-    filter_active_skills,
-    filter_skills_by_budget,
-    is_path_matching_pattern,
-    is_skill_active_for_paths,
-    render_skills_prompt_section,
-)
-from app.loop.skills.definition import (
-    SkillDefinition,
-    SkillFrontmatterError,
-)
-from app.loop.skills.loader import (
-    SkillRegistry,
-    discover_skills,
-    extract_description_from_markdown,
-    load_skill_from_path,
-    load_skill_references,
-    parse_skill_frontmatter,
-    parse_skill_paths,
-)
-from app.loop.skills.tool import (
-    SKILL_TOOL_PROMPT,
-    build_skill_tool,
+from app.loop.skills.arguments import (
+    parse_argument_names,
+    parse_arguments,
     substitute_arguments,
+)
+from app.loop.skills.definition import SkillCommand
+from app.loop.skills.loader import (
+    BUNDLED_SKILLS_DIR,
+    SkillRegistry,
+    get_skill_registry,
+    load_skills_from_skills_dir,
+    parse_skill_frontmatter_fields,
 )
 
 __all__ = [
-    # Definition
-    "SkillDefinition",
-    "SkillFrontmatterError",
-    # Loader & Registry
+    "BUNDLED_SKILLS_DIR",
+    "SkillCommand",
     "SkillRegistry",
-    "discover_skills",
-    "extract_description_from_markdown",
-    "load_skill_from_path",
-    "load_skill_references",
-    "parse_skill_frontmatter",
-    "parse_skill_paths",
-    # Activation & Progressive Disclosure
-    "estimate_skill_frontmatter_tokens",
-    "filter_active_skills",
-    "filter_skills_by_budget",
-    "is_path_matching_pattern",
-    "is_skill_active_for_paths",
-    "render_skills_prompt_section",
-    # Tool
-    "SKILL_TOOL_PROMPT",
-    "build_skill_tool",
+    "get_skill_registry",
+    "load_skills_from_skills_dir",
+    "parse_argument_names",
+    "parse_arguments",
+    "parse_skill_frontmatter_fields",
     "substitute_arguments",
 ]

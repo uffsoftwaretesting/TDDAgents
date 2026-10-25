@@ -4,6 +4,7 @@ before the loop, whole messages as they arrive, usage and cost, and the result m
 from __future__ import annotations
 
 import asyncio
+import itertools
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -318,3 +319,45 @@ class TestContentShapes:
 
     def test_a_message_without_metadata_has_no_stop_reason(self):
         assert normalize_stop_reason(object()) is None
+
+
+def test_the_conversation_outlives_a_submit():
+    """`QueryEngine.mutableMessages`: what the next turn of the same session starts from."""
+    task = HumanMessage(content="task")
+    done = AIMessage(content="done")
+    engine = _engine(FakeModel([[done]]))
+    assert engine.mutable_messages == []
+    _run(engine, _state(task))
+    assert engine.mutable_messages == [task, done]
+
+
+def test_a_compaction_restarts_the_kept_conversation():
+    boundary = create_compact_boundary_message("auto", 9)
+    summary = HumanMessage(content="summary", additional_kwargs={"is_compact_summary": True})
+    result = CompactionResult(boundary_marker=boundary, summary_messages=[summary], attachments=[], hook_results=[])
+
+    async def auto(messages, state, config):
+        return AutoCompactOutcome(was_compacted=True, compaction_result=result, consecutive_failures=0)
+
+    done = AIMessage(content="done")
+    engine = _engine(FakeModel([[done]]), autocompact=auto)
+    _run(engine, _state(HumanMessage(content="old")))
+    assert engine.mutable_messages == [boundary, summary, done]
+
+
+def test_a_second_turn_continues_the_transcript_chain(tmp_path):
+    """A follow-up turn (a task notification) chains onto the first turn's last message."""
+    import json
+
+    from app.loop.storage.session_storage import TranscriptStore
+
+    store = TranscriptStore("sess", tmp_path, version="v", git_branch=None)
+    model = FakeModel([[AIMessage(content="first")], [AIMessage(content="second")]])
+    engine = QueryEngine(CONFIG, make_fake_deps(model), transcript=store, session_id="sess")
+    _run(engine, _state(HumanMessage(content="task")))
+    note = HumanMessage(content="<task-notification>done</task-notification>")
+    _run(engine, _state(*engine.mutable_messages, note))
+    entries = [json.loads(line) for line in store.path.read_text().splitlines()]
+    assert [e["message"]["data"]["content"] for e in entries] == [
+        "task", "first", "<task-notification>done</task-notification>", "second"]
+    assert all(b["parentUuid"] == a["uuid"] for a, b in itertools.pairwise(entries))

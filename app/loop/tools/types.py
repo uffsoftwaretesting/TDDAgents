@@ -9,8 +9,9 @@ Ported from:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from app.loop.permissions.types import PermissionResult
 
@@ -50,6 +51,10 @@ class ToolResult:
     context_modifier: Callable[[ToolContext], ToolContext] | None = None
     exit_code: int | None = None
     metadata: dict[str, Any] | None = None
+    #: Upstream `ToolResult.newMessages`: messages the call adds to the conversation after its
+    #: result (the Skill tool's skill body). Emitted after PostToolUse's attachments and before
+    #: a preventing hook's `hook_stopped_continuation` (`toolExecution.ts`).
+    new_messages: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

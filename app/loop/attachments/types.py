@@ -69,6 +69,11 @@ def wrap_command_text(raw: str, origin_kind: str | None) -> str:
     """`wrapCommandText`, for the origins a queued command can carry here."""
     if origin_kind == "task-notification":
         return f"A background agent completed a task:\n{raw}"
+    if origin_kind == "coordinator":
+        return (
+            f"The coordinator sent a message while you were working:\n{raw}\n\n"
+            "Address this before completing your current task."
+        )
     return (
         f"The user sent a new message while you were working:\n{raw}\n\n"
         "IMPORTANT: After completing your current task, you MUST address the user's message above. "
@@ -174,7 +179,12 @@ def normalize_attachment_for_api(attachment: Attachment) -> list[str]:
     if kind == "nested_memory":
         return [f"Contents of {data['path']}:\n\n{data['content']}"]
     if kind == "queued_command":
-        origin = "task-notification" if data.get("commandMode") == "task-notification" else None
+        # An explicit origin wins; task notifications predate origin and fall back to the mode.
+        explicit = data.get("origin")
+        origin = (
+            str(explicit.get("kind")) if isinstance(explicit, Mapping)
+            else "task-notification" if data.get("commandMode") == "task-notification" else None
+        )
         return [wrap_command_text(str(data.get("prompt", "")), origin)]
     if kind == "date_change":
         return [
@@ -197,6 +207,9 @@ def normalize_attachment_for_api(attachment: Attachment) -> list[str]:
         return _async_hook_response(data)
     if kind == "tdd_state":
         return _tdd_state(data)
+    if kind == "skill_listing":
+        content = data.get("content")
+        return [f"The following skills are available for use with the Skill tool:\n\n{content}"] if content else []
     return []
 
 

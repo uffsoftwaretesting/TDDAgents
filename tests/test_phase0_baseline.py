@@ -275,17 +275,20 @@ def _ledger_writers() -> list[str]:
 def test_run_tests_is_the_only_ledger_writer():
     """
     `RunTests` writes every observation. Since Phase 7 the Agent tool also writes the ledger,
-    but only through `phase_on_spawn` (`PhaseLedger.transition_to`), which can move the phase
-    or erase evidence and never create an observation — pinned here so a third writer, or an
-    Agent-tool write that bypasses `transition_to`, cannot appear unnoticed.
+    and since Phase 8 the Skill tool's forked path (user decision 2026-10-25), but both only
+    through `phase_on_spawn` (`PhaseLedger.transition_to`), which can move the phase or erase
+    evidence and never create an observation — pinned here so another writer, or a spawn
+    write that bypasses `transition_to`, cannot appear unnoticed.
     """
-    assert _ledger_writers() == ["app/loop/agents/tool.py", "app/loop/tools/run_tests.py"]
-    nodes = original_nodes(REPO / "app/loop/agents/tool.py")
-    writes = calls_to(nodes, "set_app_state")
-    assert writes and all("phase_ledger=spawn_ledger" in w for w in writes)
-    assigns = [ast.unparse(n) for n in nodes if isinstance(n, ast.Assign)
-               and any(isinstance(t, ast.Name) and t.id == "spawn_ledger" for t in n.targets)]
-    assert assigns and all(a.startswith("spawn_ledger = phase_on_spawn(") for a in assigns)
+    spawn_writers = ["app/loop/agents/tool.py", "app/loop/skills/tool.py"]
+    assert _ledger_writers() == [*spawn_writers, "app/loop/tools/run_tests.py"]
+    for path in spawn_writers:
+        nodes = original_nodes(REPO / path)
+        writes = calls_to(nodes, "set_app_state")
+        assert writes and all("phase_ledger=spawn_ledger" in w for w in writes), path
+        assigns = [ast.unparse(n) for n in nodes if isinstance(n, ast.Assign)
+                   and any(isinstance(t, ast.Name) and t.id == "spawn_ledger" for t in n.targets)]
+        assert assigns and all(a.startswith("spawn_ledger = phase_on_spawn(") for a in assigns), path
 
 
 def test_initial_state_reads_the_store_and_never_writes_it():
@@ -398,13 +401,17 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     assert [r.rule_content for r in perm.always_deny_rules] == ["from-home"]
     assert [r.rule_content for r in perm.always_ask_rules] == ["from-policy"]
     assert perm.additional_working_directories == (str(tmp_path),)
-    # Phase 7: the main thread also holds the Agent tool, as upstream's always does.
+    # Phase 7: the main thread also holds the Agent tool, as upstream's always does; Phase 8
+    # adds TaskOutput and TaskStop (SendMessage is off without agent teams).
     assert {t.name for t in ctx.tools} == {
-        "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite", "Agent"}
+        "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite", "Agent",
+        "TaskOutput", "TaskStop", "Skill"}
     assert seen[0].messages[0].content == "add two numbers"
-    # Phase 5: the user-input attachments (the initial TDD state) follow the prompt.
-    assert seen[0].messages[1].additional_kwargs["attachment"]["type"] == "tdd_state"
-    assert ctx.messages == seen[0].messages[:2]
+    # Phase 5: the user-input attachments follow the prompt — since Phase 8 the skill listing,
+    # then the initial TDD state (upstream's source order).
+    kinds = [m.additional_kwargs["attachment"]["type"] for m in seen[0].messages[1:3]]
+    assert kinds == ["skill_listing", "tdd_state"]
+    assert ctx.messages == seen[0].messages[:3]
     assert ctx.run_id.startswith("loop-") and len(ctx.run_id) == len("loop-") + 8
     assert seen[0].turn_count == 1
     # `refresh_tools`: the ledger moved RED -> GREEN during the run, so the pool was rebuilt
@@ -503,7 +510,11 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     from app.loop.storage.paths import get_transcript_path
 
     assert get_transcript_path(config.run_id, str(python_workspace.root)).is_file()
-    assert [m.content for m in state.tool_context.messages] == ["spec", INITIAL_TDD_STATE]
+    # Phase 8: the skill listing precedes the TDD state (upstream's source order).
+    contents = [m.content for m in state.tool_context.messages]
+    assert contents[0] == "spec" and contents[-1] == INITIAL_TDD_STATE
+    assert "The following skills are available for use with the Skill tool" in contents[1]
+    assert len(contents) == 3
 
 
 def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatch, python_workspace):

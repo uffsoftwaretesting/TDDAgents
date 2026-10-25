@@ -127,6 +127,9 @@ def apply_context_modifier(
             context.tools = new_ctx.tools
         if hasattr(new_ctx, "permission_context") and hasattr(context, "permission_context"):
             context.permission_context = new_ctx.permission_context
+        # Upstream `options.mainLoopModel`: a skill's `model:` override (Phase 8).
+        if hasattr(new_ctx, "main_loop_model") and hasattr(context, "main_loop_model"):
+            context.main_loop_model = new_ctx.main_loop_model
     return context
 
 

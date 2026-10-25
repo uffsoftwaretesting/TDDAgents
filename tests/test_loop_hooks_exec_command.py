@@ -227,9 +227,9 @@ def test_an_async_rewake_hook_is_watched_not_registered(tmp_path):
         assert registry.get_pending() == []
         for _ in range(100):
             await asyncio.sleep(0.01)
-            if registry._notifications:
+            if registry.queue.has_commands():
                 break
-        return registry.drain_notifications()
+        return [c.value for c in registry.queue.dequeue_all_matching(lambda c: True)]
 
     assert asyncio.run(go()) == [
         '<system-reminder>\nStop hook blocking error from command "Stop": boom\n\n</system-reminder>'

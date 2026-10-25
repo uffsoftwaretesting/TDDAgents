@@ -2,16 +2,7 @@
 name: tdd-refactor-clean
 description: Guidelines for safely restructuring production code in the REFACTOR phase while preserving green tests.
 when_to_use: In the REFACTOR phase after all tests pass, to improve readability, typing, and architectural hygiene.
-argument_hint: "[target-source-file]"
-paths:
-  - "app/**"
-  - "src/**"
-  - "*.py"
-allowed_tools:
-  - ReadFile
-  - WriteFile
-  - Edit
-  - RunTests
+argument-hint: "[target-source-file]"
 ---
 
 # TDD Clean Refactoring Skill
@@ -29,3 +20,7 @@ You are performing safe code refactoring after achieving a GREEN test suite.
    - Add explicit Python type annotations.
    - Decompose complex conditionals.
    - Improve variable and function naming.
+
+## Reference
+
+For the clean-code catalogue, read `references/clean_code.md` in this skill's base directory.

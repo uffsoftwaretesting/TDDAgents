@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.loop.command_queue import CommandQueue, QueuedCommand
 from app.loop.hooks.process import CapturedProcess
 from app.loop.messages import wrap_in_system_reminder
 
@@ -86,9 +87,11 @@ class AsyncHookResponse:
 class AsyncHookRegistry:
     """The run's background hooks and its queue of rewake notifications."""
 
-    def __init__(self) -> None:
+    def __init__(self, queue: CommandQueue | None = None) -> None:
         self._pending: dict[str, PendingAsyncHook] = {}
-        self._notifications: list[str] = []
+        #: The run's command queue (`messageQueueManager.ts`), which the runner shares as
+        #: `ToolContext.command_queue`; a rewake notification is enqueued into it.
+        self.queue = queue if queue is not None else CommandQueue()
         self._rewake_tasks: set[asyncio.Future[Any]] = set()
         self._rewake_captures: list[CapturedProcess] = []
 
@@ -129,11 +132,12 @@ class AsyncHookRegistry:
         async def watch() -> None:
             code = await capture.result()
             if code == 2:
-                self._notifications.append(
-                    wrap_in_system_reminder(
+                self.queue.enqueue_pending_notification(QueuedCommand(
+                    value=wrap_in_system_reminder(
                         f'Stop hook blocking error from command "{hook_name}": {capture.stderr or capture.stdout}'
-                    )
-                )
+                    ),
+                    mode="task-notification",
+                ))
 
         task = asyncio.ensure_future(watch())
         self._rewake_captures.append(capture)
@@ -145,11 +149,6 @@ class AsyncHookRegistry:
     def get_pending(self) -> list[PendingAsyncHook]:
         """`getPendingAsyncHooks`: those whose response has not been delivered."""
         return [hook for hook in self._pending.values() if not hook.response_attachment_sent]
-
-    def drain_notifications(self) -> list[str]:
-        """The queued rewake notifications, removed from the queue."""
-        drained, self._notifications = self._notifications, []
-        return drained
 
     async def check_for_responses(self) -> list[AsyncHookResponse]:
         """

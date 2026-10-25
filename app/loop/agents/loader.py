@@ -10,7 +10,7 @@ Agent definitions from Markdown (`reference/claude-code/src/tools/AgentTool/load
   (`~/.tddagents/agents/`), then project (`.tddagents/agents/`), a later source replacing an
   earlier agent of the same name. No prompt registry is consulted.
 
-Not ported (no subsystem here): `color`, `effort`, `isolation`, `mcpServers`, `skills`,
+Not ported (no subsystem here): `color`, `effort`, `isolation`, `mcpServers`,
 `initialPrompt`, and `omitClaudeMd` on file agents (upstream sets it on built-ins only).
 """
 
@@ -30,6 +30,7 @@ from app.loop.context.memory import is_auto_memory_enabled
 from app.loop.ledger import TddPhase
 from app.loop.permissions.settings import parse_tool_list_from_cli
 from app.loop.permissions.types import PERMISSION_MODES
+from app.loop.skills.loader import parse_slash_command_tools_from_frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,7 @@ def load_agent_definition(
         hooks=hooks,
         model=model,
         background=background,
+        skills=parse_slash_command_tools_from_frontmatter(fm.get("skills")),
         omit_claude_md=source == "built-in" and fm.get("omitClaudeMd") is True,
         source=source,
         base_dir=base_dir,

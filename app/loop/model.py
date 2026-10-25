@@ -93,7 +93,8 @@ def request_system_texts(state: LoopState, config: RunConfig) -> list[str]:
         sections = list(ctx.agent_system_prompt)
     else:
         session = get_session_context(config.run_id, ctx.workspace)
-        sections = resolve_system_prompt_sections(get_system_prompt(ctx.workspace, Config.MODEL), session.section_cache)
+        sections = resolve_system_prompt_sections(
+            get_system_prompt(ctx.workspace, Config.MODEL, ctx.mcp_clients), session.section_cache)
     return append_system_context(sections, request_system_context(state, config))
 
 
@@ -201,7 +202,8 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
     opened = await with_retry(
         operation,
         RetryOptions(
-            model=config.model,
+            # Upstream `options.mainLoopModel`: a skill's override wins over the run's model.
+            model=state.tool_context.main_loop_model or config.model,
             max_retries=config.max_retries,
             fallback_model=config.fallback_model,
             on_notice=lambda notice: logger.warning(

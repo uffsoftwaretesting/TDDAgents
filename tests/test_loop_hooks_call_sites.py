@@ -273,14 +273,15 @@ def test_async_hook_responses_and_rewake_notes_follow_the_tool_results():
     last_result = max(i for i, m in enumerate(second) if isinstance(m, ToolMessage))
     after = second[last_result + 1:]
     by_type = {m.additional_kwargs["attachment"]["type"]: m for m in after}
-    # Both are attachments of the turn, after its results (`getAttachmentMessages`).
+    # The async response is an attachment of the turn, after its results (`getAttachmentMessages`).
     assert by_type["async_hook_response"].content == reminder("bg done")
     assert by_type["async_hook_response"].additional_kwargs["attachment"]["processId"] == "p1"
-    queued = by_type["queued_command"]
-    assert 'Stop hook blocking error from command "Stop": wake up' in str(queued.content)
-    assert queued.additional_kwargs["attachment"]["commandMode"] == "task-notification"
-    # Upstream's order: queued commands come before async hook responses.
-    assert after.index(queued) < after.index(by_type["async_hook_response"])
+    # The rewake note is a `later` notification (`enqueuePendingNotification`): never drained
+    # mid-turn, it waits in the run's queue for the runner to deliver as a turn of its own.
+    assert "queued_command" not in by_type
+    (note,) = d.registry.queue.snapshot()
+    assert 'Stop hook blocking error from command "Stop": wake up' in note.value
+    assert (note.mode, note.priority) == ("task-notification", "later")
     assert events[-1].reason == Terminal.COMPLETED
 
 
@@ -329,6 +330,12 @@ def test_stop_failure_fires_on_an_unrecovered_prompt_too_long():
 
 # ── runner ──────────────────────────────────────────────────────────────────
 
+def without_skill_listing(messages: Any) -> list[Any]:
+    """The first turn minus the bundled skills' listing (Phase 8), which these tests do not pin."""
+    return [m for m in messages
+            if (m.additional_kwargs.get("attachment") or {}).get("type") != "skill_listing"]
+
+
 def run_runner(monkeypatch, tmp_path: Path, d: ScriptedDispatcher, model: Model) -> Any:
     from app.loop.runner import tdd_loop_runner
     from tests.conftest import FakeWorkspace
@@ -355,7 +362,7 @@ def test_runner_places_hook_messages_around_the_prompt(monkeypatch, tmp_path):
     model = Model([[AIMessage(content="done")]])
     result, finalized = run_runner(monkeypatch, tmp_path, d, model)
     first = model.seen[0].messages
-    assert [m.content for m in first] == [
+    assert [m.content for m in without_skill_listing(first)] == [
         reminder("SessionStart hook additional context: session ctx"),
         "hello",
         "build it",
@@ -374,7 +381,7 @@ def test_runner_places_hook_messages_around_the_prompt(monkeypatch, tmp_path):
 def test_runner_without_hook_output_starts_from_the_prompt(monkeypatch, tmp_path):
     model = Model([[AIMessage(content="done")]])
     run_runner(monkeypatch, tmp_path, ScriptedDispatcher(), model)
-    assert [m.content for m in model.seen[0].messages] == ["build it", INITIAL_TDD_STATE]
+    assert [m.content for m in without_skill_listing(model.seen[0].messages)] == ["build it", INITIAL_TDD_STATE]
 
 
 def test_a_blocked_prompt_never_reaches_the_model(monkeypatch, tmp_path):
@@ -426,7 +433,7 @@ def test_the_request_builder_reorders_hook_messages_after_tool_results(monkeypat
     monkeypatch.setattr(model_mod, "get_session_context", lambda run_id, ws: SimpleNamespace(
         section_cache=None, system_context={}, user_context={}))
     monkeypatch.setattr(model_mod, "resolve_system_prompt_sections", lambda sections, cache: [])
-    monkeypatch.setattr(model_mod, "get_system_prompt", lambda ws, m: [])
+    monkeypatch.setattr(model_mod, "get_system_prompt", lambda ws, m, mcp: [])
     monkeypatch.setattr(model_mod, "prepend_user_context", lambda msgs, ctx: list(msgs))
     state = initial_loop_state(history, tool_context_for(AppStateStore()))
     request = model_mod.build_request_messages(state, CONFIG)

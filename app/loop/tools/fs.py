@@ -196,6 +196,17 @@ def is_stale(context: ToolContext, path: str, current: str | None) -> bool:
     return state is None or state.content != current
 
 
+def activate_conditional_skills(context: ToolContext, file_path: str) -> None:
+    """
+    `activateConditionalSkillsForPaths([file], cwd)`, as FileRead/FileWrite/FileEdit call it: a
+    skill whose `paths` match the file becomes invocable. Paths here are workspace-relative,
+    and the workspace is the run's working directory, so the path is matched as is.
+    """
+    registry = context.skill_registry
+    if registry is not None:
+        registry.activate_conditional_skills_for_paths([normalize_path(file_path)], "")
+
+
 def record_write(context: ToolContext, path: str, content: str) -> None:
     """Edit/Write store `offset=undefined`, so the next edit needs no fresh Read."""
     context.read_file_state[normalize_path(path)] = FileState(content=content)
@@ -384,6 +395,7 @@ def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         )
         # `FileReadTool`: the file's directories may hold nested memory to attach next turn.
         context.nested_memory_attachment_triggers.add(normalize_path(file_path))
+        activate_conditional_skills(context, file_path)
 
         if window:
             return ToolResult(content=add_line_numbers(window, max(offset, 1)))
@@ -451,6 +463,7 @@ def build_write_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         if ws is None:
             return NO_WORKSPACE
 
+        activate_conditional_skills(context, file_path)
         try:
             existing = read_text(ws, file_path)
             if is_stale(context, file_path, existing):
@@ -535,6 +548,7 @@ def build_edit_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
         if ws is None:
             return NO_WORKSPACE
 
+        activate_conditional_skills(context, file_path)
         try:
             original = read_text(ws, file_path)
             if is_stale(context, file_path, original):

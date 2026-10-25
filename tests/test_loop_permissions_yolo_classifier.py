@@ -33,6 +33,8 @@ def tool(name: str, aliases: tuple[str, ...] = (), **attrs: Any) -> Any:
 TOOLS = (
     tool("Bash"), tool("ReadFile"), tool("WriteFile"), tool("Edit"), tool("Glob"), tool("Grep"),
     tool("TodoWrite"), tool("Agent", aliases=("Task",)), tool("TaskStop"), tool("RunTests"),
+    tool("Skill"), tool("TaskOutput"), tool("SendMessage"), tool("ListMcpResourcesTool"),
+    tool("ReadMcpResourceTool"),
 )
 
 
@@ -296,6 +298,14 @@ def test_messages_without_kwargs_are_handled():
     ("TaskStop", {"shell_id": "s1"}, "s1"),
     ("TaskStop", {}, ""),
     ("RunTests", {"test_path": "tests"}, ""),
+    # Phase 8: each new tool's upstream `toAutoClassifierInput`.
+    ("Skill", {"skill": "tdd-test-design", "args": "x"}, "tdd-test-design"),
+    ("Skill", {}, ""),
+    ("TaskOutput", {"task_id": "a1"}, "a1"),
+    ("SendMessage", {"to": "a1", "message": "go on"}, "to a1: go on"),
+    ("ListMcpResourcesTool", {"server": "docs"}, "docs"),
+    ("ListMcpResourcesTool", {}, ""),
+    ("ReadMcpResourceTool", {"server": "docs", "uri": "file://a"}, "docs file://a"),
 ])
 def test_auto_classifier_inputs(name, args, expected):
     assert yc.to_auto_classifier_input(tool(name), args) == expected

@@ -61,10 +61,15 @@ ARGS = {"description": "write the test", "prompt": "Write a failing test for add
 
 
 class TestSchema:
-    def test_the_fields_are_upstreams_with_subagent_type_required(self):
+    def test_the_fields_are_upstreams_with_subagent_type_required(self, monkeypatch):
+        monkeypatch.delenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", raising=False)
         schema = _tool().input_schema
         assert schema["required"] == ["description", "prompt", "subagent_type"]
-        assert set(schema["properties"]) == {"description", "prompt", "subagent_type", "model"}
+        assert set(schema["properties"]) == {"description", "prompt", "subagent_type", "model", "run_in_background"}
+        assert schema["properties"]["run_in_background"] == {
+            "type": "boolean",
+            "description": "Set to true to run this agent in the background. You will be notified when it completes.",
+        }
         assert schema["properties"]["model"]["enum"] == sorted(MODEL_ALIASES)
         assert schema["additionalProperties"] is False
 
@@ -337,3 +342,188 @@ def test_finalize_edges():
     assert timed.total_duration_ms == 250
     untexted = AIMessage(content=[{"type": "text"}, {"type": "text", "text": "y"}])
     assert finalize_agent_tool([untexted], "a", "t", 0.0, now=0.0).content == ("", "y")
+
+
+# ── Phase 8: background agents ───────────────────────────────────────────────
+
+
+def test_disabling_background_tasks_removes_the_field(monkeypatch):
+    """Upstream's `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`, read when the tool is built."""
+    monkeypatch.setenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", "1")
+    assert "run_in_background" not in _tool().input_schema["properties"]
+
+
+@pytest.mark.parametrize("definition_background", [False, True])
+def test_a_phase_agent_never_runs_in_the_background(definition_background):
+    defs = {"tester": dataclasses.replace(TESTER, background=definition_background or None)}
+    args = {**ARGS, "run_in_background": not definition_background}
+    model = FakeModel([])
+    store, ctx = _ctx(PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True))
+    with pytest.raises(ValueError, match="^Agent 'tester' declares TDD phase RED and cannot run in the background"):
+        _call(_tool(model, definitions=defs), args, ctx)
+    assert model.seen == []
+    assert store.get().phase_ledger.phase == TddPhase.GREEN
+    assert store.get().tasks == {}
+
+
+def _background(tool, args, ctx, store):
+    """Launch, then wait in the same event loop for the background task to finish."""
+
+    async def go():
+        result = await tool.call(args, ctx)
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if all(t.status != "running" for t in store.get().tasks.values()):
+                break
+        return result
+
+    return asyncio.run(go())
+
+
+def _bg_ctx(tmp_path, tools=()):
+    from app.loop.command_queue import CommandQueue
+    from app.loop.storage.session_storage import TranscriptStore
+
+    store = AppStateStore()
+    transcript = TranscriptStore("loop-1", tmp_path, version="v", git_branch=None)
+    ctx = tool_context_for(store, run_id="loop-1", command_queue=CommandQueue(), transcript_store=transcript,
+                           tools=tools)
+    return store, ctx, transcript
+
+
+def test_a_background_agent_launches_and_reports_through_the_queue(tmp_path, monkeypatch):
+    monkeypatch.delenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", raising=False)
+    store, ctx, transcript = _bg_ctx(tmp_path)
+    tool = _tool(FakeModel([[AIMessage(content="found the module")]]))
+    result = _background(tool, {**ARGS, "subagent_type": "Explore", "run_in_background": True}, ctx, store)
+    (task,) = store.get().tasks.values()
+    agent_id = task.id
+    assert result.metadata == {"agent_id": agent_id, "agent_type": "Explore", "status": "async_launched"}
+    output_file = transcript.path.parent / "loop-1" / "tasks" / f"{agent_id}.output"
+    assert result.content == (
+        f"Async agent launched successfully.\nagentId: {agent_id} (internal ID - do not mention to user. "
+        f"Use SendMessage with to: '{agent_id}' to continue this agent.)\n"
+        "The agent is working in the background. You will be notified automatically when it completes.\n"
+        "Briefly tell the user what you launched and end your response. Do not generate any other text — "
+        "agent results will arrive in a subsequent message."
+    )
+    assert (task.status, task.result, task.agent_type, task.description) == (
+        "completed", "found the module", "Explore", "write the test")
+    assert output_file.is_symlink() and output_file.resolve() == transcript.agent_transcript_path(agent_id).resolve()
+    (note,) = ctx.command_queue.snapshot()
+    assert f"<task-id>{agent_id}</task-id>" in note.value
+    assert "<result>found the module</result>" in note.value and note.priority == "later"
+
+
+def test_a_caller_that_can_read_gets_the_output_file_instructions(tmp_path):
+    from app.loop.tools.base import build_tool
+    from app.loop.tools.types import ToolResult
+
+    reader = build_tool(name="ReadFile", prompt="r", call=lambda a, c: ToolResult(content=""))
+    store, ctx, _transcript = _bg_ctx(tmp_path, tools=(reader,))
+    result = _background(_tool(), {**ARGS, "subagent_type": "Explore", "run_in_background": True}, ctx, store)
+    (task,) = store.get().tasks.values()
+    assert result.content.endswith(
+        "Do not duplicate this agent's work — avoid working with the same files or topics it is using. "
+        "Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.\n"
+        f"output_file: {task.output_file}\n"
+        "If asked, you can check progress before completion by using ReadFile or Bash tail on the output file."
+    )
+
+
+def test_coordinator_mode_backgrounds_agents_without_a_phase_only(tmp_path):
+    store, ctx, _ = _bg_ctx(tmp_path)
+    tool = _tool(FakeModel([[AIMessage(content="r1")], [AIMessage(content="r2")]]), is_coordinator=True)
+    explore = _background(tool, {**ARGS, "subagent_type": "Explore"}, ctx, store)
+    assert explore.metadata["status"] == "async_launched"
+    tester = _background(tool, ARGS, ctx, store)
+    assert tester.metadata["status"] == "completed"
+    assert len(store.get().tasks) == 1
+
+
+def test_disabled_background_tasks_run_synchronously(tmp_path, monkeypatch):
+    monkeypatch.setenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", "true")
+    store, ctx, _ = _bg_ctx(tmp_path)
+    tool = _tool(is_coordinator=True)
+    result = _background(tool, {**ARGS, "subagent_type": "Explore", "run_in_background": True}, ctx, store)
+    assert result.metadata["status"] == "completed" and store.get().tasks == {}
+
+
+def test_a_definition_marked_background_runs_in_the_background(tmp_path):
+    store, ctx, _ = _bg_ctx(tmp_path)
+    defs = {"Explore": dataclasses.replace(EXPLORE, background=True)}
+    result = _background(_tool(definitions=defs), {**ARGS, "subagent_type": "Explore"}, ctx, store)
+    assert result.metadata["status"] == "async_launched"
+
+
+def test_a_background_worker_is_async_and_cancellable(tmp_path):
+    seen: list[Any] = []
+
+    class Model(FakeModel):
+        async def __call__(self, state, config):
+            seen.append(state.tool_context)
+            async for m in super().__call__(state, config):
+                yield m
+
+    store, ctx, _ = _bg_ctx(tmp_path)
+    args = {**ARGS, "subagent_type": "Explore", "run_in_background": True}
+    _background(_tool(Model([[AIMessage(content="r")]])), args, ctx, store)
+    worker = seen[0]
+    (task,) = store.get().tasks.values()
+    assert worker.cancel is task.cancel and worker.cancel is not ctx.cancel
+    assert worker.get_app_state().tool_permission_context.should_avoid_permission_prompts is True
+
+
+# ── mutation-gate pins (Phase 8) ────────────────────────────────────────────
+
+def test_a_background_launch_is_recorded_exactly(tmp_path, monkeypatch):
+    monkeypatch.delenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", raising=False)
+    seen: list[Any] = []
+
+    class Model(FakeModel):
+        async def __call__(self, state, config):
+            seen.append(state.tool_context)
+            async for m in super().__call__(state, config):
+                yield m
+
+    clock = iter([5.0, 6.0, 7.0, 8.0])
+    store, ctx, transcript = _bg_ctx(tmp_path)
+    ctx = dataclasses.replace(ctx, tool_use_id="toolu_1")
+    tool = _tool(Model([[AIMessage(content="found")]]), now=lambda: next(clock))
+    _background(tool, {**ARGS, "subagent_type": "Explore", "run_in_background": True}, ctx, store)
+    (task,) = store.get().tasks.values()
+    assert task.id == seen[0].agent_id
+    # `registerAsyncAgent({ toolUseId: toolUseContext.toolUseId })`.
+    assert task.tool_use_id == "toolu_1"
+    output_file = transcript.path.parent / "loop-1" / "tasks" / f"{task.id}.output"
+    assert (task.prompt, task.output_file, task.start_time, task.end_time) == (
+        ARGS["prompt"], str(output_file), 5.0, 7.0)
+    (note,) = ctx.command_queue.snapshot()
+    assert f"<output-file>{output_file}</output-file>" in note.value
+    assert "<tool-use-id>toolu_1</tool-use-id>" in note.value
+    assert '<summary>Agent "write the test" completed</summary>' in note.value
+
+
+def test_the_prompt_carries_the_background_notes_when_background_is_on(monkeypatch):
+    from app.loop.agents.prompt import get_prompt
+
+    monkeypatch.delenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", raising=False)
+    assert _tool().prompt == get_prompt(list(DEFS.values()), False, default_agent_type=None,
+                                        background_tasks_enabled=True)
+    assert _tool().prompt != get_prompt(list(DEFS.values()), False, default_agent_type=None)
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", " ON "])
+def test_every_truthy_value_disables_background_tasks(monkeypatch, value):
+    monkeypatch.setenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", value)
+    assert "run_in_background" not in _tool().input_schema["properties"]
+
+
+def test_the_background_refusal_explains_itself():
+    from app.loop.agents.tool import refuse_background_phase_agent
+
+    with pytest.raises(ValueError) as err:
+        refuse_background_phase_agent(TESTER, True)
+    assert str(err.value) == (
+        "Agent 'tester' declares TDD phase RED and cannot run in the background: a background worker's state "
+        "changes are discarded, so its RunTests could not move the phase ledger. Run it in the foreground.")

@@ -2,15 +2,7 @@
 name: tdd-mutation-defense
 description: Strategies for designing high-mutation-score test suites that kill subtle mutant survivors.
 when_to_use: When hardening test suites, addressing surviving mutants, or preparing for mutation testing gates.
-argument_hint: "[mutant-id-or-file]"
-paths:
-  - "tests/**"
-  - "app/**"
-allowed_tools:
-  - ReadFile
-  - WriteFile
-  - Edit
-  - RunTests
+argument-hint: "[mutant-id-or-file]"
 ---
 
 # TDD Mutation Defense Skill
@@ -32,3 +24,7 @@ You are strengthening test assertions to kill surviving mutants produced by `mut
    - Assert the exact exception message substring: `with pytest.raises(ValueError, match="..."):`.
 5. **No Blind Tests**:
    - Verify every test fails when the production logic is altered.
+
+## Reference
+
+For the mutation operators and how to kill each, read `references/mutation_operators.md` in this skill's base directory.

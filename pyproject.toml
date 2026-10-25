@@ -68,3 +68,8 @@ also_copy = ["app/", "requirements.txt", ".tddagents/", "docs/", "scripts/"]
 # flake8 is the project linter of record (setup.cfg); these are its codes, so a `# noqa`
 # for them is not an unused directive to ruff.
 external = ["E302", "E402", "E501", "W291", "W293"]
+
+[tool.ruff.lint.isort]
+# `app/loop/mcp/` shares its name with the MCP SDK, which isort would otherwise take for a
+# local package inside that directory.
+known-third-party = ["mcp"]

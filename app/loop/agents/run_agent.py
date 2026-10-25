@@ -10,10 +10,13 @@ with its parent is decided exactly as upstream decides it:
 * **App state.** A synchronous worker writes through its parent's `set_app_state`
   (`shareSetAppState: !isAsync`). That is what lets a tester's `RunTests` confirm RED on the
   coordinator's ledger — the ledger *is* app state. An asynchronous worker's writes are
-  discarded, and it keeps its own denial tally.
+  discarded except its task state, which reaches the root store (upstream's
+  `setAppStateForTasks`), and it keeps its own denial tally.
 * **Permission mode.** The definition's `permissionMode` applies unless the parent runs in
   `bypassPermissions`, `acceptEdits` or `auto`; an asynchronous worker never prompts.
-* **Abort.** A synchronous worker shares its parent's cancel token.
+* **Abort.** A synchronous worker shares its parent's cancel token; an asynchronous one gets
+  its own (Phase 8), so it survives the main thread being cancelled and is stopped by
+  `TaskStop` instead.
 
 Two TDDAgents additions keep the TDD barriers inside the worker: the resolved pool is
 filtered by the live phase ledger (barrier 2, `assemble_tool_pool`), re-derived between
@@ -25,9 +28,12 @@ sink — sidechains are excluded from the sub-requirement's flow (Part L). The w
 the worker ends before the turn past the limit is sent, where upstream yields its
 `max_turns_reached` attachment and stops.
 
-Not ported: MCP servers per agent, preloaded skills, frontmatter hooks (no session-hook
+Preloaded skills (`skillsToPreload`) are resolved against the run's shared skill registry
+and appended after the SubagentStart context, as upstream appends them.
+
+Not ported: MCP servers per agent, frontmatter hooks (no session-hook
 store here), effort, the fork path's exact-tools prefix, Perfetto tracing, agent metadata
-files, and the shell/monitor task kill (no background tasks yet).
+files, and the shell/monitor task kill (no background shells or monitors here).
 """
 
 from __future__ import annotations
@@ -47,9 +53,9 @@ from app.loop.compact.compact import is_compact_boundary_message
 from app.loop.config import RunConfig
 from app.loop.context import (
     AppState,
+    CancelToken,
     DenialTrackingBox,
     ToolContext,
-    discard_app_state_update,
 )
 from app.loop.deps import LoopDeps
 from app.loop.engine import run_loop
@@ -58,6 +64,7 @@ from app.loop.hooks.messages import HookAttachment, create_attachment_message
 from app.loop.messages import Message
 from app.loop.model_aliases import get_agent_model
 from app.loop.permissions.types import PermissionMode
+from app.loop.skills.preload import skill_preload_messages
 from app.loop.state import initial_loop_state
 from app.loop.tools.base import Tool
 from app.loop.tools.pool import assemble_tool_pool
@@ -101,6 +108,32 @@ def _agent_get_app_state(
         return replace(state, tool_permission_context=context)
 
     return get
+
+
+def _task_state_only(root: Callable[[Callable[[AppState], AppState]], None]) -> Callable[..., None]:
+    """
+    A background worker's `set_app_state`: upstream gives it a no-op `setAppState` and the root
+    `setAppStateForTasks`; here one setter does both — the `tasks` an updater produces reach the
+    root store, and every other change (the ledger, todos) is discarded.
+    """
+
+    def set_tasks(updater: Callable[[AppState], AppState]) -> None:
+        def apply(state: AppState) -> AppState:
+            updated = updater(state)
+            return state if updated.tasks is state.tasks else replace(state, tasks=updated.tasks)
+
+        root(apply)
+
+    return set_tasks
+
+
+def _write_agent_metadata(store: Any, agent_id: str, agent_type: str, description: str | None) -> None:
+    """`writeAgentMetadata`, fire-and-forget as upstream's `void ... .catch(log)`."""
+    try:
+        extra = {"description": description} if description else {}
+        store.write_agent_metadata(agent_id, {"agentType": agent_type, **extra})
+    except Exception as exc:  # noqa: BLE001 - upstream's `.catch` swallows any failure
+        logger.debug("Failed to write agent metadata: %s", exc)
 
 
 def _phase_filtered_pool(
@@ -155,6 +188,8 @@ def run_agent(
     model_override: str | None = None,
     agent_id: str | None = None,
     transcript: Any = None,
+    cancel: CancelToken | None = None,
+    description: str | None = None,
 ) -> AsyncIterator[Message]:
     """
     `runAgent`: the worker's messages, as its loop produces them.
@@ -174,14 +209,21 @@ def run_agent(
         worker_config = replace(config, model=get_agent_model(agent_definition.model, config.model, model_override))
 
         initial: list[Message] = [*prompt_messages, *await _subagent_start_context(parent, agent_id, agent_type)]
+        if agent_definition.skills and parent.skill_registry is not None:
+            initial.extend(skill_preload_messages(
+                agent_definition.skills, parent.skill_registry, agent_type=agent_type, session_id=parent.run_id))
 
         get_app_state = _agent_get_app_state(parent.get_app_state, agent_definition.permission_mode, is_async)
         resolved = resolve_agent_tools(agent_definition, available_tools, is_async=is_async).resolved_tools
         refresh_tools = _phase_filtered_pool(resolved, get_app_state)
+        # `agentAbortController`: an override, else a fresh one for a background worker (it must
+        # outlive a cancelled main thread), else the parent's.
+        worker_cancel = cancel if cancel is not None else CancelToken() if is_async else parent.cancel
         worker = replace(
             parent,
+            cancel=worker_cancel,
             get_app_state=get_app_state,
-            set_app_state=discard_app_state_update if is_async else parent.set_app_state,
+            set_app_state=_task_state_only(parent.set_app_state) if is_async else parent.set_app_state,
             local_denial_tracking=DenialTrackingBox() if is_async else parent.local_denial_tracking,
             messages=tuple(initial),
             in_flight_tool_ids=set(),
@@ -192,6 +234,8 @@ def run_agent(
             loaded_nested_memory_paths=set(),
             agent_id=agent_id,
             agent_type=agent_type,
+            # `createSubagentContext`: the worker's model is its own (`worker_config`).
+            main_loop_model=None,
             agent_system_prompt=tuple(system_prompt),
             omit_claude_md=agent_definition.omit_claude_md,
             omit_git_status=agent_type in _NO_GIT_STATUS_AGENT_TYPES,
@@ -212,6 +256,8 @@ def run_agent(
         worker_deps = replace(deps, emit_event=on_event)
         store = transcript if transcript is not None else parent.transcript_store
         last_uuid = store.record_sidechain_transcript(initial, agent_id) if store is not None else None
+        if store is not None:
+            _write_agent_metadata(store, agent_id, agent_type, description)
 
         events = run_loop(initial_loop_state(tuple(initial), worker), worker_config, worker_deps)
         try:

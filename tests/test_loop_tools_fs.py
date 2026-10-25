@@ -16,9 +16,9 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.loop.context import AppStateStore, FileState, tool_context_for
-from app.loop.permissions.types import PermissionMode, ToolPermissionContext
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.tdd import check_tdd_phase_permission
+from app.loop.permissions.types import PermissionMode, ToolPermissionContext
 from app.loop.tools import fs
 from app.loop.tools.execution import run_tool_use
 from app.loop.tools.fs import (
@@ -1293,7 +1293,11 @@ def test_tool_prompt_is_its_markdown_body(builder, filename):
 # ── Read(...) rules: checkReadPermissionForTool and the ripgrep exclude globs ──
 
 def _deny_reads(ws, *patterns):
-    from app.loop.permissions.types import PermissionBehavior, PermissionRule, PermissionRuleSource
+    from app.loop.permissions.types import (
+        PermissionBehavior,
+        PermissionRule,
+        PermissionRuleSource,
+    )
 
     rules = tuple(PermissionRule("Read", PermissionBehavior.DENY, p, PermissionRuleSource.PROJECT_SETTINGS)
                   for p in patterns)
@@ -1353,3 +1357,52 @@ def test_reading_a_persisted_result_of_this_project(tmp_path, monkeypatch):
     other.write_text("not ours")
     msg = via_pipeline(build_read_file_tool, {"file_path": str(other)}, ctx)
     assert msg.status == "error" and "not ours" not in msg.content
+
+
+# ── Phase 8: conditional skills activate on the files the tools touch ────────
+
+def _conditional_registry(tmp_path):
+    from app.loop.skills.loader import get_skill_registry
+
+    skill = tmp_path / "project" / ".tddagents" / "skills" / "py-style"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\ndescription: python style\npaths: src/**/*.py\n---\nbody\n")
+    (tmp_path / "bundled").mkdir()
+    return get_skill_registry(tmp_path / "project", tmp_path / "home", tmp_path / "etc",
+                              bundled_dir=tmp_path / "bundled")
+
+
+def _names(registry):
+    return {c.name for c in registry.get_skill_tool_commands()}
+
+
+@pytest.mark.parametrize("touch", [
+    lambda ctx: read(ctx, "src/pkg/a.py"),
+    lambda ctx: run(build_write_file_tool().call({"file_path": "src/pkg/a.py", "content": "y = 2\n"}, ctx)),
+    lambda ctx: run(build_edit_tool().call(
+        {"file_path": "src/pkg/a.py", "old_string": "x = 1", "new_string": "x = 3"}, ctx)),
+])
+def test_touching_a_matching_file_activates_a_conditional_skill(tmp_path, touch):
+    """`activateConditionalSkillsForPaths` in FileReadTool, FileWriteTool and FileEditTool."""
+    ws = FakeWorkspace()
+    ws.write_file("src/pkg/a.py", "x = 1\n")
+    registry = _conditional_registry(tmp_path)
+    ctx = tool_context_for(AppStateStore(), workspace=ws, skill_registry=registry)
+    ctx.read_file_state["src/pkg/a.py"] = FileState(content="x = 1\n")
+    assert "py-style" not in _names(registry)
+    touch(ctx)
+    assert "py-style" in _names(registry)
+
+
+def test_a_non_matching_file_activates_nothing(tmp_path):
+    ws = FakeWorkspace()
+    ws.write_file("docs/a.md", "x\n")
+    registry = _conditional_registry(tmp_path)
+    read(tool_context_for(AppStateStore(), workspace=ws, skill_registry=registry), "docs/a.md")
+    assert "py-style" not in _names(registry)
+
+
+def test_a_context_without_a_registry_reads_as_before():
+    ws = FakeWorkspace()
+    ws.write_file("src/a.py", "x\n")
+    assert "x" in str(read(ctx_for(ws), "src/a.py").content)

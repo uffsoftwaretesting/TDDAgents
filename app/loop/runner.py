@@ -23,14 +23,21 @@ workspace, and reports only what the ledger observed.
   exported artifact. Every transition goes to `<run id>/events.jsonl` beside it, with the
   ledger snapshot and the last `RunTests` exit code; the run's cost tracker sits on the
   tool context so worker API calls count toward it.
+* **Background work.** One `CommandQueue` per run, the hook registry's, is the context's
+  `command_queue`, shared with every worker. When a turn ends while a background task still
+  runs, or a main-thread notification is queued, the runner waits and feeds each notification
+  back as a new turn of the same conversation (`print.ts`'s `do … while (waitingForAgents)`).
+  No ceiling, as upstream: the loop ends when nothing runs and nothing is queued.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 import tempfile
 import uuid
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -38,6 +45,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app.loop.agents.memory import AgentMemoryStore
+from app.loop.command_queue import CommandQueue, QueuedCommand
 from app.loop.config import RunConfig, build_run_config
 from app.loop.context import AppState, AppStateStore, tool_context_for
 from app.loop.coordinator import (
@@ -58,6 +66,7 @@ from app.loop.permissions.types import ToolPermissionContext
 from app.loop.query_engine import QueryEngine
 from app.loop.state import initial_loop_state
 from app.loop.storage.session_storage import TranscriptStore
+from app.loop.tasks.framework import get_running_tasks, is_background_task
 from app.loop.tools.base import Tool
 from app.loop.tools.pool import assemble_tool_pool
 from app.loop.transitions import Terminal
@@ -65,6 +74,11 @@ from app.session.state import PlanItemResult, SessionState
 from app.workspace.local import LocalWorkspace
 
 logger = logging.getLogger("loop_runner")
+
+#: `print.ts`: the modes a headless run accepts from the queue.
+HEADLESS_COMMAND_MODES = ("prompt", "orphaned-permission", "task-notification")
+#: `print.ts`'s `sleep(100)` while background tasks run and nothing is queued.
+WAITING_FOR_AGENTS_POLL_SECONDS = 0.1
 
 
 def build_builtin_tools() -> list[Tool]:
@@ -97,23 +111,47 @@ def build_builtin_tools() -> list[Tool]:
     ]
 
 
-def main_thread_tools(config: RunConfig, deps: LoopDeps, project_root: Path, home: Path | None) -> list[Tool]:
+def main_thread_tools(
+    config: RunConfig,
+    deps: LoopDeps,
+    project_root: Path,
+    home: Path | None,
+    *,
+    skill_registry: Any = None,
+    mcp_tools: Sequence[Tool] = (),
+) -> list[Tool]:
     """
     The main thread's roster: the built-ins plus the Agent tool, as upstream's main thread
-    always has it. Workers draw from the built-ins alone (upstream's `assembleToolPool` for
-    the worker), and `resolveAgentTools` keeps Agent out of every worker. In coordinator mode
-    the main thread keeps only the orchestration tools (`applyCoordinatorToolFilter`).
+    always has it, and the task tools (`getAllBaseTools`: TaskOutput, TaskStop, and
+    SendMessage, which disables itself unless agent teams are on). Workers draw from the
+    built-ins alone (upstream's `assembleToolPool` for the worker), and `resolveAgentTools`
+    keeps Agent and the task tools out of every worker. The Skill tool, given the run's
+    `skill_registry`, joins both rosters, as upstream's base tools hold it. The run's
+    `mcp_tools` join the workers' roster here; the main thread's arrive through
+    `assemble_tool_pool(mcp_tools=…)`. In coordinator mode the main thread keeps only the
+    orchestration tools (`applyCoordinatorToolFilter`).
     """
     from app.loop.agents.loader import get_agent_definitions_with_overrides
     from app.loop.agents.tool import build_agent_tool
+    from app.loop.tools.send_message import build_send_message_tool
+    from app.loop.tools.task_output import build_task_output_tool
+    from app.loop.tools.task_stop import build_task_stop_tool
 
     built_ins = build_builtin_tools()
     coordinator = is_coordinator_mode(config)
     definitions = get_agent_definitions_with_overrides(project_dir=project_root, user_home=home)
+    if skill_registry is not None:
+        from app.loop.skills.tool import build_skill_tool
+
+        built_ins.append(build_skill_tool(skill_registry, config=config, deps=deps, agent_definitions=definitions))
+    worker_tools = [*built_ins, *mcp_tools]
     agent_tool = build_agent_tool(
-        definitions=definitions, worker_tools=built_ins, config=config, deps=deps, is_coordinator=coordinator
+        definitions=definitions, worker_tools=worker_tools, config=config, deps=deps, is_coordinator=coordinator
     )
-    tools: list[Tool] = [*built_ins, agent_tool]
+    send_message = build_send_message_tool(
+        definitions=definitions, worker_tools=worker_tools, config=config, deps=deps
+    )
+    tools: list[Tool] = [*built_ins, agent_tool, build_task_output_tool(), build_task_stop_tool(), send_message]
     return apply_coordinator_tool_filter(tools) if coordinator else tools
 
 
@@ -234,12 +272,65 @@ async def tdd_loop_runner(
     perm = permission_context or run_permission_context(config, ws, project_root, home, managed_dir)
 
     store = AppStateStore(state=AppState(tool_permission_context=perm))
-    ledger = store.get().phase_ledger
     root_dir = Path(project_root) if project_root is not None else Path.cwd()
-    built_ins = main_thread_tools(config, deps, root_dir, home)
+    from app.loop.skills.loader import get_skill_registry
+
+    # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
+    skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
+    mcp = await connect_mcp_servers(root_dir, run_settings_locations(config, root_dir, home, managed_dir))
+    try:
+        return await _run_connected(
+            sub_req, idx, run_id=run_id, ws=ws, deps=deps, config=config, store=store, root_dir=root_dir,
+            home=home, managed_dir=managed_dir, hook_dispatcher=hook_dispatcher, skill_registry=skill_registry,
+            mcp=mcp,
+        )
+    finally:
+        await mcp.aclose()
+
+
+async def connect_mcp_servers(root_dir: Path, locations: SettingsLocations) -> Any:
+    """
+    `getClaudeCodeMcpConfigs` + `getMcpToolsCommandsAndResources` for the run: every configured
+    server connected (a server that fails is recorded, never fatal), headless as `claude -p`,
+    so project servers load without an approval prompt.
+    """
+    from app.loop.mcp.config import get_claude_code_mcp_configs
+    from app.loop.mcp.manager import McpConnectionManager
+
+    configs, errors = get_claude_code_mcp_configs(root_dir, locations)
+    for error in errors:
+        logger.warning("MCP config error: %s", error)
+    manager = McpConnectionManager(cwd=str(root_dir))
+    await manager.connect(configs)
+    return manager
+
+
+async def _run_connected(
+    sub_req: str,
+    idx: int,
+    *,
+    run_id: str,
+    ws: Any,
+    deps: LoopDeps,
+    config: RunConfig,
+    store: AppStateStore,
+    root_dir: Path,
+    home: Path | None,
+    managed_dir: Path | str | None,
+    hook_dispatcher: HookDispatcher | None,
+    skill_registry: Any,
+    mcp: Any,
+) -> PlanItemResult:
+    """The run once its MCP servers are connected; the caller closes them."""
+    ledger = store.get().phase_ledger
+    built_ins = main_thread_tools(
+        config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools
+    )
+    # `mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included.
+    main_mcp = apply_coordinator_tool_filter(mcp.tools) if is_coordinator_mode(config) else list(mcp.tools)
     pool_cache: dict[str, Any] = {
         "phase": ledger.phase,
-        "tools": assemble_tool_pool(built_ins, phase_ledger=ledger),
+        "tools": assemble_tool_pool(built_ins, main_mcp, phase_ledger=ledger),
     }
 
     def refresh_tools() -> tuple[Tool, ...]:
@@ -254,7 +345,7 @@ async def tdd_loop_runner(
         current = store.get().phase_ledger
         if current.phase != pool_cache["phase"]:
             pool_cache["phase"] = current.phase
-            pool_cache["tools"] = assemble_tool_pool(built_ins, phase_ledger=current)
+            pool_cache["tools"] = assemble_tool_pool(built_ins, main_mcp, phase_ledger=current)
         tools_now: tuple[Tool, ...] = pool_cache["tools"]
         return tools_now
 
@@ -289,6 +380,9 @@ async def tdd_loop_runner(
         cost_tracker=CostTracker(config.model),
         transcript_path=str(transcript.path),
         transcript_store=transcript,
+        command_queue=hook_dispatcher.registry.queue,
+        skill_registry=skill_registry,
+        mcp_clients=tuple(mcp.clients),
         **coordinator_context(config),
     )
     try:
@@ -304,6 +398,57 @@ async def tdd_loop_runner(
         memory_store.discard_run_memory(run_id)
         if memory_root is not None:
             shutil.rmtree(memory_root, ignore_errors=True)
+
+
+def _is_main_thread(command: QueuedCommand) -> bool:
+    """`isMainThread`: worker-addressed commands are drained by the worker's own loop."""
+    return command.agent_id is None
+
+
+def next_main_thread_command(queue: CommandQueue) -> QueuedCommand | None:
+    """
+    `drainCommandQueue`'s `dequeue(isMainThread)`, refusing a mode a headless run cannot run.
+
+    Upstream batches consecutive `prompt` commands into one turn; nothing here enqueues a
+    main-thread prompt, so each command is its own turn.
+    """
+    command = queue.dequeue(_is_main_thread)
+    if command is not None and command.mode not in HEADLESS_COMMAND_MODES:
+        raise ValueError("only prompt commands are supported in streaming mode")
+    return command
+
+
+def _has_running_background_task(store: AppStateStore) -> bool:
+    """`getRunningTasks(state).some(isBackgroundTask)`; this build has no teammates to exclude."""
+    return any(is_background_task(task) for task in get_running_tasks(store.get()))
+
+
+async def wait_for_background_work(engine: QueryEngine, ctx: Any, store: AppStateStore) -> None:
+    """
+    `print.ts`'s `do … while (waitingForAgents)`: after a turn, while a background task runs or
+    a main-thread command is queued, wait for the queue and submit each command as a new turn
+    of the same conversation (`ask({ prompt, mutableMessages })`).
+
+    A task notification is not a typed prompt, so no UserPromptSubmit hook runs for it
+    (`processUserInput` runs them for `prompt` mode only); its user-input attachments are
+    collected as for any input.
+    """
+    from app.loop.attachments import get_attachment_messages
+
+    queue: CommandQueue = ctx.command_queue
+    while True:
+        command = next_main_thread_command(queue)
+        if command is None:
+            if not _has_running_background_task(store):
+                return
+            await asyncio.sleep(WAITING_FOR_AGENTS_POLL_SECONDS)
+            continue
+        messages: tuple[Any, ...] = (*engine.mutable_messages, HumanMessage(content=command.value))
+        messages = (*messages, *await get_attachment_messages(ctx, messages, user_input=command.value))
+        turn_ctx = replace(ctx, messages=messages)
+        logger.info("Delivering queued %s as a new turn", command.mode)
+        async for _ in engine.submit(initial_loop_state(messages, turn_ctx)):
+            pass
 
 
 def _both(first: Any, second: Any) -> Any:
@@ -371,6 +516,7 @@ async def _run_with_hooks(
     try:
         async for _ in engine.submit(loop_state):
             pass
+        await wait_for_background_work(engine, ctx, store)
         reason = engine.terminal.reason if engine.terminal is not None else Terminal.MODEL_ERROR
     except Exception:
         logger.exception("Loop %s crashed", run_id)
@@ -399,9 +545,11 @@ __all__ = [
     "coordinator_context",
     "default_workspace",
     "main_thread_tools",
+    "next_main_thread_command",
     "run_agent_memory_store",
     "run_permission_context",
     "run_settings_locations",
     "session_workspace",
     "tdd_loop_runner",
+    "wait_for_background_work",
 ]

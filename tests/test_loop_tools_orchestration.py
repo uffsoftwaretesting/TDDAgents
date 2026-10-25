@@ -136,6 +136,14 @@ class TestApplyContextModifier:
         ret = apply_context_modifier(ctx, lambda c: c)
         assert ret is ctx
 
+    def test_a_skills_model_override_survives_the_modifier(self):
+        """Upstream replaces the whole context, so `options.mainLoopModel` reaches the next call."""
+        import dataclasses
+
+        ctx = tool_context_for(AppStateStore())
+        ret = apply_context_modifier(ctx, lambda c: dataclasses.replace(c, main_loop_model="o3"))
+        assert ret is ctx and ctx.main_loop_model == "o3"
+
     def test_apply_context_modifier_full_replacement(self):
         ctx = tool_context_for(AppStateStore())
         new_store = AppStateStore()

@@ -363,6 +363,23 @@ architecture, while enforcing the TDD cycle"):*
   preload; TDD skills (`test-design`, `refactor-clean`, `mutation-defense`) are the roster.
 - MCP: async handlers, closure fix, name normalization — only if an MCP server is in scope.
 
+*Phase 8 outcome (2026-10-25), per the interview ("follow claude-code's source and
+architecture, while enforcing the TDD cycle"; MCP: "port the main MCP functionalities"):*
+- Background agents (`run_in_background`, `background: true`, coordinator-forced async) only for
+  agents without a TDD `phase`; a phase agent is refused before any worker runs. Task registry
+  in `AppState.tasks`, upstream's `<task-notification>` at `later` priority on one per-run
+  command queue, output file symlinked to the sidechain.
+- The runner ports `print.ts`'s `waitingForAgents` loop: notifications become turns of the same
+  conversation until nothing runs or is queued; the outcome is the last turn's terminal.
+- `TaskOutput`/`TaskStop` on the main thread; `SendMessage` (local agents, resume from the
+  sidechain) behind `TDDAGENTS_EXPERIMENTAL_AGENT_TEAMS`.
+- Skills: upstream loader, `Skill` tool (inline `newMessages`, allowed-tools as `command` rules
+  under the TDD tier, `model` as `mainLoopModel`, fork via `run_agent` with phase-on-spawn for a
+  phase agent), listing attachment, agent preload, conditional `paths` activation.
+- MCP: config scopes, env expansion, stdio/sse/http/ws, connection manager, `mcp__` wrappers
+  with passthrough permissions (headless deny without an allow rule; TDD tier first), resource
+  tools, result limits, `mcp_instructions` section. Divergences are listed in `CLAUDE.md`.
+
 ### Phase 9 — Session shell and entry point
 
 - Code: `claude-code/src/cli/print.ts` → `runHeadless`

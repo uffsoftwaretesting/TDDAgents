@@ -2,16 +2,7 @@
 name: tdd-test-design
 description: Guidelines for authoring clean, isolated unit tests that establish ground truth in the RED phase.
 when_to_use: In the RED phase before implementing production code, or when specifying new requirements.
-argument_hint: "[target-test-path]"
-paths:
-  - "tests/**"
-  - "test_*.py"
-  - "*_test.py"
-allowed_tools:
-  - ReadFile
-  - WriteFile
-  - Edit
-  - RunTests
+argument-hint: "[target-test-path]"
 ---
 
 # TDD Test Design Skill
@@ -32,3 +23,7 @@ Target test path: $ARGUMENTS
    - Assert: Check the exact expected outcome.
 4. **Isolated & Hermetic**: Tests must never depend on external network calls or shared mutable global state.
 5. **Verify Failure**: After writing the test, immediately run `RunTests` to ensure it fails with the expected failure mode (ImportError, AttributeError, or AssertionError).
+
+## Reference
+
+For test isolation and mocking, read `references/isolation.md` in this skill's base directory.

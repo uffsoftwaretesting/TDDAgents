@@ -296,3 +296,37 @@ def test_a_model_without_a_config_kwarg_still_gets_the_cache_kwargs(monkeypatch)
     model_mod.open_model_stream(_stream_state(), build_run_config("r", postgres_checkpointing=False),
                                 RetryContext(model="claude-sonnet-4-6"))
     assert calls[-1] == {"cache_control": {"type": "ephemeral"}}
+
+
+def test_a_main_loop_model_override_is_the_requests_model(monkeypatch):
+    """Upstream `options.mainLoopModel`: a skill's `model:` sets it, and the next call uses it."""
+    import dataclasses
+
+    from app.loop import model as model_mod
+    from app.loop.config import build_run_config
+
+    seen: dict = {}
+
+    async def fake_with_retry(operation, options):
+        seen["options"] = options
+
+        async def empty():
+            return
+            yield
+
+        return empty()
+
+    monkeypatch.setattr(model_mod, "with_retry", fake_with_retry)
+    config = build_run_config("r", postgres_checkpointing=False)
+    state = _stream_state()
+    state = dataclasses.replace(state, tool_context=dataclasses.replace(state.tool_context, main_loop_model="o3"))
+    _drain_stream(state, config)
+    assert seen["options"].model == "o3"
+
+
+def test_without_an_override_the_runs_model_is_used(monkeypatch):
+    from app.loop.context import AppStateStore, tool_context_for
+
+    assert tool_context_for(AppStateStore()).main_loop_model is None
+    assert tool_context_for(AppStateStore(), main_loop_model="m").main_loop_model == "m"
+    assert tool_context_for(AppStateStore(), skill_registry="r").skill_registry == "r"

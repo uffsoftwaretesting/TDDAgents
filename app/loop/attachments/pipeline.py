@@ -12,11 +12,11 @@ main-thread ones — with TDDAgents' `tdd_state` last among the all-thread sourc
 the queued commands.
 
 Sources not ported, each because this build has no subsystem for it: `at_mentioned_files`,
-`mcp_resources`, `agent_mentions`, `skill_discovery`, `dynamic_skill`, `skill_listing`
-(Phase 8), `deferred_tools_delta` (no deferred tools), `ultrathink_effort` (no reasoning-effort
+`mcp_resources`, `agent_mentions`, `skill_discovery`, `dynamic_skill` (no skill discovery or
+nested skill dirs), `deferred_tools_delta` (no deferred tools), `ultrathink_effort` (no reasoning-effort
 control), `companion_intro`, `plan_mode`/`plan_mode_exit` (no plan mode in a headless run),
 `auto_mode_exit` (no mode transition sets its flag), `teammate_mailbox`, `team_context`,
-`agent_pending_messages`, `critical_system_reminder` (no context field carries one),
+`critical_system_reminder` (no context field carries one),
 `compaction_reminder` and `context_efficiency` (feature-gated off), `ide_selection`,
 `ide_opened_file`, `output_style`, `diagnostics`, `lsp_diagnostics`, `unified_tasks`,
 `budget_usd` (no budget or cost tracker until Phase 6), `output_token_usage`
@@ -32,6 +32,7 @@ import os
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from app.loop.attachments.agent_messages import get_agent_pending_message_attachments
 from app.loop.attachments.changed_files import get_changed_files
 from app.loop.attachments.dates import get_date_change_attachments
 from app.loop.attachments.deltas import (
@@ -47,6 +48,7 @@ from app.loop.attachments.reminders import (
     get_auto_mode_attachments,
     get_todo_reminder_attachments,
 )
+from app.loop.attachments.skills import get_skill_listing_attachments
 from app.loop.attachments.tdd_state import get_tdd_state_attachments
 from app.loop.attachments.types import Attachment, create_attachment_messages
 from app.loop.attachments.usage import get_token_usage_attachment
@@ -90,8 +92,10 @@ async def get_attachments(
         ("mcp_instructions_delta", get_mcp_instructions_delta_attachment),
         ("changed_files", get_changed_files),
         ("nested_memory", get_nested_memory_source),
+        ("skill_listing", get_skill_listing_attachments),
         ("auto_mode", get_auto_mode_attachments),
         ("todo_reminders", get_todo_reminder_attachments),
+        ("agent_pending_messages", get_agent_pending_message_attachments),
         ("tdd_state", get_tdd_state_attachments),
     ]
     main_thread: list[tuple[str, Source]] = (
