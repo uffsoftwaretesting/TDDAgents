@@ -3,42 +3,24 @@ An LLM-facing agent: the seam to the model.
 
 **Exempt from the CLAUDE.md quality gate's unit- and mutation-testing requirement.**
 Everything in this module resolves to a live model call; there is no seam beneath it to
-fake. It is verified by an end-to-end pipeline run. Phase 2 replaces these modules with
-declarative definitions plus a tool loop, at which point the loop itself becomes
-testable and stops being exempt.
+fake. It is verified by an end-to-end pipeline run. The prompts are built by
+`app/session/prompts.py` (tested); provider errors propagate raw, so the session shell's
+`with_retry` can classify them (`app/session/llm.py`).
 """
 
-import logging
-from langchain_core.messages import SystemMessage, HumanMessage
-from app.config.config import Config
-from app.errors.agents.handler import handle_llm_exception
-from app.utils.chat_model_factory import get_chat_model
-from app.utils.prompt_loader import load_prompt
+from langchain_core.messages import HumanMessage, SystemMessage
 
-logger = logging.getLogger("TDDOrchestrator")
+from app.config.config import Config
+from app.session.prompts import engineer_prompts
+from app.utils.chat_model_factory import get_chat_model
 
 
 def generate_specification(requirements: str, conversation_history: str = "") -> str:
-
+    """The technical specification, in Markdown, from the confirmed requirements."""
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
-
-    system_prompt = load_prompt(template_name='agents/langgraph/engineer/sys_prompt_1.jinja2')
-    human_prompt = load_prompt(
-        template_name='agents/langgraph/engineer/hum_prompt_1.jinja2',
-        requirements=requirements,
-        conversation_history=conversation_history
-    )
-
-    try:
-        response = llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=human_prompt)
-        ])
-    except Exception as exc:
-        logger.error("❌ ENGINEER: Failed to generate the technical specification")
-        handle_llm_exception(exc, context="generate_specification")
-
-    ''
-    content = response.content.strip()
-    logger.info(f"✅ Specification generated successfully! Total: {len(content)} characters.")
-    return content
+    system_prompt, human_prompt = engineer_prompts(requirements, conversation_history)
+    response = llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_prompt),
+    ])
+    return str(response.content).strip()

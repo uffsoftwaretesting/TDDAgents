@@ -391,6 +391,26 @@ architecture, while enforcing the TDD cycle"; MCP: "port the main MCP functional
   checkpointer configurable; resolve `recursion_limit` against the no-ceilings rule.
 - `TDDOrchestrator` stops auto-answering the analyst with `/yes` outside headless mode.
 
+*Phase 9 outcome (2026-10-26), per the interview:*
+- The session shell owns requirements gathering: `analyst ⇄ analyst_review (interrupt) →
+  engineer → planner → items → evaluator`. The blocking `RequirementsOrchestrator`, its nodes
+  and `TDDOrchestrator` (the double analyst and the auto-`/yes`) are deleted. The analyst's
+  model call and its `interrupt()` are separate nodes, so a resume never asks the model again.
+- Analyst, engineer and planner prompts are Markdown (`app/prompts/session/`); their calls go
+  through `with_retry`. Approval is `/yes`, only while a checklist is pending; no round cap.
+- Headless entry point (`python -m app.main -p`, `runHeadless`): checklist approved, a
+  clarifying question fails the session, exit code from the outcome. Startup flags
+  (`--permission-mode`, `--settings`, `--dangerously-skip-permissions`, `--coordinator`) reach
+  every item's `RunConfig`; coordinator mode stays off by default.
+- Checkpointer: `POSTGRES_URL` by default with the logged memory fallback, `--checkpoint
+  memory` to opt out, and `Gates.postgres_checkpointing` records the real outcome.
+  `recursion_limit` is unbounded (`sys.maxsize`).
+- Resume: a thread continues from its checkpoint; an unfinished item (run id
+  `item_run_id(thread, index)`) resumes its transcript with SessionStart(`resume`) and the
+  interrupted prompt re-submitted once. The ledger is never restored.
+- Per item: fresh `AppStateStore`, run memory discarded, `reset_session_context(run_id)`.
+  Divergences are listed in `CLAUDE.md`.
+
 ### Phase 10 — Cleanup
 
 - Delete the dissolved graph modules (Part L3), `app/tools/`, `app/sync/`, and `app/hooks/`

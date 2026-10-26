@@ -12,8 +12,8 @@ if not os.getenv("OPENAI_API_KEY"):
 # E2B_API_KEY is optional: runs use a local workspace, and the sandbox adapter checks the
 # key only when a sandbox is actually requested (`app/sandbox/adapter.py`).
 
-if not os.getenv("POSTGRES_URL"):
-    raise Exception("No POSTGRES_URL configured")
+# POSTGRES_URL is optional too: the session shell checkpoints to it by default and falls
+# back to an in-memory checkpointer when it cannot connect (`app/session/checkpointer.py`).
 
 
 class Config:
@@ -134,17 +134,3 @@ class AgentState(TypedDict):
     subreq_failure_count: int
     subreq_results: list[dict[str, Any]]
     is_flow_type: list[str]
-
-
-class RequirementsState(TypedDict):
-    user_input: str
-    user_prompts: list[str]
-    conversation_history: str
-    current_response: str
-    needs_clarification: bool
-    has_checklist: bool
-    user_confirmed: bool
-    final_specification: str
-    status: str
-    interaction_count: int
-    infra_retries: int

@@ -1,132 +1,136 @@
 """
-Requirements analyst node with human-in-the-loop interrupt() conforming to §3.4 and Part K2.
+Requirements gathering: the analyst and the human review of its answer (Part K2, Phase 9).
 
-Replaces blocking terminal stdin input with LangGraph's native interrupt() protocol:
-- Yields structured question / checklist payload to caller on clarification or approval.
-- Resumes execution statefully via `Command(resume=...)` across process restarts and turns.
+Two nodes, because LangGraph re-runs an interrupted node from its first line on resume:
+with the model call and the `interrupt()` in one node, the analyst was asked again on every
+resume and the checklist the user approved was not the one the session kept. Here
+`node_analyst` makes the call and stores the answer; `node_analyst_review` only asks.
+
+* **Approval** is the documented rule: `/yes`, and only while a checklist is pending.
+  Anything else — "yes" included — is feedback that sends the request back to the analyst.
+  There is no cap on the number of rounds (the no-ceilings rule): the analysis ends when
+  the user approves a checklist.
+* **Headless** (upstream `claude -p`: nobody to ask) never interrupts. A checklist is
+  approved as if `/yes` were typed; a clarifying question fails the session, because an
+  unresolved question has no one to answer it — the research protocol discards those
+  attempts anyway.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langgraph.types import interrupt
 
+from app.session.llm import call_with_retry
 from app.session.state import SessionState, SessionStatus
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_AFFIRMATIVES = frozenset({"/yes", "yes", "confirm", "proceed", "y", "approved", "ok"})
+#: The one answer that approves a pending checklist.
+APPROVAL = "/yes"
+
+#: Why a headless session stops when the analyst asks instead of answering.
+HEADLESS_CLARIFICATION_ERROR = "analyst needs clarification, and a headless session has no user to answer it"
 
 
-def node_analyst_interrupt(
+def _audit(state: SessionState, line: str) -> list[str]:
+    return [*(state.get("audit_log") or []), line]
+
+
+def node_analyst(
     state: SessionState,
     *,
     analyzer_fn: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """
-    Analyst node that clarifies requirements and obtains checklist approval using interrupt() (Part K2).
-
-    If needs_clarification or has_checklist is True:
-        Pauses graph via `interrupt(...)` yielding prompt & checklist metadata.
-        Resumes when caller supplies response via `Command(resume=...)`.
-    """
-    if state.get("user_confirmed"):
-        return {
-            "status": SessionStatus.ANALYSIS_COMPLETE,
-            "user_confirmed": True,
-        }
-
+    """One analyst turn: answer the latest user input in the light of the conversation so far."""
     user_input = str(state.get("user_input") or "").strip()
     conversation_history = str(state.get("conversation_history") or "")
     interaction_count = int(state.get("interaction_count") or 0) + 1
 
-    # Use injected analyzer or fallback to default analyze_requirements
     if analyzer_fn is None:
         from app.agents.langgraph.analyst import analyze_requirements
 
         analyzer_fn = analyze_requirements
 
     try:
-        result = analyzer_fn(user_input, conversation_history)
-    except Exception as exc:
+        result = call_with_retry(analyzer_fn, user_input, conversation_history)
+    except Exception as exc:  # noqa: BLE001 - any model failure ends the session as FAILED
         logger.error("Analyst execution error: %s", exc)
-        return {
-            "status": SessionStatus.FAILED,
-            "audit_log": [f"Analyst error: {exc}"],
-        }
+        return {"status": SessionStatus.FAILED, "audit_log": _audit(state, f"[Analyst] Error: {exc}")}
 
     response_text = str(result.get("response") or "").strip()
     needs_clarification = bool(result.get("needs_clarification"))
     has_checklist = bool(result.get("has_checklist"))
-
-    # Interaction limit guard: if reached, enforce checklist presentation
-    if interaction_count >= 5 and not has_checklist:
-        response_text += "\n\nRequirements defined. Here is the final Checklist. May we proceed?"
-        has_checklist = True
-        needs_clarification = False
-
-    # Append to history
     new_turn = f"[User]: {user_input}\n[Analyst]: {response_text}"
-    new_history = f"{conversation_history}\n\n{new_turn}".strip() if conversation_history else new_turn
+    new_history = f"{conversation_history}\n\n{new_turn}" if conversation_history else new_turn
+    update: dict[str, Any] = {
+        "conversation_history": new_history,
+        "requirements": new_history,
+        "current_response": response_text,
+        "needs_clarification": needs_clarification,
+        "has_checklist": has_checklist,
+        "interaction_count": interaction_count,
+    }
 
-    # If the initial prompt was fully comprehensive with no clarification needed
     if not needs_clarification and not has_checklist:
         logger.info("Analyst accepted requirements directly without clarification.")
-        return {
-            "specification": response_text,
-            "requirements": new_history,
-            "conversation_history": new_history,
-            "current_response": response_text,
-            "needs_clarification": False,
-            "has_checklist": True,
-            "user_confirmed": True,
-            "interaction_count": interaction_count,
-            "status": SessionStatus.ANALYSIS_COMPLETE,
-        }
+        return {**update, "user_confirmed": True, "status": SessionStatus.ANALYSIS_COMPLETE}
+    return {**update, "user_confirmed": False, "status": SessionStatus.AWAITING_INPUT}
 
-    # Pause and interrupt for human input
-    interrupt_payload = {
-        "type": "checklist_approval" if has_checklist else "clarification",
-        "prompt": response_text,
-        "has_checklist": has_checklist,
-        "needs_clarification": needs_clarification,
-        "interaction_count": interaction_count,
-    }
 
-    # PAUSE GRAPH HERE: LangGraph saves checkpoint and returns payload to caller
-    user_feedback = interrupt(interrupt_payload)
-
-    # RESUMED HERE: user_feedback is provided by Command(resume=...)
-    user_feedback_str = str(user_feedback).strip()
-    logger.info("Resumed from interrupt with user feedback: '%s'", user_feedback_str)
-
-    is_confirmed = user_feedback_str.lower() in _DEFAULT_AFFIRMATIVES
-
-    if is_confirmed:
-        return {
-            "specification": response_text,
-            "requirements": new_history,
-            "conversation_history": new_history,
-            "current_response": response_text,
-            "user_input": user_feedback_str,
-            "needs_clarification": False,
-            "has_checklist": True,
-            "user_confirmed": True,
-            "interaction_count": interaction_count,
-            "status": SessionStatus.ANALYSIS_COMPLETE,
-        }
-
-    # User provided adjustments, answers, or new requirements
+def review_payload(state: SessionState) -> dict[str, Any]:
+    """What the caller is shown at the interrupt: the analyst's answer and what it asks for."""
+    has_checklist = bool(state.get("has_checklist"))
     return {
-        "requirements": new_history,
-        "conversation_history": new_history,
-        "current_response": response_text,
-        "user_input": user_feedback_str,
-        "needs_clarification": True,
-        "has_checklist": False,
-        "user_confirmed": False,
-        "interaction_count": interaction_count,
-        "status": SessionStatus.AWAITING_INPUT,
+        "type": "checklist_approval" if has_checklist else "clarification",
+        "prompt": str(state.get("current_response") or ""),
+        "has_checklist": has_checklist,
+        "needs_clarification": bool(state.get("needs_clarification")),
+        "interaction_count": int(state.get("interaction_count") or 0),
     }
+
+
+def node_analyst_review(state: SessionState, *, headless: bool = False) -> dict[str, Any]:
+    """The user's answer to the analyst: approval of a checklist, or feedback for another turn."""
+    payload = review_payload(state)
+    if headless:
+        if not payload["has_checklist"]:
+            logger.error("Headless session stopped: %s", HEADLESS_CLARIFICATION_ERROR)
+            return {
+                "status": SessionStatus.FAILED,
+                "audit_log": _audit(state, f"[Analyst] {HEADLESS_CLARIFICATION_ERROR}."),
+            }
+        feedback = APPROVAL
+    else:
+        # LangGraph checkpoints here and hands `payload` to the caller; `Command(resume=…)`
+        # re-enters this node and `interrupt` returns the caller's answer.
+        feedback = str(interrupt(payload)).strip()
+        logger.info("Resumed from interrupt with user feedback: '%s'", feedback)
+
+    user_prompts = [*(state.get("user_prompts") or []), feedback]
+    if payload["has_checklist"] and feedback.lower() == APPROVAL:
+        return {
+            "user_prompts": user_prompts,
+            "user_confirmed": True,
+            "needs_clarification": False,
+            "status": SessionStatus.ANALYSIS_COMPLETE,
+        }
+    return {
+        "user_prompts": user_prompts,
+        "user_input": feedback,
+        "user_confirmed": False,
+        "has_checklist": False,
+        "status": SessionStatus.GATHERING_REQUIREMENTS,
+    }
+
+
+__all__ = [
+    "APPROVAL",
+    "HEADLESS_CLARIFICATION_ERROR",
+    "node_analyst",
+    "node_analyst_review",
+    "review_payload",
+]

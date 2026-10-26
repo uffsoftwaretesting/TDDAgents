@@ -192,3 +192,15 @@ def session_python(tmp_path_factory: Any) -> Any:
 def python_workspace(tmp_path: Path, session_python: Any) -> LocalWorkspace:
     """A LocalWorkspace whose commands run with the session venv first on PATH."""
     return LocalWorkspace(str(tmp_path / "workspace"), env=session_python.env())
+
+
+@pytest.fixture
+def no_retry_sleep(monkeypatch: Any) -> list[float]:
+    """`with_retry`'s backoff, recorded instead of slept: the delays in milliseconds."""
+    delays: list[float] = []
+
+    async def record(delay_ms: float) -> None:
+        delays.append(delay_ms)
+
+    monkeypatch.setattr("app.loop.retry._default_sleep", record)
+    return delays

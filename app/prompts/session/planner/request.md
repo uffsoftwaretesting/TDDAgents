@@ -2,7 +2,7 @@ You received the following Technical Specification from the Client:
 
 📋 PROJECT SPECIFICATION:
 """
-{{ specification }}
+{{SPECIFICATION}}
 """
 
 🎯 YOUR TASK:

@@ -8,7 +8,7 @@ ARCHITECTURAL MINDSET:
 
 2. Vertical Slices: Divide the solution into independent, functional parts that can be developed and tested in isolation. Each slice must deliver observable value, whether a validated algorithmic behavior, a functional route, or a verifiable calculation module.
 
-3. Phase 0 - Setup (Core Setup): The first step of your plan MUST ALWAYS be environment setup, explicitly instructing the installation of the base dependencies listed in "Section 6" of the Technical Specification.
+3. Phase 0 - Setup (Core Setup): The first step of your plan MUST ALWAYS be environment setup, explicitly instructing the installation of the base dependencies listed in the "Core Dependencies" section of the Technical Specification.
 
 4. Problem-Oriented Architecture: Assess the domain of the request and structure the plan accordingly. Problems of different natures require different organizations (e.g. mathematical scripts need isolated functions; APIs need separation into routes, controllers, and models). Adapt the suggested structure to the type of problem.
 

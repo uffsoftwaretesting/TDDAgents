@@ -7,12 +7,14 @@ through the unified TDD loop (`run_loop`) and verifying the Red-then-Green ledge
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import inspect
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import asdict
+from typing import Any
 
 from app.loop.transitions import Terminal
+from app.session.llm import call_with_retry, run_sync
 from app.session.state import PlanItemResult, SessionState, SessionStatus
 
 logger = logging.getLogger(__name__)
@@ -28,14 +30,16 @@ def node_plan(
     planner_fn: Callable[[str], list[str]] | None = None,
 ) -> dict[str, Any]:
     """
-    Planning node: converts requirements into an ordered plan of sub-requirements (Part K3).
+    Planning node: the engineer's specification becomes an ordered plan of sub-requirements
+    (Part K3). The call goes through the shell's `with_retry` (`app/session/llm.py`).
     """
-    spec = str(state.get("specification") or state.get("requirements") or state.get("user_input") or "").strip()
+    audit_log = list(state.get("audit_log") or [])
+    spec = str(state.get("specification") or "").strip()
     if not spec:
         return {
             "status": SessionStatus.PLAN_FAILED,
             "plan": [],
-            "audit_log": [f"[{state.get('session_id', 'session')}] Planning failed: empty specification."],
+            "audit_log": [*audit_log, f"[{state.get('session_id', 'session')}] Planning failed: empty specification."],
         }
 
     if planner_fn is None:
@@ -44,20 +48,20 @@ def node_plan(
         planner_fn = generate_plan
 
     try:
-        plan = planner_fn(spec)
-    except Exception as exc:
+        plan = call_with_retry(planner_fn, spec)
+    except Exception as exc:  # noqa: BLE001 - any model failure is PLAN_FAILED
         logger.error("Planner execution error: %s", exc)
         return {
             "status": SessionStatus.PLAN_FAILED,
             "plan": [],
-            "audit_log": [f"Planner error: {exc}"],
+            "audit_log": [*audit_log, f"Planner error: {exc}"],
         }
 
     if not plan:
         return {
             "status": SessionStatus.PLAN_FAILED,
             "plan": [],
-            "audit_log": ["[Planner] Planner returned an empty plan."],
+            "audit_log": [*audit_log, "[Planner] Planner returned an empty plan."],
         }
 
     logger.info("Generated plan with %d sub-requirements.", len(plan))
@@ -70,28 +74,11 @@ def node_plan(
         "success_count": 0,
         "failure_count": 0,
         "audit_log": [
+            *audit_log,
             f"[Planner] Generated plan with {len(plan)} items:\n"
-            + "\n".join(f"{i+1}. {p}" for i, p in enumerate(plan))
+            + "\n".join(f"{i+1}. {p}" for i, p in enumerate(plan)),
         ],
     }
-
-
-def _run_coroutine_sync(coro: Any) -> Any:
-    import asyncio
-    import concurrent.futures
-
-    async def _runner() -> Any:
-        return await coro
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop is not None and loop.is_running():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, _runner()).result()
-    return asyncio.run(_runner())
 
 
 def _process_item_outcome(
@@ -159,17 +146,12 @@ def node_execute_plan_item(
     logger.info("Executing plan item %d/%d: '%s'", idx + 1, total, sub_req)
 
     try:
-        if inspect.iscoroutinefunction(loop_runner):
-            result_item = _run_coroutine_sync(loop_runner(sub_req, idx, state))
-        else:
-            res = loop_runner(sub_req, idx, state)
-            if inspect.isawaitable(res):
-                result_item = _run_coroutine_sync(res)
-            else:
-                result_item = res
+        result_item = loop_runner(sub_req, idx, state)
+        if inspect.isawaitable(result_item):
+            result_item = run_sync(result_item)
         if not isinstance(result_item, PlanItemResult):
             raise TypeError(f"loop_runner must return PlanItemResult, got {type(result_item)}")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - a crashed item is a failed item, never a fabricated pass
         logger.error("Error executing plan item '%s': %s", sub_req, exc)
         result_item = PlanItemResult(
             index=idx,
@@ -182,17 +164,6 @@ def node_execute_plan_item(
         )
 
     return _process_item_outcome(result_item, idx, total, sub_req, state)
-
-
-async def anode_execute_plan_item(
-    state: SessionState,
-    *,
-    loop_runner: Callable[..., Any] | None = None,
-) -> dict[str, Any]:
-    """
-    Asynchronously executes current plan item through the unified TDD loop (Part K3).
-    """
-    return node_execute_plan_item(state, loop_runner=loop_runner)
 
 
 def node_evaluator(state: SessionState) -> dict[str, Any]:

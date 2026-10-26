@@ -23,6 +23,15 @@ workspace, and reports only what the ledger observed.
   exported artifact. Every transition goes to `<run id>/events.jsonl` beside it, with the
   ledger snapshot and the last `RunTests` exit code; the run's cost tracker sits on the
   tool context so worker API calls count toward it.
+* **Resume.** A sub-requirement's run id is derived from the session's thread id and the
+  plan index (`item_run_id`), so when the session shell re-runs an item a previous process
+  left unfinished, its transcript is already on disk and the run continues that
+  conversation, as `claude -p --resume` does: `loadConversationForResume`, SessionStart
+  (`resume`), and an interrupted turn re-submitted once (`print.ts`'s auto-resume, which
+  upstream gates on `CLAUDE_CODE_RESUME_INTERRUPTED_TURN`; the shell's restart is exactly the
+  gateway restart that variable exists for, so here it is always on). Otherwise the
+  sub-requirement is the new prompt. **The ledger is never restored**: a resumed run starts
+  from a fresh ledger, so RED has to be observed again.
 * **Background work.** One `CommandQueue` per run, the hook registry's, is the context's
   `command_queue`, shared with every worker. When a turn ends while a background task still
   runs, or a main-thread notification is queued, the runner waits and feeds each notification
@@ -79,6 +88,19 @@ logger = logging.getLogger("loop_runner")
 HEADLESS_COMMAND_MODES = ("prompt", "orphaned-permission", "task-notification")
 #: `print.ts`'s `sleep(100)` while background tasks run and nothing is queued.
 WAITING_FOR_AGENTS_POLL_SECONDS = 0.1
+#: Fixed namespace for `item_run_id`, so the same (thread, index) always names the same run.
+RUN_ID_NAMESPACE = uuid.UUID("7d1f9c52-5b0e-4f4e-9a59-2f3c0a8f6b11")
+
+
+def item_run_id(session_id: Any, idx: int) -> str:
+    """
+    The run id of plan item `idx` of session `session_id`: stable across processes, so a
+    re-run of an unfinished item finds its transcript. Without a session id nothing can be
+    resumed, and the id is fresh.
+    """
+    if not session_id:
+        return f"loop-{uuid.uuid4().hex}"
+    return f"loop-{uuid.uuid5(RUN_ID_NAMESPACE, f'{session_id}:{idx}').hex}"
 
 
 def build_builtin_tools() -> list[Tool]:
@@ -249,9 +271,17 @@ async def tdd_loop_runner(
     home: Path | None = None,
     managed_dir: Path | str | None = None,
     hook_dispatcher: HookDispatcher | None = None,
+    postgres_checkpointing: bool = False,
+    permission_mode: str | None = None,
+    settings_path: str | None = None,
+    dangerously_skip_permissions: bool = False,
 ) -> PlanItemResult:
     """
     Run one sub-requirement through the loop and report what the ledger observed.
+
+    `postgres_checkpointing` is whether the session shell's checkpointer really persists
+    (`Gates.postgres_checkpointing`); `permission_mode`, `settings_path` and
+    `dangerously_skip_permissions` are upstream's startup flags, given by the entry point.
 
     `project_root` is where the project and local settings live (the repository, upstream's
     original cwd); the workspace is the working directory the rules anchor to.
@@ -262,13 +292,19 @@ async def tdd_loop_runner(
     then any background hook still running is killed. A UserPromptSubmit hook that blocks or
     says `continue: false` stops the run before the model is called: `hook_stopped`, failed.
     """
-    run_id = f"loop-{uuid.uuid4().hex[:8]}"
+    run_id = item_run_id(state.get("session_id"), idx)
     ws = workspace if workspace is not None else default_workspace(state)
     if deps is None:
         from app.loop.factory import get_production_deps
 
         deps = get_production_deps()
-    config = build_run_config(run_id, postgres_checkpointing=False)
+    config = build_run_config(
+        run_id,
+        postgres_checkpointing=postgres_checkpointing,
+        permission_mode=permission_mode,
+        settings_path=settings_path,
+        dangerously_skip_permissions=dangerously_skip_permissions,
+    )
     perm = permission_context or run_permission_context(config, ws, project_root, home, managed_dir)
 
     store = AppStateStore(state=AppState(tool_permission_context=perm))
@@ -367,10 +403,9 @@ async def _run_connected(
         )
 
     memory_store, memory_root = run_agent_memory_store(transcript_dir)
-    initial_message = HumanMessage(content=sub_req)
     ctx = tool_context_for(
         store,
-        messages=(initial_message,),
+        messages=(),
         tools=refresh_tools(),
         workspace=ws,
         hook_dispatcher=hook_dispatcher,
@@ -387,15 +422,18 @@ async def _run_connected(
     )
     try:
         return await _run_with_hooks(
-            sub_req, idx, run_id, initial_message, ctx, store, config, deps, transcript, events_path(run_id, cwd)
+            sub_req, idx, run_id, ctx, store, config, deps, transcript, events_path(run_id, cwd)
         )
     finally:
+        from app.loop.context.assembly import reset_session_context
         from app.loop.hooks.execute import execute_session_end_hooks
 
         await hook_dispatcher.drain_background()
         await execute_session_end_hooks(hook_dispatcher, "other")
         await hook_dispatcher.registry.finalize_pending()
         memory_store.discard_run_memory(run_id)
+        # The next sub-requirement is a new session: nothing memoized for this one carries over.
+        reset_session_context(run_id)
         if memory_root is not None:
             shutil.rmtree(memory_root, ignore_errors=True)
 
@@ -461,11 +499,51 @@ def _both(first: Any, second: Any) -> Any:
     return emit
 
 
+def _prompt_text(message: Any) -> str:
+    """A user message's text, as `print.ts` re-enqueues it: a string, or its text blocks joined."""
+    content = message.content
+    if isinstance(content, str):
+        return content
+    return "".join(
+        str(block.get("text", "")) for block in content if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
+async def load_initial_messages(ctx: Any, transcript: TranscriptStore, sub_req: str, model: str) -> tuple[Any, str]:
+    """
+    `print.ts` -> `loadInitialMessages` for one sub-requirement: the history the run starts
+    from and the prompt it submits.
+
+    With a transcript on disk the conversation is resumed (`loadConversationForResume`, whose
+    SessionStart hooks run with source `resume`); an interrupted turn is taken out and its
+    prompt submitted again, else the sub-requirement is the prompt. Without one the run
+    starts fresh with SessionStart (`startup`).
+    """
+    from app.loop.hooks.session import process_session_start_hooks
+    from app.loop.storage.recovery import (
+        load_conversation_for_resume,
+        remove_interrupted_message,
+    )
+
+    resumed = load_conversation_for_resume(transcript.path)
+    if resumed is None or not resumed.messages:
+        return await process_session_start_hooks(ctx.hook_dispatcher, "startup", model=model), sub_req
+    history: list[Any] = list(resumed.messages)
+    prompt = sub_req
+    interruption = resumed.turn_interruption_state
+    if interruption.message is not None:
+        logger.info("Auto-resuming interrupted turn (kind: %s)", interruption.kind)
+        history = remove_interrupted_message(history, interruption.message)
+        prompt = _prompt_text(interruption.message)
+    session = await process_session_start_hooks(ctx.hook_dispatcher, "resume", model=model)
+    session.messages[:0] = history
+    return session, prompt
+
+
 async def _run_with_hooks(
     sub_req: str,
     idx: int,
     run_id: str,
-    initial_message: HumanMessage,
     ctx: Any,
     store: AppStateStore,
     config: RunConfig,
@@ -473,15 +551,12 @@ async def _run_with_hooks(
     transcript: TranscriptStore,
     events_file: Path,
 ) -> PlanItemResult:
-    """SessionStart and UserPromptSubmit, then the loop itself."""
-    from app.loop.hooks.session import (
-        process_session_start_hooks,
-        process_user_prompt_submit_hooks,
-    )
+    """SessionStart (or the resumed conversation) and UserPromptSubmit, then the loop itself."""
+    from app.loop.hooks.session import process_user_prompt_submit_hooks
 
-    session = await process_session_start_hooks(ctx.hook_dispatcher, "startup", model=config.model)
+    session, prompt_text = await load_initial_messages(ctx, transcript, sub_req, config.model)
     mode = str(store.get().tool_permission_context.mode)
-    prompt = await process_user_prompt_submit_hooks(ctx, sub_req, mode)
+    prompt = await process_user_prompt_submit_hooks(ctx, prompt_text, mode)
     if not prompt.should_query:
         # A stopped UserPromptSubmit always carries one of the two messages.
         reason = prompt.blocked_message or prompt.stopped_message
@@ -497,12 +572,12 @@ async def _run_with_hooks(
             error_message=reason,
         )
     first_turn = [HumanMessage(content=session.initial_user_message)] if session.initial_user_message else []
-    messages = (*session.messages, *first_turn, initial_message, *prompt.messages)
+    messages = (*session.messages, *first_turn, HumanMessage(content=prompt_text), *prompt.messages)
     # `processUserInput`: the user-input attachments (the initial TDD state among them),
     # persisted into the history the loop starts from.
     from app.loop.attachments import get_attachment_messages
 
-    attachments = await get_attachment_messages(ctx, messages, user_input=sub_req)
+    attachments = await get_attachment_messages(ctx, messages, user_input=prompt_text)
     messages = (*messages, *attachments)
     ctx = replace(ctx, messages=messages)
     loop_state = initial_loop_state(messages, ctx)
@@ -544,6 +619,8 @@ __all__ = [
     "build_builtin_tools",
     "coordinator_context",
     "default_workspace",
+    "item_run_id",
+    "load_initial_messages",
     "main_thread_tools",
     "next_main_thread_command",
     "run_agent_memory_store",

@@ -311,3 +311,21 @@ def test_trailing_system_messages_are_skipped_one_by_one():
         kind="none", message=None)
     short = [HumanMessage(content="p0"), AIMessage(content="ok"), SystemMessage(content="s")]
     assert deserialize_messages_with_interrupt_detection(short).turn_interruption_state.kind == "none"
+
+
+def test_remove_interrupted_message_drops_it_and_its_sentinel():
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.loop.storage.recovery import remove_interrupted_message
+
+    first, prompt, sentinel, later = (HumanMessage(content="a"), HumanMessage(content="b"),
+                                      AIMessage(content="No response requested."), HumanMessage(content="c"))
+    assert remove_interrupted_message([first, prompt, sentinel, later], prompt) == [first, later]
+    # Matched by identity: an equal message elsewhere is not the interrupted one.
+    twin = HumanMessage(content="b")
+    assert remove_interrupted_message([first, twin], prompt) == [first, twin]
+    # At the end, only what is there is removed.
+    assert remove_interrupted_message([first, prompt], prompt) == [first]
+    original = [first, prompt, sentinel]
+    remove_interrupted_message(original, prompt)
+    assert original == [first, prompt, sentinel]

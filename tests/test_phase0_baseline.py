@@ -214,7 +214,7 @@ def _clean_env(**extra: str) -> dict[str, str]:
 
 
 def test_app_main_imports_without_an_e2b_key(tmp_path):
-    """The import chain app.main -> orchestrator -> runner -> factory was broken (ImportError)."""
+    """The import chain app.main -> session driver -> runner -> factory was broken (ImportError)."""
     env = _clean_env(OPENAI_API_KEY="k", POSTGRES_URL="postgresql://x")
     res = subprocess.run([sys.executable, "-c", "import app.main, app.loop.factory, app.loop.runner"],
                          cwd=tmp_path, env=env, capture_output=True, text=True, check=False)
@@ -412,7 +412,7 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     kinds = [m.additional_kwargs["attachment"]["type"] for m in seen[0].messages[1:3]]
     assert kinds == ["skill_listing", "tdd_state"]
     assert ctx.messages == seen[0].messages[:3]
-    assert ctx.run_id.startswith("loop-") and len(ctx.run_id) == len("loop-") + 8
+    assert ctx.run_id.startswith("loop-") and len(ctx.run_id) == len("loop-") + 32
     assert seen[0].turn_count == 1
     # `refresh_tools`: the ledger moved RED -> GREEN during the run, so the pool was rebuilt
     # once and is then returned *by identity* until the phase moves again.
@@ -505,7 +505,7 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     asyncio.run(tdd_loop_runner("spec", 0, {"session_id": "s"}, workspace=python_workspace,
                                 deps=_recording_deps(seen)))
     state, config = seen[0]
-    assert re.fullmatch(r"loop-[0-9a-f]{8}", config.run_id)
+    assert re.fullmatch(r"loop-[0-9a-f]{32}", config.run_id)
     assert config.gates.postgres_checkpointing is False
     from app.loop.storage.paths import get_transcript_path
 
@@ -577,37 +577,6 @@ def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):
     assert ws.root == (tmp_path / "runs" / "t-9" / "workspace").resolve()
     assert ws.execute('echo "$VIRTUAL_ENV"').stdout.strip() == str(seen[0] / "venv")
     assert runner_mod.default_workspace({"session_id": "t-9"}).root == ws.root
-
-
-def test_orchestrator_binds_the_session_workspace_into_the_runner(monkeypatch, tmp_path):
-    import functools
-
-    from app.graph import orchestrator as orch
-
-    made: list[str] = []
-
-    def fake_session_workspace(thread_id: str) -> LocalWorkspace:
-        made.append(thread_id)
-        return LocalWorkspace(str(tmp_path / thread_id))
-
-    captured: dict[str, Any] = {}
-
-    class FakeShell:
-        def __init__(self, **kwargs: Any) -> None:
-            captured.update(kwargs)
-
-    monkeypatch.setattr(orch, "session_workspace", fake_session_workspace)
-    monkeypatch.setattr(orch, "SessionShell", FakeShell)
-    monkeypatch.setattr(orch, "build_checkpointer", lambda: "ckpt")
-    o = orch.TDDOrchestrator(task_key="tdd-abc")
-    assert made == ["tdd-abc"]
-    assert captured["checkpointer"] == "ckpt"
-    runner = captured["loop_runner"]
-    assert isinstance(runner, functools.partial)
-    from app.loop.runner import tdd_loop_runner
-
-    assert runner.func is tdd_loop_runner
-    assert runner.keywords == {"workspace": o.workspace}
 
 
 # ── edges the mutation run surfaced ──────────────────────────────────────────

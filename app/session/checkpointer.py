@@ -5,12 +5,16 @@ Supports:
 - In-memory checkpointing via MemorySaver (for unit tests, dry-runs, and local dev)
 - Persistent checkpointing via PostgresSaver (for production cross-restart resume)
 - Automatic fallback on connection error
+
+The entry point checkpoints to `Config.POSTGRES_URL` by default (`--checkpoint memory` opts
+out) and records whether the connection actually held in `Gates.postgres_checkpointing`
+(`is_persistent_checkpointer`): a resumable run and an unresumable one are not the same
+experiment, so the fallback is a recorded fact, not only a log line.
 """
 
 from __future__ import annotations
 
 import logging
-
 from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -34,8 +38,8 @@ def build_checkpointer(checkpoint_uri: str | None = None) -> BaseCheckpointSaver
     if uri.startswith(("postgresql://", "postgres://")):
         try:
             import psycopg
-            from psycopg.rows import dict_row
             from langgraph.checkpoint.postgres import PostgresSaver
+            from psycopg.rows import dict_row
 
             conn = psycopg.connect(uri, autocommit=True, row_factory=dict_row)
             saver = PostgresSaver(conn)
@@ -44,7 +48,7 @@ def build_checkpointer(checkpoint_uri: str | None = None) -> BaseCheckpointSaver
                 saver.setup()
             logger.info("Configured PostgresSaver checkpointer for URI: %s", uri.split("@")[-1])
             return saver
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - any connection failure falls back to memory, logged
             logger.warning(
                 "Failed to initialize PostgresSaver (%s). Falling back to MemorySaver.",
                 exc,
@@ -53,3 +57,8 @@ def build_checkpointer(checkpoint_uri: str | None = None) -> BaseCheckpointSaver
 
     logger.warning("Unrecognized checkpointer URI '%s'. Falling back to MemorySaver.", checkpoint_uri)
     return MemorySaver()
+
+
+def is_persistent_checkpointer(checkpointer: BaseCheckpointSaver[Any]) -> bool:
+    """Whether `checkpointer` survives the process: a Postgres saver, not the in-memory fallback."""
+    return not isinstance(checkpointer, MemorySaver)

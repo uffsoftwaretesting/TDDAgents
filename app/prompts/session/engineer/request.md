@@ -4,11 +4,7 @@ Analyze the following requirements-gathering history consolidated by the Analyst
 
 📚 HISTORY AND REQUIREMENTS:
 """
-{% if conversation_history %}
-{{ conversation_history }}
-{% else %}
-{{ requirements }}
-{% endif %}
+{{REQUIREMENTS}}
 """
 
 🎯 YOUR TASK:

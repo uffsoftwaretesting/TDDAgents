@@ -257,6 +257,20 @@ def deserialize_messages(messages: Sequence[Message]) -> list[Message]:
     return deserialize_messages_with_interrupt_detection(messages).messages
 
 
+def remove_interrupted_message(messages: Sequence[Message], interrupted: Message) -> list[Message]:
+    """
+    `print.ts` -> `removeInterruptedMessage`: drop the interrupted user message and the
+    sentinel that immediately follows it, so the caller can submit it again and the model
+    sees it exactly once. Matched by identity: the continuation message has no uuid.
+    """
+    result = list(messages)
+    for index, message in enumerate(result):
+        if message is interrupted:
+            del result[index:index + 2]
+            break
+    return result
+
+
 def load_conversation_for_resume(path: str | Path) -> DeserializeResult | None:
     """
     `loadConversationForResume(undefined, path)`: the main chain of a transcript file, ready
@@ -278,4 +292,5 @@ __all__ = [
     "filter_unresolved_tool_uses",
     "filter_whitespace_only_assistant_messages",
     "load_conversation_for_resume",
+    "remove_interrupted_message",
 ]

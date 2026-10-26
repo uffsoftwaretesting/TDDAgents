@@ -1,12 +1,7 @@
 📝 CURRENT USER REQUEST:
-{{ user_input }}
+{{USER_INPUT}}
 
-{% if conversation_history %}
-📚 CONVERSATION HISTORY:
-{{ conversation_history }}
-{% endif %}
-
-🎯 TASK:
+{{CONVERSATION_HISTORY_SECTION}}🎯 TASK:
 Analyze the current request together with the history.
 Determine whether you need further clarification (by asking targeted questions) or already have enough information to create the final requirements checklist.
 Generate your response using STRICTLY the JSON/Action structure required by the system.

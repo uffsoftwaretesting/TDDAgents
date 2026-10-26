@@ -49,6 +49,8 @@ class SessionState(TypedDict, total=False):
     specification: str
     requirements: str
     user_input: str
+    #: Everything the user typed, in order: the initial request, then each answer to the analyst.
+    user_prompts: list[str]
     conversation_history: str
     current_response: str
     needs_clarification: bool
