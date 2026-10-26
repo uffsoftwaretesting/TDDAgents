@@ -44,8 +44,7 @@ alternative from the plan rather than quietly adding to code that is scheduled f
 
 ### What the loop core already is — `app/loop/`
 
-Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–8 of `docs/refactoring_transition_plan.md` are wired into the loop runner (`app/loop/runner.py`). Nothing in the legacy graph
-calls them yet; the package stands on its own and is driven entirely by fakes and offline tests.
+Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–9 of `docs/refactoring_transition_plan.md` are wired: the loop runner (`app/loop/runner.py`) runs each plan item, and since Phase 9 the session shell (`app/session/`) and the entry point (`app/main.py`) drive it. Everything is tested offline against fakes.
 
 | File / Subpackage | Ships |
 |---|---|
@@ -869,6 +868,91 @@ Triage killed ≈550 mutants with tests, each verified inside `mutants/` against
   - the `.mcp.json` walk's `parents[:-2]` (needs a file in a top-level directory);
   - the Phase 0/7 runner classes (pool `phase_ledger`, `user_input`, the `"settings"` fallback).
 
+### What Phase 9 changed (2026-10-26)
+
+The session shell and the entry point, ported test-first. The user's direction: follow
+claude-code (`print.ts` → `runHeadless`) where it has an answer, and decide the rest by
+interview (recorded in the plan's Phase 9 outcome).
+
+- **One graph owns the session** (`app/session/shell.py`):
+  `analyst ⇄ analyst_review → engineer → planner → execute_plan_item → evaluator ⟲`.
+  - The old blocking `RequirementsOrchestrator`, `graph/nodes/requirements_*`,
+    `RequirementsState` and `graph/orchestrator.py` (`TDDOrchestrator`, which ran the analyst
+    a second time and auto-answered `/yes`) are deleted.
+  - The analyst is split in two nodes because LangGraph re-runs an interrupted node from its
+    first line: with the model call and the `interrupt()` together, every resume asked the
+    model again and the approved checklist was not the one kept.
+  - The **engineer** is back: the planner plans from its specification only.
+  - **Approval is `/yes` and only while a checklist is pending** (user decision); "yes",
+    "ok"… are feedback. The fifth-round forced checklist is removed (no-ceilings rule).
+  - LangGraph's `recursion_limit` is `sys.maxsize` (no-ceilings rule).
+- **Prompts are Markdown** (`app/prompts/session/{analyst,engineer,planner}/`, built by
+  `app/session/prompts.py`); their Jinja2 templates are deleted. The planner prompt's stale
+  "Section 6" now names the engineer's "Core Dependencies" section.
+- **The shell's model calls go through `with_retry`** (`app/session/llm.py`), the loop's one
+  retry policy; the seams raise provider errors raw. The old 3 × 3 s retry is gone.
+- **Headless** (`python -m app.main -p`, upstream `claude -p`): the request comes from
+  `--spec`, the prompt argument or stdin; a checklist is approved, a clarifying question
+  fails the session (`HEADLESS_CLARIFICATION_ERROR`); exit 0 only when the session
+  completed. Interactive: interrupts are answered on the terminal, `/exit`/`/quit` leave
+  the thread paused at its checkpoint.
+- **Startup flags reach every item's `RunConfig`**: `--permission-mode`, `--settings`,
+  `--dangerously-skip-permissions`; `--coordinator` sets `TDDAGENTS_COORDINATOR_MODE`
+  (still off by default, upstream's default).
+- **Checkpointing**: `Config.POSTGRES_URL` by default, the logged `MemorySaver` fallback,
+  `--checkpoint memory` to opt out. `Gates.postgres_checkpointing` now records whether the
+  connection held (`is_persistent_checkpointer`). `POSTGRES_URL` is no longer required at
+  import.
+- **Resume** (`app/session/driver.py`, `app/loop/runner.py::load_initial_messages`): a thread
+  with a checkpoint continues from it, never restarts. Each item's run id is
+  `item_run_id(thread, index)` (uuid5), so an item the previous process left unfinished finds
+  its transcript and resumes it: `loadConversationForResume`, SessionStart(`resume`), the
+  interrupted prompt re-submitted once (`removeInterruptedMessage`). **The ledger is never
+  restored**; RED must be observed again.
+- **Per-item reset**: fresh `AppStateStore` (as before), run memory discarded, and now
+  `reset_session_context(run_id)` after every item.
+
+*Divergences, all recorded:*
+- the interrupted-turn auto-resume is always on (upstream gates it on
+  `CLAUDE_CODE_RESUME_INTERRUPTED_TURN`; the shell's restart is the gateway restart that
+  variable exists for);
+- a resumed item with no interrupted turn submits its sub-requirement again as the new
+  prompt (the shell is the SDK caller that supplies the prompt);
+- run ids keep the `loop-` prefix before the uuid hex;
+- resume skips coordinator-mode matching, agent-setting restore and `--resume-session-at`.
+
+**Pre-push gate, Phase 9 (2026-10-26).** Measured under `paths_to_mutate` = `app/session/`,
+`app/main.py`, `loop/runner.py`, `loop/storage/recovery.py`, at 6363 tests:
+
+| | |
+|---|---|
+| Mutants | 2961 first run (166 timeout); 2951 after triage removed dead code (168 timeout) |
+| Killed (gate run) | 2388 — **85.4%** |
+| Killed after triage (confirmed by a third full run) | 2708 — **97.3%** (2708 / 2783) |
+| flake8 / ruff / mypy | 0 / 0 / 0 (strict; `app/main.py` joins `[tool.mypy] files`) |
+
+- **Untested entry point.** The menu, the dialogue formatter, the artifacts and the report had
+  no exact-output tests; they now pin the user-facing text and the wrapping (width,
+  hyphens, `(empty)`), and `build_parser` pins every help string.
+- **Dead code removed:** `node_execute_plan_item`'s `iscoroutinefunction` branch (an
+  awaitable result already covers a coroutine function).
+- **Test isolation bug found on the way:** `--coordinator` writes `os.environ`, and
+  `monkeypatch.delenv` on an absent variable records nothing, so coordinator mode leaked into
+  later tests. The fixture now `setenv`s first.
+- **Remaining 75 are the recorded equivalent classes:**
+  - log wording;
+  - codec aliases;
+  - default arguments;
+  - `False`→`None` on textwrap flags;
+  - argparse's own `default=None`;
+  - `FileHandler`'s default `mode="a"`;
+  - the memory-URI tuple's `""` (already caught by `not checkpoint_uri`);
+  - `hasattr(saver, "setup")` on the real `PostgresSaver`, which always has it;
+  - `run_sync`'s `max_workers`;
+  - `RetryOptions.model` (read only for the fallback, unset here);
+  - `route_after_planner`'s `.get` default;
+  - the Phase 6 recovery bounds and the Phase 0 pool `phase_ledger` class.
+
 ### The three things that change most
 
 1. **Routing by `status` string literals is replaced** by a closed vocabulary of seven
@@ -1219,7 +1303,7 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
 
 ## What this is
 
-TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed in a **local per-session workspace** (`.tddagents/runs/<thread_id>/workspace`) with its own Python virtualenv (`.tddagents/runs/<thread_id>/venv`, pytest pinned), not inside TDDAgents' environment. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL.
+TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed in a **local per-session workspace** (`.tddagents/runs/<thread_id>/workspace`) with its own Python virtualenv (`.tddagents/runs/<thread_id>/venv`, pytest pinned), not inside TDDAgents' environment. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL (`POSTGRES_URL`), with an in-memory fallback.
 
 It is **a LangGraph pipeline today and a loop tomorrow** — the refactor rebuilds it on claude-code's loop architecture, and LangGraph is reduced to a session shell (checkpointing, `interrupt()`, plan iteration). See [Upcoming refactor](#upcoming-refactor--read-before-extending-anything).
 
@@ -1241,11 +1325,18 @@ pip install -r requirements.txt
 # Run the pipeline (interactive; must be run from the repo root)
 python -m app.main
 
-# Resume a previous run from its Postgres checkpoint
+# Headless (upstream `claude -p`): no questions; exit 0 only if every item completed Red→Green
+python -m app.main -p --spec app/prompts/specs/<file>.txt
+echo "Build a calculator" | python -m app.main -p
+
+# Continue a session from its checkpoint (an unfinished plan item resumes its transcript)
 python -m app.main --thread-id "tdd-<hash>"
 
-# Force a brand-new run instead of the spec-derived thread_id
+# Force a brand-new run instead of the request-derived thread_id
 python -m app.main --fresh
+
+# Flags: --checkpoint memory|<uri> (default POSTGRES_URL, memory fallback), --permission-mode,
+# --settings <file>, --dangerously-skip-permissions, --coordinator
 ```
 
 ### Quality tooling
@@ -1267,7 +1358,7 @@ $P/mutmut run && $P/mutmut results                      # mutation testing; see 
 
 The full procedure and its pass criteria are in [Quality gate](#quality-gate-mandatory).
 
-`app.main` is interactive: it prints a menu built from `app/prompts/specs/*.txt`, then the Analyst loop reads from stdin. Type `/yes` to approve the requirements checklist and advance to the Engineer; `/exit` (or `/quit`) exits. Because the menu resolves `Path("app/prompts/specs")` relatively, the CWD must be the repo root.
+Without `-p`, `app.main` is interactive: it prints a menu built from `app/prompts/specs/*.txt` (unless a prompt, `--spec` or `--thread-id` is given), then answers the analyst's interrupts from stdin. Type `/yes` to approve a pending checklist and advance to the Engineer; anything else is feedback; `/exit` (or `/quit`) leaves with the session paused at its checkpoint. Because the menu resolves `Path("app/prompts/specs")` relatively, the CWD must be the repo root.
 
 ### Experiment tooling (post-hoc analysis of generated workspaces)
 
@@ -1362,10 +1453,19 @@ is absent from the shipped build.
 > [Upcoming refactor](#upcoming-refactor--read-before-extending-anything) first so you know
 > which parts to preserve and which not to build on.
 
-### Two graphs, run sequentially by `app/main.py`
+### One session graph, driven by `app/main.py` (Phase 9)
 
-1. **`RequirementsOrchestrator`** (`graph/subgraphs/requirements_orchestrator_subgraph.py`) — state `RequirementsState`, no checkpointer. Cycle: `analyst → user_input → (analyst | engineer)`. Human-in-the-loop is a plain blocking `input()` inside the `user_input` node, not a LangGraph interrupt. Produces `final_specification` (Markdown, contracts only).
-2. **`TDDOrchestrator`** (`graph/orchestrator.py`) — state `AgentState`, checkpointed. Top level is `planner → tdd_execution (subgraph) → evaluator`, with `evaluator` looping back into `tdd_execution` for each item of `plan`.
+`app/main.py` → `app/session/driver.py` (`build_session_shell`, `drive_session`) →
+`app/session/shell.py`: one checkpointed LangGraph thread, state `SessionState`:
+`analyst ⇄ analyst_review (interrupt) → engineer → planner → execute_plan_item → evaluator ⟲`.
+Each plan item is one `tdd_loop_runner` run (`app/loop/runner.py`) on the thread's shared
+local workspace; `PlanItemResult` reports the item's terminal and its ledger. See
+[What Phase 9 changed](#what-phase-9-changed-2026-10-26).
+
+> The four subsections below (TDD subgraph, `status` routing, layering, `file_system`
+> mirror) describe the **pre-loop pipeline**. Its graph is gone; only the legacy modules in
+> `app/graph/nodes/` and `app/agents/langgraph/{tester,developer,reviewer,runner}.py` remain,
+> unused, until Phase 10 deletes them.
 
 ### The TDD subgraph
 
@@ -1411,16 +1511,14 @@ ones to read.
 
 ### State and config
 
-`config/config.py` holds both `Config` and the two `TypedDict` state schemas. It **raises at import time** if `OPENAI_API_KEY` or `POSTGRES_URL` is unset (`E2B_API_KEY` is optional since Phase 0) — importing anything under `app/` without a `.env` fails immediately. Model selection is hardcoded there (`CHAT_MODEL = "openai"`, `MODEL = "o4-mini"`), not read from the environment; switching providers means editing `Config` and passing the right kwargs through `utils/chat_model_factory.py`.
+`config/config.py` holds `Config` and the legacy `AgentState` schema. It **raises at import time** if `OPENAI_API_KEY` is unset (`E2B_API_KEY` is optional since Phase 0, `POSTGRES_URL` since Phase 9) — importing anything under `app/` without a `.env` fails immediately. Model selection is hardcoded there (`CHAT_MODEL = "openai"`, `MODEL = "o4-mini"`), not read from the environment; switching providers means editing `Config` and passing the right kwargs through `utils/chat_model_factory.py`.
 
-Postgres is not required: `TDDOrchestrator.run` falls back to `InMemorySaver` on `OperationalError`, losing cross-restart resumability.
-
-`node_execute_progress_evaluator` clears all three agent histories with `RemoveMessage` when advancing to the next sub-requirement — each sub-requirement gets a fresh context window.
+Postgres is not required: `build_checkpointer` falls back to `MemorySaver` when it cannot connect (logged, and recorded in `Gates.postgres_checkpointing`), losing cross-restart resumability. Each sub-requirement is its own loop session with a fresh context window.
 
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)
-- **Prompt templates are the behavior.** Agent role definitions live in `app/prompts/agents/langgraph/<agent>/{sys,hum}_prompt_*.jinja2`, not in Python. The Tester has separate `normal` and `review` variants; the orchestrator has standalone `feedback_*.jinja2` templates that are injected into `reviewer_messages` as synthetic feedback. **This is the current state, not the target** — Jinja2 is removed by the refactor and prompts become Markdown. Do not author new `.jinja2` templates; see [Prompt conventions](#prompt-conventions-incoming).
+- **Prompt templates are the behavior.** The session shell's prompts are Markdown under `app/prompts/session/` (Phase 9); the legacy TDD agents' role definitions still live in `app/prompts/agents/langgraph/<agent>/{sys,hum}_prompt_*.jinja2`, not in Python. The Tester has separate `normal` and `review` variants; the orchestrator has standalone `feedback_*.jinja2` templates that are injected into `reviewer_messages` as synthetic feedback. **This is the current state, not the target** — Jinja2 is removed by the refactor and prompts become Markdown. Do not author new `.jinja2` templates; see [Prompt conventions](#prompt-conventions-incoming).
 - The Jinja2 `Environment` in `prompt_loader.py` uses default (non-strict) undefined, so a misspelled kwarg **silently renders as an empty string**. There is already one such live bug: `agents/langgraph/developer.py:35` passes `sub_requsite=` while `developer/hum_prompt_1.jinja2` expects `sub_requisite`, so the Developer's first prompt has a blank sub-requirement block. Verify kwarg names against the template when touching either side. **This bug is the reason the refactor drops Jinja2** — §4.1 of the plan cites it as the motivating failure mode.
 - The Reviewer signals fault attribution by prefixing its feedback with the literal strings `[TEST ERROR]` / `[IMPLEMENTATION ERROR]`, and the runner nodes route on `"[TEST ERROR]" in analysis`. These strings are load-bearing across `agents/langgraph/reviewer.py` and both runner nodes.
 - `utils/workspace.py` is dead code — it references `Config.TEST_FILE` and `Config.IMPLEMENTATION_MODULE`, which no longer exist. Nothing imports it.
