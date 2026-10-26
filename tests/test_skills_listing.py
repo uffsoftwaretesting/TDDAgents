@@ -133,7 +133,7 @@ class TestListingAttachment:
         assert _listing(_ctx(None)) == []
 
     def test_the_budget_follows_the_registrys_model(self, monkeypatch):
-        from app.loop.attachments import skills as skills_mod
+        import app.loop.attachments.skills as skills_mod
 
         seen: list[object] = []
 

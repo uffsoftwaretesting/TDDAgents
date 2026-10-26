@@ -25,8 +25,14 @@ import os
 import re
 from typing import Any
 
-from app.loop.permissions.bash_commands import extract_output_redirections, split_command
-from app.loop.permissions.bash_path_validation import COMMAND_OPERATION_TYPE, PATH_EXTRACTORS
+from app.loop.permissions.bash_commands import (
+    extract_output_redirections,
+    split_command,
+)
+from app.loop.permissions.bash_path_validation import (
+    COMMAND_OPERATION_TYPE,
+    PATH_EXTRACTORS,
+)
 from app.loop.permissions.bash_read_only_commands import (
     EXTERNAL_READONLY_COMMANDS,
     JS_WS,
@@ -35,7 +41,10 @@ from app.loop.permissions.bash_read_only_commands import (
     get_command_allowlist,
     validate_flags,
 )
-from app.loop.permissions.bash_security import bash_command_is_safe, try_parse_shell_command
+from app.loop.permissions.bash_security import (
+    bash_command_is_safe,
+    try_parse_shell_command,
+)
 from app.loop.permissions.types import PermissionBehavior, PermissionResult
 
 _S = "[" + JS_WS + "]"

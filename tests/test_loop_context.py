@@ -14,14 +14,8 @@ from dataclasses import FrozenInstanceError, replace
 import pytest
 from langchain_core.messages import HumanMessage
 
-from app.loop.context import (
-    AppState,
-    AppStateStore,
-    CancelToken,
-    ToolContext,
-    discard_app_state_update,
-    tool_context_for,
-)
+from app.loop.context.app_state import AppState, AppStateStore, discard_app_state_update
+from app.loop.context.tool_context import CancelToken, ToolContext, tool_context_for
 from app.loop.ledger import PhaseLedger
 
 

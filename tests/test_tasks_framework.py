@@ -7,7 +7,7 @@ import dataclasses
 
 import pytest
 
-from app.loop.context import AppState, AppStateStore
+from app.loop.context.app_state import AppState, AppStateStore
 from app.loop.tasks.framework import (
     get_running_tasks,
     is_background_task,

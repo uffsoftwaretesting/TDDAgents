@@ -21,7 +21,7 @@ from typing import Any, TypeAlias
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from app.loop.attachments import get_attachment_messages
+from app.loop.attachments.pipeline import get_attachment_messages
 from app.loop.compact.auto_compact import (
     calculate_token_warning_state,
     is_auto_compact_enabled,

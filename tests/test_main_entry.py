@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
-from app import main as entry
+import app.main as entry
 from app.session.driver import SessionOptions, SessionRun, build_session_shell
 from app.session.state import PlanItemResult, SessionStatus
 
@@ -471,7 +471,7 @@ def test_initial_prompt_keeps_blank_lines(tmp_path: Path) -> None:
 
 
 def test_subreq_results_exact(tmp_path: Path) -> None:
-    results = [
+    results: list[dict[str, Any]] = [
         {"index": 0, "status": "success", "sub_requirement": "A", "terminal_reason": "completed",
          "red_confirmed": True, "green_passed": True, "error_message": "ignored on success"},
         {"index": 1, "status": "failed", "sub_requirement": "B", "terminal_reason": "model_error",

@@ -37,7 +37,7 @@ from typing import Any
 from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.resume import resume_agent_background
 from app.loop.config import RunConfig
-from app.loop.context import ToolContext
+from app.loop.context.tool_context import ToolContext
 from app.loop.deps import LoopDeps
 from app.loop.prompts.loader import parse_markdown_frontmatter
 from app.loop.tasks.local_agent_task import LocalAgentTaskState, queue_pending_message

@@ -29,8 +29,8 @@ from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.run_agent import run_agent
 from app.loop.agents.tool import agent_system_prompt, refuse_background_phase_agent
 from app.loop.config import RunConfig
-from app.loop.context import ToolContext
 from app.loop.context.assembly import enhance_system_prompt_with_env_details
+from app.loop.context.tool_context import ToolContext
 from app.loop.deps import LoopDeps
 from app.loop.model_aliases import get_agent_model
 from app.loop.storage.loader import get_agent_transcript

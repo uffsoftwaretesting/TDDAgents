@@ -12,8 +12,9 @@ from langchain_core.messages import (
 
 from app.config.config import Config
 from app.loop.config import build_run_config
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
 from app.loop.context.assembly import reset_session_context
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.messages import tool_calls_in
 from app.loop.model import (
@@ -171,7 +172,7 @@ def test_system_context_is_appended(config, monkeypatch):
 
 
 def test_request_is_keyed_by_run_and_memoizes_sections(monkeypatch, tmp_path):
-    from app.loop.context import assembly
+    import app.loop.context.assembly as assembly
     from app.loop.context.assembly import append_system_context, get_system_prompt
     from app.loop.prompts.sections import resolve_system_prompt_sections
     from app.workspace.local import LocalWorkspace

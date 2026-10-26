@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.loop.context import ToolContext
+from app.loop.context.tool_context import ToolContext
 from app.loop.prompts.loader import parse_markdown_frontmatter
 from app.loop.tasks.stop_task import stop_task
 from app.loop.tools.base import BuiltTool, build_tool

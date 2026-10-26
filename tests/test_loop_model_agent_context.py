@@ -8,14 +8,16 @@ from typing import Any
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
+import app.loop.context.assembly as assembly
 from app.loop.config import build_run_config
-from app.loop.context import AppStateStore, assembly, tool_context_for
+from app.loop.context.app_state import AppStateStore
 from app.loop.context.assembly import (
     AGENT_NOTES,
     SessionContext,
     compute_env_info,
     enhance_system_prompt_with_env_details,
 )
+from app.loop.context.tool_context import tool_context_for
 from app.loop.model import (
     build_request_messages,
     request_system_context,
@@ -101,8 +103,8 @@ def test_the_worker_request_starts_with_its_own_system_prompt():
 
 
 def test_anthropic_breakpoints_cover_the_worker_prompt(monkeypatch):
+    import app.loop.model as model_mod
     from app.config.config import Config
-    from app.loop import model as model_mod
     from app.loop.retry import RetryContext
 
     seen: dict[str, Any] = {}

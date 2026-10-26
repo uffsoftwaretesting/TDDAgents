@@ -108,5 +108,3 @@ def test_parse_markdown_frontmatter_edge_cases(caplog: pytest.LogCaptureFixture)
     fm3, b3 = parse_markdown_frontmatter("Just markdown text without frontmatter")
     assert fm3 == {}
     assert b3 == "Just markdown text without frontmatter"
-
-

@@ -12,7 +12,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.loop.compact.auto_compact import AutoCompactOutcome
 from app.loop.compact.compact import CompactionResult, create_compact_boundary_message
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.engine import drain, run_loop
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.state import CompactionTracking, LoopState, initial_loop_state
@@ -93,7 +94,7 @@ def test_a_failed_autocompaction_records_the_failure_count():
 
 
 def test_the_blocking_limit_stops_before_the_model_is_called(monkeypatch):
-    from app.loop import engine
+    import app.loop.engine as engine
 
     monkeypatch.setattr(engine, "token_count_with_estimation", lambda messages: 10_000_000)
     # Upstream skips the precheck when reactive compaction will recover (reactive enabled and
@@ -151,7 +152,7 @@ def test_drain_still_ends_with_the_terminal():
 
 
 def test_the_precheck_defers_to_reactive_compaction_when_both_are_on(monkeypatch):
-    from app.loop import engine
+    import app.loop.engine as engine
 
     monkeypatch.setattr(engine, "token_count_with_estimation", lambda messages: 10_000_000)
     monkeypatch.setattr(engine, "is_auto_compact_enabled", lambda: True)
@@ -170,7 +171,7 @@ def test_a_lying_summary_cannot_complete_an_unobserved_cycle(tmp_path, monkeypat
     """
     import dataclasses as dc
 
-    from app.loop import factory
+    import app.loop.factory as factory
     from app.loop.compact.compact import compact_conversation
 
     async def lying_summarizer(messages, summary_request, context, *, max_output_tokens):

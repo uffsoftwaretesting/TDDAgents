@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.storage.session_storage import TranscriptStore
 from app.loop.tasks.disk_output import (
     TASK_MAX_OUTPUT_DEFAULT,

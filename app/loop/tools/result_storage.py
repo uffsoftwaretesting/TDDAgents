@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from app.loop.context import ContentReplacementState
+    from app.loop.context.tool_context import ContentReplacementState
 
 logger = logging.getLogger(__name__)
 
@@ -455,7 +455,7 @@ def reconstruct_content_replacement_state(
     `reconstructContentReplacementState`: every candidate in `messages` is frozen as seen,
     and recorded replacements for those ids are restored.
     """
-    from app.loop.context import ContentReplacementState
+    from app.loop.context.tool_context import ContentReplacementState
 
     candidate_ids = {c.tool_use_id for group in _collect_candidates_by_message(messages) for c in group}
     state = ContentReplacementState(seen_ids=set(candidate_ids))
@@ -477,7 +477,7 @@ def provision_content_replacement_state(
     is the build's, so `enabled` is `False` unless a caller opts in. Disabled -> `None`
     (enforcement skipped); no history -> a fresh state; history -> reconstructed.
     """
-    from app.loop.context import ContentReplacementState
+    from app.loop.context.tool_context import ContentReplacementState
 
     if not enabled:
         return None

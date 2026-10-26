@@ -22,7 +22,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from app.loop.context import AppStateStore
+from app.loop.context.app_state import AppStateStore
 from app.loop.storage.paths import get_project_dir
 from app.loop.transitions import Continue, Terminated, Transition
 from app.metrics.event_log import EventLog, EventType

@@ -8,8 +8,8 @@ import os
 
 import pytest
 
-from app.loop.permissions import bash_read_only as ro
-from app.loop.permissions import bash_read_only_commands as roc
+import app.loop.permissions.bash_read_only as ro
+import app.loop.permissions.bash_read_only_commands as roc
 from app.loop.permissions.bash_read_only import (
     check_read_only_constraints,
     command_writes_to_git_internal_paths,

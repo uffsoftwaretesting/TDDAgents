@@ -11,7 +11,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.context import AppState, AppStateStore, CancelToken, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import CancelToken, tool_context_for
 from app.loop.hooks.exec_agent import (
     DEFAULT_AGENT_HOOK_TIMEOUT_MS,
     HOOK_AGENT_DISALLOWED_TOOLS,

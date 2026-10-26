@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context import CancelToken
-from app.loop.hooks import execute as ex
+import app.loop.hooks.execute as ex
+from app.loop.context.tool_context import CancelToken
 from app.loop.hooks.config import HooksConfigSnapshot
 from app.loop.hooks.events import (
     SESSION_END_HOOK_TIMEOUT_MS_DEFAULT,

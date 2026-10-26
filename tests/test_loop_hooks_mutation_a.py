@@ -20,7 +20,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.loop.config import build_run_config
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.deps import CompactionResult, LoopDeps, StopHookResult
 from app.loop.hooks.config import HooksConfigSnapshot
 from app.loop.hooks.execute import (
@@ -334,7 +335,7 @@ def loop_deps(model: Model) -> LoopDeps:
 
 
 def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
-    from app.loop.hooks import runtime
+    import app.loop.hooks.runtime as runtime
     from app.loop.runner import run_settings_locations, tdd_loop_runner
     from tests.conftest import FakeWorkspace
 

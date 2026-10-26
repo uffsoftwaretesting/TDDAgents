@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.loop.hooks import matching as matching_mod
+import app.loop.hooks.matching as matching_mod
 from app.loop.hooks.config import HooksConfigSnapshot
 from app.loop.hooks.matching import (
     MatchedHook,

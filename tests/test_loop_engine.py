@@ -21,7 +21,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.loop.config import RunConfig, build_run_config
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.deps import (
     CallModel,
     Compact,

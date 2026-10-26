@@ -14,11 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.loop.permissions import bash_read_only as ro
-from app.loop.permissions import bash_read_only_commands as roc
-from app.loop.permissions import bash_security as bs
+import app.loop.permissions.bash_read_only as ro
+import app.loop.permissions.bash_read_only_commands as roc
+import app.loop.permissions.bash_security as bs
+import app.loop.tools.bash as bash_mod
 from app.loop.permissions.bash_read_only_commands import CommandConfig, validate_flags
-from app.loop.tools import bash as bash_mod
 
 safe = ro.is_command_safe_via_flag_parsing
 

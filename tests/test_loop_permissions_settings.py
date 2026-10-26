@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.permissions import settings as st
+import app.loop.permissions.settings as st
 from app.loop.permissions.settings import (
     LEGACY_TOOL_NAME_ALIASES,
     SETTINGS_SOURCES,

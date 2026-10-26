@@ -12,7 +12,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.agents.resume import resume_agent_background
 from app.loop.command_queue import CommandQueue
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.storage.session_storage import TranscriptStore
 from app.loop.tasks.local_agent_task import register_async_agent
 from app.loop.tools.send_message import (

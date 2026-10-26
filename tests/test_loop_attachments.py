@@ -15,20 +15,22 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.attachments import (
+import app.loop.attachments.dates as dates_mod
+from app.loop.attachments.pipeline import get_attachment_messages, get_attachments
+from app.loop.attachments.reminders import (
     AUTO_MODE_ATTACHMENT_CONFIG,
     TODO_REMINDER_CONFIG,
+)
+from app.loop.attachments.tdd_state import create_tdd_state_attachment_message
+from app.loop.attachments.types import (
     Attachment,
     attachment_of,
     create_attachment_messages,
-    create_tdd_state_attachment_message,
-    get_attachment_messages,
-    get_attachments,
     normalize_attachment_for_api,
 )
-from app.loop.attachments import dates as dates_mod
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
 from app.loop.context.file_state import FileState
+from app.loop.context.tool_context import tool_context_for
 from app.loop.hooks.async_registry import AsyncHookRegistry
 from app.loop.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.loop.messages import wrap_in_system_reminder
@@ -179,7 +181,7 @@ def test_a_fresh_run_says_only_the_tdd_state_and_then_nothing():
 
 
 def test_a_failing_source_is_dropped_not_raised(monkeypatch):
-    from app.loop.attachments import pipeline
+    import app.loop.attachments.pipeline as pipeline
 
     def boom(*a: Any, **k: Any) -> list[Attachment]:
         raise RuntimeError("source broke")
@@ -201,7 +203,7 @@ def test_disable_attachments_keeps_only_queued_commands(monkeypatch):
 
 
 def test_messages_are_produced_in_attachment_order(monkeypatch):
-    from app.loop.attachments import pipeline
+    import app.loop.attachments.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "get_date_change_attachments",
                         lambda messages, context: [Attachment("date_change", {"newDate": "d"})])
@@ -212,7 +214,7 @@ def test_messages_are_produced_in_attachment_order(monkeypatch):
 
 def test_the_skill_listing_follows_nested_memory(monkeypatch):
     """Upstream's order: `nested_memory`, then `skill_listing`, then `auto_mode`/`todo_reminders`."""
-    from app.loop.attachments import pipeline
+    import app.loop.attachments.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "get_nested_memory_source",
                         lambda messages, context: [Attachment("nested_memory", {"path": "p", "content": "c"})])
@@ -226,7 +228,7 @@ def test_the_skill_listing_follows_nested_memory(monkeypatch):
 
 def test_agent_pending_messages_follow_todo_reminders_and_precede_the_tdd_state(monkeypatch):
     """Upstream's order: `todo_reminders`, then `agent_pending_messages`; `tdd_state` stays last."""
-    from app.loop.attachments import pipeline
+    import app.loop.attachments.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "get_todo_reminder_attachments",
                         lambda messages, context: [Attachment("todo_reminder", {"content": [], "itemCount": 0})])
@@ -425,7 +427,7 @@ def test_no_auto_mode_reminder_outside_auto():
 # ── token_usage ──────────────────────────────────────────────────────────────
 
 def test_token_usage_is_env_gated_and_reads_the_last_response(monkeypatch):
-    from app.loop.attachments import usage
+    import app.loop.attachments.usage as usage
 
     ctx = ctx_for()
     reply = AIMessage(content="x", usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120,
@@ -448,7 +450,7 @@ def test_deltas_are_off_unless_their_env_gate_is_set(monkeypatch):
     ctx = replace(ctx_for(), tools=(agent_tool,))
     assert [a for a in run(get_attachments(ctx, [])) if a.type == "agent_listing_delta"] == []
     monkeypatch.setenv("TDDAGENTS_AGENT_LIST_IN_MESSAGES", "1")
-    from app.loop.attachments import deltas
+    import app.loop.attachments.deltas as deltas
 
     monkeypatch.setattr(deltas, "agent_definitions_for", lambda context: (agent,))
     (att,) = [a for a in run(get_attachments(ctx, [])) if a.type == "agent_listing_delta"]
@@ -481,7 +483,7 @@ def test_agent_tools_description_matches_upstream():
 
 
 def test_mcp_instructions_delta(monkeypatch):
-    from app.loop.attachments import deltas
+    import app.loop.attachments.deltas as deltas
 
     monkeypatch.setenv("TDDAGENTS_MCP_INSTR_DELTA", "1")
     clients = [{"name": "b", "type": "connected", "instructions": "use b"},

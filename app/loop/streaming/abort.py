@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from app.loop.context import CancelToken
+from app.loop.context.tool_context import CancelToken
 
 logger = logging.getLogger(__name__)
 

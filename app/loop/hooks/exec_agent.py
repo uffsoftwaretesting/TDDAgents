@@ -375,7 +375,8 @@ def build_agent_hook_runner(call_model_factory: CallModelFactory | None = None) 
 
     async def run(request: AgentHookRequest) -> AgentHookRunOutcome:
         from app.loop.config import build_run_config
-        from app.loop.context import CancelToken, discard_app_state_update
+        from app.loop.context.app_state import discard_app_state_update
+        from app.loop.context.tool_context import CancelToken
         from app.loop.deps import CompactionResult, LoopDeps
         from app.loop.engine import run_loop
         from app.loop.state import initial_loop_state

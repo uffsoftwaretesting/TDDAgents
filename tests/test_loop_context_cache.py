@@ -12,8 +12,8 @@ from app.loop.context.cache import (
     validate_cache_breakpoints_budget,
 )
 from app.loop.prompts.sections import (
-    PromptSectionCache,
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    PromptSectionCache,
     systemPromptSection,
 )
 

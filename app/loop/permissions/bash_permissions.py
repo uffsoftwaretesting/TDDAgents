@@ -49,15 +49,18 @@ from app.loop.permissions.bash_path_validation import (
     validate_single_path_command,
 )
 from app.loop.permissions.bash_read_only import is_bash_read_only
-from app.loop.permissions.bash_sed_validation import check_sed_constraints
 from app.loop.permissions.bash_security import (
     bash_command_is_safe,
     injection_check_disabled,
     strip_safe_heredoc_substitutions,
     try_parse_shell_command,
 )
-from app.loop.permissions.shell_rules import match_wildcard_pattern, parse_permission_rule
+from app.loop.permissions.bash_sed_validation import check_sed_constraints
 from app.loop.permissions.messages import create_permission_request_message
+from app.loop.permissions.shell_rules import (
+    match_wildcard_pattern,
+    parse_permission_rule,
+)
 from app.loop.permissions.types import (
     PermissionBehavior,
     PermissionMode,

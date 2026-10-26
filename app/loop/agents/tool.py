@@ -49,8 +49,8 @@ from app.loop.agents.prompt import get_prompt
 from app.loop.agents.resolution import filter_denied_agents, get_deny_rule_for_agent
 from app.loop.agents.run_agent import create_agent_id, run_agent
 from app.loop.config import RunConfig
-from app.loop.context import CancelToken, ToolContext
 from app.loop.context.assembly import enhance_system_prompt_with_env_details
+from app.loop.context.tool_context import CancelToken, ToolContext
 from app.loop.deps import LoopDeps
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message, tool_calls_in

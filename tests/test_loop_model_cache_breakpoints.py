@@ -55,10 +55,11 @@ def test_other_providers_and_disabled_caching_are_untouched(monkeypatch):
 
 def _open_with(monkeypatch, provider: str):
     """Open a model stream through a fake chat model and capture what it was asked."""
+    import app.loop.model as model_mod
     from app.config.config import Config
-    from app.loop import model as model_mod
     from app.loop.config import build_run_config
-    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.context.app_state import AppStateStore
+    from app.loop.context.tool_context import tool_context_for
     from app.loop.retry import RetryContext
     from app.loop.state import initial_loop_state
 
@@ -99,7 +100,8 @@ def test_the_request_sends_stored_history_as_is(monkeypatch, tmp_path):
     from langchain_core.messages import AIMessage, ToolMessage
 
     from app.loop.config import build_run_config
-    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.context.app_state import AppStateStore
+    from app.loop.context.tool_context import tool_context_for
     from app.loop.model import build_request_messages
     from app.loop.state import initial_loop_state
 
@@ -122,11 +124,12 @@ def test_the_request_sends_stored_history_as_is(monkeypatch, tmp_path):
 
 
 def test_the_runs_cost_tracker_rides_on_the_model_call(monkeypatch):
+    import app.loop.model as model_mod
     from app.config.config import Config
-    from app.loop import model as model_mod
     from app.loop.config import build_run_config
-    from app.loop.context import AppStateStore, tool_context_for
-    from app.loop.cost import CostTracker
+    from app.loop.context.app_state import AppStateStore
+    from app.loop.context.tool_context import tool_context_for
+    from app.loop.cost.tracker import CostTracker
     from app.loop.retry import RetryContext
     from app.loop.state import initial_loop_state
 
@@ -153,10 +156,11 @@ def test_the_runs_cost_tracker_rides_on_the_model_call(monkeypatch):
 
 def test_the_provider_follows_the_requested_model(monkeypatch):
     """Phase 7: a worker resolved to a Claude alias reaches Anthropic even in an OpenAI run."""
+    import app.loop.model as model_mod
     from app.config.config import Config
-    from app.loop import model as model_mod
     from app.loop.config import build_run_config
-    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.context.app_state import AppStateStore
+    from app.loop.context.tool_context import tool_context_for
     from app.loop.retry import RetryContext
     from app.loop.state import initial_loop_state
 
@@ -182,7 +186,8 @@ def test_the_provider_follows_the_requested_model(monkeypatch):
 
 
 def _stream_state():
-    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.context.app_state import AppStateStore
+    from app.loop.context.tool_context import tool_context_for
     from app.loop.state import initial_loop_state
 
     return initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
@@ -191,7 +196,7 @@ def _stream_state():
 def _drain_stream(state, config):
     import asyncio
 
-    from app.loop import model as model_mod
+    import app.loop.model as model_mod
 
     async def go():
         return [m async for m in model_mod.stream_call_model(state, config)]
@@ -203,7 +208,7 @@ def test_stream_call_model_passes_the_runs_retry_options(monkeypatch, caplog):
     import dataclasses
     import logging
 
-    from app.loop import model as model_mod
+    import app.loop.model as model_mod
     from app.loop.config import build_run_config
     from app.loop.retry import RetryNotice
 
@@ -240,8 +245,8 @@ def test_a_failure_on_the_first_frame_is_retried(monkeypatch):
 
     from langchain_core.messages import AIMessageChunk
 
-    from app.loop import model as model_mod
-    from app.loop import retry as retry_mod
+    import app.loop.model as model_mod
+    import app.loop.retry as retry_mod
     from app.loop.config import build_run_config
 
     attempts: list[int] = []
@@ -273,8 +278,8 @@ def test_a_failure_on_the_first_frame_is_retried(monkeypatch):
 
 
 def test_a_model_without_a_config_kwarg_still_gets_the_cache_kwargs(monkeypatch):
+    import app.loop.model as model_mod
     from app.config.config import Config
-    from app.loop import model as model_mod
     from app.loop.config import build_run_config
     from app.loop.retry import RetryContext
 
@@ -302,7 +307,7 @@ def test_a_main_loop_model_override_is_the_requests_model(monkeypatch):
     """Upstream `options.mainLoopModel`: a skill's `model:` sets it, and the next call uses it."""
     import dataclasses
 
-    from app.loop import model as model_mod
+    import app.loop.model as model_mod
     from app.loop.config import build_run_config
 
     seen: dict = {}
@@ -325,7 +330,8 @@ def test_a_main_loop_model_override_is_the_requests_model(monkeypatch):
 
 
 def test_without_an_override_the_runs_model_is_used(monkeypatch):
-    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.context.app_state import AppStateStore
+    from app.loop.context.tool_context import tool_context_for
 
     assert tool_context_for(AppStateStore()).main_loop_model is None
     assert tool_context_for(AppStateStore(), main_loop_model="m").main_loop_model == "m"

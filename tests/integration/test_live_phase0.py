@@ -57,7 +57,8 @@ def test_live_model_call_yields_whole_messages(real_openai_key: str, python_work
     from langchain_core.messages import AIMessageChunk, HumanMessage
 
     from app.loop.config import build_run_config
-    from app.loop.context import AppStateStore, tool_context_for
+    from app.loop.context.app_state import AppStateStore
+    from app.loop.context.tool_context import tool_context_for
     from app.loop.messages import tool_calls_in
     from app.loop.model import stream_call_model
     from app.loop.runner import build_builtin_tools

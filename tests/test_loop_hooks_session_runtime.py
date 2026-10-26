@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.hooks.exec_agent import exec_agent_hook
 from app.loop.hooks.exec_http import HttpHookPolicy, exec_http_hook
 from app.loop.hooks.exec_prompt import exec_prompt_hook

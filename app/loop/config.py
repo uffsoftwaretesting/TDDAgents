@@ -40,8 +40,8 @@ class Gates:
     Environment facts frozen at entry, because a mid-run flip would be invisible.
 
     `postgres_checkpointing` records whether the run is actually persisting to Postgres or
-    fell back to an in-memory checkpointer (`app/session/checkpointer.py`). As a gate it is a fact the run can be judged against
-    afterwards — a resumable run and an unresumable one are not the same experiment.
+    fell back to an in-memory checkpointer (`app/session/checkpointer.py`). As a gate it is a
+    fact the run can be judged against afterwards — a resumable run and an unresumable one are not the same experiment.
     """
 
     postgres_checkpointing: bool

@@ -8,7 +8,8 @@ import json
 
 import pytest
 
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.tasks.local_agent_task import register_async_agent
 from app.loop.tasks.stop_task import StopTaskError, stop_task
 from app.loop.tasks.task import create_task_state_base

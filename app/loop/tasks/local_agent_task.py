@@ -32,7 +32,8 @@ from typing import Any
 from langchain_core.messages import AIMessage
 
 from app.loop.command_queue import CommandQueue, QueuedCommand
-from app.loop.context import AppState, CancelToken
+from app.loop.context.app_state import AppState
+from app.loop.context.tool_context import CancelToken
 from app.loop.messages import Message
 from app.loop.tasks.framework import SetAppState, register_task, update_task_state
 from app.loop.tasks.task import TaskStateBase

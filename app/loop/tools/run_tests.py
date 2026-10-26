@@ -36,7 +36,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-from app.loop.context import ToolContext
+from app.loop.context.tool_context import ToolContext
 from app.loop.ledger import TestRunRecord
 from app.loop.tools.base import BuiltTool, build_tool
 from app.loop.tools.types import ToolResult

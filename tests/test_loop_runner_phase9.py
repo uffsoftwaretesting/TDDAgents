@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop import runner as runner_mod
+import app.loop.runner as runner_mod
 from app.loop.factory import get_production_deps
 from app.loop.runner import item_run_id, tdd_loop_runner
 from app.loop.storage.paths import get_project_dir
@@ -83,7 +83,7 @@ def test_flags_default_to_off(make_fake_workspace, tmp_path) -> None:
 
 def test_a_fresh_item_starts_with_session_start_startup(make_fake_workspace, tmp_path) -> None:
     sources: list[str] = []
-    from app.loop.hooks import session as hook_session
+    import app.loop.hooks.session as hook_session
 
     original = hook_session.process_session_start_hooks
 
@@ -99,7 +99,7 @@ def test_a_fresh_item_starts_with_session_start_startup(make_fake_workspace, tmp
 
 
 def test_a_rerun_item_resumes_its_conversation(make_fake_workspace, tmp_path) -> None:
-    from app.loop.hooks import session as hook_session
+    import app.loop.hooks.session as hook_session
 
     original = hook_session.process_session_start_hooks
     sources: list[str] = []

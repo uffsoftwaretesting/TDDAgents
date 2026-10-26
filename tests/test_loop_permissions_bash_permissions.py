@@ -7,7 +7,8 @@ import os
 
 import pytest
 
-from app.loop.permissions import bash_permissions as bp
+import app.loop.permissions.bash_permissions as bp
+from app.loop.permissions.bash_commands import OutputRedirection
 from app.loop.permissions.bash_permissions import (
     ACCEPT_EDITS_ALLOWED_COMMANDS,
     ANT_ONLY_SAFE_ENV_VARS,
@@ -32,7 +33,6 @@ from app.loop.permissions.bash_permissions import (
     strip_safe_wrappers,
     validate_output_redirections,
 )
-from app.loop.permissions.bash_commands import OutputRedirection
 from app.loop.permissions.types import (
     PermissionBehavior,
     PermissionMode,
@@ -415,6 +415,6 @@ def test_has_permission_pipe_with_injection_is_asked(cwd):
 
 
 def test_module_reexports_path_helpers():
-    from app.loop.permissions import bash_path_validation as pv
+    import app.loop.permissions.bash_path_validation as pv
     assert bp.format_directory_list is pv.format_directory_list
     assert bp.MAX_DIRS_TO_LIST == 5

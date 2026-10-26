@@ -13,7 +13,8 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from app.loop.context import AppStateStore, DenialTrackingBox, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import DenialTrackingBox, tool_context_for
 from app.loop.hooks.config import HooksConfigSnapshot
 from app.loop.hooks.execute import HookDispatcher, execute_permission_denied_hooks
 from app.loop.hooks.output import AggregatedHookResult

@@ -58,7 +58,7 @@ from app.loop.permissions.types import (
 )
 
 if TYPE_CHECKING:
-    from app.loop.context import ToolContext
+    from app.loop.context.tool_context import ToolContext
 
 FileOperationType = Literal["read", "write", "create"]
 ToolType = Literal["edit", "read"]

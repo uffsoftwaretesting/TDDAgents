@@ -10,7 +10,8 @@ from langchain_core.messages import HumanMessage
 
 from app.loop.attachments.queued import get_queued_command_attachments
 from app.loop.command_queue import CommandQueue, QueuedCommand
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 
 
 def _ctx(queue: CommandQueue, agent_id: str | None = None):

@@ -14,9 +14,10 @@ import pytest
 from langchain_core.messages import ToolMessage
 from mcp.client._memory import InMemoryTransport
 
-from app.loop.context import AppState, AppStateStore, tool_context_for
+import app.loop.mcp.tools as mt
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.mcp import tools as mt
 from app.loop.mcp.client import connect_to_server
 from app.loop.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
 from app.loop.permissions.gate import has_permissions_to_use_tool
@@ -195,7 +196,7 @@ def test_another_servers_rule_does_not_allow():
 
 
 def test_the_tdd_phase_tier_runs_before_the_allow_rule(monkeypatch):
-    from app.loop.permissions import tdd
+    import app.loop.permissions.tdd as tdd
 
     seen: list[str] = []
 

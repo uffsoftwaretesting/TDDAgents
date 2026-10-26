@@ -16,7 +16,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 # Matches innermost HTML comment that does not contain another opening <!--
 _INNER_HTML_COMMENT_RE = re.compile(r"<!--((?!<!--)[\s\S])*?-->")
 

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from mcp.client._memory import InMemoryTransport
 
-from app.loop.mcp import manager as mm
+import app.loop.mcp.manager as mm
 from app.loop.mcp.config import get_global_config_path
 from app.loop.mcp.types import (
     ConnectedMCPServer,

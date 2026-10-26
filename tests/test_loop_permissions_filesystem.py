@@ -12,7 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.permissions.filesystem import (
     DANGEROUS_DIRECTORIES,
     DANGEROUS_FILES,

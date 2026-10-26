@@ -7,10 +7,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from app.loop.context import AppStateStore, ToolContext, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import ToolContext, tool_context_for
 from app.loop.messages import ToolCall
 from app.loop.streaming.abort import AbortController
 from app.loop.streaming.executor import StreamingToolExecutor, TrackedTool
@@ -762,7 +764,7 @@ def test_in_flight_tool_ids_lifecycle() -> None:
 
 def test_context_modifiers_applied_for_non_concurrent_tools() -> None:
     async def _run() -> None:
-        from app.loop.context import AppState
+        from app.loop.context.app_state import AppState
         from app.loop.ledger import PhaseLedger, TddPhase
 
         context = make_context()

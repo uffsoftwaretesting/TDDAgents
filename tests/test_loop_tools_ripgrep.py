@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.tools import ripgrep as rg
+import app.loop.tools.ripgrep as rg
 from app.loop.tools.ripgrep import (
     RIPGREP_PIP_SPEC,
     SANDBOX_RIPGREP_DIR,

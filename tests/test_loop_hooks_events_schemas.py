@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from app.loop.hooks import events as ev
+import app.loop.hooks.events as ev
 from app.loop.hooks.events import HOOK_EVENTS, HookEvent, is_hook_event, match_query_for
 from app.loop.hooks.schemas import (
     DEFAULT_HOOK_SHELL,

@@ -28,7 +28,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from app.loop.context import ToolContext
+from app.loop.context.tool_context import ToolContext
 from app.loop.permissions.bash_permissions import bash_tool_has_permission
 from app.loop.permissions.bash_read_only import is_bash_read_only
 from app.loop.permissions.filesystem import permission_cwd

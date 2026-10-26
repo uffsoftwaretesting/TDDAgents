@@ -38,7 +38,7 @@ DEFAULT_MAX_TOOL_USE_CONCURRENCY = 10
 
 if TYPE_CHECKING:
     from app.loop.config import RunConfig
-    from app.loop.context import ToolContext
+    from app.loop.context.tool_context import ToolContext
     from app.loop.state import LoopState
 
 

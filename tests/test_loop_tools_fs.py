@@ -15,11 +15,13 @@ from typing import Any, cast
 import pytest
 from langchain_core.messages import AIMessage
 
-from app.loop.context import AppStateStore, FileState, tool_context_for
+import app.loop.tools.fs as fs
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.file_state import FileState
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.tdd import check_tdd_phase_permission
 from app.loop.permissions.types import PermissionMode, ToolPermissionContext
-from app.loop.tools import fs
 from app.loop.tools.execution import run_tool_use
 from app.loop.tools.fs import (
     DEFAULT_HEAD_LIMIT,

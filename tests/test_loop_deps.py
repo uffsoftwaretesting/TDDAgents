@@ -13,7 +13,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.loop.config import build_run_config
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.deps import (
     CompactionResult,
     LoopDeps,

@@ -13,10 +13,14 @@ double a `"` that sits inside single quotes.
 
 import pytest
 
-from app.loop.permissions import bash_commands as bc
-from app.loop.permissions import bash_sed_validation as sv
+import app.loop.permissions.bash_commands as bc
+import app.loop.permissions.bash_sed_validation as sv
 from app.loop.permissions.bash_security import ParseEntry
-from app.loop.permissions.types import PermissionBehavior, PermissionMode, ToolPermissionContext
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionMode,
+    ToolPermissionContext,
+)
 
 EXTRACT = [
     ('echo a >! out', ('echo a', [('out', '>')], False)),

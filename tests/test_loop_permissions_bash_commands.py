@@ -5,7 +5,7 @@ splitting and redirection extraction (legacy path), plus `RegexParsedCommand_DEP
 
 import pytest
 
-from app.loop.permissions import bash_commands as bc
+import app.loop.permissions.bash_commands as bc
 from app.loop.permissions.bash_commands import (
     ALL_SUPPORTED_CONTROL_OPERATORS,
     ALLOWED_FILE_DESCRIPTORS,

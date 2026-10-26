@@ -8,7 +8,8 @@ import asyncio
 
 import pytest
 
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.loop.tools.run_tests import (
     LEDGER_EXIT_CODES,

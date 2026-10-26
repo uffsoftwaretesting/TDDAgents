@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.context import assembly
-from app.loop.permissions import yolo_classifier as yc
+import app.loop.context.assembly as assembly
+import app.loop.permissions.yolo_classifier as yc
 from app.loop.permissions.settings import SettingsLocations
 from app.loop.permissions.types import ToolPermissionContext
 from app.loop.permissions.yolo_classifier_names import (

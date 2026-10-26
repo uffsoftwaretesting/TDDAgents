@@ -8,12 +8,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context import (
-    AppState,
-    AppStateStore,
-    DenialTrackingBox,
-    tool_context_for,
-)
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import DenialTrackingBox, tool_context_for
 from app.loop.hooks.output import AggregatedHookResult
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.auto_mode import (

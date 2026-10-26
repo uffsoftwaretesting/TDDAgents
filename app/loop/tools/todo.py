@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from app.loop.context import ToolContext
+from app.loop.context.tool_context import ToolContext
 from app.loop.prompts.loader import parse_markdown_frontmatter
 from app.loop.tools.base import BuiltTool, build_tool
 from app.loop.tools.types import ToolResult

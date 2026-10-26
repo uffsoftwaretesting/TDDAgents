@@ -24,7 +24,7 @@ from app.loop.tools.result_storage import MAX_TOOL_RESULT_BYTES
 from app.loop.tools.types import PermissionResult, ToolResult, ValidationResult
 
 if TYPE_CHECKING:
-    from app.loop.context import ToolContext
+    from app.loop.context.tool_context import ToolContext
 
 
 def default_map_result(result: ToolResult, tool_use_id: str) -> ToolMessage:

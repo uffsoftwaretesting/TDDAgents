@@ -7,7 +7,7 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
-from app.loop.context import CancelToken
+from app.loop.context.tool_context import CancelToken
 from app.loop.hooks.process import ABORT_POLL_SECONDS, CapturedProcess, is_aborted
 from app.loop.streaming.abort import AbortController
 

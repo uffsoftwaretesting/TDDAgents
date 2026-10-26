@@ -21,7 +21,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.loop.config import build_run_config
-from app.loop.context import AppState, AppStateStore, ToolContext, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import ToolContext, tool_context_for
 from app.loop.deps import CompactionResult, LoopDeps
 from app.loop.engine import drain, run_loop
 from app.loop.hooks.stop_hooks import build_stop_hooks_runner
@@ -533,5 +534,3 @@ def test_e2e_live_openai_session_shell_interrupt_and_iteration() -> None:
     assert result2["user_confirmed"] is True
     assert len(result2.get("plan", [])) >= 1
     assert result2.get("success_count", 0) >= 1
-
-

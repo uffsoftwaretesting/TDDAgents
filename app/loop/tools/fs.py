@@ -59,8 +59,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from app.loop.context import ToolContext
 from app.loop.context.file_state import FileState
+from app.loop.context.tool_context import ToolContext
 from app.loop.permissions.filesystem import (
     check_file_read_permissions,
     check_file_write_permissions,

@@ -23,7 +23,7 @@ from typing import (
 
 from langchain_core.messages import ToolMessage
 
-from app.loop.context import ToolContext
+from app.loop.context.tool_context import ToolContext
 from app.loop.messages import Message, ToolCall
 from app.loop.streaming.abort import (
     AbortController,

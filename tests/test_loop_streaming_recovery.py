@@ -7,10 +7,12 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any, AsyncIterator
+
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.loop.config import RunConfig, build_run_config
-from app.loop.context import AppStateStore, ToolContext, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import ToolContext, tool_context_for
 from app.loop.deps import CompactionResult, LoopDeps
 from app.loop.engine import run_loop
 from app.loop.messages import Message, ToolCall

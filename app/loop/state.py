@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.loop.context import ToolContext
+from app.loop.context.tool_context import ToolContext
 from app.loop.ledger import PhaseLedger
 from app.loop.messages import Message
 from app.loop.transitions import Transition

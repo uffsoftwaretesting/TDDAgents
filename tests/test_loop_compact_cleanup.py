@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.compact import post_compact_cleanup as pcc
-from app.loop.compact import summarizer as summ
+import app.loop.compact.post_compact_cleanup as pcc
+import app.loop.compact.summarizer as summ
 from app.loop.compact.compact import (
     PROMPT_TOO_LONG_ERROR_MESSAGE,
     create_compact_boundary_message,
@@ -17,7 +17,8 @@ from app.loop.compact.compact import (
 from app.loop.compact.post_compact_cleanup import run_post_compact_cleanup
 from app.loop.compact.prompt import COMPACT_SUMMARIZER_SYSTEM_PROMPT
 from app.loop.compact.summarizer import build_compact_summarizer
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from tests.conftest import FakeWorkspace
 
 

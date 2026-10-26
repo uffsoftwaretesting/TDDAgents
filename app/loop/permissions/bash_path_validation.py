@@ -481,7 +481,9 @@ def validate_single_path_command(
 ) -> PermissionResult:
     """`validateSinglePathCommand`: wrappers stripped, then the command's own path checker."""
     from app.loop.permissions.bash_permissions import strip_safe_wrappers
-    from app.loop.permissions.bash_sed_validation import sed_command_is_allowed_by_allowlist
+    from app.loop.permissions.bash_sed_validation import (
+        sed_command_is_allowed_by_allowlist,
+    )
 
     stripped = strip_safe_wrappers(cmd)
     args = parse_command_arguments(stripped)

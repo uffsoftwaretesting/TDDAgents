@@ -6,7 +6,7 @@ from __future__ import annotations
 import dataclasses
 import json
 
-from app.loop.context import AppState, AppStateStore
+from app.loop.context.app_state import AppState, AppStateStore
 from app.loop.events import TransitionEventRecorder, events_path
 from app.loop.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.loop.transitions import Continue, Terminal, Terminated, Transition

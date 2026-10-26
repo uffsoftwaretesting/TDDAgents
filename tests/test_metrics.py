@@ -21,6 +21,7 @@ from app.metrics.event_log import EventEntry, EventLog, EventType
 # Part L1: EventEntry & EventLog Tests
 # ==============================================================================
 
+
 class TestEventEntryAndLog:
     def test_event_type_str_enum_values(self) -> None:
         assert str(EventType.TRANSITION) == "transition"
@@ -179,16 +180,15 @@ class TestEventEntryAndLog:
 # ==============================================================================
 
 
-
 # ==============================================================================
 # Part L2: Resilience Metrics Computation
 # ==============================================================================
 
 
-
 # ==============================================================================
 # Reporting & Artifact Export Tests
 # ==============================================================================
+
 
 class TestMetricsReporting:
 
@@ -216,12 +216,10 @@ class TestMetricsReporting:
         assert caplog.messages[-1] == f"Exported 1 events to {out_file}"
 
 
-
-
-
 # ==============================================================================
 # Mutation Booster Tests for Part L
 # ==============================================================================
+
 
 class TestMetricsBooster:
 
@@ -288,28 +286,12 @@ class TestMetricsBooster:
         content = out_file.read_text(encoding="utf-8")
         assert "テスト ✅ unicode" in content
 
-
-
-
-
-
-
-
-
-
-
-
-
     def test_event_log_custom_session_id_override(self) -> None:
         log = EventLog(session_id="default-sess")
         ev = log.record(EventType.SESSION, session_id="override-sess")
         assert ev.session_id == "override-sess"
         ev_def = log.record(EventType.SESSION)
         assert ev_def.session_id == "default-sess"
-
-
-
-
 
     def test_export_jsonl_nested_dirs_and_non_ascii(self, tmp_path: Path) -> None:
         log = EventLog(session_id="utf8-sess")
@@ -324,13 +306,6 @@ class TestMetricsBooster:
         assert "テスト 日本語 🚀 Unicode" in content
         assert "\\u" not in content
 
-
-
-
-
-
-
-
     def test_export_jsonl_exact_line_encoding_and_newline(self, tmp_path: Path) -> None:
         log = EventLog(session_id="enc-test")
         log.record(EventType.SESSION, payload={"val": "日本語 text"})
@@ -339,8 +314,3 @@ class TestMetricsBooster:
         raw_bytes = out_file.read_bytes()
         assert "日本語".encode() in raw_bytes
         assert raw_bytes.endswith(b"\n")
-
-
-
-
-

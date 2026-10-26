@@ -178,7 +178,9 @@ def _cb_pyright(_raw: str, args: list[str]) -> bool:
 # ── callbacks (readOnlyValidation.ts) ────────────────────────────────────────
 
 def _cb_sed(raw: str, _args: list[str]) -> bool:
-    from app.loop.permissions.bash_sed_validation import sed_command_is_allowed_by_allowlist
+    from app.loop.permissions.bash_sed_validation import (
+        sed_command_is_allowed_by_allowlist,
+    )
 
     return not sed_command_is_allowed_by_allowlist(raw)
 

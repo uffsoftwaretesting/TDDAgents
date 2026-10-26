@@ -15,15 +15,10 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context import (
-    AppState,
-    AppStateStore,
-    CancelToken,
-    discard_app_state_update,
-    tool_context_for,
-)
-from app.loop.hooks import exec_agent as ea
-from app.loop.hooks import exec_prompt as ep
+import app.loop.hooks.exec_agent as ea
+import app.loop.hooks.exec_prompt as ep
+from app.loop.context.app_state import AppState, AppStateStore, discard_app_state_update
+from app.loop.context.tool_context import CancelToken, tool_context_for
 from app.loop.hooks.exec_agent import (
     STRUCTURED_OUTPUT_PROMPT,
     AgentHookRequest,
@@ -393,7 +388,7 @@ def test_runner_does_not_compact_on_prompt_too_long():
 
 
 def test_runner_closes_the_loop_before_returning(monkeypatch):
-    from app.loop import engine
+    import app.loop.engine as engine
 
     real = engine.run_loop
     closed: list[bool] = []

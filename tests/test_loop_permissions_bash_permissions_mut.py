@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.loop.permissions import bash_path_validation as pv
-from app.loop.permissions import bash_permissions as bp
-from app.loop.permissions import bash_read_only_commands as roc
+import app.loop.permissions.bash_path_validation as pv
+import app.loop.permissions.bash_permissions as bp
+import app.loop.permissions.bash_read_only_commands as roc
 from app.loop.permissions.bash_commands import OutputRedirection
 from app.loop.permissions.bash_security import bash_command_is_safe
 from app.loop.permissions.types import (

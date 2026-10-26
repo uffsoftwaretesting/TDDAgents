@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from app.loop.mcp import transports as mtr
+import app.loop.mcp.transports as mtr
 from app.loop.mcp.client import call_mcp_tool, connect_to_server
 from app.loop.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
 

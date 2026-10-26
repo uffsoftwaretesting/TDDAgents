@@ -24,12 +24,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context import AppState, AppStateStore, tool_context_for
+import app.workspace.pyenv as pyenv
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.types import PermissionMode
 from app.loop.state import initial_loop_state
 from app.session.export import EXPORT_EXCLUDES, export_run_workspace
-from app.workspace import pyenv
 from app.workspace.local import LocalWorkspace
 from app.workspace.pyenv import (
     REQUIRED_PACKAGES,
@@ -459,8 +460,8 @@ def test_runner_reports_failure_without_inventing_progress(python_workspace):
 
 
 def test_runner_crash_is_a_model_error(python_workspace, monkeypatch):
-    from app.loop import query_engine
-    from app.loop import runner as runner_mod
+    import app.loop.query_engine as query_engine
+    import app.loop.runner as runner_mod
 
     def boom(*a: Any, **k: Any) -> Any:
         raise RuntimeError("engine exploded")
@@ -518,8 +519,8 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
 
 
 def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatch, python_workspace):
-    from app.loop import factory
-    from app.loop import runner as runner_mod
+    import app.loop.factory as factory
+    import app.loop.runner as runner_mod
 
     asked: list[Any] = []
 
@@ -561,8 +562,8 @@ def test_runner_needs_a_session_id_for_its_default_workspace():
 
 
 def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):
+    import app.loop.runner as runner_mod
     from app.config.config import Config
-    from app.loop import runner as runner_mod
 
     monkeypatch.setattr(Config, "LOCAL_WORKSPACE_ROOT", str(tmp_path / "runs"))
     seen: list[Path] = []

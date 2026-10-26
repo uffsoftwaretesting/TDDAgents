@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.context import ContentReplacementState
-from app.loop.tools import result_storage as rs
+import app.loop.tools.result_storage as rs
+from app.loop.context.tool_context import ContentReplacementState
 from app.loop.tools.result_storage import (
     MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
     PERSISTED_OUTPUT_TAG,

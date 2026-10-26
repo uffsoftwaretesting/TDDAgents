@@ -51,12 +51,8 @@ from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.resolution import resolve_agent_tools
 from app.loop.compact.compact import is_compact_boundary_message
 from app.loop.config import RunConfig
-from app.loop.context import (
-    AppState,
-    CancelToken,
-    DenialTrackingBox,
-    ToolContext,
-)
+from app.loop.context.app_state import AppState
+from app.loop.context.tool_context import CancelToken, DenialTrackingBox, ToolContext
 from app.loop.deps import LoopDeps
 from app.loop.engine import run_loop
 from app.loop.hooks.execute import execute_subagent_start_hooks

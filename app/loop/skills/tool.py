@@ -50,8 +50,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.agents.definition import AgentDefinition
 from app.loop.config import RunConfig
-from app.loop.context import AppState, ToolContext
+from app.loop.context.app_state import AppState
 from app.loop.context.tokens import has_1m_context
+from app.loop.context.tool_context import ToolContext
 from app.loop.deps import LoopDeps
 from app.loop.messages import Message
 from app.loop.model_aliases import parse_user_specified_model

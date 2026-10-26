@@ -5,9 +5,10 @@ Unit tests for AbortSignal, AbortController, and three-controller abort tree sub
 from __future__ import annotations
 
 import logging
+
 import pytest
 
-from app.loop.context import CancelToken
+from app.loop.context.tool_context import CancelToken
 from app.loop.streaming.abort import (
     AbortController,
     AbortSignal,

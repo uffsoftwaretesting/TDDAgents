@@ -8,7 +8,8 @@ import asyncio
 
 from langchain_core.messages import ToolMessage
 
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.tools.base import (
     BuiltTool,
     Tool,

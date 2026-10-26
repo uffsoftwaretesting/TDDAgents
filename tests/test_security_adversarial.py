@@ -18,20 +18,27 @@ from pathlib import Path
 
 import pytest
 
+from app.loop.agents.definition import AgentDefinition
+from app.loop.agents.memory import AgentMemoryStore
+from app.loop.agents.resolution import resolve_agent_tools
 from app.loop.hooks.exec_command import exec_command_hook
 from app.loop.hooks.exec_http import interpolate_env_vars
 from app.loop.hooks.exec_prompt import add_arguments_to_prompt
 from app.loop.hooks.schemas import CommandHook
-from app.loop.agents.definition import AgentDefinition
-from app.loop.agents.memory import AgentMemoryStore
-from app.loop.agents.resolution import resolve_agent_tools
 from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.filesystem import check_write_permission_for_tool, is_dangerous_file_path_to_auto_edit
+from app.loop.permissions.filesystem import (
+    check_write_permission_for_tool,
+    is_dangerous_file_path_to_auto_edit,
+)
 from app.loop.permissions.tdd import (
     check_tdd_phase_permission,
     get_phase_deny_rules,
 )
-from app.loop.permissions.types import PermissionBehavior, PermissionMode, ToolPermissionContext
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionMode,
+    ToolPermissionContext,
+)
 from app.loop.tools.base import ToolResult, build_tool
 from app.workspace.base import (
     WorkspacePathError,
@@ -47,6 +54,7 @@ def _dummy_call(input_dict: dict[str, object], context: object) -> ToolResult:
 # ============================================================================
 # 1. Path Traversal & Normalization Attacks (Part G)
 # ============================================================================
+
 
 def test_normalize_path_traversal_attempts_raise_workspace_path_error() -> None:
     malicious_paths = [
@@ -106,6 +114,7 @@ def test_local_workspace_traversal_attacks_blocked(tmp_path: Path) -> None:
 # 2. Symlink Containment & Sensitive Files Defense (Part G & C5)
 # ============================================================================
 
+
 def test_local_workspace_symlink_escape_blocked(tmp_path: Path) -> None:
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir()
@@ -164,14 +173,10 @@ def test_dangerous_files_and_directories_blocked(tmp_path: Path) -> None:
 # ============================================================================
 
 
-
-
-
-
-
 # ============================================================================
 # 4. Hook Safety & Environment Variable Leakage (Part H)
 # ============================================================================
+
 
 def test_prompt_hook_arguments_preserve_valid_json() -> None:
     payload = {
@@ -212,6 +217,7 @@ def test_command_hook_with_a_missing_binary_fails_without_crashing(tmp_path: Pat
 # ============================================================================
 # 5. TDD Phase Ledger Invariants & Tool Resolution Isolation (Part D & I)
 # ============================================================================
+
 
 def test_tdd_phase_rule_strictly_denies_implementation_writers_in_red() -> None:
     # In RED phase:
@@ -294,6 +300,7 @@ def test_agent_tool_resolution_strips_disallowed_and_enforces_phase_in_subagent(
 # ============================================================================
 # 6. Run-Scoped Memory Isolation (Part I & E)
 # ============================================================================
+
 
 def test_agent_memory_store_strict_run_isolation(tmp_path: Path) -> None:
     store = AgentMemoryStore(base_dir=tmp_path)

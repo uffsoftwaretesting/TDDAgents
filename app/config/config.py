@@ -45,4 +45,3 @@ class Config:
     # guarantee rather than an accident of the E2B default working directory.
     SANDBOX_WORKSPACE_ROOT = "/home/user"
     LOCAL_WORKSPACE_ROOT = ".tddagents/runs"
-

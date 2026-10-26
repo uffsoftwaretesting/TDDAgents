@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from app.loop.agents.tool import AbortError
-from app.loop.context import ToolContext
+from app.loop.context.tool_context import ToolContext
 from app.loop.prompts.loader import parse_markdown_frontmatter
 from app.loop.tasks.disk_output import format_task_output, get_task_output
 from app.loop.tasks.framework import update_task_state

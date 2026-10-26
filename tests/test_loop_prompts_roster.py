@@ -69,6 +69,7 @@ def test_agent_roster_loads_cleanly() -> None:
         agent_path = agents_dir / directory / "AGENT.md"
         assert agent_path.is_file(), f"Missing agent AGENT.md: {agent_path}"
         agent = load_agent_definition_from_path(agent_path)
+        assert agent is not None
         assert agent.name == name
         assert agent.phase == expected_phase
         assert len(agent.description) > 5

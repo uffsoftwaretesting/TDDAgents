@@ -3,6 +3,7 @@ Tests for Part E1: Token counting substrate (app/loop/context/tokens.py).
 """
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
 from app.loop.context.tokens import (
     TokenCounter,
     TokenWarningState,

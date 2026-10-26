@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.context import memory as m
+import app.loop.context.memory as m
 from app.loop.context.memory import (
     MEMORY_INSTRUCTION_PROMPT,
     HostSource,

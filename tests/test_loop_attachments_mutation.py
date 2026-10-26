@@ -18,8 +18,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.attachments import dates as dates_mod
-from app.loop.attachments import pipeline
+import app.loop.attachments.dates as dates_mod
+import app.loop.attachments.pipeline as pipeline
 from app.loop.attachments.changed_files import (
     DIFF_SNIPPET_MAX_BYTES,
     get_changed_files,
@@ -65,9 +65,10 @@ from app.loop.attachments.usage import (
     token_count_from_last_api_response,
     token_count_from_usage,
 )
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
 from app.loop.context.file_state import FileState
 from app.loop.context.memory import HostSource
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TestRunRecord
 from app.loop.permissions.types import (
     PermissionBehavior,
@@ -502,16 +503,16 @@ def test_last_api_response_tolerates_bare_objects():
 
 
 def test_effective_context_window_is_the_token_modules():
+    import app.loop.context.tokens as tokens
     from app.config.config import Config
-    from app.loop.context import tokens
 
     assert effective_context_window(Config.MODEL) == tokens.get_effective_context_window_size(Config.MODEL)
 
 
 @pytest.mark.parametrize("value", ["1", "true", "yes", "on", " TRUE "])
 def test_token_usage_accepts_every_truthy_spelling(monkeypatch, value):
+    import app.loop.attachments.usage as usage
     from app.config.config import Config
-    from app.loop.attachments import usage
 
     seen: list[str] = []
 

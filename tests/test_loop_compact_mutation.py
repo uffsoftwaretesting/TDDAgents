@@ -18,11 +18,11 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop import factory
-from app.loop.compact import auto_compact as ac
-from app.loop.compact import compact as cc
-from app.loop.compact import post_compact_cleanup as pcc
-from app.loop.compact import summarizer as summ
+import app.loop.compact.auto_compact as ac
+import app.loop.compact.compact as cc
+import app.loop.compact.post_compact_cleanup as pcc
+import app.loop.compact.summarizer as summ
+import app.loop.factory as factory
 from app.loop.compact.auto_compact import (
     AutoCompactOutcome,
     auto_compact_if_needed,
@@ -63,12 +63,13 @@ from app.loop.compact.prompt import (
 )
 from app.loop.compact.summarizer import build_compact_summarizer
 from app.loop.config import build_run_config
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
 from app.loop.context.file_state import FileState
 from app.loop.context.tokens import (
     MEDIA_BLOCK_TOKENS,
     rough_token_count_estimation_for_messages,
 )
+from app.loop.context.tool_context import tool_context_for
 from app.loop.prompts.loader import render_prompt
 from app.loop.state import CompactionTracking, initial_loop_state
 from tests.conftest import FakeWorkspace

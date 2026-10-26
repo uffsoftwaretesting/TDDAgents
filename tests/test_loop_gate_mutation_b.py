@@ -14,7 +14,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.permissions import yolo_classifier as yc
+import app.loop.permissions.yolo_classifier as yc
 from app.loop.permissions.settings import SettingsLocations
 from app.loop.permissions.types import ToolPermissionContext
 
@@ -248,7 +248,7 @@ class _Reply:
 
 
 def _fake_factory(monkeypatch: Any, reply: _Reply) -> list[Any]:
-    from app.utils import chat_model_factory as factory
+    import app.utils.chat_model_factory as factory
 
     seen: list[Any] = []
 

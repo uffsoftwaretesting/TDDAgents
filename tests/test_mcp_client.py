@@ -17,7 +17,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import EmbeddedResource, ImageContent, TextContent, TextResourceContents
 from pydantic import BaseModel
 
-from app.loop.mcp import client as mc
+import app.loop.mcp.client as mc
 from app.loop.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
 
 CONFIG = McpServerConfig(type="stdio", scope="project", command="unused")

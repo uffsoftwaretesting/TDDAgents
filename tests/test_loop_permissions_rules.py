@@ -5,12 +5,13 @@ Tests for rule-based permissions evaluation (Part C2).
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.permissions.rules import (
     check_rule_based_permissions,
     extract_permission_context,
@@ -248,7 +249,7 @@ class TestCheckRuleBasedPermissions:
 
     def test_phase_tier_runs_first(self):
         async def go():
-            from app.loop.context import AppState
+            from app.loop.context.app_state import AppState
             from app.loop.ledger import PhaseLedger, TddPhase
 
             tool = build_tool(name="WriteImplementation", prompt="p", call=lambda a, c: ToolResult(content="ok"))

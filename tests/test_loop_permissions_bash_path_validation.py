@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.permissions import bash_path_validation as pv
+import app.loop.permissions.bash_path_validation as pv
 from app.loop.permissions.bash_path_validation import (
     ACTION_VERBS,
     COMMAND_OPERATION_TYPE,

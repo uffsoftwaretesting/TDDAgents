@@ -11,7 +11,8 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.loop.config import Gates, RunConfig
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.messages import ToolCall
 from app.loop.state import initial_loop_state
 from app.loop.tools.base import build_tool

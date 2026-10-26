@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from app.loop.attachments import create_tdd_state_attachment_message
+from app.loop.attachments.tdd_state import create_tdd_state_attachment_message
 from app.loop.compact.auto_compact import AutoCompactOutcome, auto_compact_if_needed
 from app.loop.compact.compact import build_post_compact_messages, compact_conversation
 from app.loop.compact.micro_compact import microcompact_messages

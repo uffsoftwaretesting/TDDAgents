@@ -46,7 +46,7 @@ def token_count_from_last_api_response(messages: Sequence[Message]) -> int:
 
 def effective_context_window(model: str) -> int:
     """`getEffectiveContextWindowSize`, from the token module (Phase 5, F1)."""
-    from app.loop.context import tokens
+    import app.loop.context.tokens as tokens
 
     size: int = tokens.get_effective_context_window_size(model)
     return size

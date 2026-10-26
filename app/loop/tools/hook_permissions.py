@@ -43,7 +43,7 @@ from app.loop.permissions.rules import (
 from app.loop.permissions.types import PermissionBehavior, PermissionResult
 
 if TYPE_CHECKING:
-    from app.loop.context import ToolContext
+    from app.loop.context.tool_context import ToolContext
     from app.loop.tools.base import Tool
 
 

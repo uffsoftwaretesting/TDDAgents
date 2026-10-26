@@ -17,7 +17,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.loop.config import build_run_config
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.deps import CompactionResult, LoopDeps, StopHookResult
 from app.loop.engine import drain, run_loop
 from app.loop.hooks.messages import HookBlockingError
@@ -135,8 +136,8 @@ def test_the_deny_path_keeps_hook_messages():
 
 
 def test_a_deny_without_a_message_names_the_hook_stop(monkeypatch):
+    import app.loop.tools.execution as execution_mod
     from app.loop.permissions.types import PermissionBehavior, PermissionResult
-    from app.loop.tools import execution as execution_mod
 
     async def silent_deny(*a: Any, **k: Any) -> Any:
         return SimpleNamespace(decision=PermissionResult(behavior=PermissionBehavior.DENY, message=""), input={})
@@ -423,7 +424,7 @@ def test_run_settings_locations(tmp_path):
 # ── workers and the request builder ─────────────────────────────────────────
 
 def test_the_request_builder_reorders_hook_messages_after_tool_results(monkeypatch):
-    from app.loop import model as model_mod
+    import app.loop.model as model_mod
 
     note = HumanMessage(content="n", additional_kwargs={"is_meta": True, "attachment": {"type": "x"}})
     call = AIMessage(content="", tool_calls=[{"name": "Probe", "args": {}, "id": "a"},
@@ -456,9 +457,9 @@ def test_an_exception_in_the_permission_phase_becomes_a_tool_use_error_and_the_r
 
     from langchain_core.messages import AIMessage as _AI
 
-    from app.loop.context import AppState
-    from app.loop.context import AppStateStore as _Store
-    from app.loop.context import tool_context_for as _ctx
+    from app.loop.context.app_state import AppState
+    from app.loop.context.app_state import AppStateStore as _Store
+    from app.loop.context.tool_context import tool_context_for as _ctx
     from app.loop.permissions.denial_tracking import DenialTrackingState
     from app.loop.permissions.types import (
         PermissionBehavior,
@@ -503,8 +504,8 @@ def test_stop_failure_hooks_are_fire_and_forget_but_finish_before_the_run_ends()
     from langchain_core.messages import HumanMessage as _Human
 
     from app.loop.config import build_run_config
-    from app.loop.context import AppStateStore as _Store
-    from app.loop.context import tool_context_for as _ctx
+    from app.loop.context.app_state import AppStateStore as _Store
+    from app.loop.context.tool_context import tool_context_for as _ctx
     from app.loop.engine import drain, run_loop
     from app.loop.state import initial_loop_state
     from app.loop.transitions import Terminal

@@ -222,7 +222,7 @@ def test_the_run_loads_one_skill_registry_and_offers_the_skill_tool(python_works
 
 
 def test_workers_draw_the_skill_tool_too(tmp_path, monkeypatch):
-    from app.loop.agents import tool as agent_tool_mod
+    import app.loop.agents.tool as agent_tool_mod
     from app.loop.config import build_run_config
     from app.loop.factory import get_production_deps
     from app.loop.runner import main_thread_tools
@@ -325,7 +325,7 @@ def test_an_mcp_call_without_an_allow_rule_is_denied_headless(python_workspace, 
 
 def test_the_coordinator_hands_mcp_tools_to_its_workers_only(python_workspace, tmp_path, monkeypatch):
     """`mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included."""
-    from app.loop.agents import tool as agent_tool_mod
+    import app.loop.agents.tool as agent_tool_mod
 
     captured: dict[str, Any] = {}
     real = agent_tool_mod.build_agent_tool
@@ -370,10 +370,10 @@ def test_a_follow_up_turn_carries_its_attachments(python_workspace, tmp_path):
 
 
 def test_the_runner_hands_its_scopes_to_skills_mcp_and_the_task_tools(python_workspace, tmp_path, monkeypatch):
-    from app.loop import runner as runner_mod
-    from app.loop.skills import loader as skill_loader
-    from app.loop.skills import tool as skill_tool_mod
-    from app.loop.tools import send_message as send_mod
+    import app.loop.runner as runner_mod
+    import app.loop.skills.loader as skill_loader
+    import app.loop.skills.tool as skill_tool_mod
+    import app.loop.tools.send_message as send_mod
 
     captured: dict[str, Any] = {}
     real_registry, real_skill, real_send = (

@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal, NamedTuple
 
-from app.loop.context import AppState
+from app.loop.context.app_state import AppState
 from app.loop.tasks.framework import SetAppState
 from app.loop.tasks.local_agent_task import kill_async_agent
 

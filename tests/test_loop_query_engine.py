@@ -11,7 +11,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.loop.compact.auto_compact import AutoCompactOutcome
 from app.loop.compact.compact import CompactionResult, create_compact_boundary_message
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.query_engine import (
     QueryEngine,
     ResultMessage,

@@ -601,7 +601,7 @@ def cached_tddagents_md(run_id: str) -> str | None:
     loaded, or `None`. Read from the cache only, never loaded here — upstream does the same,
     and an unpopulated cache means the classifier proceeds without it.
     """
-    from app.loop.context import assembly
+    import app.loop.context.assembly as assembly
 
     session = assembly._SESSIONS.get(run_id)
     if session is None:

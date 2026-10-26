@@ -30,7 +30,8 @@ from app.loop.agents.loader import (
     render_prompt,
 )
 from app.loop.agents.memory import AgentMemoryStore
-from app.loop.context import AppState, AppStateStore, CancelToken, ToolContext
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import CancelToken, ToolContext
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.messages import Message
 from app.loop.tools.base import Tool, build_tool
@@ -491,8 +492,3 @@ class TestMemoryStoreBooster:
 # ==============================================================================
 # SECTION 3: Fork Context Booster
 # ==============================================================================
-
-
-
-
-

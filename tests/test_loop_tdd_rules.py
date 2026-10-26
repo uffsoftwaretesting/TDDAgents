@@ -5,13 +5,11 @@ Tests for TDD phase-derived deny rules in pool assembly (Part D3) and runtime ga
 from __future__ import annotations
 
 import asyncio
-
 from collections.abc import Callable
 from typing import Any
 
-from app.loop.context import AppState, AppStateStore, tool_context_for
-
-
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.gate import has_permissions_to_use_tool
 from app.loop.permissions.tdd import (

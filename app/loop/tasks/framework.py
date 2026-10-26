@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from app.loop.context import AppState
+from app.loop.context.app_state import AppState
 
 SetAppState = Callable[[Callable[[AppState], AppState]], None]
 

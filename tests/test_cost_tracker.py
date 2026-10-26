@@ -9,8 +9,13 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
-from app.loop.cost import CostTracker, ModelUsage, Usage, usage_from_langchain
-from app.loop.cost.tracker import format_total_cost
+from app.loop.cost.model_cost import Usage
+from app.loop.cost.tracker import (
+    CostTracker,
+    ModelUsage,
+    format_total_cost,
+    usage_from_langchain,
+)
 
 
 def _result(usage: dict | None, model: str | None = None, key: str = "model_name") -> LLMResult:
@@ -157,7 +162,8 @@ def test_format_total_cost():
 def test_the_context_carries_the_runs_tracker():
     from types import SimpleNamespace
 
-    from app.loop.context import AppStateStore, ToolContext, tool_context_for
+    from app.loop.context.app_state import AppStateStore
+    from app.loop.context.tool_context import ToolContext, tool_context_for
 
     assert ToolContext.__dataclass_fields__["cost_tracker"].default is None
     tracker = CostTracker(model="m")

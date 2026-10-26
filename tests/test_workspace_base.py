@@ -5,6 +5,7 @@ Unit tests for the Workspace protocol base abstractions and error hierarchy (Par
 from __future__ import annotations
 
 from pathlib import Path
+
 import pytest
 
 from app.workspace.base import (

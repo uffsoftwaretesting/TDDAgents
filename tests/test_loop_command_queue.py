@@ -81,6 +81,6 @@ def test_an_empty_queue():
 
 def test_app_state_carries_the_task_registry():
     """`appState.tasks`, empty at the start of a run."""
-    from app.loop.context import AppState
+    from app.loop.context.app_state import AppState
 
     assert AppState().tasks == {}

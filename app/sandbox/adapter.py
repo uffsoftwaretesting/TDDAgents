@@ -34,7 +34,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, List
 
-from e2b_code_interpreter import Sandbox
 from e2b import (
     AuthenticationException,
     NotEnoughSpaceException,
@@ -44,6 +43,7 @@ from e2b import (
     TimeoutException,
 )
 from e2b.exceptions import RateLimitException
+from e2b_code_interpreter import Sandbox
 
 from app.config.config import Config
 from app.workspace.base import (

@@ -8,12 +8,13 @@ Mandatory quality gate check required by CLAUDE.md for exempt seam modules:
 from __future__ import annotations
 
 import inspect
+
 import e2b
-import e2b.exceptions
 import e2b.connection_config
-from e2b.sandbox_sync.filesystem.filesystem import Filesystem
-from e2b.sandbox_sync.commands.command import Commands
+import e2b.exceptions
 import e2b_code_interpreter
+from e2b.sandbox_sync.commands.command import Commands
+from e2b.sandbox_sync.filesystem.filesystem import Filesystem
 
 
 def test_e2b_exceptions_surface() -> None:

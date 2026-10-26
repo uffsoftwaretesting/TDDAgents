@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context import CancelToken
-from app.loop.hooks import exec_prompt as ep
+import app.loop.hooks.exec_prompt as ep
+from app.loop.context.tool_context import CancelToken
 from app.loop.hooks.exec_prompt import (
     DEFAULT_PROMPT_HOOK_TIMEOUT_MS,
     HOOK_RESPONSE_JSON_SCHEMA,

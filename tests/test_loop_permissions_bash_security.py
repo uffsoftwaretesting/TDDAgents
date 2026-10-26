@@ -7,11 +7,11 @@ test pins the bypass that motivated its validator.
 
 import pytest
 
-from app.loop.permissions import bash_security as bs
+import app.loop.permissions.bash_security as bs
 from app.loop.permissions.bash_security import (
+    EARLY_VALIDATORS,
     NON_MISPARSING_VALIDATORS,
     VALIDATORS,
-    EARLY_VALIDATORS,
     ZSH_DANGEROUS_COMMANDS,
     bash_command_is_safe,
     build_validation_context,

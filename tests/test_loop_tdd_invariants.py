@@ -18,7 +18,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.config import build_run_config
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.deps import LoopDeps
 from app.loop.engine import run_loop
 from app.loop.ledger import PhaseLedger, TddPhase
@@ -27,7 +28,11 @@ from app.loop.permissions.tdd import (
     IMPLEMENTATION_WRITER_TOOL_NAMES,
     is_implementation_writing_tool,
 )
-from app.loop.permissions.types import PermissionBehavior, PermissionMode, ToolPermissionContext
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionMode,
+    ToolPermissionContext,
+)
 from app.loop.state import initial_loop_state
 from app.loop.tdd.hooks import tdd_phase_incomplete_hook
 from app.loop.tools.base import BuiltTool, Tool, build_tool

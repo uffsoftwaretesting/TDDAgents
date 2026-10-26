@@ -8,7 +8,8 @@ from app.loop.attachments.types import (
     normalize_attachment_for_api,
     wrap_command_text,
 )
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.tasks.local_agent_task import queue_pending_message, register_async_agent
 
 

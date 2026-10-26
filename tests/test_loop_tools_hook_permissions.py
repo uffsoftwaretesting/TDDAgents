@@ -15,7 +15,9 @@ from typing import Any
 
 import pytest
 
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
+from app.loop.hooks.output import AggregatedHookResult
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.types import (
     PermissionBehavior,
@@ -29,7 +31,6 @@ from app.loop.tools.hook_permissions import (
     HookPermissionVerdict,
     resolve_hook_permission_decision,
 )
-from app.loop.hooks.output import AggregatedHookResult
 from tests.hook_doubles import ScriptedDispatcher
 
 
@@ -180,7 +181,10 @@ def test_a_hook_ask_without_a_message_names_the_hook(monkeypatch):
 
 
 def test_a_hook_ask_is_denied_where_no_prompt_can_be_shown():
-    from app.loop.permissions.messages import auto_reject_message, dont_ask_reject_message
+    from app.loop.permissions.messages import (
+        auto_reject_message,
+        dont_ask_reject_message,
+    )
 
     resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK, message="m"))
     assert (resolved.decision.behavior, resolved.decision.message) == (

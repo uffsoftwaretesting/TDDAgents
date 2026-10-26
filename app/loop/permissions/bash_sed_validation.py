@@ -26,7 +26,11 @@ from typing import TYPE_CHECKING
 
 from app.loop.permissions.bash_commands import split_command
 from app.loop.permissions.bash_security import try_parse_shell_command
-from app.loop.permissions.types import PermissionBehavior, PermissionMode, PermissionResult
+from app.loop.permissions.types import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionResult,
+)
 
 if TYPE_CHECKING:
     from app.loop.permissions.types import ToolPermissionContext

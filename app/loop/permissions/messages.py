@@ -21,7 +21,11 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from app.loop.permissions.types import PermissionMode, PermissionRule, PermissionRuleSource
+from app.loop.permissions.types import (
+    PermissionMode,
+    PermissionRule,
+    PermissionRuleSource,
+)
 
 #: `DENIAL_WORKAROUND_GUIDANCE` (`src/utils/messages.ts`).
 DENIAL_WORKAROUND_GUIDANCE = (

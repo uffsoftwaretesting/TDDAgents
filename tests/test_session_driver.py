@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
+import app.session.driver as driver
 from app.config.config import Config
-from app.session import driver
 from app.session.driver import (
     MEMORY_CHECKPOINT,
     SessionOptions,

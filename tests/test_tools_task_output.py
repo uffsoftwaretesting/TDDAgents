@@ -6,7 +6,8 @@ import asyncio
 
 import pytest
 
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.tasks.local_agent_task import (
     complete_agent_task,
     fail_agent_task,

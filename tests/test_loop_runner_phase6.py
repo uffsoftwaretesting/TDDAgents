@@ -11,7 +11,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from app.loop.cost import CostTracker
+from app.loop.cost.tracker import CostTracker
 from app.loop.factory import get_production_deps
 from app.loop.runner import tdd_loop_runner
 from app.loop.storage.paths import get_project_dir

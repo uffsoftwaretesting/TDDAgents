@@ -21,7 +21,8 @@ from app.loop.agents.tool import (
     map_agent_result,
     phase_on_spawn,
 )
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.model_aliases import MODEL_ALIASES
 from app.loop.permissions.types import (

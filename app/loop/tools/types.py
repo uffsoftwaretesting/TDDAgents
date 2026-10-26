@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from app.loop.permissions.types import PermissionResult
 
 if TYPE_CHECKING:
-    from app.loop.context import ToolContext
+    from app.loop.context.tool_context import ToolContext
 
 __all__ = [
     "ContextModifier",

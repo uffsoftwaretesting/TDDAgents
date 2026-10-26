@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.hooks.messages import HookAttachment, HookBlockingError
 from app.loop.hooks.output import AggregatedHookResult
 from app.loop.hooks.tool_hooks import (

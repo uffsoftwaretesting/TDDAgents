@@ -10,7 +10,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.config import build_run_config
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.deps import LoopDeps
 from app.loop.engine import drain, run_loop
 from app.loop.ledger import PhaseLedger, TddPhase

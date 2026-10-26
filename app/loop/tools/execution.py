@@ -50,7 +50,7 @@ from app.loop.tools.types import ContextModifier, ToolResult
 from app.loop.tools.validation import INPUT_VALIDATION_ERROR, validate_against_schema
 
 if TYPE_CHECKING:
-    from app.loop.context import ToolContext
+    from app.loop.context.tool_context import ToolContext
 
 SYNTHETIC_TOOL_RESULT_PLACEHOLDER = "[Tool result missing due to internal error]"
 CANCEL_MESSAGE = (

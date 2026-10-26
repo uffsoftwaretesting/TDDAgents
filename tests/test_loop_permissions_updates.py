@@ -16,14 +16,19 @@ from typing import Any
 
 import pytest
 
-from app.loop.context import AppState, AppStateStore, tool_context_for
+import app.loop.permissions.updates as up
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
+from app.loop.hooks.output import AggregatedHookResult
 from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions import updates as up
 from app.loop.permissions.permission_request import (
     apply_hook_permission_updates,
     run_permission_request_hooks_for_headless_agent,
 )
-from app.loop.permissions.settings import SettingsLocations, build_tool_permission_context
+from app.loop.permissions.settings import (
+    SettingsLocations,
+    build_tool_permission_context,
+)
 from app.loop.permissions.types import (
     PermissionBehavior,
     PermissionMode,
@@ -31,7 +36,6 @@ from app.loop.permissions.types import (
     PermissionRuleSource,
     ToolPermissionContext,
 )
-from app.loop.hooks.output import AggregatedHookResult
 from tests.hook_doubles import ScriptedDispatcher
 
 S = PermissionRuleSource

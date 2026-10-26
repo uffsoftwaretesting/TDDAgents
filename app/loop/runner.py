@@ -56,14 +56,15 @@ from langchain_core.messages import HumanMessage
 from app.loop.agents.memory import AgentMemoryStore
 from app.loop.command_queue import CommandQueue, QueuedCommand
 from app.loop.config import RunConfig, build_run_config
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.coordinator import (
     apply_coordinator_tool_filter,
     get_coordinator_system_prompt,
     get_coordinator_user_context,
     is_coordinator_mode,
 )
-from app.loop.cost import CostTracker
+from app.loop.cost.tracker import CostTracker
 from app.loop.deps import LoopDeps
 from app.loop.events import TransitionEventRecorder, events_path
 from app.loop.hooks.execute import HookDispatcher
@@ -471,7 +472,7 @@ async def wait_for_background_work(engine: QueryEngine, ctx: Any, store: AppStat
     (`processUserInput` runs them for `prompt` mode only); its user-input attachments are
     collected as for any input.
     """
-    from app.loop.attachments import get_attachment_messages
+    from app.loop.attachments.pipeline import get_attachment_messages
 
     queue: CommandQueue = ctx.command_queue
     while True:
@@ -575,7 +576,7 @@ async def _run_with_hooks(
     messages = (*session.messages, *first_turn, HumanMessage(content=prompt_text), *prompt.messages)
     # `processUserInput`: the user-input attachments (the initial TDD state among them),
     # persisted into the history the loop starts from.
-    from app.loop.attachments import get_attachment_messages
+    from app.loop.attachments.pipeline import get_attachment_messages
 
     attachments = await get_attachment_messages(ctx, messages, user_input=prompt_text)
     messages = (*messages, *attachments)

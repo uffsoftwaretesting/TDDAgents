@@ -60,7 +60,7 @@ from app.loop.permissions.types import (
 )
 
 if TYPE_CHECKING:
-    from app.loop.context import ToolContext
+    from app.loop.context.tool_context import ToolContext
     from app.loop.tools.base import Tool
 
 logger = logging.getLogger("TDDOrchestrator.Permissions")

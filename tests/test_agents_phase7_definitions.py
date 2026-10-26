@@ -169,7 +169,7 @@ class TestDefinitionsWithOverrides:
     def test_no_prompt_registry_is_consulted(self):
         import inspect
 
-        from app.loop.agents import loader
+        import app.loop.agents.loader as loader
 
         assert "global_prompt_registry" not in inspect.getsource(loader)
 
@@ -528,9 +528,8 @@ class TestTriageLoader:
         assert parse_markdown_frontmatter("---\n- a list\n---\nbody") == ({}, "body")
 
 
-
-
 # ── Phase 8: preloaded skills ───────────────────────────────────────────────
+
 
 def test_skills_parse_as_upstreams_tool_lists():
     """`parseAgentFromMarkdown`: `skills` goes through `parseSlashCommandToolsFromFrontmatter`."""

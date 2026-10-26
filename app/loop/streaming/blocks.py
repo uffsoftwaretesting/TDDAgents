@@ -32,9 +32,12 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterable, AsyncIterator, Iterator, cast
 
+from langchain_core.messages import (
+    AIMessageChunk,
+    BaseMessage,
+    message_chunk_to_message,
+)
 from langchain_core.messages.tool import ToolCallChunk
-
-from langchain_core.messages import AIMessageChunk, BaseMessage, message_chunk_to_message
 
 #: Identifies the block a piece of a chunk belongs to: the text block, or one tool call.
 BlockKey = tuple[str, int]

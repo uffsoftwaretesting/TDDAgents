@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from app.loop.context import CancelToken
-from app.loop.hooks import exec_command as ec
+import app.loop.hooks.exec_command as ec
+from app.loop.context.tool_context import CancelToken
 from app.loop.hooks.async_registry import AsyncHookRegistry
 from app.loop.hooks.exec_command import (
     PROJECT_DIR_ENV,

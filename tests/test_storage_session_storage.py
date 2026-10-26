@@ -13,8 +13,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+import app.loop.storage.session_storage as session_storage
 from app.loop.compact.compact import create_compact_boundary_message
-from app.loop.storage import session_storage
 from app.loop.storage.entries import message_uuid
 from app.loop.storage.session_storage import TranscriptStore
 

@@ -10,7 +10,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.run_agent import create_agent_id, run_agent
-from app.loop.context import AppState, AppStateStore, tool_context_for
+from app.loop.context.app_state import AppState, AppStateStore
+from app.loop.context.tool_context import tool_context_for
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.permissions.types import PermissionMode, ToolPermissionContext
 from app.loop.storage.session_storage import TranscriptStore
@@ -231,7 +232,7 @@ def test_the_worker_starts_from_fresh_per_agent_state():
 
 
 def test_denial_tracking_is_shared_only_by_a_sync_worker():
-    from app.loop.context import DenialTrackingBox
+    from app.loop.context.tool_context import DenialTrackingBox
 
     box = DenialTrackingBox()
     parent = dataclasses.replace(_parent(), local_denial_tracking=box)
@@ -287,7 +288,7 @@ def test_only_next_turns_count_toward_max_turns():
 
 
 def test_closing_the_worker_closes_its_loop(monkeypatch):
-    from app.loop.agents import run_agent as run_agent_mod
+    import app.loop.agents.run_agent as run_agent_mod
 
     closed: list[bool] = []
 
@@ -368,7 +369,7 @@ def test_an_async_worker_writes_task_state_through_to_the_root():
 
 
 def test_an_async_worker_has_its_own_cancel_token_unless_given_one():
-    from app.loop.context import CancelToken
+    from app.loop.context.tool_context import CancelToken
 
     parent = _parent()
     model, _ = _run(parent=parent, is_async=True)

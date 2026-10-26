@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context import assembly as a
+import app.loop.context.assembly as a
 from app.loop.context.assembly import (
     STATIC_SECTION_FILES,
     append_system_context,

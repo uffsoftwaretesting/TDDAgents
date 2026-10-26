@@ -23,9 +23,9 @@ from app.config.config import Config
 from app.workspace.base import (
     CommandResult,
     FileEntry,
+    WorkspaceKind,
     WorkspaceNotFound,
     WorkspacePathError,
-    WorkspaceKind,
     WorkspaceProviderError,
     WorkspaceTimeout,
     normalize_path,

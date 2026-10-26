@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.compact import compact as cc
+import app.loop.compact.compact as cc
 from app.loop.compact.compact import (
     ERROR_MESSAGE_INCOMPLETE_RESPONSE,
     ERROR_MESSAGE_NOT_ENOUGH_MESSAGES,
@@ -32,8 +32,9 @@ from app.loop.compact.compact import (
 )
 from app.loop.compact.grouping import group_messages_by_api_round
 from app.loop.compact.prompt import get_compact_prompt
-from app.loop.context import AppStateStore, tool_context_for
+from app.loop.context.app_state import AppStateStore
 from app.loop.context.file_state import FileState
+from app.loop.context.tool_context import tool_context_for
 from tests.conftest import FakeWorkspace
 from tests.hook_doubles import ScriptedDispatcher
 
