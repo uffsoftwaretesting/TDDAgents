@@ -122,25 +122,6 @@ def get_global_token_tracker() -> GlobalTokenTracker:
     return _global_token_tracker
 
 
-def get_token_usage_summary() -> dict[str, Any]:
-    """Return structured token usage metrics summary (Plan D1)."""
-    return _global_token_tracker.summary()
-
-
-async def accumulate_stream(stream: AsyncIterable[Any]) -> AsyncIterator[Message]:
-    """
-    Turn a provider stream into complete assistant messages, one per content block.
-
-    Thin alias for `frame_content_blocks`, which ports upstream's `content_block_stop`
-    emission. The engine dispatches tools from every message it receives (Part F2), so it
-    must never see a partial chunk — an `AIMessageChunk` mid-stream carries tool calls with
-    an empty name or truncated arguments — and it must see a finished tool call as soon as
-    that call's own block closes, not when the whole answer ends.
-    """
-    async for message in frame_content_blocks(stream):
-        yield message
-
-
 def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext) -> AsyncIterable[Any]:
     """
     Build the request and open the provider stream. One attempt, no iteration.

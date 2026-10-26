@@ -61,9 +61,6 @@ class SuiteExecutionResult:
     __test__: bool = False
 
 
-# Backward-compatible alias
-TestExecutionResult = SuiteExecutionResult
-
 TestRunner = Callable[[str, ToolContext], Awaitable[SuiteExecutionResult] | SuiteExecutionResult]
 
 

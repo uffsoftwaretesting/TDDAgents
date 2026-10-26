@@ -38,7 +38,6 @@ from app.loop.engine import (
     BlockingLimitError,
     LoopEvent,
     LoopNeverTerminated,
-    ModelCallError,
     PromptTooLongError,
     _has_hook_stopped,
     _is_api_error,
@@ -469,15 +468,6 @@ class TestAllTerminalReturns:
             if False:
                 yield AIMessage(content="")
             raise RuntimeError("API failure")
-
-        events = collect(failing_model)
-        assert events == [Terminated(reason=Terminal.MODEL_ERROR)]
-
-    def test_terminal_model_call_error(self):
-        async def failing_model(s: LoopState, c: RunConfig) -> AsyncIterator[Message]:
-            if False:
-                yield AIMessage(content="")
-            raise ModelCallError("model provider failed")
 
         events = collect(failing_model)
         assert events == [Terminated(reason=Terminal.MODEL_ERROR)]

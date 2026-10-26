@@ -75,10 +75,6 @@ class PromptTooLongError(Exception):
     """Raised when the prompt exceeds the model context window limit."""
 
 
-class ModelCallError(Exception):
-    """Raised when the model provider call encounters an unrecoverable failure."""
-
-
 def _is_api_error(message: Message, error_type: str) -> bool:
     if getattr(message, "api_error", None) == error_type:
         return True

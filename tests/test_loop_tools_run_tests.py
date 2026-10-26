@@ -194,12 +194,9 @@ def test_fails_closed_without_a_workspace():
     assert store.get().phase_ledger == ledger
 
 
-def test_suite_execution_result_defaults_and_alias():
-    from app.loop.tools.run_tests import TestExecutionResult
-
+def test_suite_execution_result_defaults():
     res = SuiteExecutionResult(exit_code=0)
     assert (res.exit_code, res.stdout, res.stderr, res.__test__) == (0, "", "", False)
-    assert TestExecutionResult is SuiteExecutionResult
 
 
 class _Wrap:

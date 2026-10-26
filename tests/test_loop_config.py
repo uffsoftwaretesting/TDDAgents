@@ -21,18 +21,6 @@ class TestBuildRunConfig:
         """Not minted here: K1 derives it from the spec so a run can be resumed."""
         assert build_run_config("tdd-abc123", postgres_checkpointing=True).run_id == "tdd-abc123"
 
-    def test_web_tools_are_available_when_the_key_is_configured(self, monkeypatch):
-        monkeypatch.setattr(Config, "TAVILY_API_KEY", "tvly-configured")
-        assert build_run_config("r", postgres_checkpointing=False).gates.web_tools_available is True
-
-    def test_web_tools_are_unavailable_when_the_key_is_unset(self, monkeypatch):
-        monkeypatch.setattr(Config, "TAVILY_API_KEY", None)
-        assert build_run_config("r", postgres_checkpointing=False).gates.web_tools_available is False
-
-    def test_an_empty_key_is_not_a_key(self, monkeypatch):
-        monkeypatch.setattr(Config, "TAVILY_API_KEY", "")
-        assert build_run_config("r", postgres_checkpointing=False).gates.web_tools_available is False
-
     @pytest.mark.parametrize("live", [True, False])
     def test_checkpointing_is_reported_by_the_caller_that_attempted_it(self, live):
         config = build_run_config("r", postgres_checkpointing=live)
@@ -51,9 +39,9 @@ class TestTheSnapshotIsImmutable:
 
     def test_the_gates_are_frozen(self):
         """A gate that could flip mid-run would defeat the reason for snapshotting it."""
-        gates = Gates(web_tools_available=True, postgres_checkpointing=True, coordinator_mode=False)
+        gates = Gates(postgres_checkpointing=True, coordinator_mode=False)
         with pytest.raises(FrozenInstanceError):
-            gates.web_tools_available = False  # type: ignore[misc]
+            gates.postgres_checkpointing = False  # type: ignore[misc]
 
 
 class TestNoCeilings:
@@ -85,7 +73,6 @@ class TestNoCeilings:
         assert numeric == ["max_retries"]
 
     def test_the_model_is_resolved_once_from_config(self):
-        from app.config.config import Config
 
         config = build_run_config("r", postgres_checkpointing=True)
         assert config.model == Config.MODEL

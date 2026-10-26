@@ -17,12 +17,12 @@ from app.loop.context.assembly import reset_session_context
 from app.loop.ledger import PhaseLedger, TddPhase
 from app.loop.messages import tool_calls_in
 from app.loop.model import (
-    accumulate_stream,
     build_request_messages,
     convert_tool_to_langchain,
     stream_call_model,
 )
 from app.loop.state import initial_loop_state
+from app.loop.streaming.blocks import frame_content_blocks
 from app.loop.tools.base import build_tool
 from app.loop.tools.types import ToolResult
 from tests.conftest import FakeWorkspace
@@ -210,7 +210,7 @@ async def _aiter(items):
 
 def _accumulate(items):
     async def go():
-        return [m async for m in accumulate_stream(_aiter(items))]
+        return [m async for m in frame_content_blocks(_aiter(items))]
     return asyncio.run(go())
 
 

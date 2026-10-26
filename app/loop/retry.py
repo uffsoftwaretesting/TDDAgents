@@ -29,7 +29,7 @@ import logging
 import random
 import re
 from dataclasses import dataclass, field, replace
-from typing import Any, Awaitable, Callable, Mapping, TypeVar
+from typing import Awaitable, Callable, Mapping, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -359,10 +359,6 @@ async def with_retry(
             attempt += 1
 
     raise CannotRetryError(last_error, context)
-
-
-def _unused(*_args: Any) -> None:  # pragma: no cover - keeps `Any` imported for typing users
-    return None
 
 
 __all__ = [

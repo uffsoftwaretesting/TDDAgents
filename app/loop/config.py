@@ -39,18 +39,11 @@ class Gates:
     """
     Environment facts frozen at entry, because a mid-run flip would be invisible.
 
-    `web_tools_available` decides whether the web tools exist in the roster at all. If the
-    key were read per turn, a run could assemble a different tool pool at turn 9 than at
-    turn 1 — which changes the prompt prefix, and so both the model's options and the
-    cache key, for reasons no transcript would record.
-
     `postgres_checkpointing` records whether the run is actually persisting to Postgres or
-    fell back to an in-memory checkpointer. That fallback exists today in the orchestrator
-    and is currently only a log line; as a gate it is a fact the run can be judged against
+    fell back to an in-memory checkpointer (`app/session/checkpointer.py`). As a gate it is a fact the run can be judged against
     afterwards — a resumable run and an unresumable one are not the same experiment.
     """
 
-    web_tools_available: bool
     postgres_checkpointing: bool
     #: Upstream `isCoordinatorMode()` (`CLAUDE_CODE_COORDINATOR_MODE`), here
     #: `TDDAGENTS_COORDINATOR_MODE`: the main thread orchestrates workers (Phase 7).
@@ -115,7 +108,6 @@ def build_run_config(
     return RunConfig(
         run_id=run_id,
         gates=Gates(
-            web_tools_available=bool(Config.TAVILY_API_KEY),
             postgres_checkpointing=postgres_checkpointing,
             coordinator_mode=os.environ.get("TDDAGENTS_COORDINATOR_MODE", "").strip().lower()
             in ("1", "true", "yes", "on"),
