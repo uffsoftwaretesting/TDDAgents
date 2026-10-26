@@ -165,7 +165,7 @@ def test_write_session_artifacts(tmp_path: Path) -> None:
     assert "# Spec" in (artifacts / "engineer_specifications.txt").read_text()
     assert "[Analyst]: ok" in (artifacts / "confirmed_user_requirements.txt").read_text()
     report = (artifacts / "subreq_results.txt").read_text()
-    assert "- Requirement: B\n  Reason: boom" in report
+    assert "2. [FAILED ] B\n" in report and "   Reason: boom\n" in report
 
 
 def test_write_session_artifacts_without_a_plan(tmp_path: Path) -> None:
@@ -458,8 +458,10 @@ def test_artifact_files_exact(tmp_path: Path) -> None:
     assert (artifacts / "confirmed_user_requirements.txt").read_text(encoding="utf-8") == (
         f"REQUIREMENTS SUBMITTED BY THE USER\n{bar}\n[User]: Build X\n{bar}\n"
     )
-    pass_rate = (artifacts / "subreq_results.txt").read_text(encoding="utf-8")
-    assert "Total sub-requirements: 0" in pass_rate and "1. [NOT_RUN] A" in pass_rate
+    assert (artifacts / "subreq_results.txt").read_text(encoding="utf-8") == (
+        f"SUB-REQUIREMENT RESULTS\n{bar}\nTotal sub-requirements: 1\nSuccess: 0\nFailed: 0\nNot run: 1\n"
+        f"{'-' * 80}\n1. [NOT_RUN] A\n{bar}\n"
+    )
 
 
 def test_initial_prompt_keeps_blank_lines(tmp_path: Path) -> None:
@@ -468,15 +470,45 @@ def test_initial_prompt_keeps_blank_lines(tmp_path: Path) -> None:
     assert text.split("\n")[2:6] == ["a", "", "", "b"]
 
 
-def test_artifact_counts_reach_the_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, Any] = {}
-    monkeypatch.setattr(entry, "write_resilience_metrics", lambda *a: seen.setdefault("resilience", a))
-    monkeypatch.setattr(entry, "write_pass_rate_report", lambda *a: seen.setdefault("pass_rate", a))
-    results = [{"index": 0, "status": "failed", "sub_requirement": "A", "error_message": "e"}]
-    artifacts = entry.write_session_artifacts(str(tmp_path), {
-        "plan": ["A"], "success_count": 2, "failure_count": 3, "subreq_results": results})
-    assert seen["resilience"] == (artifacts, 3, 0, 0, 0)
-    assert seen["pass_rate"] == (artifacts, ["A"], results, 2, 3, [{"requirement": "A", "reason": "e"}])
+def test_subreq_results_exact(tmp_path: Path) -> None:
+    results = [
+        {"index": 0, "status": "success", "sub_requirement": "A", "terminal_reason": "completed",
+         "red_confirmed": True, "green_passed": True, "error_message": "ignored on success"},
+        {"index": 1, "status": "failed", "sub_requirement": "B", "terminal_reason": "model_error",
+         "red_confirmed": True, "green_passed": False, "error_message": "boom"},
+        {"index": 2, "status": "aborted", "sub_requirement": "C", "terminal_reason": "aborted_tools",
+         "red_confirmed": False, "green_passed": False},
+        {"index": "x", "status": "success"},
+    ]
+    entry.write_subreq_results(str(tmp_path), ["A", "B", "C", "D"], results)
+    bar = "=" * 80
+    assert (tmp_path / "subreq_results.txt").read_text(encoding="utf-8") == (
+        f"SUB-REQUIREMENT RESULTS\n{bar}\n"
+        "Total sub-requirements: 4\nSuccess: 1\nFailed: 1\nNot run: 1\n" + "-" * 80 + "\n"
+        "1. [SUCCESS] A\n   Terminal: completed | red_confirmed: True | green_passed: True\n"
+        "2. [FAILED ] B\n   Terminal: model_error | red_confirmed: True | green_passed: False\n   Reason: boom\n"
+        "3. [ABORTED] C\n   Terminal: aborted_tools | red_confirmed: False | green_passed: False\n"
+        f"4. [NOT_RUN] D\n{bar}\n"
+    )
+
+
+def test_subreq_results_without_a_plan_lists_the_results(tmp_path: Path) -> None:
+    results = [{"index": 1, "status": "success", "sub_requirement": "B", "terminal_reason": "completed",
+                "red_confirmed": True, "green_passed": True},
+               {"index": 0, "status": "failed", "sub_requirement": "A", "terminal_reason": "model_error",
+                "red_confirmed": False, "green_passed": False}]
+    entry.write_subreq_results(str(tmp_path), [], results)
+    text = (tmp_path / "subreq_results.txt").read_text(encoding="utf-8")
+    assert "Total sub-requirements: 2\n" in text and "Not run: 0\n" in text
+    assert text.index("1. [FAILED ] A") < text.index("2. [SUCCESS] B")
+
+
+def test_subreq_results_with_nothing(tmp_path: Path) -> None:
+    entry.write_subreq_results(str(tmp_path), [], [])
+    bar = "=" * 80
+    assert (tmp_path / "subreq_results.txt").read_text(encoding="utf-8") == (
+        f"SUB-REQUIREMENT RESULTS\n{bar}\n(no results)\n{bar}\n"
+    )
 
 
 def test_token_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:

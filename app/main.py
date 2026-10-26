@@ -46,8 +46,6 @@ from app.session.driver import (
     fresh_thread_id,
 )
 from app.session.export import export_run_workspace
-from app.utils.pass_rate import write_pass_rate_report
-from app.utils.resilience_metrics import write_resilience_metrics
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -320,12 +318,42 @@ def write_session_artifacts(workspace_dir: str, values: dict[str, Any]) -> str:
         formatted_requirements,
     )
 
-    success = int(values.get("success_count") or 0)
-    failure = int(values.get("failure_count") or 0)
-    failed = failed_requirements(values)
-    write_resilience_metrics(artifacts_dir, failure, 0, 0, 0)
-    write_pass_rate_report(artifacts_dir, plan, list(values.get("subreq_results") or []), success, failure, failed)
+    write_subreq_results(artifacts_dir, plan, list(values.get("subreq_results") or []))
     return artifacts_dir
+
+
+_STATUS_LABELS = {"success": "SUCCESS", "failed": "FAILED"}
+
+
+def write_subreq_results(artifacts_dir: str, plan: list[str], results: list[dict[str, Any]]) -> None:
+    """Each plan item's outcome (`PlanItemResult`): status, terminal reason and the final ledger."""
+    by_index = {item["index"]: item for item in results if isinstance(item.get("index"), int)}
+    statuses = [str(item.get("status")) for item in by_index.values()]
+    requirements = plan or [str(by_index[i].get("sub_requirement", "")) for i in sorted(by_index)]
+    lines = [
+        f"Total sub-requirements: {len(requirements)}",
+        f"Success: {statuses.count('success')}",
+        f"Failed: {statuses.count('failed')}",
+        f"Not run: {sum(1 for i in range(len(requirements)) if i not in by_index)}",
+        "-" * 80,
+    ]
+    for idx, requirement in enumerate(requirements):
+        item = by_index.get(idx)
+        if item is None:
+            lines.append(f"{idx + 1}. [NOT_RUN] {requirement}")
+            continue
+        status = str(item.get("status"))
+        lines.append(f"{idx + 1}. [{_STATUS_LABELS.get(status, status.upper()):<7}] {requirement}")
+        lines.append(
+            f"   Terminal: {item.get('terminal_reason')} | red_confirmed: {item.get('red_confirmed')}"
+            f" | green_passed: {item.get('green_passed')}"
+        )
+        if status != "success" and item.get("error_message"):
+            lines.append(f"   Reason: {item['error_message']}")
+    _write_text(
+        os.path.join(artifacts_dir, "subreq_results.txt"), "SUB-REQUIREMENT RESULTS",
+        "\n".join(lines) if requirements else "(no results)",
+    )
 
 
 def report(run: SessionRun, thread_id: str, workspace: Any) -> None:

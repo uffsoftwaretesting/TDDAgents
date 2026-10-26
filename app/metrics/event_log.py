@@ -7,14 +7,15 @@ for loop transitions, ledger changes, stop hooks, and plan items.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from enum import StrEnum
 import json
 import logging
-from pathlib import Path
 import time
-from typing import Any, Iterator
 import uuid
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass, field
+from enum import StrEnum
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
