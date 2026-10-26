@@ -23,13 +23,6 @@ from app.workspace.base import (
 )
 from app.workspace.e2b import E2BWorkspace
 from app.workspace.local import LocalWorkspace
-from app.workspace.router import (
-    DEFAULT_SPEC,
-    VALID_SPECS,
-    DualWorkspace,
-    WorkspaceSpec,
-    resolve_workspace,
-)
 
 __all__ = [
     "CommandResult",
@@ -49,9 +42,4 @@ __all__ = [
     "normalize_path",
     "E2BWorkspace",
     "LocalWorkspace",
-    "DualWorkspace",
-    "WorkspaceSpec",
-    "VALID_SPECS",
-    "DEFAULT_SPEC",
-    "resolve_workspace",
 ]

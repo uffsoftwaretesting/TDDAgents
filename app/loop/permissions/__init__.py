@@ -7,13 +7,6 @@ Ported from:
 
 from __future__ import annotations
 
-from app.loop.permissions.capability import (
-    READ_ONLY_BASE_COMMANDS,
-    bash_is_read_only,
-    has_output_redirection,
-    is_bash_command_read_only,
-    split_shell_commands,
-)
 from app.loop.permissions.filesystem import (
     DANGEROUS_DIRECTORIES,
     DANGEROUS_FILES,
@@ -66,11 +59,6 @@ __all__ = [
     # Runtime gate (C3)
     "has_permissions_to_use_tool",
     # Capability (C4)
-    "READ_ONLY_BASE_COMMANDS",
-    "is_bash_command_read_only",
-    "bash_is_read_only",
-    "has_output_redirection",
-    "split_shell_commands",
     # Filesystem & boundary (C5)
     "DANGEROUS_FILES",
     "DANGEROUS_DIRECTORIES",

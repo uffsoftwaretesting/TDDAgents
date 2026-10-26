@@ -4,7 +4,6 @@ Comprehensive mutation booster tests for Part I: Agents and delegation.
 Guarantees >= 90% mutation test score across app/loop/agents/:
 - app/loop/agents/loader.py
 - app/loop/agents/memory.py
-- app/loop/agents/fork.py
 - app/loop/agents/resolution.py
 - app/loop/agents/tool.py
 """
@@ -17,27 +16,11 @@ import shutil
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.loop.agents.definition import AgentDefinition, AgentFrontmatterError
-from app.loop.agents.fork import (
-    FORK_AGENT,
-    FORK_BOILERPLATE_TAG,
-    FORK_DIRECTIVE_PREFIX,
-    FORK_PLACEHOLDER_RESULT,
-    FORK_SUBAGENT_TYPE,
-    _get_tool_result_ids_from_message,
-    _get_tool_use_ids_from_assistant,
-    build_child_message,
-    build_forked_messages,
-    build_worktree_notice,
-    filter_incomplete_tool_calls,
-    is_in_fork_child,
-)
 from app.loop.agents.loader import (
     _scan_agent_dir,
     get_agent_definitions_with_overrides,
@@ -510,142 +493,6 @@ class TestMemoryStoreBooster:
 # ==============================================================================
 
 
-class TestForkContextBooster:
-    def test_fork_constants(self) -> None:
-        assert FORK_SUBAGENT_TYPE == "fork"
-        assert FORK_AGENT.name == "fork"
-        assert FORK_AGENT.tools == ("*",)
-        assert FORK_AGENT.permission_mode is None
 
-    def test_build_worktree_notice_exact(self) -> None:
-        expected = (
-            "You've inherited the conversation context above from a parent agent working in /parent. "
-            "You are operating in an isolated git worktree at /worktree — same repository, "
-            "same relative file structure, separate working copy. Paths in the inherited context refer to "
-            "the parent's working directory; translate them to your worktree root. Re-read files before editing "
-            "if the parent may have modified them since they appear in the context. Your changes stay in this "
-            "worktree and will not affect the parent's files."
-        )
-        assert build_worktree_notice("/parent", "/worktree") == expected
 
-    def test_build_child_message_exact(self) -> None:
-        directive = "Fix bug in calculation"
-        msg = build_child_message(directive)
-        assert f"<{FORK_BOILERPLATE_TAG}>" in msg
-        assert f"</{FORK_BOILERPLATE_TAG}>" in msg
-        assert "STOP. READ THIS FIRST." in msg
-        assert "RULES (non-negotiable):" in msg
-        assert f"{FORK_DIRECTIVE_PREFIX}{directive}" in msg
 
-    def test_get_tool_use_ids_from_assistant_variations(self) -> None:
-        obj_tc = SimpleNamespace(id="tc_obj_1")
-        msg_obj = SimpleNamespace(type="assistant", tool_calls=[obj_tc])
-        assert _get_tool_use_ids_from_assistant(msg_obj) == ["tc_obj_1"]  # type: ignore
-
-        # Tool call as dict with empty id or no id
-        msg_empty = SimpleNamespace(
-            type="assistant",
-            tool_calls=[{"name": "foo"}, {"name": "bar", "id": ""}],
-        )
-        assert _get_tool_use_ids_from_assistant(msg_empty) == []  # type: ignore
-
-        # Content blocks
-        msg_blocks = AIMessage(
-            content=[
-                {"type": "text", "text": "calling"},
-                {"type": "tool_use", "id": "tc_block_1", "name": "foo"},
-                {"type": "tool_use", "id": "", "name": "bar"},
-                {"type": "other"},
-            ]
-        )
-        assert _get_tool_use_ids_from_assistant(msg_blocks) == ["tc_block_1"]
-
-    def test_get_tool_result_ids_from_message_variations(self) -> None:
-        tm = ToolMessage(content="ok", tool_call_id="call_99")
-        assert _get_tool_result_ids_from_message(tm) == ["call_99"]
-
-        # Message with content blocks having tool_use_id and tool_call_id
-        msg_blocks = HumanMessage(
-            content=[
-                {"type": "tool_result", "tool_use_id": "call_use_1"},
-                {"type": "tool_result", "tool_call_id": "call_call_2"},
-                {"type": "tool_result"},  # no id
-                {"type": "text", "text": "hello"},
-            ]
-        )
-        assert _get_tool_result_ids_from_message(msg_blocks) == ["call_use_1", "call_call_2"]
-
-    def test_filter_incomplete_tool_calls_variations(self) -> None:
-        msg = AIMessage(content="plain answer without tools")
-        assert filter_incomplete_tool_calls([msg]) == [msg]
-
-        # Assistant with incomplete tool use is dropped
-        asst_incomp = AIMessage(
-            content=[{"type": "tool_use", "id": "call_orphan", "name": "Bash"}]
-        )
-        assert filter_incomplete_tool_calls([asst_incomp]) == []
-
-        # Assistant with completed tool use is kept
-        tool_res = ToolMessage(content="output", tool_call_id="call_orphan")
-        assert filter_incomplete_tool_calls([asst_incomp, tool_res]) == [asst_incomp, tool_res]
-
-        # Non-AIMessage assistant object with type='assistant'
-        asst_obj = SimpleNamespace(
-            type="assistant",
-            tool_calls=[{"name": "Bash", "id": "call_obj"}],
-        )
-        assert filter_incomplete_tool_calls([asst_obj]) == []  # type: ignore
-        tool_obj_res = ToolMessage(content="output", tool_call_id="call_obj")
-        assert filter_incomplete_tool_calls([asst_obj, tool_obj_res]) == [asst_obj, tool_obj_res]  # type: ignore
-
-        # Message with no type attribute
-        msg_no_type = SimpleNamespace(content="user text")
-        assert filter_incomplete_tool_calls([msg_no_type]) == [msg_no_type]  # type: ignore
-
-    def test_is_in_fork_child_variations(self) -> None:
-        needle = f"<{FORK_BOILERPLATE_TAG}>"
-        assert is_in_fork_child([]) is False
-
-        # Content string match vs non-match
-        assert is_in_fork_child([HumanMessage(content=f"start {needle} end")]) is True
-        assert is_in_fork_child([HumanMessage(content="hello world")]) is False
-
-        # Content block string in tuple
-        msg_tuple = HumanMessage(content=(f"prefix {needle} suffix",))  # type: ignore
-        assert is_in_fork_child([msg_tuple]) is True
-
-        # Content block dict with text key
-        msg_dict = HumanMessage(content=[{"type": "text", "text": f"prefix {needle}"}])
-        assert is_in_fork_child([msg_dict]) is True
-
-        # Content block dict without text key or other types
-        msg_dict_no_text = SimpleNamespace(content=[{"type": "other", "data": 123}, 456])
-        assert is_in_fork_child([msg_dict_no_text]) is False  # type: ignore
-
-        # Message with no content attribute
-        msg_no_content = SimpleNamespace()
-        assert is_in_fork_child([msg_no_content]) is False  # type: ignore
-
-        # Message with non-string, non-list content (e.g. integer)
-        msg_int_content = SimpleNamespace(content=123)
-        assert is_in_fork_child([msg_int_content]) is False  # type: ignore
-
-    def test_build_forked_messages_full(self) -> None:
-        asst = AIMessage(
-            content="Run tool",
-            tool_calls=[{"id": "call_1", "name": "tool1", "args": {}}, {"id": "call_2", "name": "tool2", "args": {}}],
-        )
-        parent_hist = [HumanMessage(content="initial request")]
-        forked = build_forked_messages("Child directive", asst, parent_hist)
-
-        assert len(forked) == 5
-        assert forked[0] == parent_hist[0]
-        assert forked[1] == asst
-        assert isinstance(forked[2], ToolMessage)
-        assert forked[2].tool_call_id == "call_1"
-        assert forked[2].content == FORK_PLACEHOLDER_RESULT
-        assert isinstance(forked[3], ToolMessage)
-        assert forked[3].tool_call_id == "call_2"
-        assert forked[3].content == FORK_PLACEHOLDER_RESULT
-        assert isinstance(forked[4], HumanMessage)
-        assert "Child directive" in str(forked[4].content)

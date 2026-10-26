@@ -26,10 +26,6 @@ from app.loop.agents.definition import AgentDefinition
 from app.loop.agents.memory import AgentMemoryStore
 from app.loop.agents.resolution import resolve_agent_tools
 from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.capability import (
-    is_bash_command_read_only,
-    split_shell_commands,
-)
 from app.loop.permissions.filesystem import check_write_permission_for_tool, is_dangerous_file_path_to_auto_edit
 from app.loop.permissions.tdd import (
     check_tdd_phase_permission,
@@ -167,57 +163,10 @@ def test_dangerous_files_and_directories_blocked(tmp_path: Path) -> None:
 # 3. Shell Injection & Capability Evasion (Part C4)
 # ============================================================================
 
-def test_bash_redirection_and_injection_attacks_not_read_only() -> None:
-    attacks = [
-        "cat file.txt > /tmp/pwned",
-        "ls -la >> /tmp/pwned",
-        "grep foo file.txt | tee /tmp/output",
-        "ls; rm -rf /tmp/test",
-        "echo $(rm -rf /)",
-        "echo `rm -rf /`",
-        "cat <(cat /etc/passwd)",
-        "sed -i 's/foo/bar/g' test.py",
-        "sed --in-place 's/foo/bar/g' test.py",
-        "python -c 'import os; os.system(\"rm -rf *\")'",
-        "pip install malicious-pkg",
-        "npm install",
-        "git commit -m 'bypass'",
-        "git push origin main",
-        "git checkout -b new-branch",
-        "touch newfile.py",
-        "mv file1 file2",
-        "cp file1 file2",
-    ]
-    for cmd in attacks:
-        assert is_bash_command_read_only(cmd) is False, f"Expected unsafe command to fail read-only check: {cmd}"
 
 
-def test_bash_legitimate_read_only_commands_pass() -> None:
-    safe_commands = [
-        "ls -la",
-        "cat app/main.py",
-        "head -n 20 setup.cfg",
-        "tail -f log.txt",
-        "grep -rn 'def ' app/",
-        "rg 'class ' .",
-        "git status",
-        "git diff",
-        "git log -n 5",
-        "git branch",
-        "python --version",
-        "python3 -V",
-        "pwd",
-        "which pytest",
-        "diff -u file1 file2",
-    ]
-    for cmd in safe_commands:
-        assert is_bash_command_read_only(cmd) is True, f"Expected safe command to pass read-only check: {cmd}"
 
 
-def test_split_shell_commands_handles_quotes_and_escapes() -> None:
-    chained = 'echo "hello; world" && ls -l | grep "foo && bar"'
-    parts = split_shell_commands(chained)
-    assert len(parts) >= 2
 
 
 # ============================================================================

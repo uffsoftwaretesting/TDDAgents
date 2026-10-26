@@ -528,17 +528,6 @@ class TestTriageLoader:
         assert parse_markdown_frontmatter("---\n- a list\n---\nbody") == ({}, "body")
 
 
-class TestTriageFork:
-    def test_messages_without_tool_calls_or_with_text_blocks_yield_no_ids(self):
-        from langchain_core.messages import HumanMessage
-
-        from app.loop.agents.fork import (
-            _get_tool_result_ids_from_message,
-            _get_tool_use_ids_from_assistant,
-        )
-
-        assert _get_tool_use_ids_from_assistant(HumanMessage(content="x")) == []
-        assert _get_tool_result_ids_from_message(HumanMessage(content=["plain", {"type": "text", "text": "t"}])) == []
 
 
 # ── Phase 8: preloaded skills ───────────────────────────────────────────────

@@ -317,13 +317,6 @@ from app.loop.context.instructions import (  # noqa: E402
     load_instruction_file,
     strip_html_comments,
 )
-from app.loop.context.slicing import (  # noqa: E402
-    find_safe_truncation_index,
-    is_assistant_message,
-    is_user_message,
-    slice_messages_head,
-    validate_api_invariants,
-)
 from app.loop.context.tokens import (  # noqa: E402
     TokenCounter,
     TokenWarningState,
@@ -354,14 +347,9 @@ __all__ = [
     "estimate_block_tokens",
     "estimate_message_tokens",
     "estimate_string_tokens",
-    "find_safe_truncation_index",
     "invalidate_context_caches",
-    "is_assistant_message",
-    "is_user_message",
     "load_instruction_file",
-    "slice_messages_head",
     "strip_html_comments",
     "tool_context_for",
-    "validate_api_invariants",
     "validate_cache_breakpoints_budget",
 ]
