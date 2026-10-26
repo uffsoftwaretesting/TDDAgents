@@ -11,8 +11,8 @@ Ported from `reference/claude-code/src/constants/systemPromptSections.ts` and `p
 from __future__ import annotations
 
 import inspect
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Sequence
 
 
 @dataclass(frozen=True, slots=True)

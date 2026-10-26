@@ -72,7 +72,6 @@ from app.loop.permissions.filesystem import (
 from app.loop.permissions.rules import extract_permission_context
 from app.loop.permissions.shell_rules import match_wildcard_pattern
 from app.loop.prompts.loader import parse_markdown_frontmatter, render_prompt
-from app.loop.prompts.registry import global_prompt_registry
 from app.loop.tools.base import BuiltTool, build_tool
 from app.loop.tools.result_storage import TOOL_RESULTS_SUBDIR, config_home
 from app.loop.tools.ripgrep import rip_grep, to_relative_path
@@ -125,12 +124,8 @@ def get_prompt(filename: str, fallback: str, vars: Mapping[str, Any] | None = No
             return render_prompt(raw_body, vars)
         return raw_body
 
-    ctx_vars = dict(vars or {})
-    desc = global_prompt_registry.get_tool_description(filename, ctx_vars)
-    if desc:
-        return desc
     if vars:
-        return render_prompt(fallback, ctx_vars)
+        return render_prompt(fallback, vars)
     return fallback
 
 

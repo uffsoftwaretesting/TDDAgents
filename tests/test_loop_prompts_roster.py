@@ -4,12 +4,10 @@ Tests verifying all authored system, tool, and agent prompt files under app/prom
 
 from pathlib import Path
 
+from app.loop.agents.loader import load_agent_definition_from_path
 from app.loop.context.instructions import load_instruction_file
 from app.loop.ledger import TddPhase
-from app.loop.prompts.loader import (
-    load_agent_definition_from_path,
-    parse_markdown_frontmatter,
-)
+from app.loop.prompts.loader import parse_markdown_frontmatter
 
 PROMPTS_ROOT = Path(__file__).parent.parent / "app" / "prompts"
 

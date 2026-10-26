@@ -217,8 +217,7 @@ def build_run_tests_tool(
         return ToolResult(content=format_output(exec_result, header), exit_code=code)
 
     from app.loop.prompts.loader import render_prompt
-    from app.loop.prompts.registry import global_prompt_registry
-    prompt_text = global_prompt_registry.get_tool_prompt("run_tests", vars) or RUN_TESTS_PROMPT
+    prompt_text = RUN_TESTS_PROMPT
     if vars:
         prompt_text = render_prompt(prompt_text, vars)
 
