@@ -51,37 +51,16 @@ def test_file_entry_attributes() -> None:
     assert entry.size == 1024
 
 
-def test_workspace_error_hierarchy_and_retryable_classification() -> None:
-    # Non-retryable
+def test_workspace_error_hierarchy() -> None:
     assert issubclass(WorkspacePathError, WorkspaceError)
-    assert WorkspacePathError.retryable is False
-
     assert issubclass(WorkspaceNotFound, WorkspaceError)
-    assert WorkspaceNotFound.retryable is False
-
     assert issubclass(WorkspaceAuthError, WorkspaceError)
-    assert WorkspaceAuthError.retryable is False
-
     assert issubclass(WorkspaceCapacityError, WorkspaceError)
-    assert WorkspaceCapacityError.retryable is False
-
     assert issubclass(WorkspaceTemplateError, WorkspaceError)
-    assert WorkspaceTemplateError.retryable is False
-
     assert issubclass(WorkspaceProviderError, WorkspaceError)
-    assert WorkspaceProviderError.retryable is False
-
-    assert WorkspaceError.retryable is False
-
-    # Retryable
     assert issubclass(WorkspaceTimeout, WorkspaceError)
-    assert WorkspaceTimeout.retryable is True
-
     assert issubclass(WorkspaceRateLimited, WorkspaceError)
-    assert WorkspaceRateLimited.retryable is True
-
     assert issubclass(WorkspaceTransportError, WorkspaceError)
-    assert WorkspaceTransportError.retryable is True
 
 
 def test_normalize_path_none_raises_workspace_path_error() -> None:

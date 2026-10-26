@@ -6,8 +6,7 @@ Validates the integrated multi-turn lifecycle across Parts D, E, F, G, and H:
    LocalWorkspace, real file edits, test execution, and phase transitions.
 2. Premature exit enforcement via UnifiedStopHooks latching and STOP_HOOK_PREVENTED.
 3. Cooperative cancellation and abort tree cascading with history-repair placeholder injection.
-4. Bidirectional SyncEngine reconciliation and automatic conflict preservation (.local.<timestamp>).
-5. Optional live LLM roundtrip if OPENAI_API_KEY is configured in the environment or .env.
+4. Optional live LLM roundtrip if OPENAI_API_KEY is configured in the environment or .env.
 """
 
 from __future__ import annotations
@@ -38,9 +37,6 @@ from app.loop.tools.base import BuiltTool, ToolResult, build_tool
 from app.loop.tools.orchestration import run_tools
 from app.loop.tools.run_tests import SuiteExecutionResult, build_run_tests_tool
 from app.loop.transitions import Continue, Terminal
-from app.sync import events
-from app.sync.engine import SyncEngine
-from app.sync.events import SyncConflict
 from app.workspace.local import LocalWorkspace
 
 # ============================================================================
@@ -364,45 +360,7 @@ async def test_e2e_streaming_cancellation_and_abort_tree_cascade(tmp_path: Path)
 
 
 # ============================================================================
-# 4. SyncEngine Bidirectional Checkpointing & Conflict Resolution
-# ============================================================================
-
-def test_e2e_sync_engine_checkpoint_reconciliation_and_conflict_resolution(tmp_path: Path) -> None:
-    sandbox_ws = LocalWorkspace(tmp_path / "sandbox")
-    local_ws = LocalWorkspace(tmp_path / "local")
-    baseline_path = tmp_path / "sync_baseline.json"
-
-    # Seed initial shared state from local
-    local_ws.write_file("shared/module.py", "def compute():\n    return 42\n")
-
-    engine = SyncEngine(sandbox=sandbox_ws, local=local_ws, baseline_path=baseline_path)
-    seed_cp = engine.seed()
-    assert seed_cp.kind == "run_start"
-    assert sandbox_ws.read_file("shared/module.py") == "def compute():\n    return 42\n"
-
-    # Simulate concurrent modification on both sides
-    sandbox_ws.write_file("shared/module.py", "def compute():\n    return 100  # sandbox update\n")
-    local_ws.write_file("shared/module.py", "def compute():\n    return 999  # local conflicting edit\n")
-
-    # Reconcile at sub_req_boundary checkpoint
-    flush_cp = engine.flush(kind="sub_req_boundary")
-    assert flush_cp.conflicts == 1
-
-    # Conflict preservation: local edit backed up with timestamp
-    emitted = [e for e in events.drain() if isinstance(e, SyncConflict)]
-    assert len(emitted) == 1
-    assert emitted[0].path == "shared/module.py"
-    backup_path = emitted[0].backup_path
-    assert ".local." in backup_path
-    assert local_ws.exists(backup_path)
-    assert "999  # local conflicting edit" in local_ws.read_file(backup_path)
-
-    # Sandbox version successfully won and propagated to active local file
-    assert "100  # sandbox update" in local_ws.read_file("shared/module.py")
-
-
-# ============================================================================
-# 5. Live OpenAI LLM Verification (Conditional on Key Availability)
+# 4. Live OpenAI LLM Verification (Conditional on Key Availability)
 # ============================================================================
 
 def _get_live_openai_key() -> str | None:

@@ -170,16 +170,6 @@ def baseline_path(tmp_path: Path) -> Path:
     return tmp_path / "baseline.json"
 
 
-@pytest.fixture(autouse=True)
-def clear_sync_events():
-    """Keeps the module-level event sink from leaking between tests."""
-    from app.sync import events
-
-    events.drain()
-    yield
-    events.drain()
-
-
 @pytest.fixture(scope="session")
 def session_python(tmp_path_factory: Any) -> Any:
     """One real session venv (pytest installed) shared by every integration test."""

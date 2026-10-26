@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import posixpath
 from dataclasses import dataclass
-from typing import ClassVar, Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 WorkspaceKind = Literal["sandbox", "local"]
 
@@ -72,70 +72,44 @@ class WorkspaceError(Exception):
 
     Provider exceptions (E2B today, something else tomorrow) are translated into this
     family at the adapter boundary, so no module above `app/sandbox/adapter.py` ever
-    sees a provider type. `app/errors/sandbox/handler.py` classifies these into the
-    pipeline's TransientInfraError / FatalInfraError taxonomy.
-
-    `retryable` is what carries that classification. Declaring it here, on the
-    exception itself, keeps the mapping in one readable place instead of spreading a
-    long isinstance ladder across the handler — and it is what lets the handler stop
-    importing the E2B SDK.
+    sees a provider type.
     """
-
-    retryable: ClassVar[bool] = False
 
 
 class WorkspacePathError(WorkspaceError):
     """A path is malformed or escapes the workspace root. A bug, never a blip."""
 
-    retryable: ClassVar[bool] = False
-
 
 class WorkspaceNotFound(WorkspaceError):
     """A file, directory, or sandbox does not exist."""
-
-    retryable: ClassVar[bool] = False
 
 
 class WorkspaceTimeout(WorkspaceError):
     """An operation or command exceeded its allotted time."""
 
-    retryable: ClassVar[bool] = True
-
 
 class WorkspaceRateLimited(WorkspaceError):
     """The execution provider rate-limited the request."""
-
-    retryable: ClassVar[bool] = True
 
 
 class WorkspaceAuthError(WorkspaceError):
     """Authentication against the execution provider failed."""
 
-    retryable: ClassVar[bool] = False
-
 
 class WorkspaceCapacityError(WorkspaceError):
     """The workspace ran out of disk space."""
-
-    retryable: ClassVar[bool] = False
 
 
 class WorkspaceTemplateError(WorkspaceError):
     """The sandbox template is invalid or unavailable."""
 
-    retryable: ClassVar[bool] = False
-
 
 class WorkspaceTransportError(WorkspaceError):
     """A recognized but unspecific failure while talking to the execution environment."""
 
-    retryable: ClassVar[bool] = True
-
 
 class WorkspaceProviderError(WorkspaceError):
     """An unclassified failure. Fail closed: treated as fatal."""
-
-    retryable: ClassVar[bool] = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

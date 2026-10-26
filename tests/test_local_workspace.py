@@ -231,8 +231,7 @@ def test_list_files_on_an_empty_workspace_is_empty(local_ws):
 # Every OSError branch below was previously unreachable from the test suite. They are
 # the paths a real workspace hits first: a directory the run cannot write to, a file
 # another process locked down. Each must surface as a WorkspaceError rather than as a
-# raw OSError, because only the WorkspaceError family is classified by
-# app/errors/sandbox/handler.py into the pipeline's retry taxonomy.
+# raw OSError, because callers above the workspace catch only the WorkspaceError family.
 
 def test_an_unreadable_file_surfaces_as_a_workspace_error(local_ws):
     local_ws.write_file("secret.py", "x")
