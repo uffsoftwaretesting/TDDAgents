@@ -8,6 +8,8 @@ fake. It is verified by an end-to-end pipeline run. The prompts are built by
 `with_retry` can classify them (`app/session/llm.py`).
 """
 
+from collections.abc import Sequence
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
@@ -24,11 +26,11 @@ class TDDPlan(BaseModel):
     )
 
 
-def generate_plan(specification: str) -> list[str]:
-    """The ordered sub-requirements (the TDD plan) for the specification."""
+def generate_plan(specification: str, completed: Sequence[str] = ()) -> list[str]:
+    """The ordered sub-requirements (the TDD plan) for the specification, minus those `completed`."""
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
     structured_llm = llm.with_structured_output(TDDPlan)
-    system_prompt, human_prompt = planner_prompts(specification)
+    system_prompt, human_prompt = planner_prompts(specification, completed)
     response: TDDPlan = structured_llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_prompt),

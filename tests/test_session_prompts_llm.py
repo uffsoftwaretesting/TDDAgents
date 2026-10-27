@@ -62,6 +62,13 @@ class TestPrompts:
         assert '📋 PROJECT SPECIFICATION:\n"""\n# Spec\n"""' in human
         assert human == human.strip()
 
+    def test_planner_lists_the_done_items_only_on_a_rescope(self) -> None:
+        _, plain = planner_prompts("# Spec")
+        assert "ALREADY DONE" not in plain
+        _, human = planner_prompts("# Spec", ["A", "B"])
+        assert human.startswith(plain + "\n\n✅ ALREADY DONE:\n")
+        assert human.endswith("- A\n- B")
+
     def test_values_are_not_rescanned(self) -> None:
         """A placeholder inside user text survives verbatim: substitution is one pass."""
         _, human = analyst_prompts("{{CONVERSATION_HISTORY}}", "")

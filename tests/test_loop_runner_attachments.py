@@ -8,8 +8,8 @@ import dataclasses
 
 from langchain_core.messages import AIMessage
 
-from app.cli.print import tdd_loop_runner
 from app.query.deps import get_production_deps
+from tests.session_run_helpers import run_item
 
 
 def test_the_first_turn_carries_the_initial_tdd_state(tmp_path, make_fake_workspace):
@@ -20,9 +20,9 @@ def test_the_first_turn_carries_the_initial_tdd_state(tmp_path, make_fake_worksp
         yield AIMessage(content="done")
 
     deps = dataclasses.replace(get_production_deps(), call_model=model)
-    asyncio.run(tdd_loop_runner("Add two numbers", 0, {"session_id": "s"}, workspace=make_fake_workspace(),
-                                deps=deps, project_root=tmp_path, home=tmp_path / "home",
-                                managed_dir=tmp_path / "etc"))
+    asyncio.run(run_item("Add two numbers", 0, {"session_id": "s"}, workspace=make_fake_workspace(),
+                         deps=deps, project_root=tmp_path, home=tmp_path / "home",
+                         managed_dir=tmp_path / "etc"))
     first = seen[0]
     prompt_index = next(i for i, m in enumerate(first) if m.content == "Add two numbers")
     kinds = [((m.additional_kwargs or {}).get("attachment") or {}).get("type") for m in first[prompt_index + 1:]]

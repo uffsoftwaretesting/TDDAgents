@@ -1,11 +1,10 @@
 """
-The session shell (Part K, Phase 9): checkpointing, the analyst's `interrupt()`, the
-engineer, the planner, and plan-item iteration.
+The session shell (Part K, Phases 9 and 11): checkpointing, the analyst's `interrupt()`, the
+engineer, the planner, and the `/requirements` re-scope.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import sys
 from typing import Any
@@ -15,7 +14,6 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END
 
-from app.query.transitions import Terminal
 from app.session.analyst import (
     APPROVAL,
     HEADLESS_CLARIFICATION_ERROR,
@@ -25,11 +23,7 @@ from app.session.analyst import (
 )
 from app.session.checkpointer import build_checkpointer, is_persistent_checkpointer
 from app.session.engineer import node_engineer
-from app.session.iteration import (
-    node_evaluator,
-    node_execute_plan_item,
-    node_plan,
-)
+from app.session.planning import node_plan
 from app.session.shell import (
     RECURSION_LIMIT,
     SessionShell,
@@ -38,18 +32,10 @@ from app.session.shell import (
     create_session_graph,
     route_after_analyst,
     route_after_engineer,
-    route_after_evaluator,
-    route_after_planner,
     route_after_review,
 )
-from app.session.state import PlanItemResult, SessionState, SessionStatus
+from app.session.state import SessionState, SessionStatus
 from tests.retry_doubles import RetryableError
-
-
-def ok_runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-    """A runner that reports an observed Red-then-Green cycle (the shell never invents one)."""
-    return PlanItemResult(index=idx, sub_requirement=sub_req, status="success", terminal_reason="completed",
-                          red_confirmed=True, green_passed=True)
 
 
 def checklist(user_input: str, history: str) -> dict[str, Any]:
@@ -68,7 +54,7 @@ def engineer(requirements: str, history: str) -> str:
     return f"SPEC({history})"
 
 
-def planner(spec: str) -> list[str]:
+def planner(spec: str, completed: Any = ()) -> list[str]:
     return ["Item A", "Item B"]
 
 
@@ -76,7 +62,6 @@ def make_shell(analyzer: Any = checklist, **kwargs: Any) -> SessionShell:
     kwargs.setdefault("checkpointer", MemorySaver())
     kwargs.setdefault("engineer_fn", engineer)
     kwargs.setdefault("planner_fn", planner)
-    kwargs.setdefault("loop_runner", ok_runner)
     return SessionShell(analyzer_fn=analyzer, **kwargs)
 
 
@@ -363,7 +348,7 @@ class TestPlannerNode:
     def test_planner_plans_from_the_specification_only(self) -> None:
         seen: list[str] = []
 
-        def capturing_planner(spec: str) -> list[str]:
+        def capturing_planner(spec: str, completed: Any) -> list[str]:
             seen.append(spec)
             return ["Item 1"]
 
@@ -375,15 +360,15 @@ class TestPlannerNode:
         assert seen == ["The spec"]
 
     def test_planner_appends_to_the_audit_log(self) -> None:
-        out = node_plan({"specification": "S", "audit_log": ["[Init]"]}, planner_fn=lambda s: ["A"])
+        out = node_plan({"specification": "S", "audit_log": ["[Init]"]}, planner_fn=lambda s, c: ["A"])
         assert out["audit_log"] == ["[Init]", "[Planner] Generated plan with 1 items:\n1. A"]
-        failed = node_plan({"specification": "S", "audit_log": ["[Init]"]}, planner_fn=lambda s: [])
+        failed = node_plan({"specification": "S", "audit_log": ["[Init]"]}, planner_fn=lambda s, c: [])
         assert failed["audit_log"] == ["[Init]", "[Planner] Planner returned an empty plan."]
 
     def test_planner_retries_a_retryable_error(self, no_retry_sleep: list[float]) -> None:
         calls: list[str] = []
 
-        def flaky(spec: str) -> list[str]:
+        def flaky(spec: str, completed: Any) -> list[str]:
             calls.append(spec)
             if len(calls) == 1:
                 raise RetryableError("overloaded")
@@ -395,7 +380,7 @@ class TestPlannerNode:
         assert len(no_retry_sleep) == 1
 
     def test_planner_exception_fails(self) -> None:
-        def crashing_planner(spec: str) -> list[str]:
+        def crashing_planner(spec: str, completed: Any) -> list[str]:
             raise ValueError("Planner timeout")
 
         state: SessionState = {"specification": "Build app"}
@@ -406,7 +391,7 @@ class TestPlannerNode:
 
     def test_planner_empty_list_fails(self) -> None:
         state: SessionState = {"specification": "Build app"}
-        out = node_plan(state, planner_fn=lambda s: [])
+        out = node_plan(state, planner_fn=lambda s, c: [])
         assert out["status"] == SessionStatus.PLAN_FAILED
         assert out["audit_log"] == ["[Planner] Planner returned an empty plan."]
         assert out["plan"] == []
@@ -414,229 +399,40 @@ class TestPlannerNode:
     def test_planner_successful_plan(self) -> None:
         items = ["Step 1: Core", "Step 2: CLI", "Step 3: Docs"]
         state: SessionState = {"specification": "Build complete app"}
-        out = node_plan(state, planner_fn=lambda s: items)
-        assert out["status"] == SessionStatus.EXECUTING_PLAN_ITEM
+        out = node_plan(state, planner_fn=lambda s, c: items)
+        assert out["status"] == SessionStatus.PLANNED
         assert out["plan"] == items
-        assert out["plan_index"] == 0
-        assert out["current_sub_req"] == "Step 1: Core"
-        assert out["subreq_results"] == []
-        assert out["success_count"] == 0
-        assert out["failure_count"] == 0
+        assert set(out) == {"plan", "status", "audit_log"}
         expected_log = "[Planner] Generated plan with 3 items:\n1. Step 1: Core\n2. Step 2: CLI\n3. Step 3: Docs"
         assert out["audit_log"] == [expected_log]
 
+    def test_the_planner_is_told_what_is_already_done(self) -> None:
+        seen: list[Any] = []
+
+        def capturing(spec: str, completed: Any) -> list[str]:
+            seen.append(completed)
+            return ["C"]
+
+        node_plan({"specification": "S"}, planner_fn=capturing)
+        node_plan({"specification": "S", "completed_items": ["A", "B"]}, planner_fn=capturing)
+        assert seen == [[], ["A", "B"]]
+
+    def test_a_rescope_with_nothing_left_is_planned_not_failed(self) -> None:
+        out = node_plan({"specification": "S", "completed_items": ["A"]}, planner_fn=lambda s, c: [])
+        assert (out["status"], out["plan"]) == (SessionStatus.PLANNED, [])
+
     def test_planner_logging(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO):
-            node_plan({"specification": "Build app"}, planner_fn=lambda s: ["A", "B"])
+            node_plan({"specification": "Build app"}, planner_fn=lambda s, c: ["A", "B"])
         assert "Generated plan with 2 sub-requirements." in caplog.text
 
     def test_planner_error_logging(self, caplog: pytest.LogCaptureFixture) -> None:
-        def crashing(s: str) -> list[str]:
+        def crashing(s: str, c: Any) -> list[str]:
             raise RuntimeError("Planner dead")
 
         with caplog.at_level(logging.ERROR):
             node_plan({"specification": "Build app"}, planner_fn=crashing)
         assert "Planner execution error: Planner dead" in caplog.text
-
-
-class TestPlanItemExecutor:
-    """Verifies plan item execution, ledger contract, and sync/async handling (Part K3)."""
-
-    def test_executor_completed_when_index_exceeds_plan(self) -> None:
-        state: SessionState = {"plan": ["A", "B"], "plan_index": 2}
-        out = node_execute_plan_item(state)
-        assert out["status"] == SessionStatus.COMPLETED
-
-    def test_executor_completed_when_plan_is_empty(self) -> None:
-        state: SessionState = {"plan": [], "plan_index": 0}
-        out = node_execute_plan_item(state)
-        assert out["status"] == SessionStatus.COMPLETED
-
-    def test_executor_success_preserves_history(self) -> None:
-        state: SessionState = {
-            "plan": ["Task 1"],
-            "plan_index": 0,
-            "success_count": 2,
-            "failure_count": 1,
-            "audit_log": ["[Init] Started"],
-            "subreq_results": [{"prev": 1}],
-        }
-        out = node_execute_plan_item(state, loop_runner=ok_runner)
-        assert out["status"] == SessionStatus.ITEM_COMPLETE
-        assert out["success_count"] == 3
-        assert out["failure_count"] == 1
-        assert len(out["subreq_results"]) == 2
-        assert out["subreq_results"][0] == {"prev": 1}
-        assert out["subreq_results"][1]["status"] == "success"
-        assert out["subreq_results"][1]["index"] == 0
-        assert out["subreq_results"][1]["sub_requirement"] == "Task 1"
-        assert out["subreq_results"][1]["red_confirmed"] is True
-        assert out["subreq_results"][1]["green_passed"] is True
-        assert out["audit_log"] == ["[Init] Started", "[Evaluator] Completed item 1/1: 'Task 1'."]
-
-    def test_executor_runner_invariant_failure_red_not_confirmed(self) -> None:
-        def non_red_runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            return PlanItemResult(
-                index=idx,
-                sub_requirement=sub_req,
-                status="success",
-                terminal_reason="completed",
-                red_confirmed=False,  # Violated red ledger contract!
-                green_passed=True,
-            )
-
-        state: SessionState = {"plan": ["Task 1"], "plan_index": 0, "audit_log": ["[Init]"]}
-        out = node_execute_plan_item(state, loop_runner=non_red_runner)
-        assert out["status"] == SessionStatus.ITEM_FAILED
-        assert out["failure_count"] == 1
-        assert out["success_count"] == 0
-        expected_log = "[Evaluator] Failed item 1/1: 'Task 1': Invariant failure (red=False, green=True)"
-        assert out["audit_log"] == ["[Init]", expected_log]
-
-    def test_executor_runner_invariant_failure_green_not_passed(self) -> None:
-        def non_green_runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            return PlanItemResult(
-                index=idx,
-                sub_requirement=sub_req,
-                status="success",
-                terminal_reason="completed",
-                red_confirmed=True,
-                green_passed=False,  # Violated green ledger contract!
-            )
-
-        state: SessionState = {"plan": ["Task 1"], "plan_index": 0, "audit_log": ["[Init]"]}
-        out = node_execute_plan_item(state, loop_runner=non_green_runner)
-        assert out["status"] == SessionStatus.ITEM_FAILED
-        assert out["failure_count"] == 1
-        expected_log = "[Evaluator] Failed item 1/1: 'Task 1': Invariant failure (red=True, green=False)"
-        assert out["audit_log"] == ["[Init]", expected_log]
-
-    def test_executor_runner_non_completed_terminal(self) -> None:
-        def stopped_runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            return PlanItemResult(
-                index=idx,
-                sub_requirement=sub_req,
-                status="failed",
-                terminal_reason=Terminal.STOP_HOOK_PREVENTED.value,
-                red_confirmed=True,
-                green_passed=True,
-                error_message="Stop hook blocked execution",
-            )
-
-        state: SessionState = {"plan": ["Task 1"], "plan_index": 0, "audit_log": ["[Init]"]}
-        out = node_execute_plan_item(state, loop_runner=stopped_runner)
-        assert out["status"] == SessionStatus.ITEM_FAILED
-        assert out["failure_count"] == 1
-        assert out["audit_log"] == ["[Init]", "[Evaluator] Failed item 1/1: 'Task 1': Stop hook blocked execution"]
-
-    def test_executor_runner_raises_exception(self) -> None:
-        def broken_runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            raise RuntimeError("Docker sandbox unreachable")
-
-        state: SessionState = {"plan": ["Task 1"], "plan_index": 0}
-        out = node_execute_plan_item(state, loop_runner=broken_runner)
-        assert out["status"] == SessionStatus.ITEM_FAILED
-        assert out["failure_count"] == 1
-        assert out["subreq_results"][0]["error_message"] == "Docker sandbox unreachable"
-        assert out["subreq_results"][0]["terminal_reason"] == "error"
-        assert out["subreq_results"][0]["red_confirmed"] is False
-        assert out["subreq_results"][0]["green_passed"] is False
-
-    def test_executor_runner_returns_invalid_type(self) -> None:
-        def bad_type_runner(sub_req: str, idx: int, state: SessionState) -> Any:
-            return {"some": "dictionary"}
-
-        state: SessionState = {"plan": ["Task 1"], "plan_index": 0}
-        out = node_execute_plan_item(state, loop_runner=bad_type_runner)
-        assert out["status"] == SessionStatus.ITEM_FAILED
-        assert "loop_runner must return PlanItemResult" in out["subreq_results"][0]["error_message"]
-
-    def test_sync_executor_calling_async_runner(self) -> None:
-        async def async_runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            await asyncio.sleep(0.001)
-            return PlanItemResult(
-                index=idx,
-                sub_requirement=sub_req,
-                status="success",
-                terminal_reason="completed",
-                red_confirmed=True,
-                green_passed=True,
-            )
-
-        state: SessionState = {"plan": ["Task 1"], "plan_index": 0}
-        out = node_execute_plan_item(state, loop_runner=async_runner)
-        assert out["status"] == SessionStatus.ITEM_COMPLETE
-        assert out["success_count"] == 1
-
-    def test_executor_logging(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.INFO):
-            node_execute_plan_item({"plan": ["Subtask 1"], "plan_index": 0}, loop_runner=ok_runner)
-        assert "Executing plan item 1/1: 'Subtask 1'" in caplog.text
-
-    def test_executor_without_runner_refuses_to_fabricate(self) -> None:
-        """Without a runner nothing observed Red or Green, so nothing may be reported."""
-        from app.session.iteration import LoopRunnerNotConfigured
-
-        state: SessionState = {"plan": ["Subtask 1"], "plan_index": 0, "success_count": 0}
-        with pytest.raises(LoopRunnerNotConfigured, match="refusing to fabricate"):
-            node_execute_plan_item(state)
-        assert issubclass(LoopRunnerNotConfigured, RuntimeError)
-
-    def test_executor_without_runner_is_fine_once_the_plan_is_done(self) -> None:
-        assert node_execute_plan_item({"plan": ["A"], "plan_index": 1})["status"] == SessionStatus.COMPLETED
-        assert node_execute_plan_item({"plan": [], "plan_index": 0})["status"] == SessionStatus.COMPLETED
-
-    def test_executor_error_logging(self, caplog: pytest.LogCaptureFixture) -> None:
-        def crashing(req: str, idx: int, state: SessionState) -> PlanItemResult:
-            raise RuntimeError("Sandbox down")
-
-        with caplog.at_level(logging.ERROR):
-            node_execute_plan_item({"plan": ["Subtask 1"], "plan_index": 0}, loop_runner=crashing)
-        assert "Error executing plan item 'Subtask 1': Sandbox down" in caplog.text
-
-
-class TestEvaluatorNode:
-    """Verifies progression to next plan item or final completion (Part K3)."""
-
-    def test_evaluator_advances_to_next_item(self) -> None:
-        state: SessionState = {
-            "plan": ["Item 1", "Item 2", "Item 3"],
-            "plan_index": 0,
-            "success_count": 1,
-            "failure_count": 0,
-            "audit_log": ["[Init] started"],
-        }
-        out = node_evaluator(state)
-        assert out["plan_index"] == 1
-        assert out["current_sub_req"] == "Item 2"
-        assert out["status"] == SessionStatus.EXECUTING_PLAN_ITEM
-        assert out["audit_log"] == ["[Init] started", "[Evaluator] Advancing to item 2/3: 'Item 2'."]
-
-    def test_evaluator_finishes_with_completed_on_zero_failures(self) -> None:
-        state: SessionState = {
-            "plan": ["Item 1", "Item 2"],
-            "plan_index": 1,  # last item
-            "success_count": 2,
-            "failure_count": 0,
-            "audit_log": ["[Init] started"],
-        }
-        out = node_evaluator(state)
-        assert out["status"] == SessionStatus.COMPLETED
-        expected_log = "[Evaluator] Plan finished. Status: completed (Success=2, Failed=0)."
-        assert out["audit_log"] == ["[Init] started", expected_log]
-
-    def test_evaluator_finishes_with_failed_on_failures_present(self) -> None:
-        state: SessionState = {
-            "plan": ["Item 1", "Item 2"],
-            "plan_index": 1,  # last item
-            "success_count": 1,
-            "failure_count": 1,
-            "audit_log": ["[Init] started"],
-        }
-        out = node_evaluator(state)
-        assert out["status"] == SessionStatus.FAILED
-        expected_log = "[Evaluator] Plan finished. Status: failed (Success=1, Failed=1)."
-        assert out["audit_log"] == ["[Init] started", expected_log]
 
 
 # ==============================================================================
@@ -650,9 +446,8 @@ class TestRoutersAndState:
         assert state == {
             "session_id": "t-1", "user_input": "Build X", "user_prompts": ["Build X"], "specification": "",
             "requirements": "", "conversation_history": "", "needs_clarification": False, "has_checklist": False,
-            "user_confirmed": False, "interaction_count": 0, "plan": [], "plan_index": 0, "subreq_results": [],
+            "user_confirmed": False, "interaction_count": 0, "plan": [], "completed_items": [],
             "status": SessionStatus.INITIALIZING, "audit_log": ["[Session] Started thread 't-1'."],
-            "success_count": 0, "failure_count": 0,
         }
 
     def test_run_config_has_no_ceiling(self) -> None:
@@ -674,16 +469,6 @@ class TestRoutersAndState:
         assert route_after_engineer({"status": SessionStatus.PLANNING}) == "planner"
         assert route_after_engineer({"status": SessionStatus.FAILED}) == END
 
-    def test_route_after_planner(self) -> None:
-        assert route_after_planner({"status": SessionStatus.EXECUTING_PLAN_ITEM, "plan": ["A"]}) == "execute_plan_item"
-        assert route_after_planner({"status": SessionStatus.PLAN_FAILED, "plan": ["A"]}) == END
-        assert route_after_planner({"status": SessionStatus.EXECUTING_PLAN_ITEM, "plan": []}) == END
-        assert route_after_planner({"status": SessionStatus.EXECUTING_PLAN_ITEM}) == END
-
-    def test_route_after_evaluator(self) -> None:
-        assert route_after_evaluator({"status": SessionStatus.EXECUTING_PLAN_ITEM}) == "execute_plan_item"
-        assert route_after_evaluator({"status": SessionStatus.COMPLETED}) == END
-
     def test_default_checkpointer_is_memory(self) -> None:
         shell = SessionShell()
         assert isinstance(shell.checkpointer, MemorySaver)
@@ -691,7 +476,8 @@ class TestRoutersAndState:
 
     def test_graph_nodes(self) -> None:
         nodes = set(make_shell().graph.get_graph().nodes)
-        assert {"analyst", "analyst_review", "engineer", "planner", "execute_plan_item", "evaluator"} <= nodes
+        assert {"analyst", "analyst_review", "engineer", "planner"} <= nodes
+        assert not {"execute_plan_item", "evaluator"} & nodes
 
 
 class TestFullSessionFlow:
@@ -704,12 +490,11 @@ class TestFullSessionFlow:
         assert payload["type"] == "checklist_approval"
         assert payload["prompt"] == "Checklist: 1. Setup. Can I proceed?"
         result = shell.resume("t", "/yes")
-        assert result["status"] == SessionStatus.COMPLETED
+        assert result["status"] == SessionStatus.PLANNED
         assert result["specification"] == (
             "SPEC([User]: Build a payment gateway\n[Analyst]: Checklist: 1. Setup. Can I proceed?)"
         )
         assert result["plan"] == ["Item A", "Item B"]
-        assert result["success_count"] == 2
         assert result["user_prompts"] == ["Build a payment gateway", "/yes"]
         assert shell.is_finished("t")
         assert shell.pending_interrupts("t") == []
@@ -739,7 +524,7 @@ class TestFullSessionFlow:
         shell.resume("t", "EUR")
         assert shell.pending_interrupts("t")[0]["type"] == "checklist_approval"
         result = shell.resume("t", "/yes")
-        assert result["status"] == SessionStatus.COMPLETED
+        assert result["status"] == SessionStatus.PLANNED
         assert result["conversation_history"].count("[User]:") == 2
         assert "[User]: EUR" in result["conversation_history"]
         assert result["user_prompts"] == ["req", "EUR", "/yes"]
@@ -747,7 +532,7 @@ class TestFullSessionFlow:
     def test_headless_runs_without_interrupts(self) -> None:
         shell = make_shell(headless=True)
         result = shell.run("req", "t")
-        assert result["status"] == SessionStatus.COMPLETED
+        assert result["status"] == SessionStatus.PLANNED
         assert shell.pending_interrupts("t") == []
         assert result["user_prompts"] == ["req", "/yes"]
 
@@ -764,17 +549,8 @@ class TestFullSessionFlow:
         assert result["plan"] == []
 
     def test_planner_failure_ends_the_session(self) -> None:
-        shell = make_shell(direct, planner_fn=lambda s: [])
+        shell = make_shell(direct, planner_fn=lambda s, c: [])
         assert shell.run("req", "t")["status"] == SessionStatus.PLAN_FAILED
-
-    def test_item_failure_marks_the_session_failed(self) -> None:
-        def runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            return PlanItemResult(index=idx, sub_requirement=sub_req, status="failed",
-                                  terminal_reason=Terminal.MODEL_ERROR.value, red_confirmed=False, green_passed=False)
-
-        result = make_shell(direct, loop_runner=runner).run("req", "t")
-        assert result["status"] == SessionStatus.FAILED
-        assert result["failure_count"] == 2
 
     def test_a_restarted_process_continues_from_the_checkpoint(self) -> None:
         shared = MemorySaver()
@@ -782,33 +558,45 @@ class TestFullSessionFlow:
         shell_b = make_shell(checkpointer=shared)
         assert shell_b.pending_interrupts("t")[0]["type"] == "checklist_approval"
         assert shell_b.get_state("t").values["user_confirmed"] is False
-        assert shell_b.resume("t", "/yes")["status"] == SessionStatus.COMPLETED
-
-    def test_continue_session_reruns_an_unfinished_item(self) -> None:
-        """A plan item whose process died is run again when the thread continues."""
-        shared = MemorySaver()
-        calls: list[int] = []
-
-        def dying(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            calls.append(idx)
-            if idx == 1:
-                raise KeyboardInterrupt
-            return ok_runner(sub_req, idx, state)
-
-        with pytest.raises(KeyboardInterrupt):
-            make_shell(direct, checkpointer=shared, loop_runner=dying).run("req", "t")
-        shell_b = make_shell(direct, checkpointer=shared)
-        assert shell_b.has_session("t") and not shell_b.is_finished("t")
-        result = shell_b.continue_session("t")
-        assert calls == [0, 1]
-        assert result["status"] == SessionStatus.COMPLETED
-        assert [r["index"] for r in result["subreq_results"]] == [0, 1]
+        assert shell_b.resume("t", "/yes")["status"] == SessionStatus.PLANNED
 
     def test_an_interactive_pause_continued_headless_is_decided_by_the_shell(self) -> None:
         shared = MemorySaver()
         make_shell(checkpointer=shared).run("req", "t")
         result = make_shell(checkpointer=shared, headless=True).continue_session("t")
-        assert result["status"] == SessionStatus.COMPLETED
+        assert result["status"] == SessionStatus.PLANNED
+
+    def test_rescope_runs_the_analysis_again_and_passes_the_done_items(self) -> None:
+        seen: list[Any] = []
+
+        def capturing(spec: str, completed: Any) -> list[str]:
+            seen.append(completed)
+            return ["C"]
+
+        inputs: list[str] = []
+
+        def analyzer(user_input: str, history: str) -> dict[str, Any]:
+            inputs.append(user_input)
+            return direct(user_input, history)
+
+        shell = make_shell(analyzer, planner_fn=capturing)
+        shell.run("req", "t")
+        result = shell.rescope("t", "add CSV export", ["Item A"])
+        assert result["status"] == SessionStatus.PLANNED
+        assert result["plan"] == ["C"]
+        assert seen == [[], ["Item A"]]
+        assert inputs == ["req", "add CSV export"]
+        assert result["user_prompts"] == ["req", "add CSV export"]
+        assert "[User]: add CSV export" in result["conversation_history"]
+        assert result["completed_items"] == ["Item A"]
+
+    def test_rescope_reaches_the_checklist_review_again(self) -> None:
+        shell = make_shell()
+        shell.run("req", "t")
+        shell.resume("t", "/yes")
+        shell.rescope("t", "more", [])
+        assert shell.pending_interrupts("t")[0]["type"] == "checklist_approval"
+        assert shell.resume("t", "/yes")["status"] == SessionStatus.PLANNED
 
     def test_unknown_thread(self) -> None:
         shell = make_shell()
@@ -827,43 +615,7 @@ class TestMutationDefensePhase9:
         assert out["status"] == SessionStatus.ANALYSIS_COMPLETE
         with patch("app.session.agents.planner.generate_plan", return_value=["A"]) as plan_seam:
             assert node_plan({"specification": "S"})["plan"] == ["A"]
-        plan_seam.assert_called_once_with("S")
-
-    def test_the_runner_receives_the_item_and_the_state(self) -> None:
-        seen: list[Any] = []
-
-        def runner(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            seen.append((sub_req, idx, state))
-            return ok_runner(sub_req, idx, state)
-
-        state: SessionState = {"plan": ["A", "B"], "plan_index": 1, "session_id": "t"}
-        node_execute_plan_item(state, loop_runner=runner)
-        assert seen == [("B", 1, state)]
-
-    def test_a_sync_runner_may_return_an_awaitable(self) -> None:
-        async def result(sub_req: str, idx: int) -> PlanItemResult:
-            return ok_runner(sub_req, idx, {})
-
-        out = node_execute_plan_item({"plan": ["A"], "plan_index": 0}, loop_runner=lambda r, i, s: result(r, i))
-        assert out["status"] == SessionStatus.ITEM_COMPLETE
-
-    def test_a_crashed_item_is_recorded_whole(self) -> None:
-        def broken(sub_req: str, idx: int, state: SessionState) -> PlanItemResult:
-            raise RuntimeError("x")
-
-        out = node_execute_plan_item({"plan": ["A", "B"], "plan_index": 1}, loop_runner=broken)
-        assert out["subreq_results"] == [{
-            "index": 1, "sub_requirement": "B", "status": "failed", "terminal_reason": "error",
-            "red_confirmed": False, "green_passed": False, "iterations": 1, "error_message": "x", "audit_notes": "",
-        }]
-
-    def test_wrong_type_names_the_type(self) -> None:
-        out = node_execute_plan_item({"plan": ["A"], "plan_index": 0}, loop_runner=lambda r, i, s: 3)
-        assert out["subreq_results"][0]["error_message"] == "loop_runner must return PlanItemResult, got <class 'int'>"
-
-    def test_evaluator_counts_default_to_zero(self) -> None:
-        out = node_evaluator({"plan": ["A"], "plan_index": 0})
-        assert out["audit_log"] == ["[Evaluator] Plan finished. Status: completed (Success=0, Failed=0)."]
+        plan_seam.assert_called_once_with("S", [])
 
     def test_run_records_the_thread_id(self) -> None:
         shell = make_shell(direct)

@@ -11,17 +11,17 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from app.cli.print import tdd_loop_runner
 from app.cost_tracker import CostTracker
 from app.query.deps import get_production_deps
 from app.tdd.event_log import EventLog
 from app.utils.session_storage_portable import get_project_dir
+from tests.session_run_helpers import run_item
 
 
 def _run(make_fake_workspace, model, tmp_path) -> tuple[Any, Any]:
     """A workspace without a root: the session cwd is the project root."""
     deps = dataclasses.replace(get_production_deps(), call_model=model)
-    result = asyncio.run(tdd_loop_runner(
+    result = asyncio.run(run_item(
         "the spec", 4, {"session_id": "s"}, workspace=make_fake_workspace(), deps=deps, project_root=tmp_path,
         home=tmp_path / "home", managed_dir=tmp_path / "etc"))
     return tmp_path, result

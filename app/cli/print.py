@@ -8,7 +8,7 @@ TDD plan — and keeps it for the whole conversation, as upstream's REPL keeps o
 and one `AppState`. `begin_session` submits the first turn and `submit_prompt` every later one,
 over the engine's growing history (`ask({prompt, mutableMessages})`). `run_headless` is
 `runHeadless` for the development phase: one conversation over the whole plan, with nobody to
-answer an 'ask'. `tdd_loop_runner` runs a single sub-requirement as a one-item plan.
+answer an 'ask'.
 
 * **Workspace.** Runs are local for now (a decision recorded in
   `docs/refactoring_transition_plan.md`): by default the session's shared
@@ -69,7 +69,6 @@ from app.query.deps import LoopDeps
 from app.query.state import initial_loop_state
 from app.query.transitions import Terminal
 from app.query_engine import QueryEngine
-from app.session.state import PlanItemResult, SessionState
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
@@ -93,19 +92,8 @@ logger = logging.getLogger("loop_runner")
 HEADLESS_COMMAND_MODES = ("prompt", "orphaned-permission", "task-notification")
 #: `print.ts`'s `sleep(100)` while background tasks run and nothing is queued.
 WAITING_FOR_AGENTS_POLL_SECONDS = 0.1
-#: Fixed namespace for `item_run_id`, so the same (thread, index) always names the same run.
+#: Fixed namespace for `session_run_id`, so the same thread always names the same run.
 RUN_ID_NAMESPACE = uuid.UUID("7d1f9c52-5b0e-4f4e-9a59-2f3c0a8f6b11")
-
-
-def item_run_id(session_id: Any, idx: int) -> str:
-    """
-    The run id of plan item `idx` of session `session_id`: stable across processes, so a
-    re-run of an unfinished item finds its transcript. Without a session id nothing can be
-    resumed, and the id is fresh.
-    """
-    if not session_id:
-        return f"loop-{uuid.uuid4().hex}"
-    return f"loop-{uuid.uuid5(RUN_ID_NAMESPACE, f'{session_id}:{idx}').hex}"
 
 
 def build_builtin_tools() -> list[Tool]:
@@ -261,16 +249,8 @@ def run_agent_memory_store(run_dir: Path | None) -> tuple[AgentMemoryStore, Path
     return AgentMemoryStore(base_dir=root), root
 
 
-def default_workspace(state: SessionState) -> LocalWorkspace:
-    """The session's shared local workspace; a session without an id is a wiring bug."""
-    session_id = state.get("session_id")
-    if not session_id:
-        raise ValueError("tdd_loop_runner needs a session_id to locate the session workspace")
-    return session_workspace(str(session_id))
-
-
 @dataclass
-class SessionRun:
+class DevelopmentRun:
     """
     One development session's open run (Phase 11): its context, store and engine, built once
     and kept for every turn of the conversation, as upstream's REPL keeps one conversation
@@ -311,7 +291,7 @@ async def open_session_run(
     settings_path: str | None = None,
     dangerously_skip_permissions: bool = False,
     plan_index: int = 0,
-) -> AsyncIterator[SessionRun]:
+) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
     phase-filtered tool pool and a fresh `AppStateStore` whose ledger starts in RED — yield it
@@ -424,7 +404,9 @@ async def open_session_run(
             session_id=run_id, cost_tracker=ctx.cost_tracker,
         )
         try:
-            yield SessionRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine, transcript=transcript)
+            yield DevelopmentRun(
+                run_id=run_id, config=config, store=store, ctx=ctx, engine=engine, transcript=transcript
+            )
         finally:
             from app.context import reset_session_context
             from app.utils.hooks.hooks import execute_session_end_hooks
@@ -562,7 +544,9 @@ async def load_initial_messages(
     return session, prompt
 
 
-async def _submit(run: SessionRun, history: Sequence[Any], prompt_text: str, prefix: Sequence[Any] = ()) -> Terminal:
+async def _submit(
+    run: DevelopmentRun, history: Sequence[Any], prompt_text: str, prefix: Sequence[Any] = ()
+) -> Terminal:
     """
     One user turn: UserPromptSubmit, the user-input attachments, the loop, then any background
     work (`print.ts`'s `ask` and its wait). A UserPromptSubmit hook that blocks or says
@@ -596,7 +580,7 @@ async def _submit(run: SessionRun, history: Sequence[Any], prompt_text: str, pre
     return reason
 
 
-async def begin_session(run: SessionRun, fresh_prompt: str, resume_prompt: str | None = None) -> Terminal:
+async def begin_session(run: DevelopmentRun, fresh_prompt: str, resume_prompt: str | None = None) -> Terminal:
     """
     The first turn: SessionStart and `fresh_prompt`, or — with a transcript on disk — the
     resumed conversation, continued with the interrupted prompt or else `resume_prompt`.
@@ -608,44 +592,9 @@ async def begin_session(run: SessionRun, fresh_prompt: str, resume_prompt: str |
     return await _submit(run, session.messages, prompt_text, first)
 
 
-async def submit_prompt(run: SessionRun, prompt_text: str) -> Terminal:
+async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal:
     """A later turn of the same conversation: the user's prompt after everything said so far."""
     return await _submit(run, run.engine.mutable_messages, prompt_text)
-
-
-async def tdd_loop_runner(
-    sub_req: str,
-    idx: int,
-    state: SessionState,
-    *,
-    workspace: Any = None,
-    **run_options: Any,
-) -> PlanItemResult:
-    """
-    One sub-requirement through one run, as the session shell's per-item node calls it: a
-    one-item plan, completed only when its Red -> Green cycle is observed.
-    """
-    ws = workspace if workspace is not None else default_workspace(state)
-    run_id = item_run_id(state.get("session_id"), idx)
-    async with open_session_run(run_id=run_id, plan=TddPlan.from_texts([sub_req]), workspace=ws,
-                                plan_index=idx, **run_options) as run:
-        logger.info("Launching TDD loop %s for sub-requirement %d: %s", run_id, idx, sub_req)
-        reason = await begin_session(run, sub_req)
-        done = run.store.get().tdd_plan.is_complete
-        final = run.store.get().phase_ledger
-        stopped = run.stopped_reason
-    succeeded = reason == Terminal.COMPLETED and done
-    logger.info("Loop %s finished: reason=%s done=%s", run_id, reason, done)
-    return PlanItemResult(
-        index=idx,
-        sub_requirement=sub_req,
-        status="success" if succeeded else "failed",
-        terminal_reason=str(reason),
-        # A done item's ledger has already restarted in RED; its cycle was observed.
-        red_confirmed=done or final.red_confirmed,
-        green_passed=done or final.green_passed,
-        error_message=None if succeeded else stopped or f"Terminated early: {reason}",
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -682,12 +631,10 @@ async def run_headless(
 
 __all__ = [
     "HeadlessOutcome",
-    "SessionRun",
+    "DevelopmentRun",
     "begin_session",
     "build_builtin_tools",
     "coordinator_context",
-    "default_workspace",
-    "item_run_id",
     "load_initial_messages",
     "main_thread_tools",
     "next_main_thread_command",
@@ -699,6 +646,5 @@ __all__ = [
     "session_run_id",
     "session_workspace",
     "submit_prompt",
-    "tdd_loop_runner",
     "wait_for_background_work",
 ]

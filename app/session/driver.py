@@ -1,6 +1,6 @@
 """
-Driving a session from the entry point (Phase 9): build the shell, start or continue a
-thread, and answer the analyst's interrupts.
+Driving a session from the entry point (Phases 9 and 11): build the shell, start or continue
+a thread, answer the analyst's interrupts, and hand the plan to development.
 
 `print.ts` -> `runHeadless` is the model for the headless path: no human, so nothing waits
 on input. Here that is the shell's `headless` flag — the analyst-review node approves a
@@ -10,25 +10,27 @@ the caller's `answer` callback; `None` from it leaves the thread paused at the c
 resumable later with the same thread id.
 
 A thread with a checkpoint is never restarted: a finished one is reported as it stands, an
-unfinished one continues from its last checkpoint (`continue_session`). That is how a
-session survives a restart — the plan item that was running when the process died runs
-again and resumes its own transcript (`app/cli/print.py::load_initial_messages`).
+unfinished one continues from its last checkpoint (`continue_session`). A planned thread goes
+on to development, whose conversation and plan are resumed from their own files
+(`app/cli/print.py`), so a restarted session continues where it stopped.
 """
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.config.config import Config
 from app.session.checkpointer import build_checkpointer, is_persistent_checkpointer
 from app.session.shell import SessionShell
 from app.session.state import SessionStatus
+
+if TYPE_CHECKING:
+    from app.cli.print import HeadlessOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +58,9 @@ class SessionRun:
     paused_at: dict[str, Any] | None = None
 
     @property
-    def completed(self) -> bool:
-        return self.values.get("status") == SessionStatus.COMPLETED
+    def planned(self) -> bool:
+        """The shell has produced the plan: development can start (or continue)."""
+        return self.values.get("status") == SessionStatus.PLANNED
 
 
 def derive_thread_id(initial_input: str) -> str:
@@ -79,40 +82,52 @@ def build_session_shell(
     options: SessionOptions,
     *,
     workspace_factory: Callable[[str], Any] | None = None,
-    loop_runner: Callable[..., Any] | None = None,
     analyzer_fn: Callable[[str, str], dict[str, Any]] | None = None,
     engineer_fn: Callable[[str, str], str] | None = None,
-    planner_fn: Callable[[str], list[str]] | None = None,
+    planner_fn: Callable[[str, Sequence[str]], list[str]] | None = None,
 ) -> tuple[SessionShell, Any]:
-    """
-    The session's shell and its shared workspace. Every plan item runs through
-    `tdd_loop_runner` on that workspace, told whether the checkpointer really persists and
-    given the run's permission flags.
-    """
-    from app.cli.print import session_workspace, tdd_loop_runner
+    """The session's shell and its shared workspace, where development will run."""
+    from app.cli.print import session_workspace
 
     checkpointer = build_checkpointer(checkpoint_uri(options.checkpoint))
-    persistent = is_persistent_checkpointer(checkpointer)
-    if not persistent:
+    if not is_persistent_checkpointer(checkpointer):
         logger.warning("Session %s checkpoints in memory: it cannot be resumed after this process ends.", thread_id)
     workspace = (workspace_factory or session_workspace)(thread_id)
-    runner = functools.partial(
-        loop_runner or tdd_loop_runner,
-        workspace=workspace,
-        postgres_checkpointing=persistent,
-        permission_mode=options.permission_mode,
-        settings_path=options.settings_path,
-        dangerously_skip_permissions=options.dangerously_skip_permissions,
-    )
     shell = SessionShell(
         checkpointer=checkpointer,
         analyzer_fn=analyzer_fn,
         engineer_fn=engineer_fn,
         planner_fn=planner_fn,
-        loop_runner=runner,
         headless=options.headless,
     )
     return shell, workspace
+
+
+def development_run_options(shell: SessionShell, options: SessionOptions) -> dict[str, Any]:
+    """
+    What the development run is told: whether the checkpointer really persists, and the
+    startup flags (`--permission-mode`, `--settings`, `--dangerously-skip-permissions`).
+    """
+    return {
+        "postgres_checkpointing": is_persistent_checkpointer(shell.checkpointer),
+        "permission_mode": options.permission_mode,
+        "settings_path": options.settings_path,
+        "dangerously_skip_permissions": options.dangerously_skip_permissions,
+    }
+
+
+def develop_headless(
+    shell: SessionShell, thread_id: str, values: dict[str, Any], workspace: Any, options: SessionOptions,
+    **run_options: Any,
+) -> HeadlessOutcome:
+    """A planned session's development with nobody to ask (`run_headless`), to its end."""
+    from app.cli.print import run_headless
+    from app.session.llm import run_sync
+
+    return run_sync(run_headless(
+        thread_id, str(values.get("specification") or ""), list(values.get("plan") or []),
+        workspace=workspace, **{**development_run_options(shell, options), **run_options},
+    ))
 
 
 def drive_session(
@@ -137,6 +152,13 @@ def drive_session(
     else:
         shell.run(initial_input, thread_id)
 
+    return answer_interrupts(shell, thread_id, answer)
+
+
+def answer_interrupts(
+    shell: SessionShell, thread_id: str, answer: Callable[[dict[str, Any]], str | None] | None
+) -> SessionRun:
+    """Answer `thread_id`'s interrupts until none is pending or `answer` returns `None`."""
     while answer is not None:
         pending = shell.pending_interrupts(thread_id)
         if not pending:
@@ -148,16 +170,16 @@ def drive_session(
     return SessionRun(values=dict(shell.get_state(thread_id).values))
 
 
-def failed_requirements(values: dict[str, Any]) -> list[dict[str, Any]]:
-    """The failed plan items in the shape the pass-rate report reads: requirement and reason."""
-    return [
-        {
-            "requirement": item.get("sub_requirement", ""),
-            "reason": item.get("error_message") or item.get("terminal_reason"),
-        }
-        for item in values.get("subreq_results") or []
-        if item.get("status") == "failed"
-    ]
+def rescope_session(
+    shell: SessionShell,
+    thread_id: str,
+    request: str,
+    completed_items: Sequence[str],
+    answer: Callable[[dict[str, Any]], str | None] | None,
+) -> SessionRun:
+    """`/requirements`: the analyst, the engineer and the planner again, with `request`."""
+    shell.rescope(thread_id, request, completed_items)
+    return answer_interrupts(shell, thread_id, answer)
 
 
 __all__ = [
@@ -166,8 +188,11 @@ __all__ = [
     "SessionRun",
     "build_session_shell",
     "checkpoint_uri",
+    "answer_interrupts",
     "derive_thread_id",
+    "develop_headless",
+    "development_run_options",
     "drive_session",
-    "failed_requirements",
     "fresh_thread_id",
+    "rescope_session",
 ]

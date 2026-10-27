@@ -1,12 +1,15 @@
 """
-Session state models, status enumerations, and result dataclasses conforming to §3.4 and Part K.
+Session state and status: what the LangGraph session shell checkpoints (Part K, Phase 11).
+
+The shell gathers requirements and plans; the sub-requirements are then worked on in one
+development conversation (`app/cli/print.py`), whose plan — which items are done — lives in
+that run's `AppState` and its saved plan file, not here.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, TypedDict
+from typing import TypedDict
 
 
 class SessionStatus(StrEnum):
@@ -18,26 +21,9 @@ class SessionStatus(StrEnum):
     ANALYSIS_COMPLETE = "analysis_complete"
     PLANNING = "planning"
     PLAN_FAILED = "plan_failed"
-    EXECUTING_PLAN_ITEM = "executing_plan_item"
-    ITEM_COMPLETE = "item_complete"
-    ITEM_FAILED = "item_failed"
-    COMPLETED = "completed"
+    #: The plan exists: the session moves on to development.
+    PLANNED = "planned"
     FAILED = "failed"
-
-
-@dataclass(frozen=True, slots=True)
-class PlanItemResult:
-    """Outcome of a single plan item execution."""
-
-    index: int
-    sub_requirement: str
-    status: str  # "success" | "failed"
-    terminal_reason: str
-    red_confirmed: bool
-    green_passed: bool
-    iterations: int = 1
-    error_message: str | None = None
-    audit_notes: str = ""
 
 
 class SessionState(TypedDict, total=False):
@@ -58,10 +44,8 @@ class SessionState(TypedDict, total=False):
     user_confirmed: bool
     interaction_count: int
     plan: list[str]
-    plan_index: int
-    current_sub_req: str
-    subreq_results: list[dict[str, Any]]
+    #: On `/requirements` (Phase 11): the sub-requirements already done, which the planner must
+    #: not plan again.
+    completed_items: list[str]
     status: str
     audit_log: list[str]
-    success_count: int
-    failure_count: int

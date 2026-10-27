@@ -488,20 +488,12 @@ async def test_e2e_live_openai_skill_activation_and_execution(tmp_path) -> None:
     assert len(str(followup_msg.content)) > 50
 
 
-def _observed_cycle_runner(sub_req: str, idx: int, state: Any) -> Any:
-    """The live shell tests exercise the analyst, engineer and planner; each item reports a cycle."""
-    from app.session.state import PlanItemResult
-
-    return PlanItemResult(index=idx, sub_requirement=sub_req, status="success", terminal_reason="completed",
-                          red_confirmed=True, green_passed=True)
-
-
 @pytest.mark.live
 def test_e2e_live_openai_session_shell_interrupt_and_iteration() -> None:
     """
     Live OpenAI E2E integration test for Part K:
     Validates that SessionShell runs with live LLM (gpt-4o-mini), correctly interrupts
-    on requirements analysis for human-in-the-loop review, and resumes to execute plan items.
+    on requirements analysis for human-in-the-loop review, and resumes to a planned session.
     """
     api_key = _get_live_openai_key()
     if not api_key:
@@ -514,7 +506,7 @@ def test_e2e_live_openai_session_shell_interrupt_and_iteration() -> None:
     from app.session.shell import SessionShell
     from app.session.state import SessionStatus
 
-    shell = SessionShell(loop_runner=_observed_cycle_runner)
+    shell = SessionShell()
     thread_id = "live-test-shell-session-k"
 
     # Turn 1: Initial run with prompt - live analyst generates response and interrupts
@@ -534,7 +526,6 @@ def test_e2e_live_openai_session_shell_interrupt_and_iteration() -> None:
 
     # Turn 2: User approves via resume("/yes")
     result2 = shell.resume(thread_id, "/yes")
-    assert result2["status"] in (SessionStatus.COMPLETED, SessionStatus.ITEM_COMPLETE)
+    assert result2["status"] == SessionStatus.PLANNED
     assert result2["user_confirmed"] is True
     assert len(result2.get("plan", [])) >= 1
-    assert result2.get("success_count", 0) >= 1

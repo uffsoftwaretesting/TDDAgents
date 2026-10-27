@@ -118,6 +118,16 @@ class TddPlan:
         items.insert(_slot(position, len(items) + 1), item)
         return replace(self, items=tuple(items))
 
+    def replace_pending(self, texts: list[str] | tuple[str, ...]) -> TddPlan:
+        """
+        A re-scoped plan (`/requirements`): the done items stay done, in order, and every item
+        not yet done is replaced by `texts`, with fresh ids.
+        """
+        plan = replace(self, items=tuple(item for item in self.items if item.status == ItemStatus.DONE))
+        for text in texts:
+            plan = plan.add(text)
+        return plan
+
     def complete_current(self, ledger: PhaseLedger) -> TddPlan:
         """Mark the current item done; only an observed Red -> Green cycle allows it."""
         current = self.current

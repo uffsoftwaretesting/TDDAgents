@@ -13,16 +13,16 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import app.cli.print as runner_mod
-from app.cli.print import item_run_id, tdd_loop_runner
 from app.query.deps import get_production_deps
 from app.utils.conversation_recovery import CONTINUATION_MESSAGE
 from app.utils.session_storage import TranscriptStore
 from app.utils.session_storage_portable import get_project_dir
+from tests.session_run_helpers import item_run_id, run_item
 
 
 def _run(make_fake_workspace, model, tmp_path, session_id: Any = "s", idx: int = 2, **kwargs: Any) -> Any:
     deps = dataclasses.replace(get_production_deps(), call_model=model)
-    return asyncio.run(tdd_loop_runner(
+    return asyncio.run(run_item(
         "the spec", idx, {"session_id": session_id}, workspace=make_fake_workspace(), deps=deps,
         project_root=tmp_path, home=tmp_path / "home", managed_dir=tmp_path / "etc", **kwargs))
 

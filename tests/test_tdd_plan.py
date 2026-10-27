@@ -326,3 +326,9 @@ def test_call_applies_and_reports_the_new_plan(tmp_path: Path):
     assert result.content == "The TDD plan is now:\n▶ 1. A\n· 2. B"
     assert ctx.get_app_state().tdd_plan == plan("A", "B")
     assert load_plan(tmp_path / PLAN_FILE_NAME) == plan("A", "B")
+
+
+def test_replace_pending_keeps_done_items_and_replaces_the_rest():
+    p = done_first(plan("A", "B", "C")).replace_pending(["X", "Y"])
+    assert p.items == (PlanItem("1", "A", ItemStatus.DONE), PlanItem("2", "X"), PlanItem("3", "Y"))
+    assert plan("A").replace_pending([]) == TddPlan()

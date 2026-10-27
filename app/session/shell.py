@@ -1,27 +1,29 @@
 """
-The session shell: what LangGraph still does once the loop runs each sub-requirement
-(§3.4 and Part K of `docs/transition_elaboration_plan.md`, Phase 9).
+The session shell: requirements and planning, before development (§3.4 and Part K of
+`docs/transition_elaboration_plan.md`, Phases 9 and 11).
 
 ```
-START → analyst ⇄ analyst_review (interrupt) → engineer → planner
-      → execute_plan_item → evaluator ⟲ → END
+START → analyst ⇄ analyst_review (interrupt) → engineer → planner → END
 ```
 
-LangGraph keeps the three things the loop has no answer for: checkpointing (so a session
-survives a restart and resumes by thread id), the analyst's human-in-the-loop `interrupt()`,
-and iteration over plan items. Each plan item is one `run_loop` session
-(`app/cli/print.py::tdd_loop_runner`); the TDD barriers live there, not in this graph.
+LangGraph keeps what the loop has no answer for: checkpointing (so a session survives a
+restart and resumes by thread id) and the analyst's human-in-the-loop `interrupt()`. Once
+the planner has produced the plan the session is `planned`, and the sub-requirements are
+worked on in one development conversation (`app/cli/print.py`), where the TDD barriers live.
 
-**No ceiling on super-steps.** LangGraph's `recursion_limit` would bound the analyst rounds
-and the plan length; claude-code has no such bound and this codebase invents none, so it is
-set to `sys.maxsize` and the session ends when the plan does.
+`rescope` (`/requirements`, Phase 11) runs the same graph again on the same thread: the
+analyst continues its dialogue with the new request, and the planner is told which
+sub-requirements are already done.
+
+**No ceiling on super-steps.** LangGraph's `recursion_limit` would bound the analyst rounds;
+claude-code has no such bound and this codebase invents none, so it is `sys.maxsize`.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -33,11 +35,7 @@ from langgraph.types import Command
 from app.session.analyst import node_analyst, node_analyst_review
 from app.session.checkpointer import build_checkpointer
 from app.session.engineer import node_engineer
-from app.session.iteration import (
-    node_evaluator,
-    node_execute_plan_item,
-    node_plan,
-)
+from app.session.planning import node_plan
 from app.session.state import SessionState, SessionStatus
 
 logger = logging.getLogger(__name__)
@@ -60,12 +58,9 @@ def create_initial_session_state(thread_id: str, user_input: str) -> SessionStat
         "user_confirmed": False,
         "interaction_count": 0,
         "plan": [],
-        "plan_index": 0,
-        "subreq_results": [],
+        "completed_items": [],
         "status": SessionStatus.INITIALIZING,
         "audit_log": [f"[Session] Started thread '{thread_id}'."],
-        "success_count": 0,
-        "failure_count": 0,
     }
 
 
@@ -99,28 +94,12 @@ def route_after_engineer(state: SessionState) -> str:
     return "planner" if state.get("status") == SessionStatus.PLANNING else END
 
 
-def route_after_planner(state: SessionState) -> str:
-    status = state.get("status")
-    plan = state.get("plan", [])
-    if status == SessionStatus.PLAN_FAILED or not plan:
-        return END
-    return "execute_plan_item"
-
-
-def route_after_evaluator(state: SessionState) -> str:
-    status = state.get("status")
-    if status == SessionStatus.EXECUTING_PLAN_ITEM:
-        return "execute_plan_item"
-    return END
-
-
 def create_session_graph(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     *,
     analyzer_fn: Callable[[str, str], dict[str, Any]] | None = None,
     engineer_fn: Callable[[str, str], str] | None = None,
-    planner_fn: Callable[[str], list[str]] | None = None,
-    loop_runner: Callable[..., Any] | None = None,
+    planner_fn: Callable[[str, Sequence[str]], list[str]] | None = None,
     headless: bool = False,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build and compile the session graph (Parts K1, K2, K3)."""
@@ -141,23 +120,16 @@ def create_session_graph(
     def _planner_node(state: SessionState) -> dict[str, Any]:
         return node_plan(state, planner_fn=planner_fn)
 
-    def _execute_item_node(state: SessionState) -> dict[str, Any]:
-        return node_execute_plan_item(state, loop_runner=loop_runner)
-
     workflow.add_node("analyst", _analyst_node)
     workflow.add_node("analyst_review", _review_node)
     workflow.add_node("engineer", _engineer_node)
     workflow.add_node("planner", _planner_node)
-    workflow.add_node("execute_plan_item", _execute_item_node)
-    workflow.add_node("evaluator", node_evaluator)
 
     workflow.add_edge(START, "analyst")
     workflow.add_conditional_edges("analyst", route_after_analyst)
     workflow.add_conditional_edges("analyst_review", route_after_review)
     workflow.add_conditional_edges("engineer", route_after_engineer)
-    workflow.add_conditional_edges("planner", route_after_planner)
-    workflow.add_edge("execute_plan_item", "evaluator")
-    workflow.add_conditional_edges("evaluator", route_after_evaluator)
+    workflow.add_edge("planner", END)
 
     return workflow.compile(checkpointer=checkpointer)
 
@@ -176,8 +148,7 @@ class SessionShell:
         *,
         analyzer_fn: Callable[[str, str], dict[str, Any]] | None = None,
         engineer_fn: Callable[[str, str], str] | None = None,
-        planner_fn: Callable[[str], list[str]] | None = None,
-        loop_runner: Callable[..., Any] | None = None,
+        planner_fn: Callable[[str, Sequence[str]], list[str]] | None = None,
         headless: bool = False,
     ) -> None:
         self._checkpointer = checkpointer or build_checkpointer()
@@ -186,7 +157,6 @@ class SessionShell:
             analyzer_fn=analyzer_fn,
             engineer_fn=engineer_fn,
             planner_fn=planner_fn,
-            loop_runner=loop_runner,
             headless=headless,
         )
 
@@ -202,6 +172,24 @@ class SessionShell:
         """Start a new session on `thread_id` from the user's initial request."""
         state = create_initial_session_state(thread_id, initial_input)
         return self._graph.invoke(state, config=build_session_run_config(thread_id))
+
+    def rescope(self, thread_id: str, request: str, completed_items: Sequence[str]) -> dict[str, Any]:
+        """
+        `/requirements` (Phase 11): run the graph again on a planned thread. The analyst picks up
+        its dialogue with `request`; the planner leaves `completed_items` out of the new plan.
+        """
+        prompts = list(self.get_state(thread_id).values.get("user_prompts") or [])
+        update: SessionState = {
+            "user_input": request,
+            "user_prompts": [*prompts, request],
+            "has_checklist": False,
+            "needs_clarification": False,
+            "user_confirmed": False,
+            "interaction_count": 0,
+            "completed_items": list(completed_items),
+            "status": SessionStatus.GATHERING_REQUIREMENTS,
+        }
+        return self._graph.invoke(update, config=build_session_run_config(thread_id))
 
     def resume(self, thread_id: str, user_response: str) -> dict[str, Any]:
         """Answer the pending interrupt of `thread_id` (`Command(resume=…)`)."""

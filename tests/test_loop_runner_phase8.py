@@ -28,11 +28,11 @@ async def _no_stop_hooks(state: Any, config: Any) -> StopHookResult:
 
 
 def _run(workspace, tmp_path, model, *, stop_hooks: Any = _no_stop_hooks):
-    from app.cli.print import tdd_loop_runner
     from app.query.deps import get_production_deps
+    from tests.session_run_helpers import run_item
 
     deps = dataclasses.replace(get_production_deps(), call_model=model, stop_hooks=stop_hooks)
-    return asyncio.run(tdd_loop_runner(
+    return asyncio.run(run_item(
         "add two numbers", 0, {"session_id": "s"}, workspace=workspace, deps=deps,
         project_root=_settings(tmp_path), home=tmp_path / "home", managed_dir=tmp_path / "etc"))
 
@@ -260,11 +260,11 @@ def _mcp_project(tmp_path, allow: list[str]) -> Any:
 
 
 def _run_mcp(workspace, tmp_path, model, allow: list[str]):
-    from app.cli.print import tdd_loop_runner
     from app.query.deps import get_production_deps
+    from tests.session_run_helpers import run_item
 
     deps = dataclasses.replace(get_production_deps(), call_model=model, stop_hooks=_no_stop_hooks)
-    return asyncio.run(tdd_loop_runner(
+    return asyncio.run(run_item(
         "add two numbers", 0, {"session_id": "s"}, workspace=workspace, deps=deps,
         project_root=_mcp_project(tmp_path, allow), home=tmp_path / "home", managed_dir=tmp_path / "etc"))
 

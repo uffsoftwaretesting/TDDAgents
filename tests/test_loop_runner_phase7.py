@@ -41,8 +41,8 @@ def _settings(tmp_path, ws_root) -> Any:
 
 def _run(workspace, tmp_path, scripts: dict[str | None, list[list[AIMessage]]], seen: list[Any]):
     """A model scripted per agent type (`None` is the main thread)."""
-    from app.cli.print import tdd_loop_runner
     from app.query.deps import get_production_deps
+    from tests.session_run_helpers import run_item
 
     async def model(state: Any, config: Any):
         agent_type = state.tool_context.agent_type
@@ -54,7 +54,7 @@ def _run(workspace, tmp_path, scripts: dict[str | None, list[list[AIMessage]]], 
             yield message
 
     deps = dataclasses.replace(get_production_deps(), call_model=model)
-    return asyncio.run(tdd_loop_runner(
+    return asyncio.run(run_item(
         "add two numbers", 2, {"session_id": "s"}, workspace=workspace, deps=deps,
         project_root=_settings(tmp_path, workspace.root), home=tmp_path / "home", managed_dir=tmp_path / "etc"))
 
@@ -193,9 +193,9 @@ def test_run_memory_lives_in_the_run_dir_or_a_named_temp_dir(tmp_path):
 def test_the_runner_wires_its_model_session_and_user_agents(make_fake_workspace, tmp_path, monkeypatch):
     """The cost tracker prices the run's model; events carry the run id; the caller's own
     sink still gets the real events; user agents come from the given home."""
-    from app.cli.print import tdd_loop_runner
     from app.query.deps import get_production_deps
     from app.query.transitions import Terminated, Transition
+    from tests.session_run_helpers import run_item
 
     monkeypatch.delenv(COORDINATOR_MODE_ENV, raising=False)
     _agent_file(tmp_path / "home" / ".tddagents" / "agents", "homer")
@@ -207,8 +207,8 @@ def test_the_runner_wires_its_model_session_and_user_agents(make_fake_workspace,
         yield AIMessage(content="d")
 
     deps = dataclasses.replace(get_production_deps(), call_model=model, emit_event=sunk.append)
-    asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=make_fake_workspace(), deps=deps,
-                                project_root=tmp_path, home=tmp_path / "home", managed_dir=tmp_path / "etc"))
+    asyncio.run(run_item("x", 0, {"session_id": "s"}, workspace=make_fake_workspace(), deps=deps,
+                         project_root=tmp_path, home=tmp_path / "home", managed_dir=tmp_path / "etc"))
     state, config = seen[0]
     assert state.tool_context.cost_tracker.model == config.model
     assert "- homer: homer agent" in _agent_tool(state.tool_context.tools).prompt
@@ -221,8 +221,8 @@ def test_the_runner_wires_its_model_session_and_user_agents(make_fake_workspace,
 
 def test_agent_memory_lives_in_the_workspaces_run_dir(make_fake_workspace, tmp_path):
     """Part I5: the run's memory store is rooted in the workspace's run dir when it has one."""
-    from app.cli.print import tdd_loop_runner
     from app.query.deps import get_production_deps
+    from tests.session_run_helpers import run_item
 
     seen: list[Any] = []
 
@@ -233,6 +233,6 @@ def test_agent_memory_lives_in_the_workspaces_run_dir(make_fake_workspace, tmp_p
     ws = make_fake_workspace()
     ws.run_dir = str(tmp_path / "run")
     deps = dataclasses.replace(get_production_deps(), call_model=model)
-    asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=ws, deps=deps, project_root=tmp_path,
-                                home=tmp_path / "home", managed_dir=tmp_path / "etc"))
+    asyncio.run(run_item("x", 0, {"session_id": "s"}, workspace=ws, deps=deps, project_root=tmp_path,
+                         home=tmp_path / "home", managed_dir=tmp_path / "etc"))
     assert str(seen[0]) == str(tmp_path / "run")

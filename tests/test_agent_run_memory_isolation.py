@@ -24,8 +24,8 @@ def test_the_runner_discards_run_memory_when_the_run_ends(tmp_path, make_fake_wo
 
     from langchain_core.messages import AIMessage
 
-    from app.cli.print import tdd_loop_runner
     from app.query.deps import get_production_deps
+    from tests.session_run_helpers import run_item
 
     seen: list[AgentMemoryStore] = []
 
@@ -38,8 +38,8 @@ def test_the_runner_discards_run_memory_when_the_run_ends(tmp_path, make_fake_wo
 
     ws = make_fake_workspace()
     deps = dataclasses.replace(get_production_deps(), call_model=model)
-    asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=ws, deps=deps, project_root=tmp_path,
-                                home=tmp_path / "home", managed_dir=tmp_path / "etc"))
+    asyncio.run(run_item("x", 0, {"session_id": "s"}, workspace=ws, deps=deps, project_root=tmp_path,
+                         home=tmp_path / "home", managed_dir=tmp_path / "etc"))
     store = seen[0]
     assert isinstance(store, AgentMemoryStore)
     assert not (Path(store.base_dir) / ".tddagents" / "run-memory").exists() or not any(

@@ -342,8 +342,8 @@ def without_skill_listing(messages: Any) -> list[Any]:
 
 
 def run_runner(monkeypatch, tmp_path: Path, d: ScriptedDispatcher, model: Model) -> Any:
-    from app.cli.print import tdd_loop_runner
     from tests.conftest import FakeWorkspace
+    from tests.session_run_helpers import run_item
 
     finalized: list[bool] = []
     original = d.registry.finalize_pending
@@ -353,7 +353,7 @@ def run_runner(monkeypatch, tmp_path: Path, d: ScriptedDispatcher, model: Model)
         await original()
 
     monkeypatch.setattr(d.registry, "finalize_pending", spy)
-    result = asyncio.run(tdd_loop_runner(
+    result = asyncio.run(run_item(
         "build it", 0, {"session_id": "s"}, workspace=FakeWorkspace(), deps=deps(model),
         permission_context=ToolPermissionContext(), hook_dispatcher=d))
     return result, finalized

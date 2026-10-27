@@ -1,4 +1,4 @@
-"""Phase 9: the entry point's session driver — building the shell and driving a thread."""
+"""Phases 9 and 11: the entry point's session driver — the shell, a thread, then development."""
 
 from __future__ import annotations
 
@@ -11,19 +11,24 @@ from langgraph.checkpoint.memory import MemorySaver
 
 import app.session.driver as driver
 from app.config.config import Config
+from app.query.transitions import Terminal
 from app.session.driver import (
     MEMORY_CHECKPOINT,
     SessionOptions,
     SessionRun,
+    answer_interrupts,
     build_session_shell,
     checkpoint_uri,
     derive_thread_id,
+    develop_headless,
+    development_run_options,
     drive_session,
-    failed_requirements,
     fresh_thread_id,
+    rescope_session,
 )
 from app.session.shell import SessionShell
-from app.session.state import PlanItemResult, SessionState, SessionStatus
+from app.session.state import SessionStatus
+from app.tdd.plan import ItemStatus
 
 
 def checklist(user_input: str, history: str) -> dict[str, Any]:
@@ -34,25 +39,14 @@ def question(user_input: str, history: str) -> dict[str, Any]:
     return {"response": "Which?", "needs_clarification": True, "has_checklist": False}
 
 
-class RecordingRunner:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, int, dict[str, Any]]] = []
-
-    def __call__(self, sub_req: str, idx: int, state: SessionState, **kwargs: Any) -> PlanItemResult:
-        self.calls.append((sub_req, idx, kwargs))
-        return PlanItemResult(index=idx, sub_requirement=sub_req, status="success", terminal_reason="completed",
-                              red_confirmed=True, green_passed=True)
-
-
-def build(options: SessionOptions, analyzer: Any = checklist, runner: Any = None) -> tuple[SessionShell, Any, Any]:
-    runner = runner or RecordingRunner()
+def build(options: SessionOptions, analyzer: Any = checklist, planner: Any = None) -> tuple[SessionShell, Any]:
     workspace = object()
     shell, ws = build_session_shell(
-        "t", options, workspace_factory=lambda thread_id: workspace, loop_runner=runner, analyzer_fn=analyzer,
-        engineer_fn=lambda r, h: "SPEC", planner_fn=lambda s: ["A"],
+        "t", options, workspace_factory=lambda thread_id: workspace, analyzer_fn=analyzer,
+        engineer_fn=lambda r, h: "SPEC", planner_fn=planner or (lambda s, c: ["A"]),
     )
     assert ws is workspace
-    return shell, ws, runner
+    return shell, ws
 
 
 def test_thread_ids() -> None:
@@ -78,16 +72,15 @@ def test_memory_checkpointer_is_recorded_and_warned(caplog: pytest.LogCaptureFix
     options = SessionOptions(checkpoint=MEMORY_CHECKPOINT, headless=True, permission_mode="acceptEdits",
                              settings_path="/s.json", dangerously_skip_permissions=True)
     with caplog.at_level(logging.WARNING):
-        shell, ws, runner = build(options)
+        shell, _ = build(options)
     assert isinstance(shell.checkpointer, MemorySaver)
     assert "Session t checkpoints in memory" in caplog.text
-    drive_session(shell, "t", "req")
-    (_, _, kwargs), = runner.calls
-    assert kwargs == {"workspace": ws, "postgres_checkpointing": False, "permission_mode": "acceptEdits",
-                      "settings_path": "/s.json", "dangerously_skip_permissions": True}
+    assert development_run_options(shell, options) == {
+        "postgres_checkpointing": False, "permission_mode": "acceptEdits", "settings_path": "/s.json",
+        "dangerously_skip_permissions": True}
 
 
-def test_a_persistent_checkpointer_reaches_the_runner(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_persistent_checkpointer_reaches_the_development_run(caplog: pytest.LogCaptureFixture) -> None:
     saver = MemorySaver()
     seen: list[Any] = []
 
@@ -97,14 +90,13 @@ def test_a_persistent_checkpointer_reaches_the_runner(caplog: pytest.LogCaptureF
 
     with patch.object(driver, "build_checkpointer", fake_build), \
             patch.object(driver, "is_persistent_checkpointer", lambda cp: True), caplog.at_level(logging.WARNING):
-        shell, _, runner = build(SessionOptions(headless=True))
+        shell, _ = build(SessionOptions(headless=True))
+        assert development_run_options(shell, SessionOptions())["postgres_checkpointing"] is True
     assert seen == [Config.POSTGRES_URL]
     assert "checkpoints in memory" not in caplog.text
-    drive_session(shell, "t", "req")
-    assert runner.calls[0][2]["postgres_checkpointing"] is True
 
 
-def test_default_workspace_and_runner_are_the_production_ones() -> None:
+def test_default_workspace_is_the_production_one() -> None:
     made: list[str] = []
 
     def fake_workspace(thread_id: str) -> Any:
@@ -118,15 +110,15 @@ def test_default_workspace_and_runner_are_the_production_ones() -> None:
 
 
 def test_headless_flag_reaches_the_shell() -> None:
-    shell, _, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT, headless=True), analyzer=question)
+    shell, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT, headless=True), analyzer=question)
     run = drive_session(shell, "t", "req")
     assert run.values["status"] == SessionStatus.FAILED
     assert run.paused_at is None
-    assert not run.completed
+    assert not run.planned
 
 
 def test_interactive_drive_answers_interrupts() -> None:
-    shell, _, runner = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT))
+    shell, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT))
     asked: list[dict[str, Any]] = []
 
     def answer(payload: dict[str, Any]) -> str:
@@ -135,38 +127,43 @@ def test_interactive_drive_answers_interrupts() -> None:
 
     run = drive_session(shell, "t", "req", answer)
     assert [p["type"] for p in asked] == ["checklist_approval"]
-    assert run.completed and run.paused_at is None
+    assert run.planned and run.paused_at is None
     assert run.values["user_prompts"] == ["req", "/yes"]
-    assert len(runner.calls) == 1
+    assert run.values["plan"] == ["A"]
 
 
 def test_answer_none_pauses_and_a_later_drive_continues() -> None:
-    shell, _, runner = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT))
+    shell, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT))
     run = drive_session(shell, "t", "req", lambda payload: None)
     assert run.paused_at is not None and run.paused_at["type"] == "checklist_approval"
     assert run.values["status"] == SessionStatus.AWAITING_INPUT
-    assert runner.calls == []
     run = drive_session(shell, "t", None, lambda payload: "/yes")
-    assert run.completed
+    assert run.planned
     assert run.values["user_prompts"] == ["req", "/yes"]
 
 
 def test_a_paused_thread_driven_headless_is_decided_by_the_shell() -> None:
     saver = MemorySaver()
     with patch.object(driver, "build_checkpointer", lambda uri: saver):
-        shell, _, _ = build(SessionOptions())
+        shell, _ = build(SessionOptions())
         drive_session(shell, "t", "req", lambda payload: None)
-        headless, _, _ = build(SessionOptions(headless=True))
-    assert drive_session(headless, "t", None).completed
+        headless, _ = build(SessionOptions(headless=True))
+    assert drive_session(headless, "t", None).planned
 
 
 def test_a_finished_thread_is_reported_as_it_stands(caplog: pytest.LogCaptureFixture) -> None:
-    shell, _, runner = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT, headless=True))
+    calls: list[str] = []
+
+    def planner(spec: str, completed: Any) -> list[str]:
+        calls.append(spec)
+        return ["A"]
+
+    shell, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT, headless=True), planner=planner)
     first = drive_session(shell, "t", "req")
     with caplog.at_level(logging.INFO):
         again = drive_session(shell, "t", "other request")
     assert again.values == first.values
-    assert len(runner.calls) == 1
+    assert len(calls) == 1
     assert "Session t already finished; reporting its checkpoint." in caplog.text
 
 
@@ -175,12 +172,12 @@ def test_an_unfinished_thread_continues(caplog: pytest.LogCaptureFixture) -> Non
     shell.is_finished.return_value = False
     shell.has_session.return_value = True
     shell.pending_interrupts.return_value = []
-    shell.get_state.return_value.values = {"status": SessionStatus.COMPLETED}
+    shell.get_state.return_value.values = {"status": SessionStatus.PLANNED}
     with caplog.at_level(logging.INFO):
         run = drive_session(shell, "t", None, lambda p: "/yes")
     shell.continue_session.assert_called_once_with("t")
     shell.run.assert_not_called()
-    assert run.completed
+    assert run.planned
     assert "Continuing session t from its last checkpoint." in caplog.text
 
 
@@ -196,42 +193,59 @@ def test_a_pending_interrupt_is_answered_not_continued() -> None:
 
 
 def test_no_session_and_no_request_is_an_error() -> None:
-    shell, _, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT))
+    shell, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT))
     with pytest.raises(ValueError, match="no session 't' to continue"):
         drive_session(shell, "t", None)
 
 
-def test_session_run_completed() -> None:
-    assert SessionRun(values={"status": SessionStatus.COMPLETED}).completed is True
-    assert SessionRun(values={"status": SessionStatus.FAILED}).completed is False
+def test_session_run_planned() -> None:
+    assert SessionRun(values={"status": SessionStatus.PLANNED}).planned is True
+    assert SessionRun(values={"status": SessionStatus.FAILED}).planned is False
     assert SessionRun(values={}).paused_at is None
 
 
-def test_failed_requirements() -> None:
-    values = {"subreq_results": [
-        {"status": "success", "sub_requirement": "A"},
-        {"status": "failed", "sub_requirement": "B", "error_message": "Terminated early: model_error",
-         "terminal_reason": "model_error"},
-        {"status": "failed", "sub_requirement": "C", "error_message": None, "terminal_reason": "hook_stopped"},
-    ]}
-    assert failed_requirements(values) == [
-        {"requirement": "B", "reason": "Terminated early: model_error"},
-        {"requirement": "C", "reason": "hook_stopped"},
-    ]
-    assert failed_requirements({}) == []
-    assert failed_requirements({"subreq_results": [{"status": "failed"}]}) == [{"requirement": "", "reason": None}]
+def test_answer_interrupts_without_an_answer_reports_the_state() -> None:
+    shell = MagicMock()
+    shell.get_state.return_value.values = {"status": "x"}
+    assert answer_interrupts(shell, "t", None) == SessionRun(values={"status": "x"})
+    shell.pending_interrupts.assert_not_called()
 
 
-def test_a_headless_session_end_to_end_through_the_real_runner(python_workspace: Any, tmp_path: Any) -> None:
+def test_rescope_session_reruns_the_analysis_and_answers_its_review() -> None:
+    seen: list[Any] = []
+
+    def planner(spec: str, completed: Any) -> list[str]:
+        seen.append(completed)
+        return ["B"]
+
+    shell, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT), planner=planner)
+    drive_session(shell, "t", "req", lambda p: "/yes")
+    asked: list[str] = []
+
+    def answer(payload: dict[str, Any]) -> str:
+        asked.append(payload["type"])
+        return "/yes"
+
+    run = rescope_session(shell, "t", "add B", ["A"], answer)
+    assert run.planned and run.values["plan"] == ["B"]
+    assert asked == ["checklist_approval"]
+    assert seen[-1] == ["A"]
+
+
+def test_rescope_session_can_pause_at_the_review() -> None:
+    shell, _ = build(SessionOptions(checkpoint=MEMORY_CHECKPOINT))
+    drive_session(shell, "t", "req", lambda p: "/yes")
+    run = rescope_session(shell, "t", "more", [], lambda p: None)
+    assert run.paused_at is not None and not run.planned
+
+
+def test_a_headless_session_end_to_end_through_development(python_workspace: Any, tmp_path: Any) -> None:
     """
-    Driver -> shell -> `tdd_loop_runner` with a scripted model on a real workspace: the
-    session completes only because the item's ledger observed Red then Green.
+    Driver -> shell -> `run_headless` with a scripted model on a real workspace: the session
+    is complete only because the item's ledger observed Red then Green.
     """
-    import functools
-
     from langchain_core.messages import AIMessage
 
-    from app.cli.print import tdd_loop_runner
     from tests.test_phase0_baseline import CALC_IMPL, CALC_TEST, _call, _scripted_deps
 
     turns = [
@@ -241,18 +255,18 @@ def test_a_headless_session_end_to_end_through_the_real_runner(python_workspace:
         [_call("RunTests", "c4", test_path="tests")],
         [AIMessage(content="Red then green observed.")],
     ]
-    runner = functools.partial(tdd_loop_runner, deps=_scripted_deps(turns), project_root=tmp_path,
-                               home=tmp_path / "home", managed_dir=tmp_path / "etc")
+    options = SessionOptions(headless=True, checkpoint=MEMORY_CHECKPOINT, permission_mode="acceptEdits")
     shell, _ = build_session_shell(
-        "tdd-e2e", SessionOptions(headless=True, checkpoint=MEMORY_CHECKPOINT, permission_mode="acceptEdits"),
-        workspace_factory=lambda thread_id: python_workspace, loop_runner=runner, analyzer_fn=checklist,
-        engineer_fn=lambda r, h: "# Spec: add", planner_fn=lambda s: ["add two numbers"],
+        "tdd-e2e", options, workspace_factory=lambda thread_id: python_workspace, analyzer_fn=checklist,
+        engineer_fn=lambda r, h: "# Spec: add", planner_fn=lambda s, c: ["add two numbers"],
     )
     run = drive_session(shell, "tdd-e2e", "Build a calculator")
-    assert run.completed
-    (item,) = run.values["subreq_results"]
-    assert (item["status"], item["terminal_reason"], item["red_confirmed"], item["green_passed"]) == (
-        "success", "completed", True, True)
+    assert run.planned
+    outcome = develop_headless(shell, "tdd-e2e", run.values, python_workspace, options,
+                               deps=_scripted_deps(turns), project_root=tmp_path, home=tmp_path / "home",
+                               managed_dir=tmp_path / "etc")
+    assert outcome.completed and outcome.terminal == Terminal.COMPLETED
+    assert [i.status for i in outcome.plan.items] == [ItemStatus.DONE]
     assert python_workspace.read_file("calculator.py") == CALC_IMPL
 
 

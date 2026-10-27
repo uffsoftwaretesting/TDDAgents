@@ -378,7 +378,7 @@ CALC_IMPL = "def add(a, b):\n    return a + b\n"
 
 
 def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
-    from app.cli.print import tdd_loop_runner
+    from tests.session_run_helpers import run_item
 
     project = tmp_path / "project"
     (project / ".tddagents").mkdir(parents=True)
@@ -400,10 +400,10 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
         [AIMessage(content="Red then green observed.")],
     ]
     seen: list[Any] = []
-    result = asyncio.run(tdd_loop_runner("add two numbers", 0, {"session_id": "s"},
-                                         workspace=python_workspace, deps=_scripted_deps(turns, seen),
-                                         project_root=project, home=tmp_path / "home",
-                                         managed_dir=tmp_path / "etc"))
+    result = asyncio.run(run_item("add two numbers", 0, {"session_id": "s"},
+                                  workspace=python_workspace, deps=_scripted_deps(turns, seen),
+                                  project_root=project, home=tmp_path / "home",
+                                  managed_dir=tmp_path / "etc"))
     assert (result.status, result.terminal_reason) == ("success", "completed")
     assert (result.red_confirmed, result.green_passed) == (True, True)
     assert result.error_message is None and result.sub_requirement == "add two numbers"
@@ -450,15 +450,15 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
 
 def test_runner_blocks_production_writes_in_red(python_workspace):
     """Barrier 2 at the runtime gate: the first write to production code in RED is refused."""
-    from app.cli.print import tdd_loop_runner
+    from tests.session_run_helpers import run_item
 
     turns = [
         [_call("WriteFile", "c1", file_path="calculator.py", content=CALC_IMPL)],
         [AIMessage(content="giving up")],
     ]
     seen: list[Any] = []
-    result = asyncio.run(tdd_loop_runner("x", 3, {"session_id": "s"}, workspace=python_workspace,
-                                         deps=_scripted_deps(turns, seen)))
+    result = asyncio.run(run_item("x", 3, {"session_id": "s"}, workspace=python_workspace,
+                                  deps=_scripted_deps(turns, seen)))
     assert not python_workspace.exists("calculator.py")
     refusal = next(m for m in seen[1].messages if getattr(m, "tool_call_id", None) == "c1")
     assert "TDD phase RED denies" in str(refusal.content)
@@ -466,7 +466,7 @@ def test_runner_blocks_production_writes_in_red(python_workspace):
 
 
 def test_runner_reports_failure_without_inventing_progress(python_workspace):
-    from app.cli.print import tdd_loop_runner
+    from tests.session_run_helpers import run_item
 
     async def crashing(state: Any, config: Any) -> AsyncIterator[Any]:
         raise RuntimeError("provider down")
@@ -475,33 +475,33 @@ def test_runner_reports_failure_without_inventing_progress(python_workspace):
     from app.query.deps import get_production_deps
 
     deps = dataclasses.replace(get_production_deps(), call_model=crashing)
-    result = asyncio.run(tdd_loop_runner("x", 1, {"session_id": "s"}, workspace=python_workspace, deps=deps))
+    result = asyncio.run(run_item("x", 1, {"session_id": "s"}, workspace=python_workspace, deps=deps))
     assert (result.status, result.terminal_reason) == ("failed", "model_error")
     assert result.error_message == "Terminated early: model_error"
     assert (result.red_confirmed, result.green_passed) == (False, False)
 
 
 def test_runner_crash_is_a_model_error(python_workspace, monkeypatch):
-    import app.cli.print as runner_mod
     import app.query_engine as query_engine
+    from tests.session_run_helpers import run_item
 
     def boom(*a: Any, **k: Any) -> Any:
         raise RuntimeError("engine exploded")
 
     monkeypatch.setattr(query_engine, "run_loop", boom)
-    result = asyncio.run(runner_mod.tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=python_workspace,
-                                                    deps=_scripted_deps([])))
+    result = asyncio.run(run_item("x", 0, {"session_id": "s"}, workspace=python_workspace,
+                                  deps=_scripted_deps([])))
     assert result.terminal_reason == "model_error" and result.status == "failed"
 
 
 def test_runner_writes_the_transcript_outside_the_workspace(python_workspace):
     """Phase 6: upstream's `<config>/projects/<sanitized cwd>/<session>.jsonl`, plus the
     session's `events.jsonl`; nothing lands in the workspace."""
-    from app.cli.print import tdd_loop_runner
     from app.utils.session_storage_portable import get_project_dir
+    from tests.session_run_helpers import run_item
 
-    asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=python_workspace,
-                                deps=_scripted_deps([[AIMessage(content="done")]])))
+    asyncio.run(run_item("x", 0, {"session_id": "s"}, workspace=python_workspace,
+                         deps=_scripted_deps([[AIMessage(content="done")]])))
     project = get_project_dir(str(python_workspace.root))
     transcripts = list(project.glob("loop-*.jsonl"))
     assert len(transcripts) == 1
@@ -522,11 +522,11 @@ def _recording_deps(seen: list[Any]) -> Any:
 def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     import re
 
-    from app.cli.print import tdd_loop_runner
+    from tests.session_run_helpers import run_item
 
     seen: list[Any] = []
-    asyncio.run(tdd_loop_runner("spec", 0, {"session_id": "s"}, workspace=python_workspace,
-                                deps=_recording_deps(seen)))
+    asyncio.run(run_item("spec", 0, {"session_id": "s"}, workspace=python_workspace,
+                         deps=_recording_deps(seen)))
     state, config = seen[0]
     assert re.fullmatch(r"loop-[0-9a-f]{32}", config.run_id)
     assert config.gates.postgres_checkpointing is False
@@ -540,22 +540,14 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     assert len(contents) == 3
 
 
-def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatch, python_workspace):
-    import app.cli.print as runner_mod
+def test_runner_defaults_to_the_production_deps(monkeypatch, python_workspace):
     import app.query.deps as factory
-
-    asked: list[Any] = []
-
-    def fake_session_workspace(thread_id: str) -> Any:
-        asked.append(thread_id)
-        return python_workspace
+    from tests.session_run_helpers import run_item
 
     seen: list[Any] = []
-    monkeypatch.setattr(runner_mod, "session_workspace", fake_session_workspace)
     deps = _recording_deps(seen)
     monkeypatch.setattr(factory, "get_production_deps", lambda: deps)
-    result = asyncio.run(runner_mod.tdd_loop_runner("spec", 0, {"session_id": "abc"}))
-    assert asked == ["abc"]
+    result = asyncio.run(run_item("spec", 0, {"session_id": "abc"}, workspace=python_workspace))
     assert seen[0][0].tool_context.workspace is python_workspace
     # Phase 4: the production stop hooks enforce barrier 3. A model that stops without an
     # observed Red->Green is refused once, then the latch ends the run — never `completed`.
@@ -566,21 +558,12 @@ def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatc
 
 
 def test_runner_tolerates_a_workspace_without_a_run_dir(make_fake_workspace):
-    from app.cli.print import tdd_loop_runner
+    from tests.session_run_helpers import run_item
 
     ws = make_fake_workspace()
     assert not hasattr(ws, "run_dir")
-    result = asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=ws, deps=_recording_deps([])))
+    result = asyncio.run(run_item("x", 0, {"session_id": "s"}, workspace=ws, deps=_recording_deps([])))
     assert result.terminal_reason == "stop_hook_prevented"
-
-
-def test_runner_needs_a_session_id_for_its_default_workspace():
-    from app.cli.print import default_workspace
-
-    with pytest.raises(ValueError, match="^tdd_loop_runner needs a session_id to locate the session workspace$"):
-        default_workspace({})
-    with pytest.raises(ValueError):
-        default_workspace({"session_id": ""})
 
 
 def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):
@@ -599,7 +582,6 @@ def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):
     assert seen == [(tmp_path / "runs" / "t-9").resolve()]
     assert ws.root == (tmp_path / "runs" / "t-9" / "workspace").resolve()
     assert ws.execute('echo "$VIRTUAL_ENV"').stdout.strip() == str(seen[0] / "venv")
-    assert runner_mod.default_workspace({"session_id": "t-9"}).root == ws.root
 
 
 # ── edges the mutation run surfaced ──────────────────────────────────────────
@@ -708,8 +690,8 @@ def test_the_runner_refreshes_the_pool_only_when_the_phase_moves(python_workspac
     `refreshTools` wiring: RED hides the production writers, and the GREEN that RunTests
     records must bring them back — on the next turn, not the next sub-requirement.
     """
-    from app.cli.print import tdd_loop_runner
     from app.tdd.ledger import TddPhase
+    from tests.session_run_helpers import run_item
 
     seen: list[Any] = []
     turns = [
@@ -718,8 +700,8 @@ def test_the_runner_refreshes_the_pool_only_when_the_phase_moves(python_workspac
         [_call("WriteFile", "c3", file_path="calculator.py", content=CALC_IMPL)],
         [AIMessage(content="done")],
     ]
-    asyncio.run(tdd_loop_runner("add", 0, {"session_id": "s"}, workspace=python_workspace,
-                                deps=_scripted_deps(turns, seen)))
+    asyncio.run(run_item("add", 0, {"session_id": "s"}, workspace=python_workspace,
+                         deps=_scripted_deps(turns, seen)))
 
     phases = [s.phase_ledger.phase for s in seen]
     assert phases[0] == TddPhase.RED and phases[-1] == TddPhase.GREEN

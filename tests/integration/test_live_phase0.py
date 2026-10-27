@@ -39,9 +39,9 @@ def real_openai_key(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 def test_live_runner_completes_a_red_green_cycle(real_openai_key: str, python_workspace) -> None:
-    from app.cli.print import tdd_loop_runner
+    from tests.session_run_helpers import run_item
 
-    result = asyncio.run(tdd_loop_runner(SPEC, 0, {"session_id": "live"}, workspace=python_workspace))
+    result = asyncio.run(run_item(SPEC, 0, {"session_id": "live"}, workspace=python_workspace))
 
     assert result.terminal_reason == "completed", result.error_message
     assert result.red_confirmed is True

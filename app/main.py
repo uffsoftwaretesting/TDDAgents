@@ -35,16 +35,18 @@ if __package__ in (None, ""):
 
 from dotenv import load_dotenv
 
+from app.query.transitions import Terminal
 from app.session.driver import (
     SessionOptions,
     SessionRun,
     build_session_shell,
     derive_thread_id,
+    develop_headless,
     drive_session,
-    failed_requirements,
     fresh_thread_id,
 )
 from app.session.export import export_run_workspace
+from app.tdd.plan import ItemStatus, TddPlan
 from app.types.permissions import PERMISSION_MODES
 
 logging.basicConfig(
@@ -318,58 +320,59 @@ def write_session_artifacts(workspace_dir: str, values: dict[str, Any]) -> str:
         formatted_requirements,
     )
 
-    write_subreq_results(artifacts_dir, plan, list(values.get("subreq_results") or []))
     return artifacts_dir
 
 
-def write_subreq_results(artifacts_dir: str, plan: list[str], results: list[dict[str, Any]]) -> None:
-    """Each plan item's outcome (`PlanItemResult`): status, terminal reason and the final ledger."""
-    by_index = {item["index"]: item for item in results if isinstance(item.get("index"), int)}
-    statuses = [str(item.get("status")) for item in by_index.values()]
-    requirements = plan or [str(by_index[i].get("sub_requirement", "")) for i in sorted(by_index)]
+def write_subreq_results(artifacts_dir: str, plan: TddPlan | None, terminal: Terminal | None) -> None:
+    """
+    Each sub-requirement's outcome (Phase 11): done (its Red -> Green observed), the one the
+    session stopped on with the terminal reason, or not run.
+    """
+    if plan is None or not plan.items:
+        _write_text(os.path.join(artifacts_dir, "subreq_results.txt"), "SUB-REQUIREMENT RESULTS", "(no results)")
+        return
+    stopped_on = plan.current if terminal is not None and terminal != Terminal.COMPLETED else None
     lines = [
-        f"Total sub-requirements: {len(requirements)}",
-        f"Success: {statuses.count('success')}",
-        f"Failed: {statuses.count('failed')}",
-        f"Not run: {sum(1 for i in range(len(requirements)) if i not in by_index)}",
-        "-" * 80,
+        f"Total sub-requirements: {len(plan.items)}",
+        f"Done: {plan.done_count}",
+        f"Not done: {len(plan.items) - plan.done_count}",
     ]
-    for idx, requirement in enumerate(requirements):
-        item = by_index.get(idx)
-        if item is None:
-            lines.append(f"{idx + 1}. [NOT_RUN] {requirement}")
-            continue
-        status = str(item.get("status"))
-        lines.append(f"{idx + 1}. [{status.upper():<7}] {requirement}")
-        lines.append(
-            f"   Terminal: {item.get('terminal_reason')} | red_confirmed: {item.get('red_confirmed')}"
-            f" | green_passed: {item.get('green_passed')}"
-        )
-        if status != "success" and item.get("error_message"):
-            lines.append(f"   Reason: {item['error_message']}")
-    _write_text(
-        os.path.join(artifacts_dir, "subreq_results.txt"), "SUB-REQUIREMENT RESULTS",
-        "\n".join(lines) if requirements else "(no results)",
-    )
+    if terminal is not None:
+        lines.append(f"Session ended: {terminal}")
+    lines.append("-" * 80)
+    for item in plan.items:
+        if item.status == ItemStatus.DONE:
+            lines.append(f"{item.id}. [DONE   ] {item.text}")
+        elif item is stopped_on:
+            lines.append(f"{item.id}. [FAILED ] {item.text}")
+            lines.append(f"   Terminal: {terminal}")
+        else:
+            lines.append(f"{item.id}. [NOT_RUN] {item.text}")
+    _write_text(os.path.join(artifacts_dir, "subreq_results.txt"), "SUB-REQUIREMENT RESULTS", "\n".join(lines))
 
 
-def report(run: SessionRun, thread_id: str, workspace: Any) -> None:
+def report(
+    run: SessionRun, thread_id: str, workspace: Any, plan: TddPlan | None = None, terminal: Terminal | None = None
+) -> None:
     """Export the workspace and the artifacts, then print the outcome."""
     workspace_dir = os.path.abspath(f"workspace_output_{thread_id}")
     os.makedirs(workspace_dir, exist_ok=True)
     artifacts_dir = write_session_artifacts(workspace_dir, run.values)
+    write_subreq_results(artifacts_dir, plan, terminal)
     _write_token_report(artifacts_dir)
     exported = export_run_workspace(workspace.root, workspace_dir)
     print(f"\n💾 {len(exported)} file(s) exported from {workspace.root} to {workspace_dir}/")
 
     if run.paused_at is not None:
         print("\n⏸️  Session paused at the analyst's question.")
-    elif run.completed:
+    elif not run.planned:
+        print(f"\n⚠️  PIPELINE FINISHED WITH STATUS: '{run.values.get('status', 'unknown')}'")
+    elif plan is not None and plan.is_complete and terminal == Terminal.COMPLETED:
         print("\n✅  PIPELINE COMPLETED SUCCESSFULLY!")
     else:
-        print(f"\n⚠️  PIPELINE FINISHED WITH STATUS: '{run.values.get('status', 'unknown')}'")
-    for item in failed_requirements(run.values):
-        print(f"   • {item['requirement']}: {item['reason']}")
+        print(f"\n⚠️  DEVELOPMENT STOPPED: {terminal}")
+        if plan is not None and plan.current is not None:
+            print(f"   • {plan.current.id}. {plan.current.text}: not done")
     print(f"\n🔑 Thread ID for this run: {thread_id}")
     print("   (To inspect the state or resume later, use --thread-id)\n")
 
@@ -411,11 +414,15 @@ def main(argv: list[str] | None = None) -> int:
         print("=" * 80)
         try:
             run = drive_session(shell, thread_id, initial_input, answer=None if args.print else interactive_answer)
+            if not run.planned:
+                report(run, thread_id, workspace)
+                return 1
+            outcome = develop_headless(shell, thread_id, run.values, workspace, session_options(args))
         except KeyboardInterrupt:
             print(f"\n🛑 Interrupted. Continue later with --thread-id {thread_id}.")
             return 130
-        report(run, thread_id, workspace)
-        return 0 if run.completed else 1
+        report(run, thread_id, workspace, outcome.plan, outcome.terminal)
+        return 0 if outcome.completed else 1
     finally:
         logging.getLogger().removeHandler(file_handler)
         file_handler.close()

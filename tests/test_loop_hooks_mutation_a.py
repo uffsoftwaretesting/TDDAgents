@@ -338,8 +338,9 @@ def loop_deps(model: Model) -> LoopDeps:
 
 def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
     import app.utils.hooks.hook_dispatcher as runtime
-    from app.cli.print import run_settings_locations, tdd_loop_runner
+    from app.cli.print import run_settings_locations
     from tests.conftest import FakeWorkspace
+    from tests.session_run_helpers import run_item
 
     project, home, managed, ws_root = (tmp_path / n for n in ("proj", "home", "etc", "ws"))
     for p in (project, home, managed, ws_root):
@@ -362,8 +363,8 @@ def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
     ws = FakeWorkspace()
     ws.root = str(ws_root)  # type: ignore[attr-defined]
     model = Model([[AIMessage(content="done")]])
-    asyncio.run(tdd_loop_runner("spec", 0, {"session_id": "s"}, workspace=ws, deps=loop_deps(model),
-                                project_root=project, home=home, managed_dir=managed))
+    asyncio.run(run_item("spec", 0, {"session_id": "s"}, workspace=ws, deps=loop_deps(model),
+                         project_root=project, home=home, managed_dir=managed))
     state, config = model.seen[0]
     assert seen["locations"] == run_settings_locations(config, project, home, managed)
     assert seen["session_id"] == config.run_id
@@ -378,13 +379,13 @@ def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
 
 
 def test_a_stopped_prompt_reports_its_plan_item(monkeypatch, tmp_path):
-    from app.cli.print import tdd_loop_runner
     from tests.conftest import FakeWorkspace
+    from tests.session_run_helpers import run_item
 
     d = ScriptedDispatcher(script={"UserPromptSubmit": [
         AggregatedHookResult(blocking_error=HookBlockingError(blocking_error="no", command="c"))]})
-    result = asyncio.run(tdd_loop_runner("the spec", 7, {"session_id": "s"}, workspace=FakeWorkspace(),
-                                         deps=loop_deps(Model([])), permission_context=ToolPermissionContext(),
-                                         hook_dispatcher=d))
+    result = asyncio.run(run_item("the spec", 7, {"session_id": "s"}, workspace=FakeWorkspace(),
+                                  deps=loop_deps(Model([])), permission_context=ToolPermissionContext(),
+                                  hook_dispatcher=d))
     assert (result.index, result.sub_requirement) == (7, "the spec")
     assert d.payload("SessionStart")["model"] == build_run_config("x", postgres_checkpointing=False).model

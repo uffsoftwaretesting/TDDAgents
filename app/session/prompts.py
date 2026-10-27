@@ -10,6 +10,7 @@ rendering an empty heading.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from app.tdd.plan import TddPlan, render_plan
@@ -45,10 +46,18 @@ def engineer_prompts(requirements: str, conversation_history: str = "") -> tuple
     return _system("engineer"), human.strip()
 
 
-def planner_prompts(specification: str) -> tuple[str, str]:
-    """The planner's (system, human) prompts for the engineer's specification."""
-    human = render_prompt(_read("planner", "request.md"), {"SPECIFICATION": specification})
-    return _system("planner"), human.strip()
+def planner_prompts(specification: str, completed: Sequence[str] = ()) -> tuple[str, str]:
+    """
+    The planner's (system, human) prompts for the engineer's specification; on a re-scope
+    (`/requirements`, Phase 11) the sub-requirements already done are listed so they are not
+    planned again.
+    """
+    human = render_prompt(_read("planner", "request.md"), {"SPECIFICATION": specification}).strip()
+    if completed:
+        done = render_prompt(_read("planner", "completed.md"),
+                             {"COMPLETED": "\n".join(f"- {item}" for item in completed)}).strip()
+        human = f"{human}\n\n{done}"
+    return _system("planner"), human
 
 
 def _current(plan: TddPlan) -> str:

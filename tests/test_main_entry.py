@@ -1,4 +1,4 @@
-"""Phase 9: the entry point — interactive and headless (`-p`) sessions."""
+"""Phases 9 and 11: the entry point — interactive and headless (`-p`) sessions."""
 
 from __future__ import annotations
 
@@ -11,18 +11,18 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
 import app.main as entry
+from app.cli.print import HeadlessOutcome
+from app.query.transitions import Terminal
 from app.session.driver import SessionOptions, SessionRun, build_session_shell
-from app.session.state import PlanItemResult, SessionStatus
+from app.session.state import SessionStatus
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.plan import TddPlan
 
-
-def ok_runner(sub_req: str, idx: int, state: Any, **kwargs: Any) -> PlanItemResult:
-    return PlanItemResult(index=idx, sub_requirement=sub_req, status="success", terminal_reason="completed",
-                          red_confirmed=True, green_passed=True)
-
-
-def failing_runner(sub_req: str, idx: int, state: Any, **kwargs: Any) -> PlanItemResult:
-    return PlanItemResult(index=idx, sub_requirement=sub_req, status="failed", terminal_reason="model_error",
-                          red_confirmed=False, green_passed=False, error_message="Terminated early: model_error")
+CYCLE = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+PLAN = TddPlan.from_texts(["Item A"])
+DONE = HeadlessOutcome(terminal=Terminal.COMPLETED, plan=PLAN.complete_current(CYCLE))
+STOPPED = HeadlessOutcome(terminal=Terminal.STOP_HOOK_PREVENTED, plan=PLAN)
+PLANNED = SessionRun(values={"status": SessionStatus.PLANNED})
 
 
 def checklist(user_input: str, history: str) -> dict[str, Any]:
@@ -36,7 +36,7 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     # setenv first so teardown restores the variable `--coordinator` writes to os.environ.
     monkeypatch.setenv("TDDAGENTS_COORDINATOR_MODE", "")
     monkeypatch.delenv("TDDAGENTS_COORDINATOR_MODE")
-    holder: dict[str, Any] = {"runner": ok_runner, "options": [], "threads": []}
+    holder: dict[str, Any] = {"outcome": DONE, "options": [], "threads": [], "developed": []}
 
     class Workspace:
         root = tmp_path / "ws"
@@ -49,11 +49,17 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
         holder["threads"].append(thread_id)
         return build_session_shell(
             thread_id, SessionOptions(headless=options.headless, checkpoint="memory"),
-            workspace_factory=lambda t: Workspace(), loop_runner=holder["runner"], analyzer_fn=checklist,
-            engineer_fn=lambda r, h: "# Spec", planner_fn=lambda s: ["Item A"],
+            workspace_factory=lambda t: Workspace(), analyzer_fn=checklist,
+            engineer_fn=lambda r, h: "# Spec", planner_fn=lambda s, c: ["Item A"],
         )
 
+    def fake_develop(shell: Any, thread_id: str, values: Any, workspace: Any, options: Any) -> HeadlessOutcome:
+        holder["developed"].append((thread_id, values["plan"], options))
+        outcome: HeadlessOutcome = holder["outcome"]
+        return outcome
+
     monkeypatch.setattr(entry, "build_session_shell", fake_build)
+    monkeypatch.setattr(entry, "develop_headless", fake_develop)
     # One saver for every build, as one Postgres database would be across processes.
     saver = MemorySaver()
     monkeypatch.setattr("app.session.driver.build_checkpointer", lambda uri: saver)
@@ -150,11 +156,7 @@ def test_interactive_answer(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Capt
 def test_write_session_artifacts(tmp_path: Path) -> None:
     values = {
         "user_prompts": ["Build X", "/yes"], "conversation_history": "[User]: Build X\n[Analyst]: ok",
-        "plan": ["A", "B"], "specification": "# Spec", "success_count": 1, "failure_count": 1,
-        "subreq_results": [
-            {"index": 0, "status": "success", "sub_requirement": "A"},
-            {"index": 1, "status": "failed", "sub_requirement": "B", "error_message": "boom"},
-        ],
+        "plan": ["A", "B"], "specification": "# Spec",
     }
     artifacts = Path(entry.write_session_artifacts(str(tmp_path), values))
     assert artifacts == tmp_path / "metrics_and_logging"
@@ -164,8 +166,7 @@ def test_write_session_artifacts(tmp_path: Path) -> None:
     assert "1. A\n2. B" in (artifacts / "planner.txt").read_text()
     assert "# Spec" in (artifacts / "engineer_specifications.txt").read_text()
     assert "[Analyst]: ok" in (artifacts / "confirmed_user_requirements.txt").read_text()
-    report = (artifacts / "subreq_results.txt").read_text()
-    assert "2. [FAILED ] B\n" in report and "   Reason: boom\n" in report
+    assert not (artifacts / "subreq_results.txt").exists()
 
 
 def test_write_session_artifacts_without_a_plan(tmp_path: Path) -> None:
@@ -187,14 +188,25 @@ def test_headless_run_succeeds(fake_session: dict[str, Any], tmp_path: Path,
     assert (out_dir / "metrics_and_logging" / "token_usage.txt").exists()
     out = capsys.readouterr().out
     assert "PIPELINE COMPLETED SUCCESSFULLY" in out and thread_id in out and "(HEADLESS)" in out
+    (developed,) = fake_session["developed"]
+    assert developed[:2] == (thread_id, ["Item A"])
+    assert "1. [DONE   ] Item A" in (out_dir / "metrics_and_logging" / "subreq_results.txt").read_text()
 
 
 def test_headless_failure_exits_one(fake_session: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
-    fake_session["runner"] = failing_runner
+    fake_session["outcome"] = STOPPED
     assert entry.main(["-p", "Build X"]) == 1
     out = capsys.readouterr().out
-    assert "FINISHED WITH STATUS: 'failed'" in out
-    assert "Item A: Terminated early: model_error" in out
+    assert "DEVELOPMENT STOPPED: stop_hook_prevented" in out
+    assert "   • 1. Item A: not done" in out
+
+
+def test_a_session_that_never_planned_is_not_developed(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(entry, "drive_session", lambda *a, **k: SessionRun(values={"status": SessionStatus.FAILED}))
+    assert entry.main(["-p", "Build X"]) == 1
+    assert fake_session["developed"] == []
+    assert "FINISHED WITH STATUS: 'failed'" in capsys.readouterr().out
 
 
 def test_headless_without_a_request_exits_one(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
@@ -277,7 +289,7 @@ def test_report_status_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     class Workspace:
         root = tmp_path / "missing"
 
-    entry.report(SessionRun(values={"status": SessionStatus.COMPLETED}), "t", Workspace())
+    entry.report(PLANNED, "t", Workspace(), DONE.plan, Terminal.COMPLETED)
     assert "0 file(s) exported" in capsys.readouterr().out
 
 
@@ -458,10 +470,6 @@ def test_artifact_files_exact(tmp_path: Path) -> None:
     assert (artifacts / "confirmed_user_requirements.txt").read_text(encoding="utf-8") == (
         f"REQUIREMENTS SUBMITTED BY THE USER\n{bar}\n[User]: Build X\n{bar}\n"
     )
-    assert (artifacts / "subreq_results.txt").read_text(encoding="utf-8") == (
-        f"SUB-REQUIREMENT RESULTS\n{bar}\nTotal sub-requirements: 1\nSuccess: 0\nFailed: 0\nNot run: 1\n"
-        f"{'-' * 80}\n1. [NOT_RUN] A\n{bar}\n"
-    )
 
 
 def test_initial_prompt_keeps_blank_lines(tmp_path: Path) -> None:
@@ -471,57 +479,37 @@ def test_initial_prompt_keeps_blank_lines(tmp_path: Path) -> None:
 
 
 def test_subreq_results_exact(tmp_path: Path) -> None:
-    results: list[dict[str, Any]] = [
-        {"index": 0, "status": "success", "sub_requirement": "A", "terminal_reason": "completed",
-         "red_confirmed": True, "green_passed": True, "error_message": "ignored on success"},
-        {"index": 1, "status": "failed", "sub_requirement": "B", "terminal_reason": "model_error",
-         "red_confirmed": True, "green_passed": False, "error_message": "boom"},
-        {"index": 2, "status": "aborted", "sub_requirement": "C", "terminal_reason": "aborted_tools",
-         "red_confirmed": False, "green_passed": False},
-        {"index": "x", "status": "success"},
-    ]
-    entry.write_subreq_results(str(tmp_path), ["A", "B", "C", "D"], results)
+    plan = TddPlan.from_texts(["A", "B", "C"]).complete_current(CYCLE)
+    entry.write_subreq_results(str(tmp_path), plan, Terminal.MODEL_ERROR)
     bar = "=" * 80
     assert (tmp_path / "subreq_results.txt").read_text(encoding="utf-8") == (
         f"SUB-REQUIREMENT RESULTS\n{bar}\n"
-        "Total sub-requirements: 4\nSuccess: 1\nFailed: 1\nNot run: 1\n" + "-" * 80 + "\n"
-        "1. [SUCCESS] A\n   Terminal: completed | red_confirmed: True | green_passed: True\n"
-        "2. [FAILED ] B\n   Terminal: model_error | red_confirmed: True | green_passed: False\n   Reason: boom\n"
-        "3. [ABORTED] C\n   Terminal: aborted_tools | red_confirmed: False | green_passed: False\n"
-        f"4. [NOT_RUN] D\n{bar}\n"
+        "Total sub-requirements: 3\nDone: 1\nNot done: 2\nSession ended: model_error\n" + "-" * 80 + "\n"
+        "1. [DONE   ] A\n2. [FAILED ] B\n   Terminal: model_error\n"
+        f"3. [NOT_RUN] C\n{bar}\n"
     )
 
 
-def test_subreq_results_without_a_plan_lists_the_results(tmp_path: Path) -> None:
-    results = [{"index": 1, "status": "success", "sub_requirement": "B", "terminal_reason": "completed",
-                "red_confirmed": True, "green_passed": True},
-               {"index": 0, "status": "failed", "sub_requirement": "A", "terminal_reason": "model_error",
-                "red_confirmed": False, "green_passed": False}]
-    entry.write_subreq_results(str(tmp_path), [], results)
+def test_subreq_results_of_a_completed_session_mark_nothing_failed(tmp_path: Path) -> None:
+    entry.write_subreq_results(str(tmp_path), DONE.plan, Terminal.COMPLETED)
     text = (tmp_path / "subreq_results.txt").read_text(encoding="utf-8")
-    assert "Total sub-requirements: 2\n" in text and "Not run: 0\n" in text
-    assert text.index("1. [FAILED ] A") < text.index("2. [SUCCESS] B")
+    assert "Session ended: completed\n" in text and "1. [DONE   ] Item A\n" in text and "FAILED" not in text
 
 
-def test_subreq_results_without_a_plan_or_a_requirement_text(tmp_path: Path) -> None:
-    entry.write_subreq_results(str(tmp_path), [], [{"index": 0, "status": "failed"}])
-    assert "1. [FAILED ] \n" in (tmp_path / "subreq_results.txt").read_text(encoding="utf-8")
-
-
-def test_a_not_run_item_does_not_end_the_list(tmp_path: Path) -> None:
-    done = {"index": 1, "status": "success", "terminal_reason": "completed", "red_confirmed": True,
-            "green_passed": True}
-    entry.write_subreq_results(str(tmp_path), ["A", "B"], [done])
+def test_subreq_results_without_a_terminal_lists_the_plan(tmp_path: Path) -> None:
+    entry.write_subreq_results(str(tmp_path), TddPlan.from_texts(["A", "B"]), None)
     text = (tmp_path / "subreq_results.txt").read_text(encoding="utf-8")
-    assert "1. [NOT_RUN] A\n2. [SUCCESS] B\n" in text
+    assert "Session ended" not in text
+    assert "1. [NOT_RUN] A\n2. [NOT_RUN] B\n" in text
 
 
 def test_subreq_results_with_nothing(tmp_path: Path) -> None:
-    entry.write_subreq_results(str(tmp_path), [], [])
     bar = "=" * 80
-    assert (tmp_path / "subreq_results.txt").read_text(encoding="utf-8") == (
-        f"SUB-REQUIREMENT RESULTS\n{bar}\n(no results)\n{bar}\n"
-    )
+    for plan in (None, TddPlan()):
+        entry.write_subreq_results(str(tmp_path), plan, Terminal.COMPLETED)
+        assert (tmp_path / "subreq_results.txt").read_text(encoding="utf-8") == (
+            f"SUB-REQUIREMENT RESULTS\n{bar}\n(no results)\n{bar}\n"
+        )
 
 
 def test_token_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -552,16 +540,20 @@ def test_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: p
         root = ws
 
     out_dir = tmp_path / "workspace_output_t"
-    values = {"status": SessionStatus.FAILED, "subreq_results": [
-        {"status": "failed", "sub_requirement": "A", "error_message": "boom"}]}
-    entry.report(SessionRun(values=values), "t", Workspace())
+    entry.report(PLANNED, "t", Workspace(), STOPPED.plan, STOPPED.terminal)
     assert capsys.readouterr().out == (
         f"\n💾 1 file(s) exported from {ws} to {out_dir}/\n"
-        "\n⚠️  PIPELINE FINISHED WITH STATUS: 'failed'\n"
-        "   • A: boom\n"
+        "\n⚠️  DEVELOPMENT STOPPED: stop_hook_prevented\n"
+        "   • 1. Item A: not done\n"
         "\n🔑 Thread ID for this run: t\n"
         "   (To inspect the state or resume later, use --thread-id)\n\n"
     )
+    assert "2. " not in (out_dir / "metrics_and_logging" / "subreq_results.txt").read_text()
+    entry.report(SessionRun(values={"status": SessionStatus.FAILED}), "t", Workspace())
+    assert "\n⚠️  PIPELINE FINISHED WITH STATUS: 'failed'\n" in capsys.readouterr().out
+    entry.report(PLANNED, "t", Workspace(), DONE.plan, Terminal.MODEL_ERROR)
+    out = capsys.readouterr().out
+    assert "DEVELOPMENT STOPPED: model_error" in out and "not done" not in out
     assert (out_dir / "a.py").read_text() == "x"
     assert (out_dir / "metrics_and_logging" / "token_usage.txt").exists()
     entry.report(SessionRun(values={}, paused_at={"type": "clarification"}), "t", Workspace())
@@ -613,8 +605,10 @@ def test_report_success_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     class Workspace:
         root = tmp_path / "none"
 
-    entry.report(SessionRun(values={"status": SessionStatus.COMPLETED}), "t", Workspace())
+    entry.report(PLANNED, "t", Workspace(), DONE.plan, Terminal.COMPLETED)
     assert "\n\n✅  PIPELINE COMPLETED SUCCESSFULLY!\n\n🔑 Thread ID for this run: t\n" in capsys.readouterr().out
+    entry.report(PLANNED, "t", Workspace(), STOPPED.plan, Terminal.COMPLETED)
+    assert "SUCCESSFULLY" not in capsys.readouterr().out
 
 
 def test_menu_first_option(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
