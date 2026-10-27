@@ -19,7 +19,7 @@ from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 TASK_STOP_TOOL_NAME = "TaskStop"
 
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "tools" / "task_stop.md"
+PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
 TASK_STOP_SCHEMA: dict[str, Any] = {
     "type": "object",

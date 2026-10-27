@@ -4,7 +4,7 @@ The task model (Phase 8).
 Ported from `reference/claude-code/src/Task.ts` -> `TaskType`, `TaskStatus`,
 `isTerminalTaskStatus`, `TaskStateBase`, `generateTaskId`, `createTaskStateBase`. A task is a
 unit of background work recorded in `AppState.tasks` by id; this build has one kind, the
-background agent (`local_agent`, `tasks/local_agent_task.py`), but keeps upstream's whole
+background agent (`local_agent`, `tasks/local_agent_task/local_agent_task.py`), but keeps upstream's whole
 vocabulary so ids and statuses read the same.
 """
 

@@ -282,7 +282,7 @@ def test_the_gate_is_asked_about_the_hooks_input_not_the_models():
 # ── hook allow: re-checked by rules only (upstream checkRuleBasedPermissions) ──
 
 def _write_tool():
-    from app.tools.file_tools import build_write_file_tool
+    from app.tools.file_write_tool.file_write_tool import build_write_file_tool
 
     return build_write_file_tool()
 

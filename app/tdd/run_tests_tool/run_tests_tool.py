@@ -34,19 +34,14 @@ import re
 import shlex
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 from app.tdd.ledger import TestRunRecord
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
+from app.utils.frontmatter_parser import parse_markdown_frontmatter, render_prompt
 
-RUN_TESTS_PROMPT = """Runs pytest in the workspace and returns the full output.
-
-Tests failing is a result, not an error — in TDD a failing test is frequently the point.
-The output includes the exit code, and is verbose on purpose because the failure detail
-is the most valuable thing you will read.
-
-Updates the TDD phase ledger from the observed exit code: only a pass (0) or failing tests (1)
-change it; anything else (no tests collected, usage error, timeout) is reported as an error."""
+PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,8 +206,7 @@ def build_run_tests_tool(
         # is_error stays False on failure: red tests are normal data in TDD
         return ToolResult(content=format_output(exec_result, header), exit_code=code)
 
-    from app.utils.frontmatter_parser import render_prompt
-    prompt_text = RUN_TESTS_PROMPT
+    prompt_text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
     if vars:
         prompt_text = render_prompt(prompt_text, vars)
 

@@ -14,7 +14,7 @@ disabled server is recorded as `disabled`, a server that fails as `failed`; neit
 others. The resource tools join the pool once, with the first server that supports resources.
 
 `clients` is the `mcp_clients` sequence the context carries (upstream `options.mcpClients`):
-`attachments/deltas.py` and the resource tools read each entry's `type`, `name` and
+`utils/attachments.py` and the resource tools read each entry's `type`, `name` and
 `instructions`. `aclose` closes every connected session; the runner calls it when the run ends.
 
 Not ported: `needs-auth` and the auth tool, MCP prompts as commands and MCP skills, plugin
@@ -45,9 +45,11 @@ from app.services.mcp.types import (
     McpServerConfig,
     MCPServerConnection,
 )
-from app.tools.mcp_tool.mcp_tool import (
+from app.tools.list_mcp_resources_tool.list_mcp_resources_tool import (
     build_list_mcp_resources_tool,
-    build_mcp_tool,
+)
+from app.tools.mcp_tool.mcp_tool import build_mcp_tool
+from app.tools.read_mcp_resource_tool.read_mcp_resource_tool import (
     build_read_mcp_resource_tool,
 )
 

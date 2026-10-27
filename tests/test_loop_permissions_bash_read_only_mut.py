@@ -1,7 +1,7 @@
 """
-Mutation-driven pins for the Bash read-only classifier (`bash_read_only.py`,
-`bash_read_only_commands.py`), the obfuscated-flag quote chain and quoted-newline checks
-(`bash_security.py`), and the Bash tool helpers (`tools/bash.py`).
+Mutation-driven pins for the Bash read-only classifier (`tools/bash_tool/read_only_validation.py`,
+`utils/shell/read_only_command_validation.py`), the obfuscated-flag quote chain and quoted-newline checks
+(`bash_security.py`), and the Bash tool helpers (`tools/bash_tool/bash_tool.py`).
 
 Every expectation follows claude-code v2.1.88 (`readOnlyValidation.ts`,
 `readOnlyCommandValidation.ts`, `bashSecurity.ts`, `BashTool.tsx`); each test targets a
@@ -334,7 +334,7 @@ def test_quoted_newline_hash_line_asks():
     assert (res.behavior, res.message) == ("ask", QUOTED_NEWLINE_ASK)
 
 
-# ── tools/bash.py ────────────────────────────────────────────────────────────
+# ── tools/bash_tool/bash_tool.py ────────────────────────────────────────────────────────────
 
 def test_zero_max_timeout_override_is_ignored():
     assert bash_mod.get_max_bash_timeout_ms({"BASH_MAX_TIMEOUT_MS": "0"}) == bash_mod.MAX_TIMEOUT_MS

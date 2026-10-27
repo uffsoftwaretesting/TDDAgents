@@ -14,7 +14,9 @@ import pytest
 from langchain_core.messages import ToolMessage
 from mcp.client._memory import InMemoryTransport
 
+import app.tools.list_mcp_resources_tool.list_mcp_resources_tool as list_tool
 import app.tools.mcp_tool.mcp_tool as mt
+import app.tools.read_mcp_resource_tool.read_mcp_resource_tool as read_tool
 from app.services.mcp.client import connect_to_server
 from app.services.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
 from app.state.app_state_store import AppState, AppStateStore
@@ -213,7 +215,7 @@ def test_the_tdd_phase_tier_runs_before_the_allow_rule(monkeypatch):
 # --- resource tools -------------------------------------------------------------------------
 
 def test_resource_tool_surfaces():
-    listing, reading = mt.build_list_mcp_resources_tool(), mt.build_read_mcp_resource_tool()
+    listing, reading = list_tool.build_list_mcp_resources_tool(), read_tool.build_read_mcp_resource_tool()
     assert listing.name == "ListMcpResourcesTool" and reading.name == "ReadMcpResourceTool"
     for tool in (listing, reading):
         assert tool.is_read_only({}) and tool.is_concurrency_safe({}) and not tool.is_mcp
@@ -240,7 +242,7 @@ def with_demo(scenario: Any) -> Any:
 
 
 def test_list_resources_from_all_or_one_server():
-    listing = mt.build_list_mcp_resources_tool()
+    listing = list_tool.build_list_mcp_resources_tool()
     failed = FailedMCPServer(name="down", config=CONFIG)
 
     async def scenario(conn: Any) -> Any:
@@ -250,19 +252,19 @@ def test_list_resources_from_all_or_one_server():
     every, none = with_demo(scenario)
     assert json.loads(every.content)[0] == {"uri": "mem://greeting", "name": "greeting", "mimeType": "text/plain",
                                             "server": "demo"}
-    assert none.content == mt.NO_RESOURCES_MESSAGE
+    assert none.content == list_tool.NO_RESOURCES_MESSAGE
 
 
 def test_list_resources_unknown_server():
     ctx = ns(mcp_clients=(FailedMCPServer(name="a", config=CONFIG), client("b")))
     with pytest.raises(ValueError, match='Server "x" not found. Available servers: a, b'):
-        asyncio.run(mt.build_list_mcp_resources_tool().call({"server": "x"}, ctx))
-    empty = asyncio.run(mt.build_list_mcp_resources_tool().call({}, ns()))
-    assert empty.content == mt.NO_RESOURCES_MESSAGE
+        asyncio.run(list_tool.build_list_mcp_resources_tool().call({"server": "x"}, ctx))
+    empty = asyncio.run(list_tool.build_list_mcp_resources_tool().call({}, ns()))
+    assert empty.content == list_tool.NO_RESOURCES_MESSAGE
 
 
 def test_read_resource_tool():
-    reading = mt.build_read_mcp_resource_tool()
+    reading = read_tool.build_read_mcp_resource_tool()
 
     async def scenario(conn: Any) -> Any:
         return await reading.call({"server": "demo", "uri": "mem://greeting"},
@@ -280,7 +282,7 @@ def test_read_resource_tool():
 def test_read_resource_refusals(clients, message):
     ctx = ns(mcp_clients=clients)
     with pytest.raises(ValueError) as info:
-        asyncio.run(mt.build_read_mcp_resource_tool().call({"server": "s", "uri": "u"}, ctx))
+        asyncio.run(read_tool.build_read_mcp_resource_tool().call({"server": "s", "uri": "u"}, ctx))
     assert str(info.value) == message
 
 
@@ -288,11 +290,11 @@ def test_read_resource_refusals(clients, message):
 
 def test_the_resource_tools_schemas_are_upstreams():
     """`ListMcpResourcesTool` / `ReadMcpResourceTool` `inputSchema`, as the model receives them."""
-    assert mt.build_list_mcp_resources_tool().input_schema == {
+    assert list_tool.build_list_mcp_resources_tool().input_schema == {
         "type": "object",
         "properties": {"server": {"type": "string", "description": "Optional server name to filter resources by"}},
     }
-    assert mt.build_read_mcp_resource_tool().input_schema == {
+    assert read_tool.build_read_mcp_resource_tool().input_schema == {
         "type": "object",
         "properties": {
             "server": {"type": "string", "description": "The MCP server name"},
@@ -315,22 +317,24 @@ def test_resource_results_are_compact_json_with_unicode_kept(monkeypatch):
         seen.update(uri=uri, run_id=run_id, cwd=cwd)
         return {"contents": [{"uri": uri, "text": "é"}]}
 
-    monkeypatch.setattr(mt, "fetch_resources_for_client", fetch)
-    monkeypatch.setattr(mt, "read_resource", read)
-    listed = asyncio.run(mt.build_list_mcp_resources_tool().call({}, ns(mcp_clients=(client("s"),))))
+    monkeypatch.setattr(list_tool, "fetch_resources_for_client", fetch)
+    monkeypatch.setattr(read_tool, "read_resource", read)
+    listed = asyncio.run(list_tool.build_list_mcp_resources_tool().call({}, ns(mcp_clients=(client("s"),))))
     assert listed.content == '[{"uri":"u","name":"café","server":"s"}]'
     ctx = ns(mcp_clients=(client("s"),), run_id="r9", workspace=SimpleNamespace(root="/ws"))
-    read_out = asyncio.run(mt.build_read_mcp_resource_tool().call({"server": "s", "uri": "x://1"}, ctx))
+    read_out = asyncio.run(read_tool.build_read_mcp_resource_tool().call({"server": "s", "uri": "x://1"}, ctx))
     assert read_out.content == '{"contents":[{"uri":"x://1","text":"é"}]}'
     assert seen == {"uri": "x://1", "run_id": "r9", "cwd": "/ws"}
-    asyncio.run(mt.build_read_mcp_resource_tool().call({"server": "s", "uri": "x://1"}, ns(mcp_clients=(client("s"),))))
+    asyncio.run(
+        read_tool.build_read_mcp_resource_tool().call({"server": "s", "uri": "x://1"}, ns(mcp_clients=(client("s"),)))
+    )
     assert (seen["run_id"], seen["cwd"]) == ("run", ".")
 
 
 def test_a_server_without_a_resources_capability_is_refused():
     bare = ConnectedMCPServer(name="s", config=CONFIG, session=None, capabilities=SimpleNamespace())
     with pytest.raises(ValueError, match='Server "s" does not support resources'):
-        asyncio.run(mt.build_read_mcp_resource_tool().call({"server": "s", "uri": "u"}, ns(mcp_clients=(bare,))))
+        asyncio.run(read_tool.build_read_mcp_resource_tool().call({"server": "s", "uri": "u"}, ns(mcp_clients=(bare,))))
 
 
 def test_the_call_gets_the_runs_id_cwd_and_cancel_token(monkeypatch):

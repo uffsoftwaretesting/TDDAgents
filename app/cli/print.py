@@ -112,13 +112,11 @@ def build_builtin_tools() -> list[Tool]:
     """
     from app.tdd.run_tests_tool.run_tests_tool import build_run_tests_tool
     from app.tools.bash_tool.bash_tool import build_bash_tool
-    from app.tools.file_tools import (
-        build_edit_tool,
-        build_glob_tool,
-        build_grep_tool,
-        build_read_file_tool,
-        build_write_file_tool,
-    )
+    from app.tools.file_edit_tool.file_edit_tool import build_edit_tool
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
+    from app.tools.file_write_tool.file_write_tool import build_write_file_tool
+    from app.tools.glob_tool.glob_tool import build_glob_tool
+    from app.tools.grep_tool.grep_tool import build_grep_tool
     from app.tools.todo_write_tool.todo_write_tool import build_todo_write_tool
 
     return [

@@ -21,8 +21,8 @@ from app.workspace.base import (
 )
 from app.workspace.local import LocalWorkspace
 
-
 # ── Path contract ────────────────────────────────────────────────────────────
+
 
 @pytest.mark.parametrize(
     "raw,expected",

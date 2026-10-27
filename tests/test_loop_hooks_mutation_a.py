@@ -273,7 +273,7 @@ def test_pipeline_hooks_are_handed_the_call_id():
 
 def test_the_permission_request_is_handed_the_call_id():
     """A default-mode write is an 'ask'; headless, PermissionRequest hooks get the call id."""
-    from app.tools.file_tools import build_write_file_tool
+    from app.tools.file_write_tool.file_write_tool import build_write_file_tool
 
     d = Recorder()
     context = worker_context(d, mode=PermissionMode.DEFAULT)

@@ -154,7 +154,7 @@ async def has_permissions_to_use_tool(
     """
     `hasPermissionsToUseTool`, the outer gate: the inner decision; in auto mode an allow
     resets the denial streak and an 'ask' (not denied by `dontAsk`) goes to the classifier
-    (`auto_mode.py`) before the headless deny; any other 'ask' is resolved by
+    (`utils/permissions/permissions.py`) before the headless deny; any other 'ask' is resolved by
     `resolve_ask_without_prompt`.
     """
 

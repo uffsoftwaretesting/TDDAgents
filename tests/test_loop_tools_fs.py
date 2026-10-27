@@ -10,45 +10,55 @@ by `normalize_path`, so a test using one passes for the wrong reason.
 
 import asyncio
 import os
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage
 
-import app.tools.file_tools as fs
+import app.tools.file_edit_tool.file_edit_tool as file_edit_tool
+import app.tools.file_read_tool.file_read_tool as file_read_tool
+import app.tools.file_write_tool.file_write_tool as file_write_tool
+import app.tools.glob_tool.glob_tool as glob_tool
+import app.tools.grep_tool.grep_tool as grep_tool
+import app.utils.glob as glob_util
 from app.services.tools.tool_execution import run_tool_use
 from app.state.app_state_store import AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_permissions import check_tdd_phase_permission
 from app.tool import tool_context_for
-from app.tools.file_tools import (
-    DEFAULT_HEAD_LIMIT,
-    FILE_MODIFIED_SINCE_READ_ERROR,
-    FILE_NOT_FOUND_CWD_NOTE,
-    FILE_NOT_READ_ERROR,
-    FILE_UNEXPECTEDLY_MODIFIED_ERROR,
-    GLOB_MAX_RESULTS,
-    MAX_COLUMNS,
-    MAX_LINES_TO_READ,
-    VCS_DIRECTORIES_TO_EXCLUDE,
-    add_line_numbers,
+from app.tools.file_edit_tool.constants import FILE_UNEXPECTEDLY_MODIFIED_ERROR
+from app.tools.file_edit_tool.file_edit_tool import build_edit_tool
+from app.tools.file_edit_tool.utils import (
     apply_edit_to_file,
-    apply_head_limit,
-    build_edit_tool,
-    build_glob_tool,
-    build_grep_tool,
-    build_read_file_tool,
-    build_write_file_tool,
     find_actual_string,
-    format_limit_info,
-    get_prompt,
     normalize_quotes,
-    path_kind,
     preserve_quote_style,
+)
+from app.tools.file_read_tool.file_read_tool import (
+    MAX_LINES_TO_READ,
+    build_read_file_tool,
+)
+from app.tools.file_write_tool.file_write_tool import build_write_file_tool
+from app.tools.glob_tool.glob_tool import GLOB_MAX_RESULTS, build_glob_tool
+from app.tools.grep_tool.grep_tool import (
+    DEFAULT_HEAD_LIMIT,
+    MAX_COLUMNS,
+    VCS_DIRECTORIES_TO_EXCLUDE,
+    apply_head_limit,
+    build_grep_tool,
+    format_limit_info,
     split_grep_globs,
 )
 from app.tools.tools import assemble_tool_pool
+from app.tools.utils import (
+    FILE_MODIFIED_SINCE_READ_ERROR,
+    FILE_NOT_READ_ERROR,
+    get_prompt,
+    path_kind,
+)
 from app.types.permissions import PermissionMode, ToolPermissionContext
+from app.utils.file import FILE_NOT_FOUND_CWD_NOTE, add_line_numbers
 from app.utils.file_state_cache import FileState
 from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
@@ -223,8 +233,8 @@ def test_prompt_frontmatter_is_stripped(builder):
 
 
 def test_get_prompt():
-    assert get_prompt("does-not-exist.md", "fallback text") == "fallback text"
-    assert get_prompt("glob.md", "x").startswith("Fast file pattern matching")
+    assert get_prompt(Path("does-not-exist.md"), "fallback text") == "fallback text"
+    assert get_prompt(glob_tool.PROMPT_PATH, "x").startswith("Fast file pattern matching")
 
 
 def test_read_only_tools_are_read_only_and_concurrency_safe():
@@ -790,7 +800,7 @@ def test_glob_runs_upstream_argv(monkeypatch):
         seen["args"], seen["target"] = args, target
         return ["./b", "a"]
 
-    monkeypatch.setattr(fs, "rip_grep", fake_rip_grep)
+    monkeypatch.setattr(glob_tool, "rip_grep", fake_rip_grep)
     res = glob(FakeWorkspace(), pattern="*.py", path="/src/")
     assert seen == {"args": ["--files", "--glob", "*.py", "--sort=modified", "--no-ignore", "--hidden"],
                     "target": "src"}
@@ -803,7 +813,7 @@ def test_glob_ripgrep_failure_is_an_error(monkeypatch):
     def boom(ws, args, target):
         raise RuntimeError("rg missing")
 
-    monkeypatch.setattr(fs, "rip_grep", boom)
+    monkeypatch.setattr(glob_tool, "rip_grep", boom)
     res = glob(FakeWorkspace(), pattern="*")
     assert (res.is_error, res.content) == (True, "Glob error: rg missing")
 
@@ -821,7 +831,7 @@ def test_glob_ripgrep_failure_is_an_error(monkeypatch):
     ("/a/[bc]", ("/a", "[bc]")),
 ])
 def test_extract_glob_base_directory(pattern, expected):
-    assert fs.extract_glob_base_directory(pattern) == expected
+    assert glob_util.extract_glob_base_directory(pattern) == expected
 
 
 # ── Grep (real ripgrep) ──────────────────────────────────────────────────────
@@ -985,16 +995,16 @@ VCS_GLOBS = [a for d in VCS_DIRECTORIES_TO_EXCLUDE for a in ("--glob", f"!{d}")]
     ({}, ["-l", ""]),
 ])
 def test_build_grep_args(args, expected_tail):
-    assert fs.build_grep_args(args) == ["--hidden", *VCS_GLOBS, "--max-columns", "500", *expected_tail]
+    assert grep_tool.build_grep_args(args) == ["--hidden", *VCS_GLOBS, "--max-columns", "500", *expected_tail]
 
 
 def test_build_grep_args_flags_order():
-    args = fs.build_grep_args({"pattern": "p", "multiline": True, "-i": True})
+    args = grep_tool.build_grep_args({"pattern": "p", "multiline": True, "-i": True})
     assert args[-5:] == ["-U", "--multiline-dotall", "-i", "-l", "p"]
 
 
 def test_grep_count_mode_skips_unparseable_lines(monkeypatch):
-    monkeypatch.setattr(fs, "rip_grep", lambda ws, a, t: ["./a:3", "weird", "b:x", "c:2"])
+    monkeypatch.setattr(grep_tool, "rip_grep", lambda ws, a, t: ["./a:3", "weird", "b:x", "c:2"])
     res = grep(FakeWorkspace(), pattern="p", output_mode="count")
     assert res.content == "a:3\nweird\nb:x\nc:2\n\nFound 5 total occurrences across 2 files."
 
@@ -1003,24 +1013,24 @@ def test_grep_ripgrep_failure_is_an_error(monkeypatch):
     def boom(ws, args, target):
         raise RuntimeError("timed out")
 
-    monkeypatch.setattr(fs, "rip_grep", boom)
+    monkeypatch.setattr(grep_tool, "rip_grep", boom)
     res = grep(FakeWorkspace(), pattern="p")
     assert (res.is_error, res.content) == (True, "Grep error: timed out")
 
 
 def test_grep_target_is_normalized(monkeypatch):
     seen: dict[str, str] = {}
-    monkeypatch.setattr(fs, "rip_grep", lambda ws, a, t: seen.setdefault("t", t) and [])
+    monkeypatch.setattr(grep_tool, "rip_grep", lambda ws, a, t: seen.setdefault("t", t) and [])
     grep(FakeWorkspace(), pattern="p", path="/src/")
     assert seen["t"] == "src"
 
 
 def test_relativize_helpers():
-    assert fs._relativize_first_colon("./a/b.py:3:x:y") == "a/b.py:3:x:y"
-    assert fs._relativize_first_colon(":x") == ":x"
-    assert fs._relativize_first_colon("nocolon") == "nocolon"
-    assert fs._relativize_last_colon("./a:b:7") == "a:b:7"
-    assert fs._relativize_last_colon(":7") == ":7"
+    assert grep_tool._relativize_first_colon("./a/b.py:3:x:y") == "a/b.py:3:x:y"
+    assert grep_tool._relativize_first_colon(":x") == ":x"
+    assert grep_tool._relativize_first_colon("nocolon") == "nocolon"
+    assert grep_tool._relativize_last_colon("./a:b:7") == "a:b:7"
+    assert grep_tool._relativize_last_colon(":7") == ":7"
 
 
 class StatWorkspace(FakeWorkspace):
@@ -1038,23 +1048,23 @@ class StatWorkspace(FakeWorkspace):
 
 def test_sort_by_mtime_newest_first_with_filename_tiebreak():
     ws = StatWorkspace("5\n9\n5\n")
-    assert fs.sort_by_mtime(ws, ["c", "a", "b"]) == ["a", "b", "c"]
+    assert grep_tool.sort_by_mtime(ws, ["c", "a", "b"]) == ["a", "b", "c"]
     assert ws.command_log[0].startswith("python3 -c ")
     assert ws.command_log[0].endswith(" c a b")
 
 
 def test_sort_by_mtime_falls_back_to_filename_order():
-    assert fs.sort_by_mtime(StatWorkspace("1\n"), ["b", "a"]) == ["a", "b"]  # count mismatch
-    assert fs.sort_by_mtime(StatWorkspace("x\ny\n"), ["b", "a"]) == ["a", "b"]  # unparseable
-    assert fs.sort_by_mtime(StatWorkspace(raise_exc=True), ["b", "a"]) == ["a", "b"]
+    assert grep_tool.sort_by_mtime(StatWorkspace("1\n"), ["b", "a"]) == ["a", "b"]  # count mismatch
+    assert grep_tool.sort_by_mtime(StatWorkspace("x\ny\n"), ["b", "a"]) == ["a", "b"]  # unparseable
+    assert grep_tool.sort_by_mtime(StatWorkspace(raise_exc=True), ["b", "a"]) == ["a", "b"]
     ws = StatWorkspace("")
-    assert fs.sort_by_mtime(ws, []) == []
+    assert grep_tool.sort_by_mtime(ws, []) == []
     assert ws.command_log == []
 
 
 def test_mtime_script_handles_missing_files(local_ws, tmp_path):
     make_tree(tmp_path, {"a": ""}, {"a": 1_234})
-    assert fs.sort_by_mtime(local_ws, ["gone", "a"]) == ["a", "gone"]
+    assert grep_tool.sort_by_mtime(local_ws, ["gone", "a"]) == ["a", "gone"]
 
 
 # ── mutation-driven pins: exact schemas and edge behavior ────────────────────
@@ -1143,8 +1153,8 @@ def test_input_schemas_are_exact(builder):
 
 
 def test_get_prompt_reads_utf8_body():
-    assert "—" not in get_prompt("does-not-exist.md", "fallback")
-    assert get_prompt("edit.md", "x").startswith("Performs exact string replacements in files.")
+    assert "—" not in get_prompt(Path("does-not-exist.md"), "fallback")
+    assert get_prompt(file_edit_tool.PROMPT_PATH, "x").startswith("Performs exact string replacements in files.")
 
 
 def test_split_grep_globs_needs_both_braces_to_keep_commas():
@@ -1258,7 +1268,7 @@ def test_glob_empty_pattern_matches_everything(local_ws, tmp_path):
 
 
 def test_build_grep_args_multiline_keeps_earlier_flags():
-    assert fs.build_grep_args({"pattern": "p", "multiline": True}) == [
+    assert grep_tool.build_grep_args({"pattern": "p", "multiline": True}) == [
         "--hidden", *VCS_GLOBS, "--max-columns", "500", "-U", "--multiline-dotall", "-l", "p"]
 
 
@@ -1269,26 +1279,26 @@ def test_grep_validation_error_codes_are_zero():
 
 
 def test_grep_count_parsing_edges(monkeypatch):
-    monkeypatch.setattr(fs, "rip_grep", lambda ws, a, t: ["a:b:3", ":4", "c:-2"])
+    monkeypatch.setattr(grep_tool, "rip_grep", lambda ws, a, t: ["a:b:3", ":4", "c:-2"])
     res = grep(FakeWorkspace(), pattern="p", output_mode="count")
     assert res.content.endswith("Found 1 total occurrence across 2 files.")
 
 
 def test_grep_count_pagination_reports_offset(monkeypatch):
-    monkeypatch.setattr(fs, "rip_grep", lambda ws, a, t: ["a:1", "b:1", "c:1"])
+    monkeypatch.setattr(grep_tool, "rip_grep", lambda ws, a, t: ["a:1", "b:1", "c:1"])
     res = grep(FakeWorkspace(), pattern="p", output_mode="count", offset=1)
     assert res.content == "b:1\nc:1\n\nFound 2 total occurrences across 2 files. with pagination = offset: 1"
 
 
-@pytest.mark.parametrize("builder, filename", [
-    (build_read_file_tool, "read_file.md"),
-    (build_write_file_tool, "write_file.md"),
-    (build_edit_tool, "edit.md"),
-    (build_glob_tool, "glob.md"),
-    (build_grep_tool, "grep.md"),
+@pytest.mark.parametrize("builder, module", [
+    (build_read_file_tool, file_read_tool),
+    (build_write_file_tool, file_write_tool),
+    (build_edit_tool, file_edit_tool),
+    (build_glob_tool, glob_tool),
+    (build_grep_tool, grep_tool),
 ])
-def test_tool_prompt_is_its_markdown_body(builder, filename):
-    body = get_prompt(filename, "")
+def test_tool_prompt_is_its_markdown_body(builder, module):
+    body = get_prompt(module.PROMPT_PATH, "")
     assert body and builder().prompt == body
 
 
@@ -1338,8 +1348,8 @@ def test_glob_and_grep_refuse_a_read_denied_search_root(local_ws, tmp_path):
 
 
 def test_build_grep_args_appends_the_ignore_globs():
-    assert fs.build_grep_args({"pattern": "x"}, ["--glob", "!**/a"])[-2:] == ["--glob", "!**/a"]
-    assert fs.build_grep_args({"pattern": "x"}) == fs.build_grep_args({"pattern": "x"}, [])
+    assert grep_tool.build_grep_args({"pattern": "x"}, ["--glob", "!**/a"])[-2:] == ["--glob", "!**/a"]
+    assert grep_tool.build_grep_args({"pattern": "x"}) == grep_tool.build_grep_args({"pattern": "x"}, [])
 
 
 def test_reading_a_persisted_result_of_this_project(tmp_path, monkeypatch):

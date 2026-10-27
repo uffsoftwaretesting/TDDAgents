@@ -397,7 +397,8 @@ def test_check_file_write_permissions_reads_the_app_state_context(tmp_path):
 
 
 def test_fs_tools_carry_the_write_check():
-    from app.tools.file_tools import build_edit_tool, build_write_file_tool
+    from app.tools.file_edit_tool.file_edit_tool import build_edit_tool
+    from app.tools.file_write_tool.file_write_tool import build_write_file_tool
 
     ctx = tool_context_for(AppStateStore(), permission_context=ToolPermissionContext(),
                            workspace=SimpleNamespace(root="/ws"))

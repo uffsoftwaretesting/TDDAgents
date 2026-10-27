@@ -13,7 +13,7 @@ has already run, so its output is the record of what happened and a hook may ann
 never rewrite it.
 
 There is exactly **one TDD phase check**, inside the permission gate
-(`permissions/tdd.py::check_tdd_phase_permission`). The duplicate PreToolUse and PostToolUse
+(`tdd/phase_permissions.py::check_tdd_phase_permission`). The duplicate PreToolUse and PostToolUse
 phase checks that used to live here were deleted in Phase 2: two enforcement points meant two
 places to get RED wrong, and the gate is the one a hook cannot talk its way past.
 """

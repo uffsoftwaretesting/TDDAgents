@@ -1,7 +1,7 @@
 """
 `updatedPermissions` from PermissionRequest hooks: `app/utils/permissions/permission_update.py` (ports of
 `PermissionUpdate.ts`, `addPermissionRulesToSettings`, `updateSettingsForSource`) and their use
-in `permission_request.py`, including the two TDD guards: a rewritten input is re-checked, and
+in `utils/permissions/permissions.py`, including the two TDD guards: a rewritten input is re-checked, and
 applied updates are re-stripped of dangerous allows.
 """
 
@@ -298,7 +298,7 @@ def _ctx(perm: ToolPermissionContext, decision: Any, ledger: PhaseLedger | None 
 
 
 def _write_tool():
-    from app.tools.file_tools import build_write_file_tool
+    from app.tools.file_write_tool.file_write_tool import build_write_file_tool
 
     return build_write_file_tool()
 

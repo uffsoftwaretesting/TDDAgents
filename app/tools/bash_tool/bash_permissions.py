@@ -18,9 +18,9 @@ Ported from (v2.1.88), the legacy (no tree-sitter) path throughout:
   `src/utils/permissions/pathValidation.ts` -> `validatePath`'s pre-checks.
 
 The per-command path validators (`validateSinglePathCommand`) live in
-`bash_path_validation.py`, `checkSedConstraints` in `bash_sed_validation.py`, and the
+`tools/bash_tool/path_validation.py`, `checkSedConstraints` in `tools/bash_tool/sed_validation.py`, and the
 read-only classifier (`readOnlyValidation.ts`, which `BashTool.isReadOnly` calls) in
-`bash_read_only.py`; each is wired here where upstream calls it.
+`tools/bash_tool/read_only_validation.py`; each is wired here where upstream calls it.
 
 Not ported: sandbox auto-allow, the Haiku prompt-rule classifiers, the `BASH_CLASSIFIER`
 pending checks, permission-update suggestions (they feed the approval UI), and the

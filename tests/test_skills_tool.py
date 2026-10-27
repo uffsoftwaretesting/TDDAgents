@@ -18,7 +18,7 @@ from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tool import tool_context_for
 from app.tools.agent_tool.load_agents_dir import AgentDefinition
 from app.tools.agent_tool.run_agent import resolve_skill_name, skill_preload_messages
-from app.tools.file_tools import build_write_file_tool
+from app.tools.file_write_tool.file_write_tool import build_write_file_tool
 from app.tools.skill_tool.skill_tool import (
     MAX_RESULT_SIZE_CHARS,
     SKILL_TOOL_SCHEMA,

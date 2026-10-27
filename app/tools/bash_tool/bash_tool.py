@@ -10,7 +10,7 @@ Ported from `reference/claude-code/src/tools/BashTool/BashTool.tsx` -> `BashTool
   redirection checks, acceptEdits mode, and read-only auto-allow. A command nothing
   resolves returns 'passthrough'; the runtime gate (`has_permissions_to_use_tool`) turns
   that into 'ask', and a headless context (`should_avoid_permission_prompts`) into 'deny'.
-- `isReadOnly` is upstream's `checkReadOnlyConstraints` (`bash_read_only.py`), and
+- `isReadOnly` is upstream's `checkReadOnlyConstraints` (`tools/bash_tool/read_only_validation.py`), and
   `isConcurrencySafe` is `isReadOnly`.
 - Timeouts follow `src/utils/timeouts.ts`: default 120000 ms, overridable through
   `BASH_DEFAULT_TIMEOUT_MS`; `timeout || default` exactly as `BashTool` computes it.
@@ -36,7 +36,7 @@ from app.utils.frontmatter_parser import parse_markdown_frontmatter
 from app.utils.permissions.filesystem import permission_cwd
 from app.utils.permissions.permissions import extract_permission_context
 
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "tools" / "bash.md"
+PROMPT_PATH = Path(__file__).with_name("prompt.md")
 BASH_PROMPT = (
     parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
     if PROMPT_PATH.exists()

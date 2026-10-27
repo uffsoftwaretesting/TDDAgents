@@ -6,7 +6,7 @@ Ported from `reference/claude-code/src/utils/mcpValidation.ts` -> `getMaxMcpOutp
 `truncateMcpContentIfNeeded`; and `utils/mcpOutputStorage.ts` -> `getFormatDescription`,
 `getLargeOutputInstructions`, `extensionForMimeType`, `persistBinaryContent`,
 `getBinaryBlobSavedMessage`. Files land in the run's tool-results directory
-(`tools/result_storage.py`), which `ReadFile` may read.
+(`utils/tool_result_storage.py`), which `ReadFile` may read.
 
 Divergences: `mcpContentNeedsTruncation` asks the API for an exact token count once the rough
 estimate passes half the limit; this port has no counting endpoint for every provider, so the

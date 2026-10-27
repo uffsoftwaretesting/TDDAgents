@@ -55,7 +55,7 @@ Ported from `reference/claude-code/src/utils/hooks.ts` -> `execCommandHook` (and
 * Timeout: the hook's own `timeout` seconds, else ten minutes. A timed-out or aborted hook is
   killed and reported `aborted`, which the caller turns into `hook_cancelled`.
 * Async: `async`/`asyncRewake` in the config, or a first stdout line that parses as
-  `{"async": true}`, backgrounds the process (see `async_registry.py`) and returns at once.
+  `{"async": true}`, backgrounds the process (see `utils/hooks/async_hook_registry.py`) and returns at once.
 
 Not ported: Windows path conversion and the `.sh` auto-prefix (this build is POSIX-only), the
 plugin variables (`CLAUDE_PLUGIN_ROOT`, plugin options — there are no plugins),

@@ -22,7 +22,7 @@ from app.skills.load_skills_dir import SkillCommand
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 SKILL_TOOL_NAME = "Skill"
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "tools" / "skill.md"
+PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
 SKILL_BUDGET_CONTEXT_PERCENT = 0.01
 CHARS_PER_TOKEN = 4

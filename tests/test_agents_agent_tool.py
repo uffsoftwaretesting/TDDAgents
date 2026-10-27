@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.phase_on_spawn import phase_on_spawn
 from app.tool import tool_context_for
 from app.tools.agent_tool.agent_tool import (
     AGENT_TOOL_NAME,
@@ -21,7 +22,6 @@ from app.tools.agent_tool.agent_tool import (
     build_agent_tool,
     finalize_agent_tool,
     map_agent_result,
-    phase_on_spawn,
 )
 from app.tools.agent_tool.load_agents_dir import AgentDefinition
 from app.types.permissions import (
@@ -520,7 +520,7 @@ def test_every_truthy_value_disables_background_tasks(monkeypatch, value):
 
 
 def test_the_background_refusal_explains_itself():
-    from app.tools.agent_tool.agent_tool import refuse_background_phase_agent
+    from app.tdd.phase_on_spawn import refuse_background_phase_agent
 
     with pytest.raises(ValueError) as err:
         refuse_background_phase_agent(TESTER, True)

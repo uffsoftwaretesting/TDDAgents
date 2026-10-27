@@ -10,7 +10,7 @@ same way when their gates are off.
 
 **Background agents (Phase 8)** follow the async branch of `call`: `run_in_background`, a
 definition's `background: true`, or coordinator mode (`isCoordinator`) start the worker as a
-background task (`tasks/local_agent_task.py`) and return at once; `TDDAGENTS_DISABLE_BACKGROUND_TASKS`
+background task (`tasks/local_agent_task/local_agent_task.py`) and return at once; `TDDAGENTS_DISABLE_BACKGROUND_TASKS`
 (upstream's `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`, read when the tool is built) removes the field
 and runs everything in the foreground. **TDD:** only agents without a `phase` may run in the
 background. An async worker's app-state writes are discarded upstream (`shareSetAppState:
@@ -23,8 +23,8 @@ Where this diverges, each by decision:
 * **`subagent_type` is required.** Upstream defaults an omitted type to `general-purpose`,
   or to the fork path when forking is enabled; forking is off in a headless session
   (`isForkSubagentEnabled`) and TDDAgents ships no general-purpose agent.
-* **`model` accepts the Claude aliases and an OpenAI table** (`model_aliases.py`).
-* **Phase-on-spawn (TDD).** Before the worker starts, the shared ledger moves to the
+* **`model` accepts the Claude aliases and an OpenAI table** (`utils/model/model.py`).
+* **Phase-on-spawn (TDD, `app/tdd/phase_on_spawn.py`).** Before the worker starts, the shared ledger moves to the
   agent's declared `phase` if `PhaseLedger.transition_to` allows it — GREEN needs a confirmed
   RED, REFACTOR a completed cycle, and RED restarts the cycle. A refused spawn raises before
   any worker runs, so the coordinator sees why. The observations themselves stay `RunTests`'
@@ -52,7 +52,7 @@ from app.tasks.local_agent_task.local_agent_task import (
     run_async_agent_lifecycle,
     start_background_lifecycle,
 )
-from app.tdd.ledger import PhaseLedger
+from app.tdd.phase_on_spawn import phase_on_spawn, refuse_background_phase_agent
 from app.tool import BuiltTool, CancelToken, Tool, ToolContext, ToolResult, build_tool
 from app.tools.agent_tool.agent_tool_utils import (
     filter_denied_agents,
@@ -118,16 +118,6 @@ def agent_tool_schema(background_enabled: bool) -> dict[str, Any]:
     return {**AGENT_TOOL_SCHEMA, "properties": properties}
 
 
-def refuse_background_phase_agent(agent: AgentDefinition, requested: bool) -> None:
-    """A phase agent asked to run in the background is refused with the reason (TDD)."""
-    if agent.phase is not None and requested:
-        raise ValueError(
-            f"Agent '{agent.name}' declares TDD phase {agent.phase} and cannot run in the background: a "
-            "background worker's state changes are discarded, so its RunTests could not move the phase "
-            "ledger. Run it in the foreground."
-        )
-
-
 def map_async_launched(agent_id: str, output_file: str, can_read_output_file: bool) -> str:
     """`mapToolResultToToolResultBlockParam` for `async_launched`."""
     prefix = (
@@ -164,16 +154,6 @@ class AgentToolResult:
     total_duration_ms: int
     total_tokens: int
     total_tool_use_count: int
-
-
-def phase_on_spawn(ledger: PhaseLedger, agent: AgentDefinition) -> PhaseLedger:
-    """The ledger a spawn of `agent` starts from; raises when the cycle forbids the spawn."""
-    if agent.phase is None or agent.phase == ledger.phase:
-        return ledger
-    try:
-        return ledger.transition_to(agent.phase)
-    except ValueError as exc:
-        raise ValueError(f"Agent '{agent.name}' cannot start: {exc}") from None
 
 
 def _text_blocks(message: AIMessage) -> tuple[str, ...]:
@@ -387,6 +367,4 @@ __all__ = [
     "is_background_tasks_disabled",
     "map_agent_result",
     "map_async_launched",
-    "phase_on_spawn",
-    "refuse_background_phase_agent",
 ]

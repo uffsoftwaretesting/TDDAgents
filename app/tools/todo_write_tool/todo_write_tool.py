@@ -33,7 +33,7 @@ from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 TODO_WRITE_TOOL_NAME = "TodoWrite"
 
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "tools" / "todo_write.md"
+PROMPT_PATH = Path(__file__).with_name("prompt.md")
 TODO_WRITE_PROMPT = (
     parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
     if PROMPT_PATH.exists()

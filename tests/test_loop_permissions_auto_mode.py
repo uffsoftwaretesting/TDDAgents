@@ -249,7 +249,7 @@ def test_a_worker_keeps_its_denials_in_its_local_box():
 
 def test_red_denies_a_production_write_before_the_classifier_is_asked():
     """Barrier 2 sits above auto mode: no classifier verdict can open a phase-forbidden write."""
-    from app.tools.file_tools import build_write_file_tool
+    from app.tools.file_write_tool.file_write_tool import build_write_file_tool
 
     clf = FakeClassifier(verdict(False, "looks fine"))
     ctx, _ = ctx_for(classifier=clf, ledger=PhaseLedger(phase=TddPhase.RED))

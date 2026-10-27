@@ -7,7 +7,7 @@ Ported from `reference/claude-code/src/utils/hooks/hooksConfigSnapshot.ts` ->
 `src/utils/settings/pluginOnlyPolicy.ts` -> `isRestrictedToPluginOnly`.
 
 The settings sources are the ones the permission context is built from
-(`permissions/settings.py`: user, project, local, flag, policy + `managed-settings.d`), so a
+(`utils/settings/settings.py`: user, project, local, flag, policy + `managed-settings.d`), so a
 run's hooks and its permission rules come from exactly the same files.
 
 Policy decides first, and nothing below it can relax it:

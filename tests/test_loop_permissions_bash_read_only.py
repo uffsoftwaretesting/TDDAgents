@@ -1,5 +1,5 @@
 """
-`app/tools/bash_tool/read_only_validation.py` and `bash_read_only_commands.py`: ports of
+`app/tools/bash_tool/read_only_validation.py` and `utils/shell/read_only_command_validation.py`: ports of
 claude-code's `readOnlyValidation.ts` and `utils/shell/readOnlyCommandValidation.ts`.
 Attack examples are the ones upstream documents next to each defense.
 """

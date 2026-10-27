@@ -341,7 +341,7 @@ def test_the_persisted_file_is_readable_back_through_read_file(tmp_path, monkeyp
     decoration. Ours is workspace-bounded, so the store is an explicit extra read root.
     """
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "config"))
-    from app.tools.file_tools import read_text
+    from app.tools.utils import read_text
     from app.utils.tool_result_storage import persist_tool_result
 
     path = persist_tool_result("the whole thing", "toolu_1", "run-1", "/proj")
@@ -351,7 +351,7 @@ def test_the_persisted_file_is_readable_back_through_read_file(tmp_path, monkeyp
 
 def test_a_path_outside_the_store_is_not_read_off_the_host(tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "config"))
-    from app.tools.file_tools import is_persisted_result_path
+    from app.tools.utils import is_persisted_result_path
 
     secret = tmp_path / "secret.txt"
     secret.write_text("private")

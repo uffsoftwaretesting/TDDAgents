@@ -1,6 +1,6 @@
 """
-Mutation-driven pins for the prompt and agent hook executors (`exec_prompt.py`,
-`exec_agent.py`): result identity, attachment fields on every error path, the exact verifier
+Mutation-driven pins for the prompt and agent hook executors (`utils/hooks/exec_prompt_hook.py`,
+`utils/hooks/exec_agent_hook.py`): result identity, attachment fields on every error path, the exact verifier
 prompt, cancellation of abandoned work, and the production builders driven by a fake model
 factory (never a live provider).
 """

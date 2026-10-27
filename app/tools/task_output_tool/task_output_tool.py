@@ -25,7 +25,7 @@ from app.utils.task.framework import update_task_state
 
 TASK_OUTPUT_TOOL_NAME = "TaskOutput"
 
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "tools" / "task_output.md"
+PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
 #: `waitForTaskCompletion`'s poll interval, seconds.
 POLL_INTERVAL_S = 0.1

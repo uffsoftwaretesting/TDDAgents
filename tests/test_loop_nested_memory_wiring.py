@@ -7,7 +7,7 @@ import asyncio
 
 from app.state.app_state_store import AppStateStore
 from app.tool import tool_context_for
-from app.tools.file_tools import build_read_file_tool
+from app.tools.file_read_tool.file_read_tool import build_read_file_tool
 from tests.conftest import FakeWorkspace
 
 

@@ -43,7 +43,7 @@ class AppState:
     #: to the same rules (`ToolContext.permission_context` still overrides it when set).
     tool_permission_context: ToolPermissionContext = field(default_factory=ToolPermissionContext)
     #: Upstream `appState.denialTracking`: the auto-mode classifier's denial streak and total
-    #: (`permissions/denial_tracking.py`), `None` until auto mode first records one.
+    #: (`utils/permissions/denial_tracking.py`), `None` until auto mode first records one.
     denial_tracking: DenialTrackingState | None = None
     #: The last test run the ledger observed (`ledger.TestRunRecord`), written by `RunTests`
     #: together with the ledger; the TDD state is re-attached from it after a compaction.

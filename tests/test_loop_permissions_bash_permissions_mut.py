@@ -1,5 +1,5 @@
 """
-Mutation-driven pins for `bash_permissions.py` and `bash_path_validation.py`.
+Mutation-driven pins for `bash_permissions.py` and `tools/bash_tool/path_validation.py`.
 
 Each test pins a behavior upstream claude-code has (`bashPermissions.ts`,
 `bashCommandHelpers.ts`, `pathValidation.ts`) that the general suites left implicit:

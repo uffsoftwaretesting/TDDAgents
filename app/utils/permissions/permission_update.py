@@ -24,7 +24,7 @@ and `cliArg` are memory-only. `addRules` alone is refused under
 
 **TDD:** applying updates can re-introduce an interpreter allow (`Bash(python:*)`), which
 the phase gate cannot see past. The caller re-runs `strip_dangerous_permissions` after every
-apply (`permission_request.py`), so the TDD managed tier holds for the rest of the run.
+apply (`utils/permissions/permissions.py`), so the TDD managed tier holds for the rest of the run.
 
 Divergences: additional directories carry no source here (upstream records the
 destination, used only for display); `updateSettingsForSource` does not add the local

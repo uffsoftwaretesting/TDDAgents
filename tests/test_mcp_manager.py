@@ -152,7 +152,7 @@ def test_aclose_closes_every_session(tmp_path):
 
 
 def test_the_clients_feed_the_instructions_delta(tmp_path, monkeypatch):
-    """`attachments/deltas.py` reads `type`, `name` and `instructions` off the manager's clients."""
+    """`utils/attachments.py` reads `type`, `name` and `instructions` off the manager's clients."""
     from types import SimpleNamespace
 
     from app.utils.attachments import (

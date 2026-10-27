@@ -277,7 +277,7 @@ def _read_tool(context: Any) -> Any:
     for tool in getattr(context, "tools", ()) or ():
         if getattr(tool, "name", None) == READ_TOOL_NAME:
             return tool
-    from app.tools.file_tools import build_read_file_tool
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
 
     return build_read_file_tool()
 

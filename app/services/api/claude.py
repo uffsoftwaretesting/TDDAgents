@@ -169,7 +169,7 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
     only the model, which the 529 fallback swaps.
     """
     # The provider follows the model: a worker resolved to a Claude alias reaches Anthropic
-    # even when the run's configured provider is OpenAI (`model_aliases.py`).
+    # even when the run's configured provider is OpenAI (`utils/model/model.py`).
     provider = provider_for_model(context.model, default=Config.CHAT_MODEL)
     messages_to_send, cache_kwargs = prepare_cached_request(
         build_request_messages(state, config),

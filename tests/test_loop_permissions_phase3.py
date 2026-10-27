@@ -1,7 +1,8 @@
 """
 Phase 3 — permissions and settings wired at runtime.
 
-Covers the modules the phase added (`dangerous.py`, `permission_request.py`, `messages.py`),
+Covers the modules the phase added (`utils/permissions/dangerous_patterns.py`,
+`utils/permissions/permissions.py`),
 the settings sources added to `settings.py` (flag, policy with drop-ins,
 `allowManagedPermissionRulesOnly`, mode resolution, `initializeToolPermissionContext`), the
 PermissionRequest decision parsing (`app/utils/hooks/` since Phase 4), and the D6 structural invariant against

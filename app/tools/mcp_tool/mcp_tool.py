@@ -29,7 +29,6 @@ and tool name: a loop that built several tools cannot leave them all calling the
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -40,8 +39,6 @@ from langchain_core.messages import ToolMessage
 
 from app.services.mcp.client import (
     call_mcp_tool,
-    fetch_resources_for_client,
-    read_resource,
     truncate_description,
 )
 from app.services.mcp.normalization import build_mcp_tool_name
@@ -61,16 +58,11 @@ logger = logging.getLogger(__name__)
 MCP_MAX_RESULT_SIZE_CHARS = 100_000
 #: `MCPTool.ts` -> `checkPermissions`.
 MCP_PERMISSION_MESSAGE = "MCPTool requires permission."
-LIST_MCP_RESOURCES_TOOL_NAME = "ListMcpResourcesTool"
-READ_MCP_RESOURCE_TOOL_NAME = "ReadMcpResourceTool"
-#: `ListMcpResourcesTool.mapToolResultToToolResultBlockParam`'s empty answer.
-NO_RESOURCES_MESSAGE = "No resources found. MCP servers may still provide tools even if they have no resources."
-
-_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts" / "tools"
 
 
-def _load_prompt(filename: str) -> str:
-    return parse_markdown_frontmatter((_PROMPTS_DIR / filename).read_text(encoding="utf-8"))[1].strip()
+def load_prompt(path: Path) -> str:
+    """A resource tool's `prompt.md` body."""
+    return parse_markdown_frontmatter(path.read_text(encoding="utf-8"))[1].strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +124,7 @@ def map_mcp_result(result: ToolResult, tool_use_id: str) -> ToolMessage:
     return message
 
 
-def _context_cwd(context: Any) -> str:
+def context_cwd(context: Any) -> str:
     root = getattr(getattr(context, "workspace", None), "root", None)
     return str(root) if root is not None else "."
 
@@ -149,7 +141,7 @@ def build_mcp_tool(client: ConnectedMCPServer, tool: Any) -> McpBuiltTool:
     async def call(input: dict[str, Any], context: Any) -> ToolResult:
         out = await call_mcp_tool(
             client, server_tool_name, input,
-            run_id=str(getattr(context, "run_id", "") or "run"), cwd=_context_cwd(context),
+            run_id=str(getattr(context, "run_id", "") or "run"), cwd=context_cwd(context),
             cancel=getattr(context, "cancel", None),
         )
         content = out["content"]
@@ -185,98 +177,20 @@ def build_mcp_tool(client: ConnectedMCPServer, tool: Any) -> McpBuiltTool:
     )
 
 
-def _clients(context: Any) -> tuple[Any, ...]:
-    """Upstream's `options.mcpClients`, read from the context as `attachments/deltas.py` does."""
+def mcp_clients_of(context: Any) -> tuple[Any, ...]:
+    """Upstream's `options.mcpClients`, read from the context as `utils/attachments.py` does."""
     return tuple(getattr(context, "mcp_clients", ()) or ())
 
 
-def _available(clients: Sequence[Any]) -> str:
+def available_server_names(clients: Sequence[Any]) -> str:
     return ", ".join(str(c.name) for c in clients)
 
 
-def build_list_mcp_resources_tool() -> McpBuiltTool:
-    """`ListMcpResourcesTool`."""
-
-    async def call(input: dict[str, Any], context: Any) -> ToolResult:
-        clients = _clients(context)
-        target = input.get("server")
-        chosen = [c for c in clients if c.name == target] if target else list(clients)
-        if target and not chosen:
-            raise ValueError(f'Server "{target}" not found. Available servers: {_available(clients)}')
-        resources = [r.as_dict() for c in chosen for r in await fetch_resources_for_client(c)]
-        if not resources:
-            return ToolResult(content=NO_RESOURCES_MESSAGE)
-        return ToolResult(content=json.dumps(resources, ensure_ascii=False, separators=(",", ":")))
-
-    built = build_tool(
-        name=LIST_MCP_RESOURCES_TOOL_NAME,
-        prompt=_load_prompt("list_mcp_resources.md"),
-        call=call,
-        input_schema={
-            "type": "object",
-            "properties": {"server": {"type": "string", "description": "Optional server name to filter resources by"}},
-        },
-        is_concurrency_safe=lambda _args: True,
-        is_read_only=lambda _args: True,
-        max_result_size_chars=MCP_MAX_RESULT_SIZE_CHARS,
-    )
-    return McpBuiltTool(
-        **{f: getattr(built, f) for f in BuiltTool.__dataclass_fields__},
-        _auto_classifier_input=lambda args: args.get("server") or "",
-    )
-
-
-def build_read_mcp_resource_tool() -> McpBuiltTool:
-    """`ReadMcpResourceTool`."""
-
-    async def call(input: dict[str, Any], context: Any) -> ToolResult:
-        clients = _clients(context)
-        server_name = str(input["server"])
-        client = next((c for c in clients if c.name == server_name), None)
-        if client is None:
-            raise ValueError(f'Server "{server_name}" not found. Available servers: {_available(clients)}')
-        connected = client if isinstance(client, ConnectedMCPServer) else None
-        if connected is None:
-            raise ValueError(f'Server "{server_name}" is not connected')
-        if not getattr(connected.capabilities, "resources", None):
-            raise ValueError(f'Server "{server_name}" does not support resources')
-        data = await read_resource(
-            connected, str(input["uri"]), run_id=str(getattr(context, "run_id", "") or "run"), cwd=_context_cwd(context)
-        )
-        return ToolResult(content=json.dumps(data, ensure_ascii=False, separators=(",", ":")))
-
-    built = build_tool(
-        name=READ_MCP_RESOURCE_TOOL_NAME,
-        prompt=_load_prompt("read_mcp_resource.md"),
-        call=call,
-        input_schema={
-            "type": "object",
-            "properties": {
-                "server": {"type": "string", "description": "The MCP server name"},
-                "uri": {"type": "string", "description": "The resource URI to read"},
-            },
-            "required": ["server", "uri"],
-        },
-        is_concurrency_safe=lambda _args: True,
-        is_read_only=lambda _args: True,
-        max_result_size_chars=MCP_MAX_RESULT_SIZE_CHARS,
-    )
-    return McpBuiltTool(
-        **{f: getattr(built, f) for f in BuiltTool.__dataclass_fields__},
-        _auto_classifier_input=lambda args: f"{args.get('server')} {args.get('uri')}",
-    )
-
-
 __all__ = [
-    "LIST_MCP_RESOURCES_TOOL_NAME",
     "MCP_MAX_RESULT_SIZE_CHARS",
     "MCP_PERMISSION_MESSAGE",
-    "NO_RESOURCES_MESSAGE",
-    "READ_MCP_RESOURCE_TOOL_NAME",
     "McpBuiltTool",
-    "build_list_mcp_resources_tool",
     "build_mcp_tool",
-    "build_read_mcp_resource_tool",
     "map_mcp_result",
     "mcp_tool_input_to_auto_classifier_input",
     "render_blocks_as_text",

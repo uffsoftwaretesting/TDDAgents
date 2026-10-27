@@ -5,7 +5,7 @@ The production assembly of `HookDispatcher`: the config snapshot is captured fro
 settings files as the permission rules (`captureHooksConfigSnapshot` at startup), and the
 three executors a non-command hook needs are bound to the run — the prompt hook and the
 agent hook to the run's model as their fallback (`getSmallFastModel` first, see
-`exec_prompt.py`), the HTTP hook to the settings' URL and env-var allowlists.
+`utils/hooks/exec_prompt_hook.py`), the HTTP hook to the settings' URL and env-var allowlists.
 
 Every production piece is injectable, so a test builds a dispatcher with fakes and no model,
 network or subprocess it did not ask for.

@@ -76,7 +76,7 @@ MAX_AGENT_TURNS = 50
 #: `SYNTHETIC_OUTPUT_TOOL_NAME`.
 SYNTHETIC_OUTPUT_TOOL_NAME = "StructuredOutput"
 #: `ALL_AGENT_DISALLOWED_TOOLS` (`src/constants/tools.ts`) as the external build has it,
-#: mapped onto this repo's names: this repo's set (`agents/resolution.py`) plus `Agent` and
+#: mapped onto this repo's names: this repo's set (`tools/agent_tool/agent_tool_utils.py`) plus `Agent` and
 #: its legacy alias `Task`, which upstream disallows for every non-ant user.
 HOOK_AGENT_DISALLOWED_TOOLS: frozenset[str] = frozenset({"Agent", "Task"})
 

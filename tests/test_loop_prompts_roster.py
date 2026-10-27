@@ -28,20 +28,20 @@ def test_system_prompt_files_exist_and_load() -> None:
         assert len(strip_html_comments(p.read_text(encoding="utf-8")).strip()) > 20, f"Prompt {filename} is too short"
 
 
-def test_tool_prompt_files_exist_and_load() -> None:
-    tools_dir = PROMPTS_ROOT / "tools"
-    expected_tools = [
-        "read_file.md",
-        "write_file.md",
-        "edit.md",
-        "grep.md",
-        "glob.md",
-        "bash.md",
-        "run_tests.md",
-        "agent.md",
+def test_every_tool_directory_has_its_prompt() -> None:
+    """Each tool's `prompt.md` sits beside it, as upstream's `tools/<Tool>/prompt.ts` does."""
+    app_root = PROMPTS_ROOT.parent
+    tool_dirs = sorted(d for d in (app_root / "tools").iterdir() if d.is_dir() and d.name.endswith("_tool"))
+    assert [d.name for d in tool_dirs] == [
+        "agent_tool", "bash_tool", "file_edit_tool", "file_read_tool", "file_write_tool", "glob_tool",
+        "grep_tool", "list_mcp_resources_tool", "mcp_tool", "read_mcp_resource_tool", "send_message_tool",
+        "skill_tool", "task_output_tool", "task_stop_tool", "todo_write_tool",
     ]
-    for filename in expected_tools:
-        p = tools_dir / filename
+    with_markdown = [d for d in tool_dirs if d.name not in ("agent_tool", "mcp_tool")] + [
+        app_root / "tdd" / "run_tests_tool"
+    ]
+    for directory in with_markdown:
+        p = directory / "prompt.md"
         assert p.is_file(), f"Missing tool prompt file: {p}"
         fm, body = parse_markdown_frontmatter(p.read_text(encoding="utf-8"))
         assert "name" in fm

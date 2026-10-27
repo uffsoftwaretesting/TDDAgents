@@ -22,8 +22,8 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from app.utils.attachments import Attachment, attachment_of, tdd_state_lines
 from app.tdd.ledger import PhaseLedger, TestRunRecord
+from app.utils.attachments import Attachment, attachment_of, tdd_state_lines
 from app.utils.messages import ATTACHMENT_KEY, Message, wrap_in_system_reminder
 from app.utils.tool_result_storage import PREVIEW_SIZE_BYTES
 

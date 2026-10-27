@@ -158,8 +158,11 @@ def test_ledger_codes_constant():
 
 
 def test_default_instance_and_properties():
-    from app.tdd.run_tests_tool.run_tests_tool import RUN_TESTS_PROMPT
+    from app.tdd.run_tests_tool.run_tests_tool import PROMPT_PATH
+    from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
+    RUN_TESTS_PROMPT = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
+    assert RUN_TESTS_PROMPT.startswith("Runs pytest in the workspace and returns the full output.")
     built_instance = build_run_tests_tool()
     for t in (RunTests, built_instance):
         assert t.name == "RunTests"

@@ -60,7 +60,7 @@ defaults off, so a terminal entry walks back to its nearest user/assistant ances
 unconditionally.
 
 `recoverOrphanedParallelToolResults` matters here for the same reason it does upstream: the
-model emits one assistant message per content block (`streaming/blocks.py`), so parallel tool
+model emits one assistant message per content block (`services/api/claude.py`), so parallel tool
 calls become sibling assistant messages sharing one provider id, and each tool result is
 chained to its own assistant. The single-parent walk keeps one branch; the post-pass splices
 the others back after the group's last on-chain member.

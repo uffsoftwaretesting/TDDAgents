@@ -33,11 +33,9 @@ from app.tasks.local_agent_task.local_agent_task import (
     run_async_agent_lifecycle,
     start_background_lifecycle,
 )
+from app.tdd.phase_on_spawn import refuse_background_phase_agent
 from app.tool import Tool, ToolContext
-from app.tools.agent_tool.agent_tool import (
-    agent_system_prompt,
-    refuse_background_phase_agent,
-)
+from app.tools.agent_tool.agent_tool import agent_system_prompt
 from app.tools.agent_tool.load_agents_dir import AgentDefinition
 from app.tools.agent_tool.run_agent import run_agent
 from app.utils.conversation_recovery import (

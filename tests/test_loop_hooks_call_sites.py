@@ -63,7 +63,7 @@ def execute(tool: Any, dispatcher: Any, call_id: str = "c1", c: Any = None) -> A
                                     context, [tool]))
 
 
-# ── tools/execution.py ──────────────────────────────────────────────────────
+# ── services/tools/tool_execution.py ──────────────────────────────────────────────────────
 
 def test_hook_messages_follow_the_result_pre_then_post_then_stop():
     d = ScriptedDispatcher(script={

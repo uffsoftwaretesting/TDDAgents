@@ -1,4 +1,4 @@
-"""Hook event vocabulary (`events.py`) and the hook config schema (`schemas.py`)."""
+"""Hook event vocabulary (`events.py`) and the hook config schema (`schemas/hooks.py`)."""
 
 from __future__ import annotations
 

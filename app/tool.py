@@ -456,7 +456,7 @@ class ToolContext:
     #: `None` means the budget is off — upstream provisions it only behind a GrowthBook flag
     #: that is off in the external build (`provision_content_replacement_state`).
     content_replacement_state: ContentReplacementState | None = None
-    #: The run's agent-memory store (`agents/memory.py`), owned by the runner: rooted outside
+    #: The run's agent-memory store (`tools/agent_tool/agent_memory.py`), owned by the runner: rooted outside
     #: the workspace, and its run-scoped memory discarded when the run ends (Part I5).
     agent_memory_store: Any = None
     #: The run's `CostTracker` (`app/cost_tracker.py`), upstream's session-global cost state made

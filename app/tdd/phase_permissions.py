@@ -162,7 +162,7 @@ def check_tdd_phase_permission(
     RunTests is always permitted.
 
     `Bash` is checked through its write targets rather than a path argument
-    (`bash_tdd.py`): without that, `echo code > calculator.py` would write production code
+    (`tdd/bash_phase_permissions.py`): without that, `echo code > calculator.py` would write production code
     in RED through a tool the path check cannot see, and barrier 2 would be bypassable by
     rephrasing the request.
     """

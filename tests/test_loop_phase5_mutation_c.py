@@ -44,7 +44,7 @@ def foreign(**attrs: Any) -> Any:
     return SimpleNamespace(**attrs)
 
 
-# ── context/tokens.py ───────────────────────────────────────────────────────
+# ── utils/tokens.py ───────────────────────────────────────────────────────
 
 def test_an_unknown_block_is_estimated_from_its_json():
     block = {"type": "custom", "payload": "p" * 40}
@@ -143,7 +143,7 @@ def test_an_override_of_one_is_honoured(monkeypatch):
     assert tokens.get_effective_context_window_size("o4-mini") == 1 - 20_000
 
 
-# ── context/cache.py ────────────────────────────────────────────────────────
+# ── services/api/claude.py ────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("value", ["yes", " ON "])
 def test_prompt_caching_disable_accepts_yes_and_on(monkeypatch, value):
@@ -158,7 +158,7 @@ def test_no_system_text_keeps_the_messages_but_still_marks_the_tail(monkeypatch)
         messages, {"cache_control": {"type": "ephemeral"}})
 
 
-# ── tools/result_storage.py ─────────────────────────────────────────────────
+# ── utils/tool_result_storage.py ─────────────────────────────────────────────────
 
 def test_sanitize_path_hashes_only_past_the_maximum():
     assert rs.sanitize_path("a" * 200) == "a" * 200
@@ -291,7 +291,7 @@ def test_provisioning_from_history_restores_the_recorded_replacements():
     assert state is not None and state.replacements == {"c1": "prev"}
 
 
-# ── engine.py ───────────────────────────────────────────────────────────────
+# ── query/query.py ───────────────────────────────────────────────────────────────
 
 def _capture_budget(monkeypatch) -> list[dict[str, Any]]:
     seen: list[dict[str, Any]] = []
@@ -414,7 +414,7 @@ def test_stop_failure_on_prompt_too_long_reads_the_turns_history():
     assert d.payload("StopFailure")["last_assistant_message"] == "too long"
 
 
-# ── agents/memory.py ────────────────────────────────────────────────────────
+# ── tools/agent_tool/agent_memory.py ────────────────────────────────────────────────────────
 
 def test_session_memory_without_an_id_uses_the_default_session(tmp_path):
     store = AgentMemoryStore(base_dir=tmp_path, user_home=tmp_path / "home")

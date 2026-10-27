@@ -8,7 +8,7 @@ Ported from:
 Concurrent results are emitted **in completion order**, which is upstream's behaviour here:
 `runTools` yields through `all()` as each generator finishes and `query.ts` appends them in
 arrival order with no sort. (The streaming executor is the path that preserves the model's
-call order — see `streaming/executor.py::get_completed_results`, which stops scanning at the
+call order — see `services/tools/streaming_tool_executor.py::get_completed_results`, which stops scanning at the
 first still-running non-concurrency-safe tool.) Context modifiers are the exception and are
 replayed in call order, because a modifier out of order changes what the next tool sees.
 """

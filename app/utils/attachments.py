@@ -55,7 +55,7 @@ For every file in `read_file_state` that was read whole: if it is gone, it is fo
 differs from what was read, the new content is recorded (upstream re-reads it through
 `FileReadTool.call`, which updates the cache) and an `edited_text_file` attachment carries
 the changed hunks with line numbers. *Divergence:* the `Workspace` protocol exposes no mtime
-(see `context/file_state.py`), so "changed" is decided by content, the fallback upstream's own
+(see `utils/file_state_cache.py`), so "changed" is decided by content, the fallback upstream's own
 read-before-write check uses. A Read-denied path is skipped, as upstream skips it.
 
 The `date_change` source.
@@ -477,7 +477,7 @@ def get_agent_pending_message_attachments(messages: Sequence[Message], context: 
     """
     `getAgentPendingMessageAttachments`. Upstream drains through `setAppStateForTasks ??
     setAppState`; a background worker's `set_app_state` here already lets task writes reach the
-    root store (`agents/run_agent.py`), so it is that one setter.
+    root store (`tools/agent_tool/run_agent.py`), so it is that one setter.
     """
     agent_id = getattr(context, "agent_id", None)
     if not agent_id:

@@ -25,7 +25,7 @@ The shape is upstream's, including the parts that look like details and are not:
 The directory layout mirrors upstream's — `<config>/projects/<sanitized cwd>/<run>/tool-results/`
 — rather than living inside the workspace, so generated code never contains the agent's own
 scratch. Upstream's `Read` is not workspace-bounded and can open that path directly; ours is,
-so `app/tools/file_tools.py` admits this one directory as an extra read root, which is what
+so `app/tools/utils.py` admits this one directory as an extra read root, which is what
 keeps the path in the preview a path the model can actually use.
 """
 

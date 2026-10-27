@@ -11,7 +11,7 @@ A background agent is a worker the Agent tool did not wait for. Its task record 
 written only through the root setter, and ends in exactly one `<task-notification>` enqueued at
 `later` priority on the run's command queue — the runner delivers it as a turn of its own.
 
-**TDD.** Only agents without a `phase` may run here (`agents/tool.py` refuses the rest): an
+**TDD.** Only agents without a `phase` may run here (`tools/agent_tool/agent_tool.py` refuses the rest): an
 async worker's app-state writes are discarded upstream (`shareSetAppState: !isAsync`), so a
 background tester's `RunTests` could never confirm RED.
 

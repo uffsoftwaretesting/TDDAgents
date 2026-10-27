@@ -16,14 +16,14 @@ for the rest of the turn's calls and the turns after it, exactly as upstream's
 way (`resolveSkillModelOverride`: a `[1m]` session keeps `[1m]` on a model that supports it).
 
 **TDD:** those rules are ordinary allow rules. The TDD phase tier runs above every rule in the
-gate (`permissions/rules.py::tdd_phase_denial`), so a skill granting `WriteFile` cannot write
+gate (`utils/permissions/permissions.py::tdd_phase_denial`), so a skill granting `WriteFile` cannot write
 implementation in RED; it can only spare an 'ask' the phase already permits.
 
 **Fork** (`context: fork`): the skill runs as a worker (`run_agent`, synchronous) on the agent
 its `agent` field names — upstream's `general-purpose` fallback, else the first agent — with the
 allowed tools granted on the worker's state only, and the worker's last text is the result.
 **TDD:** when that agent has a `phase`, the fork goes through the Agent tool's phase-on-spawn
-(`agents/tool.py::phase_on_spawn`, user decision 2026-10-25): GREEN needs a confirmed RED,
+(`app/tdd/phase_on_spawn.py`, user decision 2026-10-25): GREEN needs a confirmed RED,
 REFACTOR a completed cycle, RED restarts the cycle, and a refused move fails the call before any
 worker runs. Only `RunTests` can record an observation.
 
@@ -308,7 +308,8 @@ def build_skill_tool(
         # Imported here: the worker loop pulls in the Agent tool's modules, which import this
         # package's light modules (`app.skills`), never this one.
         from app.context import enhance_system_prompt_with_env_details
-        from app.tools.agent_tool.agent_tool import agent_system_prompt, phase_on_spawn
+        from app.tdd.phase_on_spawn import phase_on_spawn
+        from app.tools.agent_tool.agent_tool import agent_system_prompt
         from app.tools.agent_tool.run_agent import create_agent_id, run_agent
         from app.utils.model.model import get_agent_model
 

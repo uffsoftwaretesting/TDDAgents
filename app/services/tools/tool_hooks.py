@@ -15,7 +15,7 @@ Each runner turns `executeHooks`' aggregated stream into what the tool pipeline 
   context become messages after the tool result, and `continue: false` stops the run. They
   cannot un-run the tool.
 
-A hook's verdict is only an opinion here; `tools/hook_permissions.py` re-checks it against
+A hook's verdict is only an opinion here; `services/tools/tool_hooks.py` re-checks it against
 the permission rules and the TDD phase tier, so no hook can approve a phase-forbidden write.
 
 Resolving a PreToolUse hook's verdict against the permission rules.

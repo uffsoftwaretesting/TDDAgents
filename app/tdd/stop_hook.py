@@ -7,10 +7,10 @@ via the `stop_hook_active` contract (§3.3 of `docs/transition_elaboration_plan.
 **This module holds the Stop hook and nothing else.** Phase 2 deleted the PreToolUse and
 PostToolUse hooks that used to live here:
 
-* the PreToolUse one duplicated `permissions/tdd.py::check_tdd_phase_permission`, giving
+* the PreToolUse one duplicated `tdd/phase_permissions.py::check_tdd_phase_permission`, giving
   RED two enforcement points and so two places to get it wrong. The gate is the surviving
   one, because a PreToolUse hook's `allow` cannot talk its way past it
-  (`tools/hook_permissions.py`);
+  (`services/tools/tool_hooks.py`);
 * the PostToolUse one decided the phase by grepping tool output for the words "fail" and
   "error", which could contradict the ledger it was describing — output mentioning an error
   while the suite passes is ordinary. `RunTests` and its exit code are the only evidence the

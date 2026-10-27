@@ -5,15 +5,15 @@ Ported from `reference/claude-code/src/tools/SendMessageTool/SendMessageTool.ts`
 `SendMessageTool` (`validateInput`, `checkPermissions`, `isReadOnly`, `isEnabled`,
 `mapToolResultToToolResultBlockParam`, and `call`'s local-agent branches) and `prompt.ts`.
 A message to a **running** background agent is queued on its task (`queuePendingMessage`) and
-drained at the worker's next tool round (`attachments/agent_messages.py`); a **stopped** agent,
+drained at the worker's next tool round (`utils/attachments.py`); a **stopped** agent,
 or one with no task, is resumed in the background from its sidechain transcript
-(`agents/resume.py`, `resumeAgentBackground`).
+(`tools/agent_tool/resume_agent.py`, `resumeAgentBackground`).
 
 `isEnabled` is upstream's `isAgentSwarmsEnabled` for the external build: off unless
 `TDDAGENTS_EXPERIMENTAL_AGENT_TEAMS` (upstream `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) is truthy;
 the GrowthBook killswitch defaults on and has no counterpart here.
 
-**TDD.** A resumed agent runs async, so a phase agent is never resumed (`agents/resume.py`).
+**TDD.** A resumed agent runs async, so a phase agent is never resumed (`tools/agent_tool/resume_agent.py`).
 Queuing a message to a running agent cannot reach a phase agent either: only agents without a
 `phase` ever run as background tasks.
 
@@ -60,7 +60,7 @@ AGENT_TEAMS_ENV = "TDDAGENTS_EXPERIMENTAL_AGENT_TEAMS"
 #: `types/ids.ts` -> `AGENT_ID_PATTERN`: `a` + optional `<label>-` + 16 hex digits.
 AGENT_ID_PATTERN = re.compile(r"^a(?:.+-)?[0-9a-f]{16}$")
 
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "tools" / "send_message.md"
+PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
 SEND_MESSAGE_SCHEMA: dict[str, Any] = {
     "type": "object",

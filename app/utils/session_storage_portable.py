@@ -10,7 +10,7 @@ an explicit `subdir` argument rather than a module-level map), and
     <config>/projects/<sanitized cwd>/<session>/subagents[/<subdir>]/agent-<id>.jsonl
 
 The project directory is the same one persisted tool results already use
-(`tools/result_storage.py` -> `tool_results_dir`), so a run's record sits in one place, outside
+(`utils/tool_result_storage.py` -> `tool_results_dir`), so a run's record sits in one place, outside
 the workspace, where no agent can read or edit it.
 """
 
