@@ -7,7 +7,6 @@ input contract `FileEditInput` (`sdk-tools.d.ts`).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +37,7 @@ from app.utils.permissions.filesystem import (
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
 
-def build_edit_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
+def build_edit_tool() -> BuiltTool:
     def validate_edit(input_args: dict[str, Any], context: ToolContext) -> ValidationResult:
         file_path = str(input_args.get("file_path") or "")
         old_string = str(input_args.get("old_string", ""))
@@ -110,7 +109,7 @@ def build_edit_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
 
     return build_tool(
         name="Edit",
-        prompt=get_prompt(PROMPT_PATH, "Edits a file.", vars=vars),
+        prompt=get_prompt(PROMPT_PATH, "Edits a file."),
         input_schema={
             "type": "object",
             "properties": {

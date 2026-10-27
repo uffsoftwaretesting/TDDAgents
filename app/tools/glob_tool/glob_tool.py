@@ -7,7 +7,6 @@ contract `GlobInput` (`sdk-tools.d.ts`).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +36,7 @@ PROMPT_PATH = Path(__file__).with_name("prompt.md")
 GLOB_MAX_RESULTS = 100
 
 
-def build_glob_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
+def build_glob_tool() -> BuiltTool:
     def validate_glob(input_args: dict[str, Any], context: ToolContext) -> ValidationResult:
         path = input_args.get("path")
         ws = context.workspace
@@ -78,7 +77,7 @@ def build_glob_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
 
     return build_tool(
         name="Glob",
-        prompt=get_prompt(PROMPT_PATH, "Finds files.", vars=vars),
+        prompt=get_prompt(PROMPT_PATH, "Finds files."),
         input_schema={
             "type": "object",
             "properties": {

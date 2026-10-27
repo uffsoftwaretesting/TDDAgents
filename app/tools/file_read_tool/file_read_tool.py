@@ -8,7 +8,6 @@ input contract `FileReadInput` (`sdk-tools.d.ts`).
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +42,7 @@ READ_DENIED_MESSAGE = "File is in a directory that is denied by your permission 
 MAX_LINES_TO_READ = 2000
 
 
-def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
+def build_read_file_tool() -> BuiltTool:
     def validate_read(input_args: dict[str, Any], context: ToolContext) -> ValidationResult:
         # `FileReadTool.validateInput`: a Read-deny match is refused before any I/O.
         cwd = permission_cwd(context)
@@ -100,7 +99,7 @@ def build_read_file_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
 
     return build_tool(
         name="ReadFile",
-        prompt=get_prompt(PROMPT_PATH, "Reads a file.", vars=vars),
+        prompt=get_prompt(PROMPT_PATH, "Reads a file."),
         # `FileReadTool.ts`: Infinity, because persisting a read would create a
         # ReadFile -> file -> ReadFile loop and the tool already bounds its own output.
         max_result_size_chars=math.inf,

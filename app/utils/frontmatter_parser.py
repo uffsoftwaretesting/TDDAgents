@@ -77,7 +77,7 @@ def render_prompt(
 
 def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """
-    Parse YAML frontmatter delimited by leading '---' or '<!--'.
+    Parse YAML frontmatter delimited by a leading '---' (upstream `FRONTMATTER_REGEX` takes no other).
 
     Returns (frontmatter_dict, markdown_body).
     """
@@ -92,18 +92,6 @@ def parse_markdown_frontmatter(content: str) -> tuple[dict[str, Any], str]:
                 fm = data if isinstance(data, dict) else {}
             except Exception as e:  # noqa: BLE001 — malformed frontmatter is logged and ignored (§4.5)
                 logger.warning("Failed to parse YAML frontmatter: %s", e)
-                fm = {}
-            return fm, body.strip()
-    elif stripped.startswith("<!--"):
-        parts = stripped.split("-->", 1)
-        if len(parts) >= 2:
-            raw_fm = parts[0][4:]
-            body = parts[1]
-            try:
-                data = yaml.safe_load(raw_fm)
-                fm = data if isinstance(data, dict) else {}
-            except Exception as e:  # noqa: BLE001 — malformed frontmatter is logged and ignored (§4.5)
-                logger.warning("Failed to parse HTML comment frontmatter: %s", e)
                 fm = {}
             return fm, body.strip()
 

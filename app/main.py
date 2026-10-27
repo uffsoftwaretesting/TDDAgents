@@ -322,9 +322,6 @@ def write_session_artifacts(workspace_dir: str, values: dict[str, Any]) -> str:
     return artifacts_dir
 
 
-_STATUS_LABELS = {"success": "SUCCESS", "failed": "FAILED"}
-
-
 def write_subreq_results(artifacts_dir: str, plan: list[str], results: list[dict[str, Any]]) -> None:
     """Each plan item's outcome (`PlanItemResult`): status, terminal reason and the final ledger."""
     by_index = {item["index"]: item for item in results if isinstance(item.get("index"), int)}
@@ -343,7 +340,7 @@ def write_subreq_results(artifacts_dir: str, plan: list[str], results: list[dict
             lines.append(f"{idx + 1}. [NOT_RUN] {requirement}")
             continue
         status = str(item.get("status"))
-        lines.append(f"{idx + 1}. [{_STATUS_LABELS.get(status, status.upper()):<7}] {requirement}")
+        lines.append(f"{idx + 1}. [{status.upper():<7}] {requirement}")
         lines.append(
             f"   Terminal: {item.get('terminal_reason')} | red_confirmed: {item.get('red_confirmed')}"
             f" | green_passed: {item.get('green_passed')}"

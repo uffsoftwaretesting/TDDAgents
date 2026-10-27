@@ -59,7 +59,7 @@ from typing import Any
 
 from app.tool import ToolContext, ToolResult, ValidationResult
 from app.utils.file_state_cache import FileState
-from app.utils.frontmatter_parser import parse_markdown_frontmatter, render_prompt
+from app.utils.frontmatter_parser import parse_markdown_frontmatter
 from app.utils.permissions.shell_rule_matching import match_wildcard_pattern
 from app.utils.tool_result_storage import TOOL_RESULTS_SUBDIR, config_home
 from app.workspace.base import WorkspaceNotFound, normalize_path
@@ -75,16 +75,10 @@ NO_WORKSPACE = ToolResult(content="No workspace available", is_error=True)
 VALID = ValidationResult(valid=True)
 
 
-def get_prompt(path: Path, fallback: str, vars: Mapping[str, Any] | None = None) -> str:
+def get_prompt(path: Path, fallback: str) -> str:
     """The body of a tool's `prompt.md` (frontmatter dropped), or `fallback` if it is missing."""
     if path.exists():
-        raw_body = parse_markdown_frontmatter(path.read_text(encoding="utf-8"))[1]
-        if vars:
-            return render_prompt(raw_body, vars)
-        return raw_body
-
-    if vars:
-        return render_prompt(fallback, vars)
+        return parse_markdown_frontmatter(path.read_text(encoding="utf-8"))[1]
     return fallback
 
 

@@ -352,12 +352,6 @@ def test_call_without_a_workspace_attribute():
     assert (res.is_error, res.content) == (True, "No workspace available")
 
 
-def test_prompt_vars_are_rendered(monkeypatch):
-    monkeypatch.setattr(bash_mod, "BASH_PROMPT", "run {{X}} now")
-    assert bash_mod.build_bash_tool({"X": "1"}).prompt == "run 1 now"
-    assert bash_mod.build_bash_tool().prompt == "run {{X}} now"
-
-
 def test_validate_flags_positional_does_not_skip_or_stop():
     assert validate_flags(["c", "x", "-Z"], 1, CommandConfig(safe_flags={})) is False
 

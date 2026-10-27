@@ -357,3 +357,8 @@ def test_input_schema_is_exact():
         },
         "required": ["command"],
     }
+
+
+def test_bash_results_are_capped_at_upstreams_30000_chars():
+    """`BashTool.maxResultSizeChars` is 30_000, below the generic tool default."""
+    assert bash_mod.build_bash_tool().max_result_size_chars == bash_mod.BASH_MAX_RESULT_SIZE_CHARS == 30_000

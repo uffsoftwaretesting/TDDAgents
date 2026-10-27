@@ -8,7 +8,6 @@ Ported from `reference/claude-code/src/tools/GrepTool/GrepTool.ts` -> `GrepTool`
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -144,7 +143,7 @@ def _relativize_last_colon(line: str) -> str:
     return to_relative_path(line[:i]) + line[i:] if i > 0 else line
 
 
-def build_grep_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
+def build_grep_tool() -> BuiltTool:
     def validate_grep(input_args: dict[str, Any], context: ToolContext) -> ValidationResult:
         path = input_args.get("path")
         ws = context.workspace
@@ -208,7 +207,7 @@ def build_grep_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
 
     return build_tool(
         name="Grep",
-        prompt=get_prompt(PROMPT_PATH, "Searches file contents.", vars=vars),
+        prompt=get_prompt(PROMPT_PATH, "Searches file contents."),
         input_schema={
             "type": "object",
             "properties": {

@@ -115,7 +115,7 @@ def bash_permission_matcher(args: Mapping[str, Any]) -> Callable[[str], bool]:
     return lambda pattern: True
 
 
-def build_bash_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
+def build_bash_tool() -> BuiltTool:
     async def call_bash(input_args: dict[str, Any], context: ToolContext) -> ToolResult:
         command = str(input_args.get("command") or "")
         ws = getattr(context, "workspace", None)
@@ -140,14 +140,9 @@ def build_bash_tool(vars: Mapping[str, Any] | None = None) -> BuiltTool:
             is_error=res.exit_code != 0,
         )
 
-    prompt_text = BASH_PROMPT
-    if vars:
-        from app.utils.frontmatter_parser import render_prompt
-        prompt_text = render_prompt(BASH_PROMPT, vars)
-
     return build_tool(
         name="Bash",
-        prompt=prompt_text,
+        prompt=BASH_PROMPT,
         input_schema={
             "type": "object",
             "properties": {

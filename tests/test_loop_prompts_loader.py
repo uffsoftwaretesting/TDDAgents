@@ -108,3 +108,13 @@ def test_parse_markdown_frontmatter_edge_cases(caplog: pytest.LogCaptureFixture)
     fm3, b3 = parse_markdown_frontmatter("Just markdown text without frontmatter")
     assert fm3 == {}
     assert b3 == "Just markdown text without frontmatter"
+
+
+def test_render_prompt_substitutes_all_three_placeholder_forms() -> None:
+    rendered = render_prompt("{{A}} ${B} {c} {{missing}} ${gone} {unset}", {"A": "1", "B": "2", "c": "3"})
+    assert rendered == "1 2 3 {{missing}} ${gone} {unset}"
+
+
+def test_an_html_comment_header_is_not_frontmatter() -> None:
+    """Upstream's `FRONTMATTER_REGEX` takes `---` only: a leading comment is body text."""
+    assert parse_markdown_frontmatter("<!--\nname: a\n-->\nbody") == ({}, "<!--\nname: a\n-->\nbody")

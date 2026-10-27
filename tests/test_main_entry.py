@@ -503,6 +503,19 @@ def test_subreq_results_without_a_plan_lists_the_results(tmp_path: Path) -> None
     assert text.index("1. [FAILED ] A") < text.index("2. [SUCCESS] B")
 
 
+def test_subreq_results_without_a_plan_or_a_requirement_text(tmp_path: Path) -> None:
+    entry.write_subreq_results(str(tmp_path), [], [{"index": 0, "status": "failed"}])
+    assert "1. [FAILED ] \n" in (tmp_path / "subreq_results.txt").read_text(encoding="utf-8")
+
+
+def test_a_not_run_item_does_not_end_the_list(tmp_path: Path) -> None:
+    done = {"index": 1, "status": "success", "terminal_reason": "completed", "red_confirmed": True,
+            "green_passed": True}
+    entry.write_subreq_results(str(tmp_path), ["A", "B"], [done])
+    text = (tmp_path / "subreq_results.txt").read_text(encoding="utf-8")
+    assert "1. [NOT_RUN] A\n2. [SUCCESS] B\n" in text
+
+
 def test_subreq_results_with_nothing(tmp_path: Path) -> None:
     entry.write_subreq_results(str(tmp_path), [], [])
     bar = "=" * 80

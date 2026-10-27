@@ -211,6 +211,10 @@ def test_export_excludes_constant():
 def _clean_env(**extra: str) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in ("E2B_API_KEY", "OPENAI_API_KEY", "POSTGRES_URL")}
     env.update(PYTHONPATH=str(REPO), **extra)
+    if "MUTANT_UNDER_TEST" in env:
+        # Under mutmut the child imports the mutated copy, whose trampolines need mutmut's config,
+        # which only the parent has. "" is the trampolines' unmutated baseline.
+        env["MUTANT_UNDER_TEST"] = ""
     return env
 
 

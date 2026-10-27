@@ -32,14 +32,14 @@ import asyncio
 import inspect
 import re
 import shlex
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from app.tdd.ledger import TestRunRecord
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
-from app.utils.frontmatter_parser import parse_markdown_frontmatter, render_prompt
+from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
@@ -157,7 +157,6 @@ def format_output(exec_result: SuiteExecutionResult, header: str) -> str:
 
 def build_run_tests_tool(
     test_runner: TestRunner | Callable[[str], Awaitable[SuiteExecutionResult] | SuiteExecutionResult] | None = None,
-    vars: Mapping[str, Any] | None = None,
 ) -> BuiltTool:
     """
     Build a RunTests tool instance with an optional custom runner.
@@ -207,8 +206,6 @@ def build_run_tests_tool(
         return ToolResult(content=format_output(exec_result, header), exit_code=code)
 
     prompt_text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
-    if vars:
-        prompt_text = render_prompt(prompt_text, vars)
 
     return build_tool(
         name="RunTests",
