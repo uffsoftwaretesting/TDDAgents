@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-FF6B35?style=for-the-badge)
 ![E2B](https://img.shields.io/badge/E2B-Cloud_Sandbox-00C7B7?style=for-the-badge)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-State_Persistence-336791?style=for-the-badge&logo=postgresql&logoColor=white)
@@ -54,7 +54,7 @@ The workflow is structured into two well-defined phases:
 1. **Interactive Requirements Gathering** — An AI Analyst collaborates with the user to eliminate ambiguities and produce a structured Technical Specification.
 2. **Autonomous Red-Green Cycle** — A team of specialized agents executes an adapted Red-Green cycle for each decomposed sub-requirement.
 
-All agent-generated code runs inside isolated **E2B Linux containers**. Orchestration state is persisted in **PostgreSQL** via LangGraph checkpointing, enabling resumable, fault-tolerant long-running executions.
+The TDD cycle runs on the *loop engineering architecture* of Claude Code: one agent loop, with permissions, hooks, context assembly, compaction, recovery and tool orchestration arranged around it, laid out module for module like Claude Code's own source (`app/` mirrors its `src/`). All agent-generated code runs in a **per-session local workspace** with its own Python virtualenv (an E2B sandbox can be bound behind the same interface). Session state is persisted in **PostgreSQL** via LangGraph checkpointing (with an in-memory fallback), so a session resumes from its checkpoint and an interrupted sub-requirement resumes its transcript.
 
 <div align="center">
   <img src="assets/arquitetura.png" alt="TDDAgents Architecture" width="80%"/>
@@ -81,28 +81,15 @@ The Technical Specification is designed to be consumed by AI agents, not humans.
 
 The Technical Specification feeds into the **Planner Agent**, which decomposes it into an ordered list of atomic, testable sub-requirements (`tdd_plan`). The first item is always an environment setup step. Subsequent items represent incremental functional slices ordered by complexity.
 
-Each sub-requirement is processed by a dedicated **TDD Subgraph** that encapsulates the full Red-Green loop:
+Each sub-requirement is one run of the agent loop (`app/cli/print.py` → `app/query_engine.py` → `app/query/query.py`). The model works with file, Bash, `RunTests`, `TodoWrite`, skill and `Agent` tools, and can delegate to the TDD agents: **tester** (RED), **developer** (GREEN), **refactorer** (REFACTOR), plus the read-only **verification**, **Explore** and **Plan** agents.
 
-<div align="center">
-  <img src="assets/subgrafo.png" alt="TDD Subgraph" width="60%"/>
-</div>
+The Red → Green order is enforced by three independent barriers that no model output can reach (`app/tdd/`):
 
-**Execution flow inside the TDD Subgraph:**
+1. **The phase ledger.** `RunTests` executes the suite and is the only writer of observations: a failing run in RED confirms RED, a passing run in GREEN confirms GREEN.
+2. **Phase permissions.** In RED, writes to production code are denied (including through Bash redirections); spawning the developer requires a confirmed RED.
+3. **The stop hook.** The loop cannot end `completed` until the ledger shows Red-then-Green; until then the model is told what is missing and the turn continues.
 
-1. **Test Engineer (Tester):** Writes failing tests for the current sub-requirement before any implementation exists. Produces an `AgentAction` with test files, dependencies to install, and optional bash setup commands.
-
-2. **Executor Red:** Runs the test suite via pytest inside the E2B container. Three outcomes are handled:
-   - `red_confirmed` — tests fail due to missing implementation → advance to Developer.
-   - `test_review_needed` — Reviewer flags a malformed test (`[ERRO NO TESTE]`) → Test Engineer rewrites the suite.
-   - `green_in_red` — tests pass immediately (prior iteration already satisfied the requirement) → Reviewer injects a warning and Developer inspects for false positives.
-
-3. **Developer:** Writes the minimum production code to make the current test suite pass. Respects the TDD minimum-implementation principle: no speculative features.
-
-4. **Executor Green:** Re-runs the full test suite. If all pass, `green_passed` is emitted and the cycle advances to the next sub-requirement. If tests fail, the Reviewer classifies the fault and routes back to either the Developer (implementation error) or Test Engineer (test error).
-
-5. **Reviewer:** Acts as external judge throughout the cycle. Receives the full workspace state, the current sub-requirement, and the complete Technical Specification as context. Emits a binary diagnosis: implementation fault vs. test fault. This role separation is an intentional architectural decision to prevent biased self-correction.
-
-Resilience metrics (total failures, failures by type, auto-recovery rate) are collected throughout.
+Each sub-requirement reports its terminal reason and its final ledger (`red_confirmed`, `green_passed`).
 
 ---
 
@@ -110,12 +97,12 @@ Resilience metrics (total failures, failures by type, auto-recovery rate) are co
 
 | Feature | Description |
 |---------|-------------|
-| **Real Execution Environment** | Every test runs inside an isolated E2B Linux container. Dependencies installed via `pip`. Results are deterministic. |
-| **Intelligent Fault Attribution** | The Reviewer distinguishes between bad implementation and bad tests by analyzing the full traceback — routing the fix to the correct agent automatically. |
-| **State Persistence & Resumability** | PostgreSQL checkpoints the full LangGraph state after every node. Stop at any time and resume from the exact checkpoint using a Thread ID. |
-| **Self-Healing Retry Loop** | When tests fail, agents read the error output, reason about the root cause, apply a targeted fix, and re-execute — iterating until resolution or hitting the retry limit. |
-| **Multi-Provider LLM Support** | Supports OpenAI, Anthropic, Gemini, and DeepSeek via a unified `chat_model_factory`. Swap the provider in `.env` without changing any agent code. |
-| **Structured Output Delivery** | All generated source files and test suites are extracted from the E2B sandbox and saved locally to `./workspace_output/`. |
+| **Real Execution Environment** | Every test runs with pytest in the session's own workspace and virtualenv, never inside TDDAgents' environment. |
+| **Structurally Enforced TDD** | The ledger, the phase permission tier and the stop hook hold the cycle; the model cannot skip RED or declare success. |
+| **State Persistence & Resumability** | PostgreSQL checkpoints the session graph; resume with `--thread-id`. An unfinished sub-requirement resumes from its transcript (the ledger is never restored — RED must be observed again). |
+| **Self-Correction** | Failing test output goes back to the model as tool results; it fixes and re-runs until the cycle is observed. Model calls are retried with Claude Code's `withRetry` policy. |
+| **Headless Mode** | `python -m app.main -p` runs a spec end to end with no questions, exiting 0 only when every sub-requirement completed Red → Green. |
+| **Structured Output Delivery** | All generated source files and test suites are exported from the workspace to `./workspace_output_<thread_id>/`. |
 
 ---
 
@@ -134,91 +121,52 @@ Resilience metrics (total failures, failures by type, auto-recovery rate) are co
   ║  Planner         ║  Architect     ║  Decomposes the spec into ordered, atomic vertical   ║
   ║                  ║                ║  slices. Produces the tdd_plan execution sequence.   ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
-  ║  Test Engineer   ║  QA Engineer   ║  Writes failing test files before any implementation ║
-  ║  (Tester)        ║                ║  exists. Rewrites tests when Reviewer flags errors.  ║
+  ║  tester          ║  RED           ║  Writes failing tests and confirms RED with RunTests.║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
-  ║  Developer       ║  Software Eng. ║  Writes minimum production code to satisfy tests.    ║
-  ║                  ║                ║  Applies targeted fixes guided by Reviewer feedback. ║
+  ║  developer       ║  GREEN         ║  Writes minimum production code; confirms GREEN.     ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
-  ║  Runner          ║  Executor      ║  Manages E2B sandbox lifecycle. Executes Red and     ║
-  ║  (Red / Green)   ║                ║  Green phases. Returns exact stdout/stderr logs.     ║
+  ║  refactorer      ║  REFACTOR      ║  Improves the code with the tests kept green.        ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
-  ║  Reviewer        ║  Judge/Debugger║  Analyzes stack traces. Emits binary fault diagnosis ║
-  ║                  ║                ║  (implementation vs. test). Routes fix accordingly.  ║
+  ║  verification,   ║  Read-only     ║  Review the result and explore or plan the codebase  ║
+  ║  Explore, Plan   ║                ║  without writing.                                    ║
   ╚══════════════════╩════════════════╩══════════════════════════════════════════════════════╝
 ```
+
+The Analyst, Engineer and Planner run in the LangGraph session shell (`app/session/`); the TDD agents are workers of the agent loop, spawned through the `Agent` tool (`app/prompts/agents/`).
 
 ---
 
 ## Project Structure
 
 ```
-TDDAgentsUFF/
+TDDAgents/
 │
-├── app/
-│   ├── agents/
-│   │   └── langgraph/                   # Agent logic — LLM calls & structured outputs
-│   │       ├── analyst.py               # Requirements Analyst
-│   │       ├── developer.py             # Developer: production code generation
-│   │       ├── engineer.py              # Engineer: Technical Specification authoring
-│   │       ├── planner.py               # Planner/Architect: TDD plan decomposition
-│   │       ├── reviewer.py              # Reviewer/Judge: fault attribution
-│   │       ├── runner.py                # Runner: E2B sandbox execution (Red & Green)
-│   │       └── tester.py                # Test Engineer: pytest file generation
-│   │
-│   ├── config/
-│   │   └── config.py                    # App settings & LangGraph AgentState TypedDicts
-│   │
-│   ├── errors/                          # Structured error handling
-│   │   ├── agents/handler.py
-│   │   ├── sandbox/handler.py
-│   │   └── exceptions.py
-│   │
-│   ├── graph/
-│   │   ├── nodes/                       # Individual LangGraph node implementations
-│   │   │   ├── execute_developer.py
-│   │   │   ├── execute_progress_evaluator.py
-│   │   │   ├── execute_runner_green.py
-│   │   │   ├── execute_runner_red.py
-│   │   │   ├── execute_tester.py
-│   │   │   ├── plan_task.py
-│   │   │   ├── requirements_analyst.py
-│   │   │   ├── requirements_engineer.py
-│   │   │   └── requirements_user_input.py
-│   │   ├── subgraphs/
-│   │   │   ├── build_tdd_subgraph.py    # Inner TDD Red-Green-Refactor subgraph
-│   │   │   └── requirements_orchestrator_subgraph.py
-│   │   └── orchestrator.py              # Main LangGraph graph construction & compilation
-│   │
-│   ├── prompts/
-│   │   ├── agents/langgraph/            # Jinja2 system & human prompt templates per agent
-│   │   └── specs/                       # Example problem specifications for testing
-│   │
-│   ├── schema/
-│   │   └── schema.py                    # Pydantic models for structured LLM output
-│   │
-│   ├── utils/
-│   │   ├── chat_model_factory.py        # Multi-provider LLM client factory
-│   │   ├── pass_rate.py
-│   │   ├── prompt_loader.py
-│   │   ├── resilience_metrics.py        # Fault tracking & recovery metrics
-│   │   ├── sandbox_utils.py
-│   │   ├── spec_loader.py
-│   │   ├── token_metrics.py             # Token usage tracking
-│   │   └── workspace.py
-│   │
-│   └── main.py                          # CLI entry point
+├── app/                        # laid out like Claude Code's src/, in snake_case
+│   ├── main.py                 # CLI entry point (interactive and headless -p)
+│   ├── cli/print.py            # One sub-requirement end to end (runHeadless)
+│   ├── query_engine.py         # QueryEngine: transcript, result, cost
+│   ├── query/                  # The agent loop (query.ts), its state, deps and stop hooks
+│   ├── tool.py, tools/         # Tool contract; one directory per tool, prompt.md beside it
+│   ├── services/               # api (model call, retry), tools (execution), compact, mcp
+│   ├── utils/                  # permissions, hooks, settings, attachments, transcripts, ...
+│   ├── state/ tasks/ skills/ coordinator/ constants/ schemas/ types/
+│   ├── tdd/                    # TDDAgents' TDD layer: ledger, RunTests, phase rules, stop hook
+│   ├── session/                # LangGraph session shell: analyst → engineer → planner → items
+│   ├── workspace/, sandbox/    # Local workspace + venv; optional E2B sandbox
+│   ├── prompts/                # System sections, TDD agents, skills, session prompts, specs
+│   └── config/config.py        # Provider, model and environment settings
 │
-├── assets/
-│   ├── arquitetura_geral.png            # Overall architecture diagram (two-phase flow)
-│   └── subgrafo.png                     # TDD Subgraph internal structure
-│
-├── mutation_tests/                      # Mutation testing results
-├── backup/                              # SonarQube analysis scripts & config
-├── docker-compose.yaml                  # PostgreSQL service
-├── docker-compose.sonarqube.yaml        # SonarQube service for quality analysis
-├── requirements.txt                     # Python package dependencies
-└── .env.example                         # Environment variable template
+├── tests/                      # Offline test suite for app/ (no keys, sandbox or database)
+├── reference/                  # Claude Code reference: source map and analyses
+├── docs/                       # Architecture plan and phase record
+├── assets/                     # Diagrams
+├── experimental_executions/    # Recorded runs from the paper's evaluation
+├── mutation_tests/             # Mutation testing results from the paper's evaluation
+├── backup/                     # SonarQube analysis scripts & config
+├── docker-compose.yaml         # PostgreSQL service
+├── docker-compose.sonarqube.yaml
+├── requirements.txt
+└── .env.example
 ```
 
 ---
@@ -229,12 +177,10 @@ TDDAgentsUFF/
 
 | Requirement | Version | Purpose |
 |-------------|---------|---------|
-| **Python** | 3.10+ | Runtime |
+| **Python** | 3.11+ | Runtime (`enum.StrEnum`) |
 | **Docker** | Latest | Hosts PostgreSQL locally |
-| **LLM API Key** | — | OpenAI, Anthropic, Gemini, or DeepSeek |
-| **E2B API Key** | e2b_309a046e57b5b145e9855b913af9745d824b2e52 | Cloud sandbox code execution (research api key token) |
-
-> **Get your own E2B API key** at [e2b.dev](https://e2b.dev) — required for all code execution. (they give you $100 dollars of credit).
+| **OpenAI API Key** | — | The default model (`o4-mini`, set in `app/config/config.py`) |
+| **E2B API Key** | optional | Only if you bind the E2B sandbox instead of the local workspace — get one at [e2b.dev](https://e2b.dev) |
 
 ---
 
@@ -256,16 +202,13 @@ cp .env.example .env
 Open `.env` and fill in your credentials:
 
 ```env
-# ─── LLM Provider (pick one or more) ──────────────────────────────
+# ─── LLM Provider ──────────────────────────────────────────────────
 OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GEMINI_API_KEY=...
-DEEPSEEK_API_KEY=...
 
-# ─── E2B Cloud Sandbox ─────────────────────────────────────────────
-E2B_API_KEY=e2b_...
+# ─── E2B Cloud Sandbox (optional) ──────────────────────────────────
+E2B_API_KEY=
 
-# ─── Database (Docker) ─────────────────────────────────────────────
+# ─── Database (Docker; optional, falls back to in-memory checkpoints)
 POSTGRES_URL=postgresql://tdd_user:tdd_password@localhost:5432/tdd_db
 ```
 
@@ -318,7 +261,7 @@ Choose one of the available options:
 - Select a number to load a predefined `.txt` prompt used in the programming tasks experiments (e.g., CEP formatter, discount calculator, palindrome checker, CPF validator, or markdown to HTML).
 - Or choose the last option to manually provide a custom prompt.
 - The Analyst can ask follow-up questions. For evaluation/experiment runs, keep only the attempts where the initial prompt was enough to elicit requirements.
-- Once you see the Requirements displayed in the terminal screen, type `/sim` as an answer. This will trigger the execution graph to move to the Engineer phase.
+- Once you see the Requirements displayed in the terminal screen, type `/yes` as an answer. This approves the checklist and moves the session to the Engineer phase. Anything else is feedback to the Analyst; `/exit` (or `/quit`) leaves with the session paused at its checkpoint.
 
 Note: The Analyst can ask more questions. You can also ask more features or corrections to be made. However, for research purposes, we only consider executions where the Analyst immediatelly collects and displays the requirements with no questions asked. Also, no other features are asked after the requirements are defined.
 
@@ -332,9 +275,29 @@ Note: The Analyst can ask more questions. You can also ask more features or corr
 python -m app.main --thread-id "tdd-1a2b3c4d..."
 ```
 
-Resumes a previous session from the LangGraph checkpoint stored in PostgreSQL. Useful for recovering from crashes or manual interrupts.
+Resumes a previous session from the LangGraph checkpoint stored in PostgreSQL. Useful for recovering from crashes or manual interrupts. A sub-requirement that was interrupted resumes from its transcript.
 
 > **Thread IDs** are printed to the console at the start of every run. Save them to resume long-running sessions.
+
+### Headless *(no questions)*
+
+```bash
+python -m app.main -p --spec app/prompts/specs/<file>.txt
+echo "Build a calculator" | python -m app.main -p
+```
+
+The checklist is approved automatically; a clarifying question from the Analyst fails the session. The exit code is 0 only if every sub-requirement completed Red → Green.
+
+### Other flags
+
+| Flag | Effect |
+|------|--------|
+| `--fresh` | Start a new session instead of the request-derived thread id |
+| `--checkpoint memory\|<uri>` | Checkpoint store (default `POSTGRES_URL`, in-memory fallback) |
+| `--permission-mode <mode>` | `default`, `acceptEdits` (shipped default), `plan`, `bypassPermissions`, `dontAsk` or `auto` |
+| `--settings <file>` | An extra settings file (permissions, hooks) |
+| `--dangerously-skip-permissions` | Bypass permission prompts (the TDD phase rules still apply) |
+| `--coordinator` | Coordinator mode: the main thread only orchestrates the TDD agents |
 
 ---
 
@@ -352,9 +315,8 @@ workspace_output/
     ├── engineer_specifications.txt     # Specs generated by the Engineer Agent based on the confirmed_user_requirements.txt
     ├── planner.txt                     # tdd_plan decomposition
     ├── execution_logs.txt              # Full agent trace
-    ├── resilience_metrics.txt          # Fault counts by type
     ├── token_usage.txt                 # Token usage
-    ├── subreq_results.txt              # Number of satisfied requirements and general TDD workflow data
+    ├── subreq_results.txt              # Each sub-requirement's status, terminal reason and final ledger
     └── user_analyst_dialogue.txt       # Full dialogue between the user and the Analyst Agent.
 
 ```
@@ -362,7 +324,7 @@ workspace_output/
 
 ## Experiments
 
-TDDAgents was evaluated on **15 executions** across 5 different programming tasks (3 independent runs per task), as part of a study submitted to [SBES 2026](https://cbsoft.sbc.org.br/2026/sbes/). The evaluation results are available in the `experimental_executions/` and `mutation_tests/` directories. 
+TDDAgents was evaluated on **15 executions** across 5 different programming tasks (3 independent runs per task), as part of a study submitted to [SBES 2026](https://cbsoft.sbc.org.br/2026/sbes/). The evaluation results are available in the `experimental_executions/` and `mutation_tests/` directories. They were produced by the earlier LangGraph pipeline (Tester / Developer / Reviewer subgraph), before the rebuild on the agent loop, and are kept unchanged as the paper's record.
 
 The 5 evaluated programming tasks are:
 1. **CEP Formatter** (`cep_validator`): A function that formats and validates Brazilian postal codes (CEP) to the "XXXXX-XXX" pattern.

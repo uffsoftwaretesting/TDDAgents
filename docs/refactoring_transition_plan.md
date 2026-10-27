@@ -418,6 +418,21 @@ architecture, while enforcing the TDD cycle"; MCP: "port the main MCP functional
   `app/loop/prompts/`.
 - Update `CLAUDE.md` tables, baselines and gotchas; re-run the full mutation baseline.
 
+*Phase 10 outcome (2026-10-26), per the interview:*
+- `app/loop/` is dissolved into claude-code's `src/` tree at `app/`, snake_cased
+  (`tools/bash_tool/bash_permissions.py`, `services/api/with_retry.py`, `query/query.py` for
+  `query.ts`); modules are split or merged to upstream's file boundaries. The TDD
+  customization is one package, `app/tdd/`; each tool's prompt is `prompt.md` beside it.
+- Deleted: the dissolved graph modules and legacy agents (Part L3), their Jinja2 templates,
+  `app/sync/`, `app/errors/`, `app/schema/`, the runtime prompt registry and the copied prompt
+  trees (`app/loop/prompts/` and `docs/`), and every module or symbol with no production
+  caller. `app/tools/` and `app/hooks/` were already gone (Phase 4). E2B stays behind the
+  `Workspace` protocol.
+- F1/F2 and the resilience metrics are dropped; `subreq_results.txt` reports each item's
+  terminal and final ledger.
+- The gate runs over the whole tree: flake8 and strict mypy on all of `app/` and `tests/`,
+  mutmut on `app/` minus the seam modules. Details in `CLAUDE.md`.
+
 ---
 
 ## 3. Verification

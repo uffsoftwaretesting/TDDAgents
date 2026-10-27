@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Start-of-session ritual (mandatory)
 
-A massive refactor of TDDAgents is under way. Before doing **any** work in this repository — reading, planning, answering a question, or editing — always:
+TDDAgents was rebuilt on claude-code's loop architecture (Phases 0–10 of `docs/refactoring_transition_plan.md`, completed 2026-10-26). Before doing **any** work in this repository — reading, planning, answering a question, or editing — always:
 
-1. **Read this entire `CLAUDE.md`.** It is the map of the current architecture and of the gotchas the refactor has to preserve or deliberately break.
-2. **Read the relevant source code before changing it.** Never edit or reason about `app/` from memory or from this document alone; open the actual files. This file describes intent, the source is the truth, and during the refactor the two will drift.
-3. **Start from `reference/claude-code-map.md`** whenever the task touches Claude Code behavior, agent/tool design, or a pattern worth mirroring in the refactor. The map is short, covers every subsystem, and routes you to the analysis and the code. Follow both routes — see [Claude Code reference](#claude-code-reference). Never answer a question about Claude Code internals from memory when the source is sitting in `reference/claude-code/`.
+1. **Read this entire `CLAUDE.md`.** It is the map of the architecture and of the gotchas a change has to preserve or deliberately break.
+2. **Read the relevant source code before changing it.** Never edit or reason about `app/` from memory or from this document alone; open the actual files. This file describes intent, the source is the truth, and the two drift.
+3. **Start from `reference/claude-code-map.md`** whenever the task touches Claude Code behavior, agent/tool design, or a pattern worth mirroring. The map is short, covers every subsystem, and routes you to the analysis and the code. Follow both routes — see [Claude Code reference](#claude-code-reference). Never answer a question about Claude Code internals from memory when the source is sitting in `reference/claude-code/`.
 4. **Run the [Quality gate](#quality-gate-mandatory) before any code you create or refactor is considered done.** It is not optional and not a final polish step: the tests are written *with* the change, not after it.
 
 Only after these steps should you propose a plan or start editing.
@@ -18,124 +18,54 @@ to the user with the `AskUserQuestion` tool before acting on it — never resolv
 picking a default. A `UserPromptSubmit` hook in `.claude/settings.json` restates this on every
 prompt.
 
-## Upcoming refactor — read before extending anything
+## The architecture — claude-code's loop, laid out like its source
 
-**The architecture has pivoted.** TDDAgents is being rebuilt on claude-code's *loop
-engineering architecture*: one `while True` loop as the system centre, with permissions,
-hooks, context assembly, compaction, recovery and tool orchestration as systems arranged
-around it. The plan is `docs/transition_elaboration_plan.md` — **read it before designing
+TDDAgents is built on claude-code's *loop engineering architecture*: one `while True` loop as
+the system centre, with permissions, hooks, context assembly, compaction, recovery and tool
+orchestration as systems arranged around it. The design is `docs/transition_elaboration_plan.md`
+and the phase record is `docs/refactoring_transition_plan.md` — **read the plan before designing
 anything new in `app/`.**
 
-This supersedes the previous plan, which ported claude-code's *features* onto a LangGraph
-pipeline while the graph stayed the enforcement mechanism.
+Since Phase 10 (2026-10-26) **`app/` mirrors `reference/claude-code/src/`**, file for file, in
+snake_case: `src/tools/BashTool/bashPermissions.ts` is `app/tools/bash_tool/bash_permissions.py`,
+`src/services/api/withRetry.ts` is `app/services/api/with_retry.py`. Where a `.ts` file and a
+directory share a name, the file's code is `<name>/<name>.py` (`query.ts` →
+`app/query/query.py`, beside `query/deps.py`). To find our port of an upstream file, translate
+its path; to find what a module ports, read its docstring's `Ported from` lines. Everything
+TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
 
-### What this means for work in `app/` right now
+| Path (`app/`) | Upstream | Ships |
+|---|---|---|
+| `main.py` | `entrypoints/cli.tsx`, `main.tsx` | Argument parsing, interactive / headless (`-p`) session, report and artifacts |
+| `cli/print.py` | `cli/print.ts` → `runHeadless` | One plan item end to end (`tdd_loop_runner`): MCP connect, SessionStart / UserPromptSubmit, the `QueryEngine`, the background-task wait loop, item resume (`load_initial_messages`), SessionEnd |
+| `query_engine.py` | `QueryEngine.ts` | `QueryEngine.submit`: transcript recorded before the loop, `ResultMessage` with usage, cost and `terminal_reason` |
+| `query/query.py` | `query.ts` | `run_loop` (async generator, yields `Terminated` last) and `drain`; every continue/terminal site; the pre-model pipeline (boundary → budget → microcompact → autocompact → blocking precheck) |
+| `query/state.py`, `query/transitions.py` | `query.ts` `State`, `query/transitions.ts` | `LoopState` (frozen, **no defaults**), `CompactionTracking`, `CompactionResult`; the `Continue` / `Terminal` vocabulary |
+| `query/config.py`, `query/deps.py` | `query/config.ts`, `query/deps.ts` | `RunConfig` + `Gates` (snapshotted at entry); `LoopDeps` (the DI seam) and the production deps |
+| `query/stop_hooks.py`, `query/withhold.py` | `query/stopHooks.ts`, `query.ts` | `StopHookResult`, `build_stop_hooks_runner` (**TDD hook first**); withhold-then-decide recovery predicates |
+| `tool.py`, `tools/tools.py` | `Tool.ts`, `tools.ts` / `utils/toolPool.ts` | `Tool`, `build_tool` (fail-closed defaults), `ToolResult`, `ToolContext` (`ToolUseContext`); `assemble_tool_pool` with phase-derived deny rules |
+| `tools/<name>_tool/` | `tools/<Name>Tool/` | One directory per tool, its `prompt.md` beside it: `bash_tool` (+ `bash_permissions`, `bash_security`, `path_validation`, `read_only_validation`, `sed_validation`), `file_read_tool`, `file_write_tool`, `file_edit_tool` (+ `utils`, `constants`), `glob_tool`, `grep_tool`, `todo_write_tool`, `agent_tool` (`agent_tool`, `run_agent`, `load_agents_dir`, `agent_tool_utils`, `resume_agent`, `agent_memory`, `prompt`), `skill_tool`, `send_message_tool`, `task_output_tool`, `task_stop_tool`, `mcp_tool`, `list_mcp_resources_tool`, `read_mcp_resource_tool`. `tools/utils.py` holds what the five file tools share |
+| `services/api/` | `services/api/claude.ts`, `withRetry.ts` | `claude.py`: `stream_call_model`, one message per content block, prompt-cache breakpoints; `with_retry.py`: the one ceiling, `DEFAULT_MAX_RETRIES = 10` |
+| `services/tools/` | `services/tools/` | `tool_execution.py` (`runToolUse`: validation → `validate_input` → PreToolUse → gate → call → governance → PostToolUse), `tool_orchestration.py`, `streaming_tool_executor.py`, `tool_hooks.py` (+ `resolveHookPermissionDecision`) |
+| `services/compact/` | `services/compact/` | `compactConversation`, `autoCompactIfNeeded`, microcompact, the compact prompt + **TDD sections**, post-compact cleanup, the summarizer seam |
+| `services/mcp/` | `services/mcp/` | Config scopes, env expansion, `client.py` (connect, transports, results), `McpConnectionManager`, normalization, types |
+| `context.py`, `constants/system_prompt_sections.py` | `context.ts`, `constants/prompts.ts`, `constants/systemPromptSections.ts` | `getSystemPrompt` + `tdd-contract.md`, system/user context, per-run memoization; `systemPromptSection`, the dynamic boundary, `invalidate_context_caches` |
+| `state/app_state_store.py` | `state/AppStateStore.ts` | `AppState` (ledger, todos, permission context, denial tracking, last test run, tasks), `AppStateStore`, `discard_app_state_update` |
+| `task.py`, `tasks/`, `utils/task/` | `Task.ts`, `tasks/`, `utils/task/` | Task ids, `LocalAgentTask` + `<task-notification>`, `stopTask`, the task framework and disk output |
+| `coordinator/coordinator_mode.py` | `coordinator/coordinatorMode.ts` | Coordinator mode (`TDDAGENTS_COORDINATOR_MODE`), its tool filter and user context |
+| `skills/load_skills_dir.py` | `skills/loadSkillsDir.ts` | Skill definitions and the loader (bundled `app/prompts/skills` < policy < user < project) |
+| `cost_tracker.py`, `utils/model_cost.py` | `cost-tracker.ts`, `utils/modelCost.ts` | `CostTracker` callback per run; Claude + hand-maintained OpenAI price tables |
+| `utils/permissions/` | `utils/permissions/` | `permissions.py` (`hasPermissionsToUseTool` inner/outer, rules, auto mode, PermissionRequest), `filesystem.py`, `permission_update.py`, `permission_rule_parser.py`, `dangerous_patterns.py`, `denial_tracking.py`, `classifier_decision.py`, `yolo_classifier.py`, `shell_rule_matching.py` |
+| `utils/settings/`, `types/permissions.py` | `utils/settings/`, `types/permissions.ts` | The five settings sources and `build_tool_permission_context`; `PermissionMode`, rules, `ToolPermissionContext` |
+| `utils/hooks/`, `schemas/hooks.py`, `types/hooks.py` | `utils/hooks.ts`, `utils/hooks/`, `schemas/hooks.ts`, `types/hooks.ts` | `hooks.py` (`executeHooks`, matching, `execCommandHook`, every per-event executor), the config snapshot, async registry, prompt/agent/HTTP hooks, SSRF guard, `hook_dispatcher.py` (`build_hook_dispatcher`); the hook schema; `processHookJSONOutput` |
+| `utils/attachments.py` | `utils/attachments.ts` | `getAttachments` / `getAttachmentMessages` and every ported source (the TDD source is in `app/tdd/`) |
+| `utils/` (rest) | `utils/*.ts` | `messages.py`, `message_queue_manager.py`, `claudemd.py` (memory files), `session_storage.py` + `session_storage_portable.py` + `conversation_recovery.py` (transcripts, resume), `session_start.py`, `tokens.py`, `tool_result_storage.py`, `tool_errors.py`, `ripgrep.py`, `file.py`, `glob.py`, `file_state_cache.py`, `abort_controller.py`, `argument_substitution.py`, `frontmatter_parser.py`, `mcp_validation.py`, `shell_command.py`, `bash/commands.py`, `shell/read_only_command_validation.py`, `model/model.py` (model aliases) |
+| **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`) |
+| `session/` | — (TDDAgents) | The LangGraph session shell: `analyst ⇄ analyst_review → engineer → planner → execute_plan_item → evaluator ⟲`, checkpointing, resume; `session/agents/` are its LLM seams |
+| `workspace/`, `sandbox/` | — (TDDAgents) | The `Workspace` protocol, `LocalWorkspace` (+ the per-session venv), `E2BWorkspace` over the E2B adapter |
+| `prompts/` | `constants/prompts.ts`, bundled agents and skills | System sections, the TDD agents (`AGENT.md` + `references/`), bundled skills, compact / permission / session prompts, specs. Tool prompts live beside their tools |
 
-| | |
-|---|---|
-| The graph below still runs | The [Architecture](#architecture) section describes the code as it exists today. It is accurate. Do not break it. |
-| But do not invest in it | `execute_tester`, `execute_developer`, both runners, `build_tdd_subgraph`, the `wrapper_*` functions, `is_flow_type` and both router functions **dissolve into the loop**. Extending them is wasted work. |
-| Shipped layers are being replaced | **At the user's explicit direction, `app/workspace/` and `app/sync/` will be dropped** and rebuilt against the loop. They are not a foundation to build on. `app/tools/` and `app/hooks/` were deleted in Phase 4. |
-| Jinja2 is going | Prompts become Markdown (see [Prompt conventions](#prompt-conventions-incoming)). Do not author new `.jinja2` templates. |
-| The quality gate does not change | It still applies to everything you write, including throwaway work. |
-
-If a task asks you to extend something on that list, say so and propose the loop-shaped
-alternative from the plan rather than quietly adding to code that is scheduled for deletion.
-
-### What the loop core already is — `app/loop/`
-
-Parts A1–A7, B1–B8, C1–C5, D1–D6, E1–E8, F1–F6, G1–G4, and H1–H5 of the plan are built and under the quality gate, and Phases 0–9 of `docs/refactoring_transition_plan.md` are wired: the loop runner (`app/loop/runner.py`) runs each plan item, and since Phase 9 the session shell (`app/session/`) and the entry point (`app/main.py`) drive it. Everything is tested offline against fakes.
-
-| File / Subpackage | Ships |
-|---|---|
-| `config.py` | `RunConfig` + `Gates`, snapshotted once at entry by `build_run_config()` |
-| `state.py` | `LoopState` (frozen, tuples, **no field has a default**), `CompactionTracking`, `initial_loop_state()` |
-| `context/` | Subpackage providing `AppState`, `AppStateStore`, `CancelToken`, `ToolContext` (with `workspace`), `discard_app_state_update` |
-| `context/tokens.py` | Fast heuristic token counter (`(len+3)//4`), block/message/sequence token estimators, `TokenWarningState`, `TokenCounter` (E1); `token_count_with_estimation`, model context window / max output (200k / 32k for an unknown model), effective window (Phase 5) |
-| `context/slicing.py` | Head-slicing enforcing all 3 hard invariants (user-first, unbroken tool pairs, non-orphaned thinking), `find_safe_truncation_index`, `slice_messages_head` (E2) |
-| `context/instructions.py` | Iterative HTML comment cleaner and `load_instruction_file`, used by the prompt/agent/skill loaders (E3) |
-| `context/memory.py` | Port of `utils/claudemd.ts`: Managed → User → Project → rules → Local memory files (`TDDAGENTS.md`, `.tddagents/`), `@include`, conditional `paths:` rules, block-level comment stripping, `getClaudeMds`; AutoMem off unless `TDDAGENTS_ENABLE_AUTO_MEMORY` (Part I5) |
-| `context/assembly.py` | Port of `getSystemPrompt` (static sections in upstream order + `tdd-contract.md`, boundary, `env_info_simple`), `getGitStatus`/`getSystemContext`/`getUserContext`, `appendSystemContext`/`prependUserContext`, per-run memoization |
-| `context/file_state.py` | `FileState` — upstream `readFileState`; `ToolContext.read_file_state` backs read-before-write |
-| `model.py` | `stream_call_model`: system prompt + system context, `<system-reminder>` user context, history, TDD-state attachment; model resolved from `RunConfig`; retry around opening the stream; per-content-block emission |
-| `retry.py` | Port of `withRetry.ts`: `with_retry`, `get_retry_delay` (500 ms base, x2, 32 s cap, +25% one-sided jitter), `should_retry`, `is_529_error`, `FallbackTriggeredError`, `CannotRetryError`. **The one ceiling in the codebase**, `DEFAULT_MAX_RETRIES = 10` |
-| `streaming/blocks.py` | Port of `claude.ts`'s `content_block_stop` framing: one complete assistant message per content block, which is what makes Part F2 eager dispatch real |
-| `tools/validation.py` | JSON-Schema input validation (`jsonschema`) + `formatZodValidationError`'s wording; step 1 of the tool pipeline |
-| `tools/result_storage.py` | Port of `toolResultStorage.ts`: 50 000-char clamp, 2000-byte head-only preview, `<persisted-output>` message, create-only writes, fail-open, `math.inf` opt-out |
-| `tools/hook_permissions.py` | Port of `resolveHookPermissionDecision`: a hook `allow` skips the prompt but is **still re-checked**, so it cannot defeat the TDD phase rules |
-| `tools/todo.py` | `TodoWrite`, keyed by agent in `AppState`; replaces the ad-hoc `TODO.md` read |
-| `permissions/bash_tdd.py` | Phase enforcement on `Bash` write targets — closes the `echo code > calculator.py` bypass of barrier 2 |
-| `metrics.py` | Renamed from `resilience.py`: it measures, it recovers nothing. "Retry" now means `retry.py` alone |
-| `tools/fs.py` | `ReadFile`/`WriteFile`/`Edit`/`Glob`/`Grep` on the `sdk-tools.d.ts` contracts, upstream `errorCode`s in `validate_input`, read-before-write |
-| `tools/ripgrep.py` | Port of `utils/ripgrep.ts`; rg runs inside the workspace, vendored via the pinned `ripgrep` wheel (installed into the sandbox on creation and on first use) |
-| `tools/bash.py`, `permissions/bash_*.py` | Bash tool and the port of `bashSecurity.ts`'s validator battery + `bashToolHasPermission`; no LLM classifier |
-| `prompts/loader.py` | Markdown frontmatter parser, visible placeholder rendering (`{{VAR}}`), agent loader enforcing 4-rule discipline and loud phase validation (E4) |
-| `prompts/sections.py` | `systemPromptSection` (memoized), `DANGEROUS_uncachedSystemPromptSection` (volatile with required reason), `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`, run-scoped `PromptSectionCache` (E4b) |
-| `context/cache.py` | `SessionLatches` (`CacheLatchError` on mid-session flip), `validate_cache_breakpoints_budget` (E5); `prepare_cached_request` — upstream's two breakpoints (system block + last message) for Anthropic, nothing for OpenAI (Phase 5) |
-| `context/cleanup.py` | `invalidate_context_caches` clearing run cache and latches without two-layer trap (E8) |
-| `app/loop/attachments/` | `getAttachments` / `getAttachmentMessages`: per-turn sources persisted into `state.messages` — queued commands, date change, changed files, nested memory, todo and auto-mode reminders, agent/MCP deltas, async hook responses, token usage, **TDD state** (+ `create_tdd_state_attachment_message` for the post-compaction re-attach) (Phase 5) |
-| `app/loop/compact/` | `compactConversation` (no kept tail, file restoration, PTL retry, boundary), `autoCompactIfNeeded` (window arithmetic, circuit breaker 3), the compact prompt + **TDD sections**, post-compact cleanup, microcompact (time-based, off externally), the summarizer seam (Phase 5) |
-| `app/prompts/` | Complete composition roster: 7 static system instructions + dynamic, 7 core tools, and 6 TDD agents (`tester`, `developer`, `refactorer` + catalogue, `verification`, `explore`, `plan`) |
-| `query_engine.py` | `QueryEngine.submit` (`submitMessage`): transcript recorded before the loop, whole messages recorded on the growing history (boundary restarts it), `isResultSuccessful`, `ResultMessage` (`success` / `error_during_execution`) with usage, cost and the loop's `terminal_reason` (Phase 6) |
-| `events.py` | `TransitionEventRecorder`, the run's `emit_event`: every `Transition`/`Terminated` with the ledger snapshot, last `RunTests` exit code and plan index, appended to `<project dir>/<run id>/events.jsonl` (Phase 6) |
-| `app/loop/storage/` | `sessionStorage.ts` + `conversationRecovery.ts`: entry format (`entries.py`), upstream paths (`paths.py`), `TranscriptStore` (`recordTranscript` prefix dedup, sidechains, boundary `logicalParentUuid`, tool results chained to their assistant), `loader.py` (leaf, chain, orphaned parallel tool results), `recovery.py` (`load_conversation_for_resume`, the three filters, interruption detection) (Phase 6) |
-| `app/loop/cost/` | `modelCost.ts` Claude table + a hand-maintained OpenAI table (unknown model = cost 0 + flag), `CostTracker` callback (`cost-tracker.ts`), per run on `ToolContext.cost_tracker` (Phase 6) |
-| `agents/run_agent.py`, `agents/tool.py` | `runAgent` (worker `run_loop`: own prompt/identity/pool, sync workers share `set_app_state` so `RunTests` moves the coordinator's ledger, mode override, SubagentStart context, sidechain transcript, `maxTurns`, cleanup) and `AgentTool.call` (selection + `Agent(type)` deny rules, **phase-on-spawn**, `finalizeAgentTool`, upstream's result trailer) (Phase 7) |
-| `agents/{definition,loader,resolution,prompt}.py` | `parseAgentFromMarkdown` (upstream fields + `phase`), built-in < user < project overrides from `app/prompts/agents` only, `filterToolsForAgent`/`resolveAgentTools` (Agent disallowed for workers), `filterDeniedAgents`, the Agent tool prompt (`getPrompt`) (Phase 7) |
-| `coordinator.py` + `app/prompts/system/coordinator.md` | Coordinator mode (`TDDAGENTS_COORDINATOR_MODE` → `Gates.coordinator_mode`): `applyCoordinatorToolFilter`, `getCoordinatorUserContext`, a TDDAgents-authored coordinator prompt (Phase 7) |
-| `command_queue.py` | `messageQueueManager.ts`: one `CommandQueue` per run (`ToolContext.command_queue`, the hook registry's), priorities `now`/`next`/`later`, `enqueuePendingNotification` (Phase 8) |
-| `app/loop/tasks/` | `Task.ts`/`tasks/types.ts` (`generateTaskId`, `isBackgroundTask`), `framework.ts` over `AppState.tasks`, `diskOutput.ts` (output file = symlink to the sidechain), `LocalAgentTask` + `runAsyncAgentLifecycle` + the `<task-notification>`, `stopTask` (Phase 8) |
-| `tools/task_output.py`, `tools/task_stop.py`, `tools/send_message.py`, `agents/resume.py` | `TaskOutput`, `TaskStop`, opt-in `SendMessage` (local agents only, `TDDAGENTS_EXPERIMENTAL_AGENT_TEAMS`) and `resumeAgentBackground` from the sidechain + `.meta.json` (Phase 8) |
-| `app/loop/skills/` + `attachments/skills.py` | `loadSkillsDir.ts` (bundled `app/prompts/skills` < policy < user < project, conditional `paths`), argument substitution, the `Skill` tool (inline `newMessages` + allowed-tools/model context modifier, fork via `run_agent` with phase-on-spawn), the listing budget and `skill_listing` attachment, agent `skills` preload (Phase 8) |
-| `app/loop/mcp/` | `services/mcp/`: config scopes (`.mcp.json`, user/local in `~/.tddagents.json`, `managed-mcp.json`, policy allow/deny), env expansion, stdio/sse/http/ws transports, `McpConnectionManager` (3 local / 20 remote at a time), `mcp__server__tool` wrappers (passthrough permissions), resource tools, result transformation and output limits, `mcp_instructions` (Phase 8) |
-| `model_aliases.py` | `parseUserSpecifiedModel` (Claude aliases + an OpenAI table, default `o4-mini`), `getAgentModel`, `provider_for_model` (Phase 7) |
-| `transitions.py` | `Continue` / `Terminal` `StrEnum`s, `Transition`, `Terminated` |
-| `deps.py` | `LoopDeps` — the injected 7-member DI seam (A4), plus `CompactionResult` and `StopHookResult` |
-| `engine.py` | `run_loop`, an async generator (A3–A7), plus `drain`, handling all terminal returns, continue sites, and ledger reconciliation |
-| `ledger.py` | `TddPhase` (`RED`, `GREEN`, `REFACTOR`), `PhaseLedger`, `with_test_result()`, `transition_to()`, `is_cycle_complete` (D1) |
-| `messages.py` | The `Message` alias and `tool_calls_in` |
-| `tools/types.py` | `ValidationResult`, `PermissionResult`, `ToolResult`, `ContextModifier` (B1) |
-| `tools/base.py` | `Tool` protocol, `BuiltTool`, `build_tool` with fail-closed defaults, name/alias lookup, classification hooks (B2 & D3) |
-| `tools/execution.py` | `run_tool_use`, `yield_missing_tool_results`, history-repair invariant (B4 & B7) |
-| `tools/orchestration.py` | `partition_tool_calls`, serial & concurrent `run_tools`, context-modifier replay (B5 & B6) |
-| `tools/pool.py` | `assemble_tool_pool` with partition-sorting, prompt-cache stability, and phase-derived deny rules (B8 & D3) |
-| `tools/run_tests.py` | `RunTests` loop tool, ground truth test execution, `SuiteExecutionResult`, updating authoritative ledger, workspace execution (D2 & G) |
-| `permissions/types.py` | `PermissionMode`, `PermissionBehavior`, `PermissionRule`, `ToolPermissionContext`, ladder cycling (C1) |
-| `permissions/rules.py` | `rule_matches`, rule lookups, `extract_permission_context`, `tdd_phase_denial` (the TDD tier, fail-closed), upstream `checkRuleBasedPermissions` with the TDD tier first (C2, Phase 3) |
-| `permissions/updates.py` | `PermissionUpdate` schema, `applyPermissionUpdate(s)`, `persistPermissionUpdate(s)`, `addPermissionRulesToSettings`, `updateSettingsForSource` (Phase 3) |
-| `permissions/gate.py` | `hasPermissionsToUseTool` inner/outer step for step; TDD phase tier above step 1a, failing closed; dontAsk, headless deny after PermissionRequest hooks (C3, D4, Phase 3) |
-| `permissions/capability.py` | `is_bash_command_read_only`, `bash_is_read_only`, shell splitting, duration and wrapper handling (C4) |
-| `permissions/filesystem.py` | `matchingRuleForInput` (gitignore `Edit(...)`/`Read(...)` rules via `pathspec`), `checkPathSafetyForAutoEdit`, `isPathAllowed`, `checkWritePermissionForTool` (`WriteFile`/`Edit`), `checkReadPermissionForTool` + Read-deny ripgrep globs (`ReadFile`/`Glob`/`Grep`) (C5, Phase 3) |
-| `permissions/settings.py` | Five settings sources (user, project, local, flag, policy + `managed-settings.d`), `allowManagedPermissionRulesOnly`, `initialPermissionModeFromCLI`, `initializeToolPermissionContext`, `build_tool_permission_context` (Phase 3) |
-| `permissions/dangerous.py` | `DANGEROUS_BASH_PATTERNS`, `isDangerousBashPermission`, `stripDangerousPermissionsForAutoMode` run for **every** TDD context — the TDD managed tier (Phase 3) |
-| `permissions/permission_request.py` | `runPermissionRequestHooksForHeadlessAgent` over `ToolContext.hook_dispatcher` (Phase 3) |
-| `permissions/messages.py` | `createPermissionRequestMessage`, `AUTO_REJECT_MESSAGE`, `DONT_ASK_REJECT_MESSAGE`, source/mode display names (Phase 3) |
-| `permissions/auto_mode.py`, `permissions/denial_tracking.py`, `permissions/classifier_decision.py` | The `mode === 'auto'` branch of `hasPermissionsToUseTool` (safety-check guard, acceptEdits fast path, allowlist, classifier, fail-closed, denial limits), `DENIAL_LIMITS` 3/20, `SAFE_YOLO_ALLOWLISTED_TOOLS` (Phase 4b) |
-| `permissions/yolo_classifier.py` + `app/prompts/permissions/` | Port of `yoloClassifier.ts`: transcript building, `classify_result` tool path, two-stage XML path, `formatActionForClassifier`, rejection/unavailable messages; **TDDAgents-authored prompts** (upstream's compiled out) (Phase 4b) |
-| `permissions/tdd.py` | `get_phase_deny_rules`, tool classification (`is_implementation_writing_tool`, `is_test_writing_tool`, `is_test_path`), `check_tdd_phase_permission` (D3 & D4) |
-| `tdd/hooks.py` | `tdd_phase_incomplete_hook`, stop hook honoring `stop_hook_active` without infinite loops (D5) |
-| `streaming/abort.py` | Three-controller abort tree (`AbortSignal`, `AbortController`, `create_child_abort_controller`, `bridge_cancel_token`) (F3) |
-| `streaming/withhold.py` | Withhold-then-decide gate snapshot (`WithholdGateSnapshot`, `take_withhold_gate_snapshot`), recovery error predicates (F5 & F6) |
-| `streaming/executor.py` | Eager content-block tool dispatch (`StreamingToolExecutor`, `TrackedTool`), upward bubbling (#21056), Bash-only sibling cascade, synthetic errors, strictly ordered emission, `discard()` (F2, F3, F4) |
-| `streaming/__init__.py` | Clean re-export of Part F streaming & abort primitives |
-| `app/workspace/base.py` | `Workspace` protocol, POSIX path normalization, `CommandResult`, `FileEntry`, and `WorkspaceError` hierarchy (G1) |
-| `app/sandbox/adapter.py` | `E2BAdapter` wrapping E2B SDK, static surface verified, `E2BWorkspace` delegation (G2) |
-| `app/workspace/local.py` | `LocalWorkspace` rooted on host, login-shell parity (`/bin/bash -l -c`), symlink boundary defense (G3) |
-| `app/workspace/router.py` | `DualWorkspace` and `resolve_workspace` target resolution |
-| `app/sync/baseline.py` | SHA256 snapshot, `IgnoreRules` (.gitignore matching), 3-way `classify` conflict resolution (G4) |
-| `app/sync/events.py` | `SyncCheckpoint`, `SyncConflict`, event logging and drainable sink (G4) |
-| `app/sync/engine.py` | `SyncEngine`: bidirectional sync at 4 deterministic checkpoints (`seed`, `reconcile_ledger`, `flush`), conflict backup (G4) |
-| `hooks/events.py`, `hooks/schemas.py`, `hooks/config.py` | The 27 `HookEvent`s and each event's match query; the `command`/`prompt`/`agent`/`http` hook schema; the run's frozen `HooksConfigSnapshot` from the five settings sources with policy `disableAllHooks`/`allowManagedHooksOnly` (Phase 4) |
-| `hooks/output.py`, `hooks/messages.py` | `processHookJSONOutput`, hook-JSON validation with upstream's schema hint; hook attachments as `<system-reminder>` meta messages exactly where upstream sends them to the model; `reorder_attachments_for_api` (Phase 4) |
-| `hooks/matching.py` | `matchesPattern`, `if` conditions via each tool's `prepare_permission_matcher`, dedup, `getMatchingHooks` (Phase 4) |
-| `hooks/execute.py` | `HookDispatcher` (one per run, on `ToolContext.hook_dispatcher`): `executeHooks` in parallel with deny > ask > allow, `executeHooksOutsideREPL`, and every per-event executor (Phase 4) |
-| `hooks/exec_command.py`, `hooks/process.py`, `hooks/async_registry.py` | `execCommandHook` (stdin JSON, `TDDAGENTS_PROJECT_DIR`, process-group kill on timeout/abort), background `async`/`asyncRewake` hooks delivered between turns (Phase 4) |
-| `hooks/exec_prompt.py`, `hooks/exec_agent.py`, `hooks/exec_http.py`, `hooks/ssrf_guard.py` | Prompt hooks (`{ok, reason}`), agent-hook verifier loop (`StructuredOutput`, 50-turn upstream ceiling), HTTP hooks with URL/env allowlists and the SSRF guard (Phase 4) |
-| `hooks/tool_hooks.py`, `hooks/stop_hooks.py`, `hooks/session.py`, `hooks/runtime.py` | `runPreToolUseHooks`/`runPostToolUseHooks`/`runPostToolUseFailureHooks`; `handleStopHooks` + `build_stop_hooks_runner` (**TDD hook first**, configured hooks only add blocks); SessionStart/UserPromptSubmit processing; `build_hook_dispatcher` (Phase 4) |
-
-
-
-Three things about it are load-bearing and easy to undo by accident:
+Three things about the loop are load-bearing and easy to undo by accident:
 
 - **`LoopState` has no defaults, on purpose.** Every continue site must name every field, so
   the reset-or-preserve decision is visible in the diff. A default would let a future site
@@ -155,6 +85,12 @@ Three things about it are load-bearing and easy to undo by accident:
   single forced divergence from the reference: PEP 525 forbids a value in an async
   generator's `return`, so JS's `yield*`-returns-`Terminal` has no Python equivalent. `drain`
   is the stand-in.
+
+### The phase record
+
+The sections below record what each phase changed and how its gate measured. **They cite the
+paths of their time** — `app/loop/...` before Phase 10 — and are kept as written; the table
+above gives each module's current home.
 
 ### What Phases 1 and 2 changed (2026-10-11)
 
@@ -953,27 +889,120 @@ interview (recorded in the plan's Phase 9 outcome).
   - `route_after_planner`'s `.get` default;
   - the Phase 6 recovery bounds and the Phase 0 pool `phase_ledger` class.
 
-### The three things that change most
+### What Phase 10 changed (2026-10-26)
 
-1. **Routing by `status` string literals is replaced** by a closed vocabulary of seven
+Cleanup and reorganization. The user's direction: delete every piece of dead and legacy code,
+and lay `app/` out like `reference/claude-code/src/` while keeping the TDD customization. Each
+choice below was put to the user.
+
+- **`app/` mirrors upstream's tree** (see [The architecture](#the-architecture--claude-codes-loop-laid-out-like-its-source)).
+  - Paths are upstream's in snake_case. A `.ts` file and a directory with the same name
+    become `<name>/<name>.py`.
+  - Modules that ported one upstream file are merged. Examples: `utils/attachments.py`,
+    `utils/hooks/hooks.py`, `utils/permissions/permissions.py`, `utils/session_storage.py`,
+    `services/api/claude.py`.
+  - Modules that held several upstream files are split. `fs.py` became the five file tool
+    directories plus `tools/utils.py`; `context/__init__` became `tool.py` and
+    `state/app_state_store.py`; the permission messages went to `permission_rule_parser.py`,
+    `utils/settings/constants.py`, `types/permissions.py` and `utils/messages.py`.
+  - The import cycles the merges exposed are broken along upstream's own boundaries:
+    `StopHookResult` in `query/stop_hooks.py`, `CapturedProcess` in `utils/shell_command.py`,
+    `CompactionResult` (the loop's) in `query/state.py`. Two cycles remain, each broken by one
+    function-level import with a comment: the TDD stop hook and the TDD state source.
+- **TDD customization is one package, `app/tdd/`.** It holds the ledger, `RunTests`
+  (`run_tests_tool/`), both phase-permission modules, the stop hook, phase-on-spawn and the
+  background refusal, the TDD state attachment, and the event log (`events.jsonl`). The
+  session shell's LLM seams are `app/session/agents/`.
+- **Each tool prompt is `prompt.md` beside its tool.** `app/prompts/tools/` is gone.
+  `RunTests` now reads its live text from `tdd/run_tests_tool/prompt.md`; the stale
+  `run_tests.md` and the unused `agent.md` are deleted.
+- **Package hubs are gone.** Every import names the defining module, and no `__init__.py`
+  re-exports anything.
+- **Deleted as legacy:**
+  - the pre-loop pipeline: `app/graph/`, `app/errors/`, `app/schema/`, the tester, developer,
+    reviewer and runner agents and their Jinja2 templates;
+  - `app/sync/`;
+  - `utils/{prompt_loader,sandbox_utils,spec_loader,workspace}.py`;
+  - the runtime prompt registry and ~830 copied upstream prompt files, both in
+    `app/loop/prompts/` and in `docs/`;
+  - `Config.AgentState` and every constant nothing read;
+  - `jinja2` and `markupsafe` from `requirements.txt`.
+- **Deleted as dead code:**
+  - Inventions superseded by the ports, with no production caller: `permissions/capability.py`,
+    `context/slicing.py`, `workspace/router.py` (`DualWorkspace`), `SessionLatches` and the
+    cache-breakpoint budget, `load_instruction_file`, permission-mode cycling,
+    `WorkspaceError.retryable`, `Gates.web_tools_available`, `ModelCallError`.
+  - `agents/fork.py`: forking is off headless, and nothing called it.
+- **Metrics (user decision):**
+  - F1/F2 and the resilience metrics are dropped. Under the ledger, every completed item is a
+    confirmed Red-then-Green cycle, the reviewer tags the resilience ratios came from no
+    longer exist, and `main.py` was writing zeros.
+  - `subreq_results.txt` lists each `PlanItemResult`: status, terminal reason and the final
+    ledger.
+- **Kept:** the `Workspace` protocol, `LocalWorkspace` and `E2BWorkspace` with its adapter,
+  for the plan's E2B end-to-end run.
+- **The gate covers the whole tree.**
+  - flake8 has zero findings across `app/` and `tests/`, and mypy is strict on all of `app/`.
+  - mutmut mutates `app/` minus the seams (`do_not_mutate`).
+  - A subprocess test now gives its child `MUTANT_UNDER_TEST=""`. Otherwise import-time
+    prompt loading hits mutmut's trampoline in the child, and stats collection fails.
+
+*Divergences, all recorded:*
+- Two function-level imports where upstream's single-file TypeScript has no cycle;
+- `app/tdd/` and `app/session/` have no upstream counterpart;
+- the `tools/utils.py` the five file tools share is ours (upstream spreads those helpers over
+  `utils/file.ts` and the tools);
+- every package is a namespace package, so there is no `index.ts`-style re-export.
+
+**Pre-push gate, Phase 10 (2026-10-26).** The full baseline, `paths_to_mutate = ["app/"]`
+minus the seams:
+
+| | |
+|---|---|
+| Mutants | 39 706 first run (1 002 timeout); 39 644 after triage removed dead code (463 timeout) |
+| Killed (gate run) | 37 249 — **96.2%** (37 249 / 38 704) |
+| Killed after triage (confirmed by a second full run) | 37 829 — **96.5%** (37 829 / 39 181) |
+| flake8 / ruff / mypy | 0 / 0 / 0 (strict, 313 files, all of `app/` and `tests/`) |
+
+Triage covered the code Phase 10 changed; the moved code keeps the classes its own phase
+recorded above.
+- **Dead code deleted:** the tool builders' `vars` (no caller), `get_prompt`'s rendering
+  branch, `parse_markdown_frontmatter`'s `<!--` branch, the identity label map in
+  `write_subreq_results`.
+- **Real gaps killed:** `${VAR}`/`{var}` substitution (its test went with the registry),
+  Bash's 30 000-char result cap, `write_subreq_results`' missing-text and mid-plan NOT_RUN
+  cases.
+- **Remaining survivors in changed code** are the recorded equivalent classes:
+  - codec aliases;
+  - log wording;
+  - `getattr` defaults on attributes that always exist;
+  - `build_tool` defaults (`False` → `None`, dropped);
+  - the `strip_html_comments` loop sentinel;
+  - the TDD stop hook's unread `config` argument.
+
+### The three things that changed most
+
+1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
    continue reasons and ten terminal reasons, ported from `src/query.ts`. No more router
    functions comparing strings.
-2. **Red→Green stops being enforced by graph topology.** It becomes a phase ledger plus
+2. **Red→Green is no longer enforced by graph topology.** It is a phase ledger plus
    phase-derived deny rules plus a Stop hook that refuses to let the loop terminate — three
    independent barriers, none reachable by a model decision. This is §3.3 of the plan and it
    is the part a thesis reviewer will press on.
-3. **Prompts stop being templates and become composed Markdown**, following claude-code's own
+3. **Prompts are composed Markdown, not templates**, following claude-code's own
    file conventions.
 
-### Prompt conventions (incoming)
+### Prompt conventions
 
-Detailed in §4 of the plan. The short version, because it changes how you write every prompt:
+Detailed in §4 of the plan. The short version, because it governs every prompt:
 
 - **No templating engine.** Markdown in English, with `{{PLACEHOLDER}}` substitution. An
   unknown placeholder is left visible rather than rendered empty — the opposite of the Jinja2
-  failure mode documented under [Conventions and gotchas](#conventions-and-gotchas).
+  failure mode that retired the old templates (a misspelled kwarg rendered as an empty string).
 - **Directory per unit**: `AGENT.md` / `SKILL.md` entry file plus `references/` loaded on
-  demand, mirroring `reference/claude-code/src/skills/bundled/`.
+  demand, mirroring `reference/claude-code/src/skills/bundled/`. A tool's prompt is
+  `prompt.md` beside the tool (`app/tools/<name>_tool/prompt.md`), as upstream's
+  `tools/<Name>Tool/prompt.ts`.
 - **No values in prose.** No model id, path, threshold or count is written into a prompt file.
   Each has one resolution point in code and reaches the prompt as a placeholder.
 - **No invented defaults in frontmatter.** Omission means unset, not a number someone picked.
@@ -995,10 +1024,10 @@ P=.venv/bin      # the repo-local, gitignored venv; see Commands
 # 1. Unit tests — written alongside the change, never bolted on afterwards
 $P/pytest tests/ -q
 
-# 2. Lint — zero findings on the files you touched
-$P/flake8 <touched files>
+# 2. Lint — zero findings
+$P/flake8 app tests
 
-# 3. Types — zero errors on the files you touched
+# 3. Types — zero errors (strict, all of app/ and tests/)
 $P/mypy
 
 # 4. Mutation testing — do the tests actually assert anything?
@@ -1011,10 +1040,10 @@ tested against a fake, never against a live LLM or sandbox. `tests/conftest.py` 
 provides `FakeWorkspace` and the `make_fake_workspace` factory; reuse them instead of
 writing new doubles.
 
-**Steps 2 and 3 — touched files only.** Legacy modules carry ~250 pre-existing flake8
-findings and are excluded from `[tool.mypy] files`. Clean them up when a phase rewrites
-them, not before. Config lives in `setup.cfg` (flake8, `max-line-length = 120`) and
-`pyproject.toml` (mypy `strict = true`, pytest, mutmut).
+**Steps 2 and 3 — the whole tree.** Since Phase 10, `app/` and `tests/` carry zero flake8
+findings and mypy checks all of `app/` strictly (only the seam modules below are
+`ignore_errors`). Keep it that way. Config lives in `setup.cfg` (flake8,
+`max-line-length = 120`) and `pyproject.toml` (mypy `strict = true`, pytest, mutmut).
 
 **Step 4 — the gate is ≥ 90% killed**, computed as `killed / (total − timeout)`. Then
 **triage every survivor**: kill it with a test, or write down why it is equivalent or
@@ -1029,7 +1058,11 @@ an external service rather than something sitting behind one:
 |---|---|
 | `app/sandbox/adapter.py` | the E2B SDK |
 | `app/utils/chat_model_factory.py` | the LLM provider |
-| `app/agents/langgraph/*` | the LLM itself |
+| `app/session/agents/*` | the LLM itself (the session shell's analyst, engineer and planner) |
+
+`app/utils/token_metrics.py` (the LangChain usage callback) and `app/config/` (environment
+constants) are also outside the mutation set. All of them are listed in `[tool.mutmut]
+do_not_mutate`, and every other module under `app/` is mutated (`paths_to_mutate = ["app/"]`).
 
 Each names its exemption in its own docstring. In place of unit and mutation testing they
 require **a static surface check** — assert every SDK method and kwarg they call still
@@ -1276,8 +1309,8 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
   project into `mutants/` and runs the suite there, but it walks only `paths_to_mutate`.
   Without `also_copy`, `app/config/` is never copied, every mutant dies of `ImportError`
   rather than of a real assertion, and the run reports a meaningless 100%.
-- **Growing `paths_to_mutate` is part of the gate.** New tested modules must be added to
-  it, or they are silently never mutated.
+- **`paths_to_mutate = ["app/"]` mutates every new module automatically** (Phase 10). An
+  exemption is a `do_not_mutate` entry, and only a seam module (see above) may have one.
 - **Default-argument mutations are equivalent by construction — do not chase them.**
   mutmut keeps the *original* signature on the public wrapper, resolves the defaults
   there, and passes every argument positionally into the mutant
@@ -1305,9 +1338,9 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
 
 TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed in a **local per-session workspace** (`.tddagents/runs/<thread_id>/workspace`) with its own Python virtualenv (`.tddagents/runs/<thread_id>/venv`, pytest pinned), not inside TDDAgents' environment. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL (`POSTGRES_URL`), with an in-memory fallback.
 
-It is **a LangGraph pipeline today and a loop tomorrow** — the refactor rebuilds it on claude-code's loop architecture, and LangGraph is reduced to a session shell (checkpointing, `interrupt()`, plan iteration). See [Upcoming refactor](#upcoming-refactor--read-before-extending-anything).
+It is **claude-code's loop with a LangGraph session shell around it**: each plan item is one loop run, and LangGraph only checkpoints the session, asks the user (`interrupt()`) and iterates the plan. See [The architecture](#the-architecture--claude-codes-loop-laid-out-like-its-source).
 
-`pytest`, `flake8`, `mypy` and `mutmut` apply to **`app/` itself**, not only to the generated workspaces. `tests/` holds an offline suite for `app/` that needs no API keys, no sandbox and no database, and runs in under a second; `setup.cfg` and `pyproject.toml` configure the four tools. See [Quality gate](#quality-gate-mandatory) for the mandatory procedure and the current baseline.
+`pytest`, `flake8`, `mypy` and `mutmut` apply to **`app/` itself**, not only to the generated workspaces. `tests/` holds an offline suite for `app/` that needs no API keys, no sandbox and no database, and runs in about a minute; `setup.cfg` and `pyproject.toml` configure the four tools. See [Quality gate](#quality-gate-mandatory) for the mandatory procedure and the current baseline.
 
 *(This reverses what this file used to say. Until Phase 1A the repository had no tests of its own and verification was purely end-to-end. That is no longer true, and treating it as true is how untested code lands.)*
 
@@ -1345,15 +1378,15 @@ Use the repo-local, gitignored `.venv` (`python3 -m venv .venv && .venv/bin/pip 
 requirements.txt`; it also provides the vendored `rg` binary and `types-PyYAML`). On the
 original workstation the equivalent is `/home/amaro/tdd-agents/.venv`. (`/home/amaro/tdd-agents/venv` there is missing
 `langchain_together`, which `app/utils/chat_model_factory.py` imports at module scope, so
-importing anything under `app/graph/` fails there.)
+importing the model call fails there.)
 
 ```bash
 P=.venv/bin
 
 $P/pytest tests/ -q                                     # offline suite, no credentials
-$P/flake8 app/loop app/workspace app/sync app/sandbox tests   # touched files
+$P/flake8 app tests                                     # zero findings
 $P/mypy                                                 # strict; config in pyproject.toml
-$P/mutmut run && $P/mutmut results                      # mutation testing; see the gotchas
+$P/mutmut run && $P/python scripts/mutmut_score.py      # mutation testing; see the gotchas
 ```
 
 The full procedure and its pass criteria are in [Quality gate](#quality-gate-mandatory).
@@ -1447,79 +1480,48 @@ is absent from the shipped build.
 
 ## Architecture
 
-> **This section describes the code as it runs today, and it is accurate.** Much of it is
-> scheduled to dissolve into the loop — the graph topology, the `status` routing vocabulary,
-> the node wrappers and the tool layer. Read
-> [Upcoming refactor](#upcoming-refactor--read-before-extending-anything) first so you know
-> which parts to preserve and which not to build on.
+The module map is [The architecture](#the-architecture--claude-codes-loop-laid-out-like-its-source)
+above; this section is the runtime path through it.
 
-### One session graph, driven by `app/main.py` (Phase 9)
+### One session graph, driven by `app/main.py`
 
 `app/main.py` → `app/session/driver.py` (`build_session_shell`, `drive_session`) →
 `app/session/shell.py`: one checkpointed LangGraph thread, state `SessionState`:
 `analyst ⇄ analyst_review (interrupt) → engineer → planner → execute_plan_item → evaluator ⟲`.
-Each plan item is one `tdd_loop_runner` run (`app/loop/runner.py`) on the thread's shared
-local workspace; `PlanItemResult` reports the item's terminal and its ledger. See
+Each plan item is one `tdd_loop_runner` run (`app/cli/print.py`) on the thread's shared
+local workspace; `PlanItemResult` reports the item's terminal and its ledger, and
+`app/main.py` writes them to `metrics_and_logging/subreq_results.txt`. See
 [What Phase 9 changed](#what-phase-9-changed-2026-10-26).
 
-> The four subsections below (TDD subgraph, `status` routing, layering, `file_system`
-> mirror) describe the **pre-loop pipeline**. Its graph is gone; only the legacy modules in
-> `app/graph/nodes/` and `app/agents/langgraph/{tester,developer,reviewer,runner}.py` remain,
-> unused, until Phase 10 deletes them.
+### One plan item
 
-### The TDD subgraph
-
-`graph/subgraphs/build_tdd_subgraph.py` builds `tester → runner_red → developer → runner_green` with conditional edges. Every node is wrapped (`wrapper_tester`, `wrapper_runner_red`, …) — the wrappers exist solely to fold **resilience metrics** into the returned state (failure counters, `is_flow_type`), keeping the node functions themselves metric-free.
-
-Two success flows are recorded per sub-requirement:
-- **F1** — clean TDD: the test failed first (Red confirmed), then passed.
-- **F2** — "green in red": the test passed immediately; `runner_red` still routes to the Developer with an injected warning prompt so the cycle is never skipped.
-
-### Routing is entirely by `state["status"]` string
-
-*(Replaced by the refactor with a closed continue/terminal vocabulary — §3.1 and §5 Part A2 of
-the plan. Accurate for the current code.)*
-
-There is no shared enum. Router functions read `status` and branch on literals. The vocabulary spans three families and **must be kept consistent between the node that sets it and the router that reads it**:
-- flow: `red_confirmed`, `green_passed`, `green_failed`, `test_review_needed`, `tests_written`, `code_written`, `next_req`, `plan_complete`, `plan_complete_with_failures`
-- retryable infra: `infra_error_{planner,tester,red,developer,green,analyst,engineer}` — routes the node back to itself
-- terminal: `sandbox_failed`, `tester_failed`, `developer_failed`, `plan_failed`, `max_retries_exceeded`
-
-### Layering
-
-`graph/nodes/*` (state in → state out, error handling, logging) → `agents/langgraph/*` (build message history, call the LLM with `.with_structured_output(...)`, return `(pydantic_action, updated_history)`) → `utils/prompt_loader.py` (Jinja2) and `utils/sandbox_utils.py` (E2B I/O). Nodes never call the LLM directly; agents never touch `AgentState`.
-
-Agents return the **full** conversation history; the node slices `updated_history[existing_len:]` and returns only the new turns, letting LangGraph's `add_messages` reducer append them. Returning the whole list would duplicate messages on every re-entry.
-
-### Sandbox and the `file_system` mirror
-
-`AgentState["file_system"]` is a `dict[filepath, content]` mirror of the sandbox. `apply_agent_action_to_sandbox` writes files to E2B *and* updates the mirror; `read_all_files_from_state` renders the whole mirror into every agent prompt (this is the agents' only view of the codebase). `main.py` extracts the mirror to `workspace_output_<thread_id>/` at the end — nothing is pulled back off the sandbox, so anything an agent creates via `bash_commands` rather than `files_to_write` is lost.
-
-The sandbox is created once in `TDDOrchestrator.run` and killed in its `finally`; nodes only `Sandbox.connect(sandbox_id)`.
-
-### The tool layer (Phase 1B) — deleted in Phase 4
-
-`app/tools/` and `app/hooks/` were a first port of `Tool.ts` and the hook system onto the
-LangGraph pipeline. Nothing in the running graph ever called them, and Phase 4 deleted both
-(2026-10-21, at the user's direction) once `app/loop/tools/` and `app/loop/hooks/` had
-replaced them. Their design notes live on in git history; the loop-side modules are the
-ones to read.
-
-### Error taxonomy
-
-`errors/exceptions.py` defines `TransientInfraError` (retry, capped by `Config.MAX_INFRA_RETRIES`, with a 3s sleep) and `FatalInfraError` (abort to a terminal status). Two classifiers map SDK exceptions onto them: `errors/agents/handler.py` for LLM/LangChain/LangGraph errors and `errors/sandbox/handler.py` for E2B. Both **always raise** — call them from inside `except` blocks and never expect a return. `handler.py` deliberately re-raises `GraphBubbleUp` untouched so LangGraph control flow is not swallowed. Note the E2B `CommandExitException` (non-zero exit from pytest) is *expected* in TDD and is intercepted in `agents/langgraph/runner.py` before reaching the classifier.
+`tdd_loop_runner` builds the run (`RunConfig`, permission context, hook dispatcher, MCP
+connections, skills, transcript store, cost tracker, a fresh `AppStateStore` whose ledger
+starts in RED), fires SessionStart and UserPromptSubmit, and hands the sub-requirement to
+`QueryEngine.submit`, which drives `run_loop` (`app/query/query.py`). Each iteration: the
+pre-model pipeline, `stream_call_model`, the tool calls through `run_tools` /
+`StreamingToolExecutor` and `run_tool_use`, the turn's attachments, then either a continue
+reason or a terminal. The TDD cycle is held by three barriers that no model output can
+reach: the ledger (`app/tdd/ledger.py`, written only by `RunTests`), the phase permission
+tier in the gate (`app/tdd/phase_permissions.py`), and the stop hook
+(`app/tdd/stop_hook.py`) that refuses `completed` until the cycle is observed.
 
 ### State and config
 
-`config/config.py` holds `Config` and the legacy `AgentState` schema. It **raises at import time** if `OPENAI_API_KEY` is unset (`E2B_API_KEY` is optional since Phase 0, `POSTGRES_URL` since Phase 9) — importing anything under `app/` without a `.env` fails immediately. Model selection is hardcoded there (`CHAT_MODEL = "openai"`, `MODEL = "o4-mini"`), not read from the environment; switching providers means editing `Config` and passing the right kwargs through `utils/chat_model_factory.py`.
+`app/config/config.py` holds `Config`: the provider and model (`CHAT_MODEL = "openai"`,
+`MODEL = "o4-mini"`), the Postgres URL and the E2B sandbox constants. It **raises at import
+time** if `OPENAI_API_KEY` is unset (`E2B_API_KEY` and `POSTGRES_URL` are optional), so
+importing anything under `app/` without a `.env` fails immediately. A run's own settings are
+snapshotted once into `RunConfig` (`app/query/config.py`).
 
-Postgres is not required: `build_checkpointer` falls back to `MemorySaver` when it cannot connect (logged, and recorded in `Gates.postgres_checkpointing`), losing cross-restart resumability. Each sub-requirement is its own loop session with a fresh context window.
+Postgres is not required: `build_checkpointer` falls back to `MemorySaver` when it cannot
+connect (logged, and recorded in `Gates.postgres_checkpointing`), losing cross-restart
+resumability. Each sub-requirement is its own loop session with a fresh context window.
 
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)
-- **Prompt templates are the behavior.** The session shell's prompts are Markdown under `app/prompts/session/` (Phase 9); the legacy TDD agents' role definitions still live in `app/prompts/agents/langgraph/<agent>/{sys,hum}_prompt_*.jinja2`, not in Python. The Tester has separate `normal` and `review` variants; the orchestrator has standalone `feedback_*.jinja2` templates that are injected into `reviewer_messages` as synthetic feedback. **This is the current state, not the target** — Jinja2 is removed by the refactor and prompts become Markdown. Do not author new `.jinja2` templates; see [Prompt conventions](#prompt-conventions-incoming).
-- The Jinja2 `Environment` in `prompt_loader.py` uses default (non-strict) undefined, so a misspelled kwarg **silently renders as an empty string**. There is already one such live bug: `agents/langgraph/developer.py:35` passes `sub_requsite=` while `developer/hum_prompt_1.jinja2` expects `sub_requisite`, so the Developer's first prompt has a blank sub-requirement block. Verify kwarg names against the template when touching either side. **This bug is the reason the refactor drops Jinja2** — §4.1 of the plan cites it as the motivating failure mode.
-- The Reviewer signals fault attribution by prefixing its feedback with the literal strings `[TEST ERROR]` / `[IMPLEMENTATION ERROR]`, and the runner nodes route on `"[TEST ERROR]" in analysis`. These strings are load-bearing across `agents/langgraph/reviewer.py` and both runner nodes.
-- `utils/workspace.py` is dead code — it references `Config.TEST_FILE` and `Config.IMPLEMENTATION_MODULE`, which no longer exist. Nothing imports it.
+- **Prompts are Markdown and they are the behavior.** System sections, agents and skills live under `app/prompts/`, each tool's prompt in `prompt.md` beside it; see [Prompt conventions](#prompt-conventions). There is no templating engine left in the codebase.
+- **A new module goes where upstream keeps its counterpart**, snake_cased (`src/utils/foo/barBaz.ts` → `app/utils/foo/bar_baz.py`); TDD-only code goes in `app/tdd/`. Its docstring names the upstream file and symbols it ports.
+- **Package `__init__.py` files re-export nothing.** Import a name from the module that defines it; the hubs were removed in Phase 10 so a module can move without breaking importers.
 - `experimental_executions/` and `mutation_tests/` are **frozen research artifacts** backing the paper's results. Do not regenerate or reformat them.
