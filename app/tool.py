@@ -500,6 +500,9 @@ class ToolContext:
     nested_memory_attachment_triggers: set[str] = field(default_factory=set)
     #: Upstream `loadedNestedMemoryPaths`: memory files already attached, never sent twice.
     loaded_nested_memory_paths: set[str] = field(default_factory=set)
+    #: Where the session's TDD plan is saved (`app/tdd/plan.py`, Phase 11); `None` keeps it in
+    #: memory only. A worker shares its parent's.
+    tdd_plan_path: str | None = None
 
 
 @dataclass

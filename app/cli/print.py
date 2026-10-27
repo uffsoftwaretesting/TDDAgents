@@ -145,12 +145,14 @@ def main_thread_tools(
     always has it, and the task tools (`getAllBaseTools`: TaskOutput, TaskStop, and
     SendMessage, which disables itself unless agent teams are on). Workers draw from the
     built-ins alone (upstream's `assembleToolPool` for the worker), and `resolveAgentTools`
-    keeps Agent and the task tools out of every worker. The Skill tool, given the run's
+    keeps Agent and the task tools out of every worker. `UpdatePlan` (Phase 11) is the main
+    thread's alone: the session's plan is changed by the thread the user talks to. The Skill tool, given the run's
     `skill_registry`, joins both rosters, as upstream's base tools hold it. The run's
     `mcp_tools` join the workers' roster here; the main thread's arrive through
     `assemble_tool_pool(mcp_tools=…)`. In coordinator mode the main thread keeps only the
     orchestration tools (`applyCoordinatorToolFilter`).
     """
+    from app.tdd.tdd_plan_tool.tdd_plan_tool import build_update_plan_tool
     from app.tools.agent_tool.agent_tool import build_agent_tool
     from app.tools.agent_tool.load_agents_dir import (
         get_agent_definitions_with_overrides,
@@ -173,7 +175,10 @@ def main_thread_tools(
     send_message = build_send_message_tool(
         definitions=definitions, worker_tools=worker_tools, config=config, deps=deps
     )
-    tools: list[Tool] = [*built_ins, agent_tool, build_task_output_tool(), build_task_stop_tool(), send_message]
+    tools: list[Tool] = [
+        *built_ins, agent_tool, build_task_output_tool(), build_task_stop_tool(), send_message,
+        build_update_plan_tool(),
+    ]
     return apply_coordinator_tool_filter(tools) if coordinator else tools
 
 

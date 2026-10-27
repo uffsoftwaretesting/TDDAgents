@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.tdd.ledger import PhaseLedger, TestRunRecord
+from app.tdd.plan import TddPlan
 from app.types.permissions import ToolPermissionContext
 from app.utils.permissions.denial_tracking import DenialTrackingState
 
@@ -52,6 +53,12 @@ class AppState:
     #: id (`app/tasks/`). Written through the root setter even by a background worker,
     #: as upstream's `setAppStateForTasks` is (Phase 8).
     tasks: Mapping[str, Any] = field(default_factory=dict)
+    #: The session's sub-requirements (`app/tdd/plan.py`, Phase 11): which are done, which is
+    #: current. Shared with every worker, as the ledger is.
+    tdd_plan: TddPlan = field(default_factory=TddPlan)
+    #: `/pause` (Phase 11): the stop hook lets a turn end without finishing the plan, and the
+    #: run terminates `stop_hook_prevented`, never `completed`.
+    tdd_paused: bool = False
 
 
 @dataclass(slots=True)
