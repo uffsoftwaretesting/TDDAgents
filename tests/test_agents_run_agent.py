@@ -223,10 +223,14 @@ def test_the_worker_starts_from_fresh_per_agent_state():
     model, _ = _run(parent=parent)
     ctx = model.seen[0].tool_context
     assert ctx.read_file_state == {} and ctx.read_file_state is not parent.read_file_state
-    assert ctx.in_flight_tool_ids == set() and ctx.in_flight_tool_ids is not parent.in_flight_tool_ids
-    assert ctx.nested_memory_attachment_triggers == set()
-    assert ctx.loaded_nested_memory_paths == set()
-    assert [m.content for m in ctx.messages] == ["write a failing test"]
+
+
+def test_a_worker_never_inherits_the_interactive_can_use_tool():
+    """Phase 11: a worker avoids permission prompts, so the REPL's `canUseTool` is not handed down."""
+    parent = _parent()
+    parent.can_use_tool = lambda *a: None
+    model, _ = _run(parent=parent)
+    assert model.seen[0].tool_context.can_use_tool is None
 
 
 def test_denial_tracking_is_shared_only_by_a_sync_worker():

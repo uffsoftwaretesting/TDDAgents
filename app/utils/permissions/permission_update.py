@@ -103,6 +103,16 @@ class PermissionUpdate:
         return [permission_rule_value_to_string(name, content) for name, content in self.rules]
 
 
+def create_read_rule_suggestion(
+    dir_path: str, destination: PermissionRuleSource = PermissionRuleSource.SESSION
+) -> PermissionUpdate | None:
+    """`createReadRuleSuggestion`: `Read(//dir/**)` for an absolute dir; none for the root."""
+    if dir_path == "/":
+        return None
+    content = f"/{dir_path}/**" if dir_path.startswith("/") else f"{dir_path}/**"
+    return PermissionUpdate("addRules", destination, rules=(("Read", content),), behavior=PermissionBehavior.ALLOW)
+
+
 def _parse_rule_value(raw: Any) -> tuple[str, str | None] | None:
     """`permissionRuleValueSchema`: `{toolName, ruleContent?}`."""
     if not isinstance(raw, Mapping):
@@ -377,6 +387,7 @@ __all__ = [
     "UPDATE_DESTINATIONS",
     "UPDATE_TYPES",
     "add_permission_rules_to_settings",
+    "create_read_rule_suggestion",
     "apply_permission_update",
     "apply_permission_updates",
     "parse_permission_update",

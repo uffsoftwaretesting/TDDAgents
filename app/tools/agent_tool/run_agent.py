@@ -237,6 +237,9 @@ def run_agent(
             read_file_state={},
             nested_memory_attachment_triggers=set(),
             loaded_nested_memory_paths=set(),
+            # A worker never prompts: its context avoids permission prompts, as upstream's
+            # outside swarm mode, so the parent's interactive `canUseTool` is not inherited.
+            can_use_tool=None,
             agent_id=agent_id,
             agent_type=agent_type,
             # `createSubagentContext`: the worker's model is its own (`worker_config`).

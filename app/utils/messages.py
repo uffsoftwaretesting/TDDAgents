@@ -276,6 +276,18 @@ __all__ = [
 ]
 
 
+#: `REJECT_MESSAGE` (`src/utils/messages.ts`): the user said no at a permission prompt.
+REJECT_MESSAGE = (
+    "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, "
+    "the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how "
+    "to proceed."
+)
+#: `REJECT_MESSAGE_WITH_REASON_PREFIX`: the same, followed by what the user said instead.
+REJECT_MESSAGE_WITH_REASON_PREFIX = (
+    "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, "
+    "the new_string was NOT written to the file). To tell you how to proceed, the user said:\n"
+)
+
 DENIAL_WORKAROUND_GUIDANCE = (
     "IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used "
     "to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around "

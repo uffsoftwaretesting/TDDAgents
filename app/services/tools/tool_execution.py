@@ -210,6 +210,10 @@ async def _run_tool_use(
     #    the gate is the one a hook cannot talk its way past.
     resolved = await resolve_hook_permission_decision(hook_verdict, tool, tool_args, context, call_id)
     permission = resolved.decision
+    if permission.behavior == "ask" and context.can_use_tool is not None:
+        # An interactive session asks the user (`canUseTool`); the TDD tier never asks, so a
+        # phase-forbidden call cannot reach this question.
+        permission = await context.can_use_tool(tool, resolved.input, permission, context, call_id)
     if permission.behavior != "allow":
         denied_msg = permission.message
         if pre.prevent_continuation and not denied_msg:

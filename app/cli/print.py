@@ -203,8 +203,13 @@ def run_permission_context(
     project_root: Path | None = None,
     home: Path | None = None,
     managed_dir: Path | str | None = None,
+    *,
+    interactive: bool = False,
 ) -> ToolPermissionContext:
-    """The run's permission context from its config and settings, anchored at the workspace."""
+    """
+    The run's permission context from its config and settings, anchored at the workspace. An
+    `interactive` run can prompt (Phase 11); any other avoids permission prompts.
+    """
     from app.utils.settings.settings import MANAGED_DIR
 
     root = getattr(workspace, "root", None)
@@ -216,6 +221,7 @@ def run_permission_context(
         permission_mode_cli=config.permission_mode,
         dangerously_skip_permissions=config.dangerously_skip_permissions,
         working_dir=Path(root) if root is not None else None,
+        should_avoid_permission_prompts=not interactive,
     )
 
 
@@ -291,6 +297,7 @@ async def open_session_run(
     settings_path: str | None = None,
     dangerously_skip_permissions: bool = False,
     plan_index: int = 0,
+    can_use_tool: Any = None,
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -303,7 +310,9 @@ async def open_session_run(
     `dangerously_skip_permissions` are upstream's startup flags, given by the entry point.
     `project_root` is where the project and local settings live (the repository, upstream's
     original cwd); the workspace is the working directory the rules anchor to. `home` and
-    `managed_dir` relocate the user and policy scopes (tests use them).
+    `managed_dir` relocate the user and policy scopes (tests use them). With `can_use_tool`
+    (`app/hooks/use_can_use_tool.py`) the run is interactive: a permission 'ask' on the main
+    thread becomes a question to the user instead of a deny.
 
     The plan is saved beside the transcript (`app/tdd/plan.py`); when that file already exists
     the session is being resumed and its saved plan wins, so done items stay done. The ledger
@@ -320,7 +329,9 @@ async def open_session_run(
         settings_path=settings_path,
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
-    perm = permission_context or run_permission_context(config, workspace, project_root, home, managed_dir)
+    perm = permission_context or run_permission_context(
+        config, workspace, project_root, home, managed_dir, interactive=can_use_tool is not None
+    )
     store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan))
     root_dir = Path(project_root) if project_root is not None else Path.cwd()
     from app.skills.load_skills_dir import get_skill_registry
@@ -391,6 +402,7 @@ async def open_session_run(
             mcp_clients=tuple(mcp.clients),
             **coordinator_context(config),
         )
+        ctx.can_use_tool = can_use_tool
         saved_plan_path = plan_path(run_id, cwd)
         ctx.tdd_plan_path = str(saved_plan_path)
         saved = load_plan(saved_plan_path)

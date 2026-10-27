@@ -9,7 +9,8 @@ Ported from claude-code v2.1.88:
   `hasSuspiciousWindowsPathPattern`, `checkPathSafetyForAutoEdit`, `allWorkingDirectories`,
   `pathInAllowedWorkingPath`, `pathInWorkingPath`, `relativePath`, `rootPathForSource`,
   `patternWithRoot`, `getPatternsByRoot`, `matchingRuleForInput`,
-  `checkWritePermissionForTool`
+  `checkWritePermissionForTool`, `generateSuggestions` (Phase 11: what the permission prompt
+  offers as "allow during this session")
 * `src/utils/permissions/pathValidation.ts` -> `isPathAllowed`
 * `src/utils/fsOperations.ts` -> `getPathsForPermissionCheck` (original + resolved path)
 
@@ -31,9 +32,10 @@ or memory the next run would load.
 
 Not ported, because no equivalent exists in this loop: the editable internal paths (plan
 files, scratchpad, step 1.5), the `.claude/**` session-allow carve-out (step 1.6, which
-serves an approval dialog), the sandbox write allowlist (step 3.7), permission-update
-suggestions, the Windows-only ADS check, and the full symlink-chain walk — the resolved
-path is checked, not each intermediate link.
+serves an approval dialog), the sandbox write allowlist (step 3.7), the skill-scope
+suggestion of a safety ask, the Windows-only ADS check, and the full symlink-chain walk — the
+resolved path is checked, not each intermediate link. `getDirectoryForPath` is the parent
+directory: the workspace may not be on this host, so the path is never stat'ed.
 """
 
 from __future__ import annotations
@@ -54,6 +56,10 @@ from app.types.permissions import (
     PermissionRule,
     PermissionRuleSource,
     ToolPermissionContext,
+)
+from app.utils.permissions.permission_update import (
+    PermissionUpdate,
+    create_read_rule_suggestion,
 )
 from app.utils.shell.read_only_command_validation import contains_vulnerable_unc_path
 
@@ -377,6 +383,7 @@ def check_write_permission_for_tool(
             behavior=PermissionBehavior.ASK,
             message=message,
             decision_reason={"type": "safetyCheck", "reason": message, "classifierApprovable": approvable},
+            suggestions=generate_suggestions(absolute, "write", context, cwd, candidates),
         )
 
     for candidate in candidates:
@@ -412,7 +419,45 @@ def check_write_permission_for_tool(
             if in_working_dir
             else {"type": "workingDir", "reason": "Path is outside allowed working directories"}
         ),
+        suggestions=generate_suggestions(absolute, "write", context, cwd, candidates),
     )
+
+
+def get_directory_for_path(path: str) -> str:
+    """`getDirectoryForPath`, without the stat: the path's parent directory."""
+    return posixpath.dirname(path.rstrip("/")) or "/"
+
+
+def generate_suggestions(
+    path: str,
+    operation: Literal["read", "write", "create"],
+    context: ToolPermissionContext,
+    cwd: str,
+    paths_to_check: Sequence[str] | None = None,
+) -> tuple[Any, ...]:
+    """
+    `generateSuggestions`: what "allow during this session" grants for this path.
+
+    A read outside the working directories gets `Read(//dir/**)` session rules for the path's
+    directory (and its resolved form). A write or create gets `acceptEdits` for the session —
+    only from `default` or `plan`, where it is an upgrade — and, outside the working
+    directories, the directory as an additional working directory. A read inside them gets
+    the same `acceptEdits` suggestion.
+    """
+    outside = not path_in_allowed_working_path(path, context, cwd, paths_to_check)
+    accept_edits = (
+        (PermissionUpdate("setMode", PermissionRuleSource.SESSION, mode=PermissionMode.ACCEPT_EDITS),)
+        if context.mode in (PermissionMode.DEFAULT, PermissionMode.PLAN) else ()
+    )
+    dirs = get_paths_for_permission_check(get_directory_for_path(path))
+    if operation == "read":
+        if outside:
+            reads = (create_read_rule_suggestion(directory) for directory in dirs)
+            return tuple(update for update in reads if update is not None)
+        return accept_edits
+    if outside:
+        return (*accept_edits, PermissionUpdate("addDirectories", PermissionRuleSource.SESSION, directories=dirs))
+    return accept_edits
 
 
 def is_project_dir_path(absolute_path: str, cwd: str) -> bool:
@@ -525,6 +570,7 @@ def check_read_permission_for_tool(
         behavior=PermissionBehavior.ASK,
         message=f"The agent requested permissions to read from {path}, but you haven't granted it yet.",
         decision_reason={"type": "workingDir", "reason": "Path is outside allowed working directories"},
+        suggestions=generate_suggestions(absolute, "read", context, cwd, candidates),
     )
 
 
@@ -646,6 +692,8 @@ __all__ = [
     "DANGEROUS_FILES",
     "FILE_EDIT_TOOL_NAME",
     "FILE_READ_TOOL_NAME",
+    "generate_suggestions",
+    "get_directory_for_path",
     "PathCheckResult",
     "all_working_directories",
     "check_file_read_permissions",

@@ -138,6 +138,7 @@ from app.utils.permissions.permission_update import (
     parse_permission_updates,
     persist_permission_updates,
     settings_locations_for,
+    supports_persistence,
 )
 from app.utils.settings.constants import SOURCE_DISPLAY_NAMES
 
@@ -286,11 +287,12 @@ async def _has_permissions_to_use_tool_inner(
         )
 
     if tool_perm_res.behavior == PermissionBehavior.PASSTHROUGH:
-        return PermissionResult(
+        # `{...toolPermissionResult, behavior: 'ask', message}`: every other field, the
+        # suggestions among them, carries over.
+        return replace(
+            tool_perm_res,
             behavior=PermissionBehavior.ASK,
             message=create_permission_request_message(tool.name, tool_perm_res.decision_reason),
-            updated_input=tool_perm_res.updated_input,
-            decision_reason=tool_perm_res.decision_reason,
         )
     return tool_perm_res
 
@@ -770,19 +772,28 @@ def permission_request_decision(outcome: Any) -> Mapping[str, Any] | None:
 
 def apply_hook_permission_updates(updates: Any, context: ToolContext) -> None:
     """Persist, then apply and re-strip, a hook's `updatedPermissions`."""
-    parsed = parse_permission_updates(updates) or ()
-    if not parsed:
-        return
+    persist_permissions(parse_permission_updates(updates) or (), context)
+
+
+def persist_permissions(updates: Sequence[Any], context: ToolContext) -> bool:
+    """
+    `PermissionContext.persistPermissions`: write the persistable updates to their settings
+    files, apply all of them to the run's context — re-stripped of dangerous allows, the TDD
+    managed tier — and say whether any of them persisted.
+    """
+    if not updates:
+        return False
     current = extract_permission_context(context)
     locations = settings_locations_for(current)
     if locations is not None:
-        persist_permission_updates(parsed, locations)
+        persist_permission_updates(updates, locations)
 
     def apply(state: Any) -> Any:
-        updated = strip_dangerous_permissions(apply_permission_updates(state.tool_permission_context, parsed))
+        updated = strip_dangerous_permissions(apply_permission_updates(state.tool_permission_context, updates))
         return replace(state, tool_permission_context=updated)
 
     context.set_app_state(apply)
+    return any(supports_persistence(update.destination) for update in updates)
 
 
 async def run_permission_request_hooks_for_headless_agent(

@@ -23,7 +23,8 @@ read-only classifier (`readOnlyValidation.ts`, which `BashTool.isReadOnly` calls
 `tools/bash_tool/read_only_validation.py`; each is wired here where upstream calls it.
 
 Not ported: sandbox auto-allow, the Haiku prompt-rule classifiers, the `BASH_CLASSIFIER`
-pending checks, permission-update suggestions (they feed the approval UI), and the
+pending checks, prefix suggestions from the model (`getCommandSubcommandPrefix`: every
+suggestion is the exact command, as when upstream's injected prefix function is the default), and the
 `MAX_SUBCOMMANDS_FOR_SECURITY_CHECK` fan-out cap — every subcommand is checked, which is
 the safe direction.
 """
@@ -32,6 +33,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import replace
 from typing import Any, Literal, Mapping
 
 from app.tools.bash_tool.bash_security import (
@@ -53,6 +55,7 @@ from app.types.permissions import (
     PermissionMode,
     PermissionResult,
     PermissionRule,
+    PermissionRuleSource,
     ToolPermissionContext,
 )
 from app.utils.bash.commands import (
@@ -63,13 +66,19 @@ from app.utils.bash.commands import (
     split_command,
     without_output_redirections,
 )
+from app.utils.permissions.permission_rule_parser import permission_rule_value_to_string
+from app.utils.permissions.permission_update import PermissionUpdate
 from app.utils.permissions.permissions import create_permission_request_message
 from app.utils.permissions.shell_rule_matching import (
     match_wildcard_pattern,
     parse_permission_rule,
+    suggestion_for_exact_command,
 )
 
 BASH_TOOL_NAME = "Bash"
+
+#: `MAX_SUGGESTED_RULES_FOR_COMPOUND` (GH#11380): the rules a compound command's prompt offers.
+MAX_SUGGESTED_RULES_FOR_COMPOUND = 5
 
 MatchMode = Literal["exact", "prefix"]
 
@@ -338,12 +347,14 @@ def _allow_for_rule(command: str, rule: PermissionRule) -> PermissionResult:
     )
 
 
-def _requires_approval() -> PermissionResult:
+def _requires_approval(command: str) -> PermissionResult:
     decision = {"type": "other", "reason": "This command requires approval"}
     return PermissionResult(
         behavior=PermissionBehavior.PASSTHROUGH,
         message=request_message(BASH_TOOL_NAME, decision),
         decision_reason=decision,
+        # Suggest an exact-match rule; `check_command_and_suggest_rules` may override it.
+        suggestions=suggestion_for_exact_command(BASH_TOOL_NAME, command),
     )
 
 
@@ -357,7 +368,7 @@ def bash_tool_check_exact_match_permission(command: str, context: ToolPermission
         return _ask_for_rule(ask[0])
     if allow:
         return _allow_for_rule(command, allow[0])
-    return _requires_approval()
+    return _requires_approval(command)
 
 
 # ── mode and path checks ─────────────────────────────────────────────────────
@@ -507,7 +518,7 @@ def bash_tool_check_permission(
             updated_input={"command": command},
             decision_reason={"type": "other", "reason": "Read-only command is allowed"},
         )
-    return _requires_approval()
+    return _requires_approval(command)
 
 
 def check_command_and_suggest_rules(
@@ -516,7 +527,7 @@ def check_command_and_suggest_rules(
     cwd: str,
     compound_command_has_cd: bool = False,
 ) -> PermissionResult:
-    """`checkCommandAndSuggestRules` (no prefix suggestions: there is no approval UI)."""
+    """`checkCommandAndSuggestRules`: the exact command is the suggestion (no model prefix)."""
     exact = bash_tool_check_exact_match_permission(command, context)
     if exact.behavior != PermissionBehavior.PASSTHROUGH:
         return exact
@@ -533,9 +544,12 @@ def check_command_and_suggest_rules(
                 if safety.behavior == PermissionBehavior.ASK and safety.message
                 else "This command contains patterns that could pose security risks and requires approval"
             )
-            return _ask(reason)
+            # Don't suggest saving a potentially dangerous command.
+            return replace(_ask(reason), suggestions=())
 
-    return result
+    if result.behavior == PermissionBehavior.ALLOW:
+        return result
+    return replace(result, suggestions=suggestion_for_exact_command(BASH_TOOL_NAME, command))
 
 
 # ── command identity ─────────────────────────────────────────────────────────
@@ -737,7 +751,32 @@ def bash_tool_has_permission(command: str, context: ToolPermissionContext, cwd: 
         behavior=PermissionBehavior.ASK if ask_result is not None else PermissionBehavior.PASSTHROUGH,
         message=request_message(BASH_TOOL_NAME, decision),
         decision_reason=decision,
+        suggestions=compound_suggestions(results),
     )
+
+
+def compound_suggestions(results: Mapping[str, PermissionResult]) -> tuple[Any, ...] | None:
+    """
+    The rules a compound command's prompt offers: every non-allowed subcommand's suggested
+    rules, deduplicated in subcommand order and capped at `MAX_SUGGESTED_RULES_FOR_COMPOUND`.
+    A security 'ask' carries none, so its subcommand gets an exact rule (GH#28784) unless an
+    ask rule asked for it on purpose.
+    """
+    collected: dict[str, tuple[str, str | None]] = {}
+    for subcommand, result in results.items():
+        if result.behavior not in (PermissionBehavior.ASK, PermissionBehavior.PASSTHROUGH):
+            continue
+        rules = [rule for update in result.suggestions or () if update.type == "addRules" for rule in update.rules]
+        for rule in rules:
+            collected[permission_rule_value_to_string(*rule)] = rule
+        reason = result.decision_reason or {}
+        if result.behavior == PermissionBehavior.ASK and not rules and reason.get("type") != "rule":
+            collected[permission_rule_value_to_string(BASH_TOOL_NAME, subcommand)] = (BASH_TOOL_NAME, subcommand)
+    capped = list(collected.values())[:MAX_SUGGESTED_RULES_FOR_COMPOUND]
+    if not capped:
+        return None
+    return (PermissionUpdate("addRules", PermissionRuleSource.LOCAL_SETTINGS, rules=tuple(capped),
+                             behavior=PermissionBehavior.ALLOW),)
 
 
 __all__ = [

@@ -398,6 +398,7 @@ def build_agent_hook_runner(call_model_factory: CallModelFactory | None = None) 
             tools=hook_agent_tools(getattr(parent, "tools", ()), create_structured_output_tool(holder)),
             permission_context=None,
             refresh_tools=None,
+            can_use_tool=None,
             agent_id=hook_agent_id,
         )
         state = initial_loop_state((first,), context)

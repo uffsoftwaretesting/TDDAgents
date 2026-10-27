@@ -32,6 +32,10 @@ class PermissionResult:
     #: 'ask' from a Bash security validator whose concern is a parser differential, so the
     #: Bash permission check blocks before any command splitting runs.
     is_bash_security_check_for_misparsing: bool = False
+    #: Upstream `suggestions` (`PermissionUpdate[]`) on an 'ask' or 'passthrough': what the
+    #: permission prompt offers as "don't ask again" (Phase 11). `None` means none were made,
+    #: `()` that none may be (a command the security checks flagged).
+    suggestions: tuple[Any, ...] | None = None
 
 
 class PermissionMode(StrEnum):

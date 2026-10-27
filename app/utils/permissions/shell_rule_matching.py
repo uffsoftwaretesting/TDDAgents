@@ -9,15 +9,18 @@ Ported from `reference/claude-code/src/utils/permissions/shellRuleMatching.ts`:
 - wildcard — `git * --dry-run`: `*` matches any run of characters, `\\*` a literal star
 - exact   — anything else: the command must equal the content
 
-The suggestion builders (`suggestionForExactCommand`, `suggestionForPrefix`) are not
-ported: they feed the interactive approval UI, which this loop does not have.
+The suggestion builders (`suggestionForExactCommand`, `suggestionForPrefix`) feed the
+interactive permission prompt (Phase 11): an allow rule for `localSettings`, as upstream.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
+
+from app.types.permissions import PermissionBehavior, PermissionRuleSource
+from app.utils.permissions.permission_update import PermissionUpdate
 
 _ESCAPED_STAR_PLACEHOLDER = "\x00ESCAPED_STAR\x00"
 _ESCAPED_BACKSLASH_PLACEHOLDER = "\x00ESCAPED_BACKSLASH\x00"
@@ -102,10 +105,23 @@ def parse_permission_rule(permission_rule: str) -> ShellPermissionRule:
     return ShellPermissionRule("exact", permission_rule)
 
 
+def suggestion_for_exact_command(tool_name: str, command: str) -> tuple[Any, ...]:
+    """`suggestionForExactCommand`: allow exactly `command` from now on (`localSettings`)."""
+    return (PermissionUpdate("addRules", PermissionRuleSource.LOCAL_SETTINGS, rules=((tool_name, command),),
+                             behavior=PermissionBehavior.ALLOW),)
+
+
+def suggestion_for_prefix(tool_name: str, prefix: str) -> tuple[Any, ...]:
+    """`suggestionForPrefix`: allow every command starting with `prefix` (`localSettings`)."""
+    return suggestion_for_exact_command(tool_name, f"{prefix}:*")
+
+
 __all__ = [
     "ShellPermissionRule",
     "has_wildcards",
     "match_wildcard_pattern",
     "parse_permission_rule",
     "permission_rule_extract_prefix",
+    "suggestion_for_exact_command",
+    "suggestion_for_prefix",
 ]

@@ -187,3 +187,22 @@ def test_development_prompts_state_the_plan(plan: TddPlan):
     assert development_start_prompt("  ", plan).count("(none)") >= 1
     resume = development_resume_prompt(plan)
     assert resume.startswith("The session was resumed.")
+
+
+def test_an_interactive_run_can_prompt_and_holds_its_can_use_tool(python_workspace, tmp_path):
+    async def can_use(*args: Any) -> Any:
+        raise AssertionError("not asked here")
+
+    seen: dict[str, Any] = {}
+
+    async def go(handler: Any) -> None:
+        opts = options(tmp_path, scripted([], []))
+        opts.pop("permission_context")
+        async with open_session_run(run_id=f"loop-i{bool(handler)}", plan=FINISHED, workspace=python_workspace,
+                                    can_use_tool=handler, **opts) as run:
+            seen[str(bool(handler))] = (run.ctx.can_use_tool,
+                                        run.store.get().tool_permission_context.should_avoid_permission_prompts)
+
+    asyncio.run(go(can_use))
+    asyncio.run(go(None))
+    assert seen == {"True": (can_use, False), "False": (None, True)}
