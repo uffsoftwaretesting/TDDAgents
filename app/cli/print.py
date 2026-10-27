@@ -1,42 +1,45 @@
 """
-The production runner: one sub-requirement through one `run_loop` (Phase 0 baseline).
+The production runner (upstream `cli/print.ts`): a development session's run, built once and
+driven turn by turn (Phase 11).
 
-`tdd_loop_runner` is what the LangGraph session shell calls per plan item. It builds a
-real `LoopState` with `initial_loop_state` and `build_run_config`, gives the tools a real
-workspace, and reports only what the ledger observed.
+`open_session_run` builds a real run — `build_run_config`, the permission context, skills,
+MCP, hooks, the transcript, the cost tracker and a fresh `AppStateStore` holding the session's
+TDD plan — and keeps it for the whole conversation, as upstream's REPL keeps one conversation
+and one `AppState`. `begin_session` submits the first turn and `submit_prompt` every later one,
+over the engine's growing history (`ask({prompt, mutableMessages})`). `run_headless` is
+`runHeadless` for the development phase: one conversation over the whole plan, with nobody to
+answer an 'ask'. `tdd_loop_runner` runs a single sub-requirement as a one-item plan.
 
 * **Workspace.** Runs are local for now (a decision recorded in
   `docs/refactoring_transition_plan.md`): by default the session's shared
   `LocalWorkspace.for_run(session_id)`, so later sub-requirements build on earlier code. The
   workspace is a parameter, which is the room left for E2B.
-* **Ledger.** Each sub-requirement gets a fresh `AppStateStore`; that construction is the
-  only place a ledger is seeded, and after it `RunTests` is the only writer.
+* **Ledger and plan.** The run's `AppStateStore` is the only place a ledger is seeded; after it
+  `RunTests` is the only writer of observations, and the plan's advance
+  (`app/tdd/plan_advance.py`) restarts it for each sub-requirement. The plan is saved beside
+  the transcript, and a resumed session keeps its saved plan.
 * **Permissions.** Built once at entry the way upstream's startup builds them
   (`build_tool_permission_context`): the mode from the run config or settings
   `defaultMode`, rules from user, project, local, flag and policy settings, with the TDD
-  managed tier applied. The context lives in the sub-requirement's `AppState`, so a worker
-  reading its parent's state is held to it. The run is headless
-  (`should_avoid_permission_prompts`): an `ask` that no PermissionRequest hook answers is a deny.
-* **Transcript.** A `QueryEngine` per sub-requirement (Phase 6) records it at upstream's
-  location, `<config home>/projects/<sanitized workspace>/<run id>.jsonl` — never inside the
-  workspace, so agents cannot read or edit their own record and it never reaches the
-  exported artifact. Every transition goes to `<run id>/events.jsonl` beside it, with the
-  ledger snapshot and the last `RunTests` exit code; the run's cost tracker sits on the
-  tool context so worker API calls count toward it.
-* **Resume.** A sub-requirement's run id is derived from the session's thread id and the
-  plan index (`item_run_id`), so when the session shell re-runs an item a previous process
-  left unfinished, its transcript is already on disk and the run continues that
-  conversation, as `claude -p --resume` does: `loadConversationForResume`, SessionStart
-  (`resume`), and an interrupted turn re-submitted once (`print.ts`'s auto-resume, which
-  upstream gates on `CLAUDE_CODE_RESUME_INTERRUPTED_TURN`; the shell's restart is exactly the
-  gateway restart that variable exists for, so here it is always on). Otherwise the
-  sub-requirement is the new prompt. **The ledger is never restored**: a resumed run starts
-  from a fresh ledger, so RED has to be observed again.
+  managed tier applied. The context lives in the run's `AppState`, so a worker reading its
+  parent's state is held to it. A headless run (`should_avoid_permission_prompts`) denies an
+  `ask` that no PermissionRequest hook answers.
+* **Transcript.** A `QueryEngine` per run (Phase 6) records it at upstream's location,
+  `<config home>/projects/<sanitized workspace>/<run id>.jsonl` — never inside the workspace,
+  so agents cannot read or edit their own record and it never reaches the exported artifact.
+  Every transition goes to `<run id>/events.jsonl` beside it, with the ledger snapshot and the
+  last `RunTests` exit code; the run's cost tracker sits on the tool context so worker API
+  calls count toward it.
+* **Resume.** The run id is derived from the session's thread id (`session_run_id`), so a
+  restarted session finds its transcript and continues that conversation, as
+  `claude -p --resume` does: `loadConversationForResume`, SessionStart (`resume`), and an
+  interrupted turn re-submitted once (`print.ts`'s auto-resume, always on here); otherwise the
+  resume prompt. **The ledger is never restored**: RED has to be observed again.
 * **Background work.** One `CommandQueue` per run, the hook registry's, is the context's
   `command_queue`, shared with every worker. When a turn ends while a background task still
   runs, or a main-thread notification is queued, the runner waits and feeds each notification
   back as a new turn of the same conversation (`print.ts`'s `do … while (waitingForAgents)`).
-  No ceiling, as upstream: the loop ends when nothing runs and nothing is queued.
+  No ceiling, as upstream: the turn ends when nothing runs and nothing is queued.
 """
 
 from __future__ import annotations
@@ -46,8 +49,9 @@ import logging
 import shutil
 import tempfile
 import uuid
-from collections.abc import Sequence
-from dataclasses import replace
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +72,7 @@ from app.query_engine import QueryEngine
 from app.session.state import PlanItemResult, SessionState
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.events import TransitionEventRecorder, events_path
+from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
 from app.tool import Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.tools.tools import assemble_tool_pool
@@ -264,12 +269,37 @@ def default_workspace(state: SessionState) -> LocalWorkspace:
     return session_workspace(str(session_id))
 
 
-async def tdd_loop_runner(
-    sub_req: str,
-    idx: int,
-    state: SessionState,
+@dataclass
+class SessionRun:
+    """
+    One development session's open run (Phase 11): its context, store and engine, built once
+    and kept for every turn of the conversation, as upstream's REPL keeps one conversation
+    and one `AppState` for the whole session.
+    """
+
+    run_id: str
+    config: RunConfig
+    store: AppStateStore
+    ctx: Any
+    engine: QueryEngine
+    transcript: TranscriptStore
+    #: Why the last turn's UserPromptSubmit hooks stopped it, when they did.
+    stopped_reason: str | None = None
+
+
+def session_run_id(session_id: Any) -> str:
+    """The development run of session `session_id`: stable, so a restart finds its transcript."""
+    if not session_id:
+        return f"loop-{uuid.uuid4().hex}"
+    return f"loop-{uuid.uuid5(RUN_ID_NAMESPACE, f'{session_id}:development').hex}"
+
+
+@asynccontextmanager
+async def open_session_run(
     *,
-    workspace: Any = None,
+    run_id: str,
+    plan: TddPlan,
+    workspace: Any,
     deps: LoopDeps | None = None,
     permission_context: ToolPermissionContext | None = None,
     project_root: Path | None = None,
@@ -280,25 +310,25 @@ async def tdd_loop_runner(
     permission_mode: str | None = None,
     settings_path: str | None = None,
     dangerously_skip_permissions: bool = False,
-) -> PlanItemResult:
+    plan_index: int = 0,
+) -> AsyncIterator[SessionRun]:
     """
-    Run one sub-requirement through the loop and report what the ledger observed.
+    Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
+    phase-filtered tool pool and a fresh `AppStateStore` whose ledger starts in RED — yield it
+    for as many turns as the caller submits, and tear it down: SessionEnd (`other`), background
+    hooks finalized, run memory discarded, the memoized session context reset, MCP closed.
 
     `postgres_checkpointing` is whether the session shell's checkpointer really persists
     (`Gates.postgres_checkpointing`); `permission_mode`, `settings_path` and
     `dangerously_skip_permissions` are upstream's startup flags, given by the entry point.
-
     `project_root` is where the project and local settings live (the repository, upstream's
-    original cwd); the workspace is the working directory the rules anchor to.
-    `home` and `managed_dir` relocate the user and policy scopes (tests use them).
+    original cwd); the workspace is the working directory the rules anchor to. `home` and
+    `managed_dir` relocate the user and policy scopes (tests use them).
 
-    Hooks follow upstream's headless session: SessionStart (`startup`) and UserPromptSubmit
-    (the sub-requirement) before the first model call, SessionEnd (`other`) after the last,
-    then any background hook still running is killed. A UserPromptSubmit hook that blocks or
-    says `continue: false` stops the run before the model is called: `hook_stopped`, failed.
+    The plan is saved beside the transcript (`app/tdd/plan.py`); when that file already exists
+    the session is being resumed and its saved plan wins, so done items stay done. The ledger
+    is never restored.
     """
-    run_id = item_run_id(state.get("session_id"), idx)
-    ws = workspace if workspace is not None else default_workspace(state)
     if deps is None:
         from app.query.deps import get_production_deps
 
@@ -310,9 +340,8 @@ async def tdd_loop_runner(
         settings_path=settings_path,
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
-    perm = permission_context or run_permission_context(config, ws, project_root, home, managed_dir)
-
-    store = AppStateStore(state=AppState(tool_permission_context=perm))
+    perm = permission_context or run_permission_context(config, workspace, project_root, home, managed_dir)
+    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan))
     root_dir = Path(project_root) if project_root is not None else Path.cwd()
     from app.skills.load_skills_dir import get_skill_registry
 
@@ -320,11 +349,94 @@ async def tdd_loop_runner(
     skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
     mcp = await connect_mcp_servers(root_dir, run_settings_locations(config, root_dir, home, managed_dir))
     try:
-        return await _run_connected(
-            sub_req, idx, run_id=run_id, ws=ws, deps=deps, config=config, store=store, root_dir=root_dir,
-            home=home, managed_dir=managed_dir, hook_dispatcher=hook_dispatcher, skill_registry=skill_registry,
-            mcp=mcp,
+        ledger = store.get().phase_ledger
+        built_ins = main_thread_tools(
+            config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools
         )
+        # `mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included.
+        main_mcp = apply_coordinator_tool_filter(mcp.tools) if is_coordinator_mode(config) else list(mcp.tools)
+        pool_cache: dict[str, Any] = {
+            "phase": ledger.phase,
+            "tools": assemble_tool_pool(built_ins, main_mcp, phase_ledger=ledger),
+        }
+
+        def refresh_tools() -> tuple[Tool, ...]:
+            """
+            `refreshTools` for this loop: re-derive the phase-filtered pool when, and only
+            when, the phase has moved.
+
+            The cached tuple is returned unchanged otherwise, because the engine compares by
+            identity — a fresh but equal tuple would rebuild the serialized tool block every
+            turn and break the prompt cache for no reason.
+            """
+            current = store.get().phase_ledger
+            if current.phase != pool_cache["phase"]:
+                pool_cache["phase"] = current.phase
+                pool_cache["tools"] = assemble_tool_pool(built_ins, main_mcp, phase_ledger=current)
+            tools_now: tuple[Tool, ...] = pool_cache["tools"]
+            return tools_now
+
+        run_dir = getattr(workspace, "run_dir", None)
+        transcript_dir = Path(run_dir) if run_dir is not None else None
+        cwd = str(getattr(workspace, "root", None) or root_dir)
+        transcript = TranscriptStore(run_id, cwd)
+
+        if hook_dispatcher is None:
+            from app.utils.hooks.hook_dispatcher import build_hook_dispatcher
+
+            hook_dispatcher = build_hook_dispatcher(
+                run_settings_locations(config, root_dir, home, managed_dir),
+                session_id=run_id,
+                cwd=cwd,
+                project_dir=str(root_dir),
+                model=config.model,
+                transcript_path=str(transcript.path),
+            )
+
+        memory_store, memory_root = run_agent_memory_store(transcript_dir)
+        ctx = tool_context_for(
+            store,
+            messages=(),
+            tools=refresh_tools(),
+            workspace=workspace,
+            hook_dispatcher=hook_dispatcher,
+            refresh_tools=refresh_tools,
+            run_id=run_id,
+            agent_memory_store=memory_store,
+            cost_tracker=CostTracker(config.model),
+            transcript_path=str(transcript.path),
+            transcript_store=transcript,
+            command_queue=hook_dispatcher.registry.queue,
+            skill_registry=skill_registry,
+            mcp_clients=tuple(mcp.clients),
+            **coordinator_context(config),
+        )
+        saved_plan_path = plan_path(run_id, cwd)
+        ctx.tdd_plan_path = str(saved_plan_path)
+        saved = load_plan(saved_plan_path)
+        if saved is not None:
+            store.update(lambda s: replace(s, tdd_plan=saved))
+        else:
+            save_plan(saved_plan_path, plan)
+        recorder = TransitionEventRecorder(store, events_path(run_id, cwd), session_id=run_id, plan_index=plan_index)
+        engine = QueryEngine(
+            config, replace(deps, emit_event=_both(recorder, deps.emit_event)), transcript=transcript,
+            session_id=run_id, cost_tracker=ctx.cost_tracker,
+        )
+        try:
+            yield SessionRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine, transcript=transcript)
+        finally:
+            from app.context import reset_session_context
+            from app.utils.hooks.hooks import execute_session_end_hooks
+
+            await hook_dispatcher.drain_background()
+            await execute_session_end_hooks(hook_dispatcher, "other")
+            await hook_dispatcher.registry.finalize_pending()
+            memory_store.discard_run_memory(run_id)
+            # Nothing memoized for this session carries over to the next one.
+            reset_session_context(run_id)
+            if memory_root is not None:
+                shutil.rmtree(memory_root, ignore_errors=True)
     finally:
         await mcp.aclose()
 
@@ -344,103 +456,6 @@ async def connect_mcp_servers(root_dir: Path, locations: SettingsLocations) -> A
     manager = McpConnectionManager(cwd=str(root_dir))
     await manager.connect(configs)
     return manager
-
-
-async def _run_connected(
-    sub_req: str,
-    idx: int,
-    *,
-    run_id: str,
-    ws: Any,
-    deps: LoopDeps,
-    config: RunConfig,
-    store: AppStateStore,
-    root_dir: Path,
-    home: Path | None,
-    managed_dir: Path | str | None,
-    hook_dispatcher: HookDispatcher | None,
-    skill_registry: Any,
-    mcp: Any,
-) -> PlanItemResult:
-    """The run once its MCP servers are connected; the caller closes them."""
-    ledger = store.get().phase_ledger
-    built_ins = main_thread_tools(
-        config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools
-    )
-    # `mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included.
-    main_mcp = apply_coordinator_tool_filter(mcp.tools) if is_coordinator_mode(config) else list(mcp.tools)
-    pool_cache: dict[str, Any] = {
-        "phase": ledger.phase,
-        "tools": assemble_tool_pool(built_ins, main_mcp, phase_ledger=ledger),
-    }
-
-    def refresh_tools() -> tuple[Tool, ...]:
-        """
-        `refreshTools` for this loop: re-derive the phase-filtered pool when, and only
-        when, the phase has moved.
-
-        The cached tuple is returned unchanged otherwise, because the engine compares by
-        identity — a fresh but equal tuple would rebuild the serialized tool block every
-        turn and break the prompt cache for no reason.
-        """
-        current = store.get().phase_ledger
-        if current.phase != pool_cache["phase"]:
-            pool_cache["phase"] = current.phase
-            pool_cache["tools"] = assemble_tool_pool(built_ins, main_mcp, phase_ledger=current)
-        tools_now: tuple[Tool, ...] = pool_cache["tools"]
-        return tools_now
-
-    run_dir = getattr(ws, "run_dir", None)
-    transcript_dir = Path(run_dir) if run_dir is not None else None
-    cwd = str(getattr(ws, "root", None) or root_dir)
-    transcript = TranscriptStore(run_id, cwd)
-
-    if hook_dispatcher is None:
-        from app.utils.hooks.hook_dispatcher import build_hook_dispatcher
-
-        hook_dispatcher = build_hook_dispatcher(
-            run_settings_locations(config, root_dir, home, managed_dir),
-            session_id=run_id,
-            cwd=cwd,
-            project_dir=str(root_dir),
-            model=config.model,
-            transcript_path=str(transcript.path),
-        )
-
-    memory_store, memory_root = run_agent_memory_store(transcript_dir)
-    ctx = tool_context_for(
-        store,
-        messages=(),
-        tools=refresh_tools(),
-        workspace=ws,
-        hook_dispatcher=hook_dispatcher,
-        refresh_tools=refresh_tools,
-        run_id=run_id,
-        agent_memory_store=memory_store,
-        cost_tracker=CostTracker(config.model),
-        transcript_path=str(transcript.path),
-        transcript_store=transcript,
-        command_queue=hook_dispatcher.registry.queue,
-        skill_registry=skill_registry,
-        mcp_clients=tuple(mcp.clients),
-        **coordinator_context(config),
-    )
-    try:
-        return await _run_with_hooks(
-            sub_req, idx, run_id, ctx, store, config, deps, transcript, events_path(run_id, cwd)
-        )
-    finally:
-        from app.context import reset_session_context
-        from app.utils.hooks.hooks import execute_session_end_hooks
-
-        await hook_dispatcher.drain_background()
-        await execute_session_end_hooks(hook_dispatcher, "other")
-        await hook_dispatcher.registry.finalize_pending()
-        memory_store.discard_run_memory(run_id)
-        # The next sub-requirement is a new session: nothing memoized for this one carries over.
-        reset_session_context(run_id)
-        if memory_root is not None:
-            shutil.rmtree(memory_root, ignore_errors=True)
 
 
 def _is_main_thread(command: QueuedCommand) -> bool:
@@ -514,15 +529,17 @@ def _prompt_text(message: Any) -> str:
     )
 
 
-async def load_initial_messages(ctx: Any, transcript: TranscriptStore, sub_req: str, model: str) -> tuple[Any, str]:
+async def load_initial_messages(
+    ctx: Any, transcript: TranscriptStore, sub_req: str, model: str, *, resume_prompt: str | None = None
+) -> tuple[Any, str]:
     """
     `print.ts` -> `loadInitialMessages` for one sub-requirement: the history the run starts
     from and the prompt it submits.
 
     With a transcript on disk the conversation is resumed (`loadConversationForResume`, whose
     SessionStart hooks run with source `resume`); an interrupted turn is taken out and its
-    prompt submitted again, else the sub-requirement is the prompt. Without one the run
-    starts fresh with SessionStart (`startup`).
+    prompt submitted again, else `resume_prompt` (the sub-requirement when there is none) is
+    the prompt. Without one the run starts fresh with SessionStart (`startup`).
     """
     from app.utils.conversation_recovery import (
         load_conversation_for_resume,
@@ -534,7 +551,7 @@ async def load_initial_messages(ctx: Any, transcript: TranscriptStore, sub_req: 
     if resumed is None or not resumed.messages:
         return await process_session_start_hooks(ctx.hook_dispatcher, "startup", model=model), sub_req
     history: list[Any] = list(resumed.messages)
-    prompt = sub_req
+    prompt = resume_prompt if resume_prompt is not None else sub_req
     interruption = resumed.turn_interruption_state
     if interruption.message is not None:
         logger.info("Auto-resuming interrupted turn (kind: %s)", interruption.kind)
@@ -545,82 +562,128 @@ async def load_initial_messages(ctx: Any, transcript: TranscriptStore, sub_req: 
     return session, prompt
 
 
-async def _run_with_hooks(
-    sub_req: str,
-    idx: int,
-    run_id: str,
-    ctx: Any,
-    store: AppStateStore,
-    config: RunConfig,
-    deps: LoopDeps,
-    transcript: TranscriptStore,
-    events_file: Path,
-) -> PlanItemResult:
-    """SessionStart (or the resumed conversation) and UserPromptSubmit, then the loop itself."""
+async def _submit(run: SessionRun, history: Sequence[Any], prompt_text: str, prefix: Sequence[Any] = ()) -> Terminal:
+    """
+    One user turn: UserPromptSubmit, the user-input attachments, the loop, then any background
+    work (`print.ts`'s `ask` and its wait). A UserPromptSubmit hook that blocks or says
+    `continue: false` stops the turn before the model is called: `hook_stopped`.
+    """
+    from app.utils.attachments import get_attachment_messages
     from app.utils.session_start import process_user_prompt_submit_hooks
 
-    session, prompt_text = await load_initial_messages(ctx, transcript, sub_req, config.model)
-    mode = str(store.get().tool_permission_context.mode)
-    prompt = await process_user_prompt_submit_hooks(ctx, prompt_text, mode)
+    mode = str(run.store.get().tool_permission_context.mode)
+    prompt = await process_user_prompt_submit_hooks(run.ctx, prompt_text, mode)
     if not prompt.should_query:
         # A stopped UserPromptSubmit always carries one of the two messages.
-        reason = prompt.blocked_message or prompt.stopped_message
-        logger.info("Loop %s not started: UserPromptSubmit hook stopped it: %s", run_id, reason)
-        final = store.get().phase_ledger
-        return PlanItemResult(
-            index=idx,
-            sub_requirement=sub_req,
-            status="failed",
-            terminal_reason=str(Terminal.HOOK_STOPPED),
-            red_confirmed=final.red_confirmed,
-            green_passed=final.green_passed,
-            error_message=reason,
-        )
-    first_turn = [HumanMessage(content=session.initial_user_message)] if session.initial_user_message else []
-    messages = (*session.messages, *first_turn, HumanMessage(content=prompt_text), *prompt.messages)
-    # `processUserInput`: the user-input attachments (the initial TDD state among them),
-    # persisted into the history the loop starts from.
-    from app.utils.attachments import get_attachment_messages
-
-    attachments = await get_attachment_messages(ctx, messages, user_input=prompt_text)
-    messages = (*messages, *attachments)
-    ctx = replace(ctx, messages=messages)
-    loop_state = initial_loop_state(messages, ctx)
-
-    logger.info("Launching TDD loop %s for sub-requirement %d: %s", run_id, idx, sub_req)
-    recorder = TransitionEventRecorder(store, events_file, session_id=run_id, plan_index=idx)
-    engine = QueryEngine(
-        config, replace(deps, emit_event=_both(recorder, deps.emit_event)), transcript=transcript, session_id=run_id,
-        cost_tracker=ctx.cost_tracker,
-    )
+        run.stopped_reason = prompt.blocked_message or prompt.stopped_message
+        logger.info("Turn of %s not started: UserPromptSubmit hook stopped it: %s", run.run_id, run.stopped_reason)
+        return Terminal.HOOK_STOPPED
+    messages: tuple[Any, ...] = (*history, *prefix, HumanMessage(content=prompt_text), *prompt.messages)
+    # `processUserInput`: the user-input attachments (the TDD state among them), persisted into
+    # the history the loop starts from.
+    messages = (*messages, *await get_attachment_messages(run.ctx, messages, user_input=prompt_text))
+    turn_ctx = replace(run.ctx, messages=messages)
     try:
-        async for _ in engine.submit(loop_state):
+        async for _ in run.engine.submit(initial_loop_state(messages, turn_ctx)):
             pass
-        await wait_for_background_work(engine, ctx, store)
-        reason = engine.terminal.reason if engine.terminal is not None else Terminal.MODEL_ERROR
+        await wait_for_background_work(run.engine, run.ctx, run.store)
+        reason = run.engine.terminal.reason if run.engine.terminal is not None else Terminal.MODEL_ERROR
     except Exception:
-        logger.exception("Loop %s crashed", run_id)
+        logger.exception("Loop %s crashed", run.run_id)
         reason = Terminal.MODEL_ERROR
-    if engine.result is not None:
-        logger.info("Loop %s result: %s", run_id, engine.result)
+    if run.engine.result is not None:
+        logger.info("Loop %s result: %s", run.run_id, run.engine.result)
+    return reason
 
-    final = store.get().phase_ledger
-    succeeded = reason == Terminal.COMPLETED
-    logger.info(
-        "Loop %s finished: reason=%s red=%s green=%s", run_id, reason, final.red_confirmed, final.green_passed
+
+async def begin_session(run: SessionRun, fresh_prompt: str, resume_prompt: str | None = None) -> Terminal:
+    """
+    The first turn: SessionStart and `fresh_prompt`, or — with a transcript on disk — the
+    resumed conversation, continued with the interrupted prompt or else `resume_prompt`.
+    """
+    session, prompt_text = await load_initial_messages(
+        run.ctx, run.transcript, fresh_prompt, run.config.model, resume_prompt=resume_prompt
     )
+    first = [HumanMessage(content=session.initial_user_message)] if session.initial_user_message else []
+    return await _submit(run, session.messages, prompt_text, first)
+
+
+async def submit_prompt(run: SessionRun, prompt_text: str) -> Terminal:
+    """A later turn of the same conversation: the user's prompt after everything said so far."""
+    return await _submit(run, run.engine.mutable_messages, prompt_text)
+
+
+async def tdd_loop_runner(
+    sub_req: str,
+    idx: int,
+    state: SessionState,
+    *,
+    workspace: Any = None,
+    **run_options: Any,
+) -> PlanItemResult:
+    """
+    One sub-requirement through one run, as the session shell's per-item node calls it: a
+    one-item plan, completed only when its Red -> Green cycle is observed.
+    """
+    ws = workspace if workspace is not None else default_workspace(state)
+    run_id = item_run_id(state.get("session_id"), idx)
+    async with open_session_run(run_id=run_id, plan=TddPlan.from_texts([sub_req]), workspace=ws,
+                                plan_index=idx, **run_options) as run:
+        logger.info("Launching TDD loop %s for sub-requirement %d: %s", run_id, idx, sub_req)
+        reason = await begin_session(run, sub_req)
+        done = run.store.get().tdd_plan.is_complete
+        final = run.store.get().phase_ledger
+        stopped = run.stopped_reason
+    succeeded = reason == Terminal.COMPLETED and done
+    logger.info("Loop %s finished: reason=%s done=%s", run_id, reason, done)
     return PlanItemResult(
         index=idx,
         sub_requirement=sub_req,
         status="success" if succeeded else "failed",
         terminal_reason=str(reason),
-        red_confirmed=final.red_confirmed,
-        green_passed=final.green_passed,
-        error_message=None if succeeded else f"Terminated early: {reason}",
+        # A done item's ledger has already restarted in RED; its cycle was observed.
+        red_confirmed=done or final.red_confirmed,
+        green_passed=done or final.green_passed,
+        error_message=None if succeeded else stopped or f"Terminated early: {reason}",
     )
 
 
+@dataclass(frozen=True, slots=True)
+class HeadlessOutcome:
+    """How a headless development session ended: the last turn's terminal and the plan."""
+
+    terminal: Terminal
+    plan: TddPlan
+
+    @property
+    def completed(self) -> bool:
+        """Every sub-requirement was observed Red -> Green and the loop ended `completed`."""
+        return self.terminal == Terminal.COMPLETED and self.plan.is_complete
+
+
+async def run_headless(
+    session_id: str, specification: str, plan_texts: Sequence[str], *, workspace: Any, **run_options: Any
+) -> HeadlessOutcome:
+    """
+    `runHeadless` for the development phase (Phase 11): one conversation over the whole plan
+    with nobody to ask, so a permission 'ask' (a plan change among them) is denied and the
+    session ends at the first turn that ends without the plan done (user decision 2026-10-27).
+    """
+    from app.session.prompts import development_resume_prompt, development_start_prompt
+
+    async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan.from_texts(list(plan_texts)),
+                                workspace=workspace, **run_options) as run:
+        plan = run.store.get().tdd_plan
+        reason = await begin_session(
+            run, development_start_prompt(specification, plan), development_resume_prompt(plan)
+        )
+        return HeadlessOutcome(terminal=reason, plan=run.store.get().tdd_plan)
+
+
 __all__ = [
+    "HeadlessOutcome",
+    "SessionRun",
+    "begin_session",
     "build_builtin_tools",
     "coordinator_context",
     "default_workspace",
@@ -628,10 +691,14 @@ __all__ = [
     "load_initial_messages",
     "main_thread_tools",
     "next_main_thread_command",
+    "open_session_run",
+    "run_headless",
     "run_agent_memory_store",
     "run_permission_context",
     "run_settings_locations",
+    "session_run_id",
     "session_workspace",
+    "submit_prompt",
     "tdd_loop_runner",
     "wait_for_background_work",
 ]

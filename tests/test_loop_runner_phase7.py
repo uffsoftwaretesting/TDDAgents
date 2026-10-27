@@ -93,7 +93,7 @@ def test_the_coordinator_drives_a_red_green_cycle_through_workers(python_workspa
     assert "workerToolsContext" in coordinator.extra_user_context
     # The developer only ran once the tester's RunTests had confirmed RED on the shared ledger.
     first_developer = next(state for kind, state in seen if kind == "developer")
-    assert first_developer.tool_context.get_app_state().phase_ledger.red_confirmed is True
+    assert first_developer.phase_ledger.red_confirmed is True
     # The tester's report reached the coordinator as the Agent tool result.
     second_coordinator_turn = [state for kind, state in seen if kind is None][1]
     assert "The test fails: no module named calculator." in _tool_results(second_coordinator_turn)

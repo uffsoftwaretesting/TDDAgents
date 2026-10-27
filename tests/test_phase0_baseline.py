@@ -44,10 +44,15 @@ from tests.source_scan import calls_to, original_nodes
 REPO = Path(__file__).resolve().parent.parent
 
 #: The first TDD-state announcement a fresh run attaches after the prompt (Phase 5).
-INITIAL_TDD_STATE = (
-    "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
-    "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n</system-reminder>"
-)
+
+
+def initial_tdd_state(sub_requirement: str) -> str:
+    """The first TDD-state announcement of a one-item plan (Phase 11 adds the item)."""
+    return (
+        "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
+        "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n"
+        f"Current Sub-requirement: 1. {sub_requirement}\nSub-requirements Done: 0/1\n</system-reminder>"
+    )
 
 
 # ── session Python environment ───────────────────────────────────────────────
@@ -437,7 +442,8 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     current = ctx.refresh_tools()
     assert current is not ctx.tools and current is ctx.refresh_tools()
     assert {t.name for t in current} == {t.name for t in ctx.tools}
-    ctx.set_app_state(lambda st: dataclasses.replace(st, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+    # The finished item restarted the ledger in RED (Phase 11), so moving it is a GREEN.
+    ctx.set_app_state(lambda st: dataclasses.replace(st, phase_ledger=PhaseLedger(phase=TddPhase.GREEN)))
     rebuilt = ctx.refresh_tools()
     assert rebuilt is not current and rebuilt is ctx.refresh_tools()
 
@@ -529,7 +535,7 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     assert get_transcript_path(config.run_id, str(python_workspace.root)).is_file()
     # Phase 8: the skill listing precedes the TDD state (upstream's source order).
     contents = [m.content for m in state.tool_context.messages]
-    assert contents[0] == "spec" and contents[-1] == INITIAL_TDD_STATE
+    assert contents[0] == "spec" and contents[-1] == initial_tdd_state("spec")
     assert "The following skills are available for use with the Skill tool" in contents[1]
     assert len(contents) == 3
 

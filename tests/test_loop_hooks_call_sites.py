@@ -34,10 +34,15 @@ from tests.hook_doubles import ScriptedDispatcher
 CONFIG = build_run_config("sites", postgres_checkpointing=False)
 
 #: The first TDD-state announcement a fresh run attaches after the prompt (Phase 5).
-INITIAL_TDD_STATE = (
-    "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
-    "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n</system-reminder>"
-)
+
+
+def initial_tdd_state(sub_requirement: str) -> str:
+    """The first TDD-state announcement of a one-item plan (Phase 11 adds the item)."""
+    return (
+        "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
+        "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n"
+        f"Current Sub-requirement: 1. {sub_requirement}\nSub-requirements Done: 0/1\n</system-reminder>"
+    )
 
 
 def reminder(text: str) -> str:
@@ -367,7 +372,7 @@ def test_runner_places_hook_messages_around_the_prompt(monkeypatch, tmp_path):
         "hello",
         "build it",
         reminder("UserPromptSubmit hook additional context: prompt ctx"),
-        INITIAL_TDD_STATE,
+        initial_tdd_state("build it"),
     ]
     assert model.seen[0].tool_context.messages == first
     assert d.payload("SessionStart")["source"] == "startup"
@@ -381,7 +386,8 @@ def test_runner_places_hook_messages_around_the_prompt(monkeypatch, tmp_path):
 def test_runner_without_hook_output_starts_from_the_prompt(monkeypatch, tmp_path):
     model = Model([[AIMessage(content="done")]])
     run_runner(monkeypatch, tmp_path, ScriptedDispatcher(), model)
-    assert [m.content for m in without_skill_listing(model.seen[0].messages)] == ["build it", INITIAL_TDD_STATE]
+    first = [m.content for m in without_skill_listing(model.seen[0].messages)]
+    assert first == ["build it", initial_tdd_state("build it")]
 
 
 def test_a_blocked_prompt_never_reaches_the_model(monkeypatch, tmp_path):

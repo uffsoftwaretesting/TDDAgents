@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.tdd.plan import TddPlan, render_plan
 from app.utils.frontmatter_parser import render_prompt
 
 PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts" / "session"
@@ -50,4 +51,30 @@ def planner_prompts(specification: str) -> tuple[str, str]:
     return _system("planner"), human.strip()
 
 
-__all__ = ["PROMPTS_DIR", "analyst_prompts", "engineer_prompts", "planner_prompts"]
+def _current(plan: TddPlan) -> str:
+    current = plan.current
+    return f"{current.id}: {current.text}" if current is not None else "(none: every sub-requirement is done)"
+
+
+def development_start_prompt(specification: str, plan: TddPlan) -> str:
+    """The first prompt of the development conversation (Phase 11): the spec, the plan, where to start."""
+    return render_prompt(
+        _read("development", "start.md"),
+        {"SPECIFICATION": specification.strip() or "(none)", "PLAN": render_plan(plan), "CURRENT": _current(plan)},
+    ).strip()
+
+
+def development_resume_prompt(plan: TddPlan) -> str:
+    """The prompt a resumed development conversation continues with."""
+    values = {"PLAN": render_plan(plan), "CURRENT": _current(plan)}
+    return render_prompt(_read("development", "resume.md"), values).strip()
+
+
+__all__ = [
+    "PROMPTS_DIR",
+    "analyst_prompts",
+    "development_resume_prompt",
+    "development_start_prompt",
+    "engineer_prompts",
+    "planner_prompts",
+]
