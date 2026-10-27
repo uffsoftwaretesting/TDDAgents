@@ -11,9 +11,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
-from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.execute import HookDispatcher, HookOutsideReplResult
-from app.loop.hooks.output import AggregatedHookResult
+from app.types.hooks import AggregatedHookResult
+from app.utils.hooks.hooks import HookDispatcher, HookOutsideReplResult
+from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
 
 
 class ScriptedDispatcher(HookDispatcher):

@@ -18,19 +18,22 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-import app.loop.context.tokens as tokens
-import app.loop.engine as engine
-import app.loop.tools.result_storage as rs
-from app.loop.agents.memory import AgentMemoryStore
-from app.loop.compact.auto_compact import AutoCompactOutcome
-from app.loop.compact.compact import CompactionResult, create_compact_boundary_message
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.cache import get_prompt_caching_enabled, prepare_cached_request
-from app.loop.context.tool_context import ContentReplacementState, tool_context_for
-from app.loop.engine import drain, run_loop
-from app.loop.state import initial_loop_state
-from app.loop.transitions import Terminal, Terminated
+import app.query.query as engine
+import app.utils.tokens as tokens
+import app.utils.tool_result_storage as rs
+from app.query.config import build_run_config
+from app.query.query import drain, run_loop
+from app.query.state import initial_loop_state
+from app.query.transitions import Terminal, Terminated
+from app.services.api.claude import get_prompt_caching_enabled, prepare_cached_request
+from app.services.compact.auto_compact import AutoCompactOutcome
+from app.services.compact.compact import (
+    CompactionResult,
+    create_compact_boundary_message,
+)
+from app.state.app_state_store import AppStateStore
+from app.tool import ContentReplacementState, tool_context_for
+from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from tests.test_loop_engine import FakeModel, make_fake_deps
 
 CONFIG = build_run_config("budget-run", postgres_checkpointing=False)

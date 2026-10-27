@@ -1,4 +1,4 @@
-"""Tests for `app/loop/hooks/execute.py`: `HookDispatcher` and the per-event entry points."""
+"""Tests for `app/utils/hooks/hooks.py`: `HookDispatcher` and the per-event entry points."""
 
 from __future__ import annotations
 
@@ -14,14 +14,22 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.loop.hooks.execute as ex
-from app.loop.context.tool_context import CancelToken
-from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.events import (
+import app.utils.hooks.hooks as ex
+from app.schemas.hooks import (
+    AgentHook,
+    CommandHook,
+    HookCommand,
+    HookMatcher,
+    HttpHook,
+    PromptHook,
+)
+from app.tool import CancelToken
+from app.types.hooks import AggregatedHookResult, HookResult
+from app.utils.hooks.hook_events import (
     SESSION_END_HOOK_TIMEOUT_MS_DEFAULT,
     TOOL_HOOK_EXECUTION_TIMEOUT_MS,
 )
-from app.loop.hooks.execute import (
+from app.utils.hooks.hooks import (
     HookDispatcher,
     HookOutsideReplResult,
     PreCompactHookResult,
@@ -40,16 +48,8 @@ from app.loop.hooks.execute import (
     execute_user_prompt_submit_hooks,
     last_assistant_text,
 )
-from app.loop.hooks.messages import HookAttachment, HookBlockingError
-from app.loop.hooks.output import AggregatedHookResult, HookResult
-from app.loop.hooks.schemas import (
-    AgentHook,
-    CommandHook,
-    HookCommand,
-    HookMatcher,
-    HttpHook,
-    PromptHook,
-)
+from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
+from app.utils.messages import HookAttachment, HookBlockingError
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 """
-Schema validation of tool input: `app/loop/tools/validation.py`.
+Schema validation of tool input: `app/utils/tool_errors.py`.
 
 The contract under test is what the *model* reads. Upstream's wording is reproduced
 because the message is the only feedback the model gets about a call it got wrong.
@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.loop.tools.validation import (
+from app.utils.tool_errors import (
     INPUT_VALIDATION_ERROR,
     format_validation_path,
 )
-from app.loop.tools.validation import validate_against_schema as _validate
+from app.utils.tool_errors import validate_against_schema as _validate
 
 
 def validate_against_schema(tool_name, schema, args) -> str:

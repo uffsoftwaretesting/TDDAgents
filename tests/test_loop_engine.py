@@ -20,22 +20,17 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.config import RunConfig, build_run_config
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.deps import (
+from app.query.config import RunConfig, build_run_config
+from app.query.deps import (
     CallModel,
     Compact,
-    CompactionResult,
     EventSink,
     LoopDeps,
     NowProvider,
     RunTools,
-    StopHookResult,
-    StopHooks,
     UuidGenerator,
 )
-from app.loop.engine import (
+from app.query.query import (
     BlockingLimitError,
     LoopEvent,
     LoopNeverTerminated,
@@ -45,10 +40,18 @@ from app.loop.engine import (
     drain,
     run_loop,
 )
-from app.loop.ledger import PhaseLedger
-from app.loop.messages import Message, ToolCall
-from app.loop.state import CompactionTracking, LoopState, initial_loop_state
-from app.loop.transitions import Continue, Terminal, Terminated, Transition
+from app.query.state import (
+    CompactionResult,
+    CompactionTracking,
+    LoopState,
+    initial_loop_state,
+)
+from app.query.stop_hooks import StopHookResult, StopHooks
+from app.query.transitions import Continue, Terminal, Terminated, Transition
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger
+from app.tool import tool_context_for
+from app.utils.messages import Message, ToolCall
 
 CONFIG = build_run_config("tdd-test", postgres_checkpointing=False)
 
@@ -793,7 +796,7 @@ def test_a_model_error_repairs_every_orphaned_tool_call_before_terminating():
 
 
 def test_a_model_fallback_repairs_switches_model_and_retries_the_same_turn():
-    from app.loop.retry import FallbackTriggeredError
+    from app.services.api.with_retry import FallbackTriggeredError
 
     model = FailingModel([FallbackTriggeredError("big", "small")])
     events = collect(model)
@@ -812,7 +815,7 @@ def test_a_model_fallback_repairs_switches_model_and_retries_the_same_turn():
 
 def test_the_abandoned_turn_is_dropped_so_the_fallback_answer_stands_alone():
     """Upstream clears assistantMessages/toolResults/toolUseBlocks before retrying."""
-    from app.loop.retry import FallbackTriggeredError
+    from app.services.api.with_retry import FallbackTriggeredError
 
     model = FailingModel([FallbackTriggeredError("big", "small")])
     deps = make_fake_deps(model)
@@ -945,47 +948,47 @@ def test_refresh_is_not_consulted_on_a_recovery_continue():
 
 class TestIsApiErrorMessage:
     def test_a_message_flagged_on_the_object_itself(self):
-        from app.loop.engine import is_api_error_message
+        from app.query.query import is_api_error_message
 
         message = AIMessage(content="x")
         object.__setattr__(message, "is_api_error_message", True)
         assert is_api_error_message(message) is True
 
     def test_a_message_flagged_in_additional_kwargs(self):
-        from app.loop.engine import is_api_error_message
+        from app.query.query import is_api_error_message
 
         assert is_api_error_message(
             AIMessage(content="x", additional_kwargs={"is_api_error_message": True})) is True
 
     def test_an_api_error_code_also_counts(self):
-        from app.loop.engine import is_api_error_message
+        from app.query.query import is_api_error_message
 
         assert is_api_error_message(
             AIMessage(content="x", additional_kwargs={"api_error": "prompt_too_long"})) is True
 
     def test_an_empty_api_error_does_not_count(self):
-        from app.loop.engine import is_api_error_message
+        from app.query.query import is_api_error_message
 
         assert is_api_error_message(AIMessage(content="x", additional_kwargs={"api_error": ""})) is False
 
     def test_a_flag_set_to_false_does_not_count(self):
-        from app.loop.engine import is_api_error_message
+        from app.query.query import is_api_error_message
 
         assert is_api_error_message(
             AIMessage(content="x", additional_kwargs={"is_api_error_message": False})) is False
 
     def test_an_ordinary_message_is_not_an_api_error(self):
-        from app.loop.engine import is_api_error_message
+        from app.query.query import is_api_error_message
 
         assert is_api_error_message(AIMessage(content="all good")) is False
 
     def test_an_object_with_no_additional_kwargs_at_all(self):
-        from app.loop.engine import is_api_error_message
+        from app.query.query import is_api_error_message
 
         assert is_api_error_message(SimpleNamespace()) is False  # type: ignore[arg-type]
 
     def test_additional_kwargs_that_is_not_a_mapping(self):
-        from app.loop.engine import is_api_error_message
+        from app.query.query import is_api_error_message
 
         assert is_api_error_message(SimpleNamespace(additional_kwargs="junk")) is False  # type: ignore[arg-type]
 
@@ -998,13 +1001,13 @@ class TestRefreshToolPool:
         return state.tool_context
 
     def test_without_a_callback_the_context_is_returned_unchanged(self):
-        from app.loop.engine import refresh_tool_pool
+        from app.query.query import refresh_tool_pool
 
         context = self._context((SimpleNamespace(name="A"),))
         assert refresh_tool_pool(context) is context
 
     def test_an_identical_tuple_is_returned_unchanged(self):
-        from app.loop.engine import refresh_tool_pool
+        from app.query.query import refresh_tool_pool
 
         pool = (SimpleNamespace(name="A"),)
         context = self._context(pool, lambda: pool)
@@ -1012,7 +1015,7 @@ class TestRefreshToolPool:
 
     def test_an_equal_but_new_tuple_still_replaces_the_context(self):
         """Identity, not equality: upstream compares references and so do we."""
-        from app.loop.engine import refresh_tool_pool
+        from app.query.query import refresh_tool_pool
 
         tool = SimpleNamespace(name="A")
         context = self._context((tool,), lambda: (tool,))
@@ -1021,13 +1024,13 @@ class TestRefreshToolPool:
         assert [t.name for t in refreshed.tools] == ["A"]
 
     def test_a_changed_roster_is_adopted(self):
-        from app.loop.engine import refresh_tool_pool
+        from app.query.query import refresh_tool_pool
 
         context = self._context((SimpleNamespace(name="A"),), lambda: (SimpleNamespace(name="B"),))
         assert [t.name for t in refresh_tool_pool(context).tools] == ["B"]
 
     def test_a_list_is_accepted_and_stored_as_a_tuple(self):
-        from app.loop.engine import refresh_tool_pool
+        from app.query.query import refresh_tool_pool
 
         context = self._context((), lambda: [SimpleNamespace(name="B")])
         assert isinstance(refresh_tool_pool(context).tools, tuple)

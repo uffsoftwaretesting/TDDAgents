@@ -1,5 +1,5 @@
 """
-Content-block framing: `app/loop/streaming/blocks.py`, the port of upstream's
+Content-block framing: `app/services/api/claude.py`, the port of upstream's
 `content_block_start` / `_delta` / `_stop` handling in `claude.ts`.
 
 The property under test is the one eager dispatch depends on: a tool call is a whole,
@@ -12,13 +12,13 @@ import asyncio
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from app.loop.messages import tool_calls_in
-from app.loop.streaming.blocks import (
+from app.services.api.claude import (
     TEXT_BLOCK,
     BlockAccumulator,
     frame_content_blocks,
     split_chunk_into_blocks,
 )
+from app.utils.messages import tool_calls_in
 
 
 async def _aiter(items):

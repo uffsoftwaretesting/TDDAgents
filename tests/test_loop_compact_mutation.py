@@ -1,6 +1,6 @@
 """
-Phase 5 mutation triage: the compaction package (`app/loop/compact/*`) and its production
-bindings in `app/loop/factory.py`.
+Phase 5 mutation triage: the compaction package (`app/services/compact/*`) and its production
+bindings in `app/query/deps.py`.
 
 Each test pins a behaviour a surviving mutant changed without any existing assertion
 noticing: exact outputs where the older tests only checked a count or a prefix, the
@@ -18,19 +18,21 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-import app.loop.compact.auto_compact as ac
-import app.loop.compact.compact as cc
-import app.loop.compact.post_compact_cleanup as pcc
-import app.loop.compact.summarizer as summ
-import app.loop.factory as factory
-from app.loop.compact.auto_compact import (
+import app.query.deps as factory
+import app.services.compact.auto_compact as ac
+import app.services.compact.compact as cc
+import app.services.compact.post_compact_cleanup as pcc
+import app.services.compact.summarizer as summ
+from app.query.config import build_run_config
+from app.query.state import CompactionTracking, initial_loop_state
+from app.services.compact.auto_compact import (
     AutoCompactOutcome,
     auto_compact_if_needed,
     calculate_token_warning_state,
     get_auto_compact_threshold,
     is_auto_compact_enabled,
 )
-from app.loop.compact.compact import (
+from app.services.compact.compact import (
     ERROR_MESSAGE_NO_SUMMARY,
     POST_COMPACT_MAX_TOKENS_PER_FILE,
     PROMPT_TOO_LONG_ERROR_MESSAGE,
@@ -45,8 +47,8 @@ from app.loop.compact.compact import (
     strip_images_from_messages,
     truncate_head_for_ptl_retry,
 )
-from app.loop.compact.grouping import group_messages_by_api_round
-from app.loop.compact.micro_compact import (
+from app.services.compact.grouping import group_messages_by_api_round
+from app.services.compact.micro_compact import (
     TIME_BASED_MC_CLEARED_MESSAGE,
     TimeBasedMCConfig,
     calculate_tool_result_tokens,
@@ -54,24 +56,22 @@ from app.loop.compact.micro_compact import (
     evaluate_time_based_trigger,
     microcompact_messages,
 )
-from app.loop.compact.prompt import (
+from app.services.compact.prompt import (
     COMPACT_FORBIDDEN_TOOLS,
     _read,
     format_compact_summary,
     get_compact_prompt,
     get_compact_user_summary_message,
 )
-from app.loop.compact.summarizer import build_compact_summarizer
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.file_state import FileState
-from app.loop.context.tokens import (
+from app.services.compact.summarizer import build_compact_summarizer
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.utils.file_state_cache import FileState
+from app.utils.frontmatter_parser import render_prompt
+from app.utils.tokens import (
     MEDIA_BLOCK_TOKENS,
     rough_token_count_estimation_for_messages,
 )
-from app.loop.context.tool_context import tool_context_for
-from app.loop.prompts.loader import render_prompt
-from app.loop.state import CompactionTracking, initial_loop_state
 from tests.conftest import FakeWorkspace
 from tests.hook_doubles import ScriptedDispatcher
 

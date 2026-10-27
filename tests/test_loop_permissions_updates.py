@@ -1,5 +1,5 @@
 """
-`updatedPermissions` from PermissionRequest hooks: `app/loop/permissions/updates.py` (ports of
+`updatedPermissions` from PermissionRequest hooks: `app/utils/permissions/permission_update.py` (ports of
 `PermissionUpdate.ts`, `addPermissionRulesToSettings`, `updateSettingsForSource`) and their use
 in `permission_request.py`, including the two TDD guards: a rewritten input is re-checked, and
 applied updates are re-stripped of dangerous allows.
@@ -16,25 +16,25 @@ from typing import Any
 
 import pytest
 
-import app.loop.permissions.updates as up
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.permission_request import (
-    apply_hook_permission_updates,
-    run_permission_request_hooks_for_headless_agent,
-)
-from app.loop.permissions.settings import (
-    SettingsLocations,
-    build_tool_permission_context,
-)
-from app.loop.permissions.types import (
+import app.utils.permissions.permission_update as up
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionRule,
     PermissionRuleSource,
     ToolPermissionContext,
+)
+from app.utils.permissions.permissions import (
+    apply_hook_permission_updates,
+    run_permission_request_hooks_for_headless_agent,
+)
+from app.utils.settings.settings import (
+    SettingsLocations,
+    build_tool_permission_context,
 )
 from tests.hook_doubles import ScriptedDispatcher
 
@@ -298,7 +298,7 @@ def _ctx(perm: ToolPermissionContext, decision: Any, ledger: PhaseLedger | None 
 
 
 def _write_tool():
-    from app.loop.tools.fs import build_write_file_tool
+    from app.tools.file_tools import build_write_file_tool
 
     return build_write_file_tool()
 

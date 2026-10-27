@@ -9,15 +9,15 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.deps import LoopDeps
-from app.loop.engine import drain, run_loop
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.state import initial_loop_state
-from app.loop.tdd.hooks import tdd_phase_incomplete_hook
-from app.loop.transitions import Continue, Terminal
+from app.query.config import build_run_config
+from app.query.deps import LoopDeps
+from app.query.query import drain, run_loop
+from app.query.state import initial_loop_state
+from app.query.transitions import Continue, Terminal
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.stop_hook import tdd_phase_incomplete_hook
+from app.tool import tool_context_for
 
 
 class FakeModel:
@@ -160,7 +160,7 @@ def test_stop_hook_in_full_loop_terminates_without_infinite_loop():
         events: list[Any] = []
 
         async def fake_compact(s, c):
-            from app.loop.deps import CompactionResult
+            from app.query.state import CompactionResult
             return CompactionResult(compacted=False, messages=s.messages)
 
         deps = LoopDeps(

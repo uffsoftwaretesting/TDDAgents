@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import pytest
 
-import app.loop.permissions.bash_path_validation as pv
-import app.loop.permissions.bash_permissions as bp
-import app.loop.permissions.bash_read_only_commands as roc
-from app.loop.permissions.bash_commands import OutputRedirection
-from app.loop.permissions.bash_security import bash_command_is_safe
-from app.loop.permissions.types import (
+import app.tools.bash_tool.bash_permissions as bp
+import app.tools.bash_tool.path_validation as pv
+import app.utils.shell.read_only_command_validation as roc
+from app.tools.bash_tool.bash_security import bash_command_is_safe
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionResult,
@@ -24,6 +23,7 @@ from app.loop.permissions.types import (
     PermissionRuleSource,
     ToolPermissionContext,
 )
+from app.utils.bash.commands import OutputRedirection
 
 ALLOW, DENY, ASK, PASS = (PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK,
                           PermissionBehavior.PASSTHROUGH)

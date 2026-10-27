@@ -9,18 +9,21 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.compact.auto_compact import AutoCompactOutcome
-from app.loop.compact.compact import CompactionResult, create_compact_boundary_message
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.query_engine import (
+from app.query.state import initial_loop_state
+from app.query.transitions import Terminal, Terminated
+from app.query_engine import (
     QueryEngine,
     ResultMessage,
     is_result_successful,
     normalize_stop_reason,
 )
-from app.loop.state import initial_loop_state
-from app.loop.transitions import Terminal, Terminated
+from app.services.compact.auto_compact import AutoCompactOutcome
+from app.services.compact.compact import (
+    CompactionResult,
+    create_compact_boundary_message,
+)
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
 from tests.test_loop_engine import (
     CONFIG,
     FakeModel,
@@ -135,7 +138,7 @@ def test_each_user_message_from_the_loop_is_a_turn():
 
 
 def test_attachments_are_not_turns_and_not_the_result():
-    from app.loop.hooks.messages import ATTACHMENT_KEY
+    from app.utils.messages import ATTACHMENT_KEY
 
     att = HumanMessage(content="r", additional_kwargs={"is_meta": True, ATTACHMENT_KEY: {"type": "tdd_state"}})
     model = FakeModel([[AIMessage(content="text"), att]])
@@ -229,7 +232,7 @@ def test_stop_reasons_are_normalized_to_upstreams_vocabulary():
 
 
 def test_a_synthetic_sentinel_is_never_the_result_text():
-    from app.loop.storage.recovery import NO_RESPONSE_REQUESTED
+    from app.utils.conversation_recovery import NO_RESPONSE_REQUESTED
 
     result = _run(_engine(FakeModel([[AIMessage(content=NO_RESPONSE_REQUESTED)]])), _state())[-1]
     assert (result.subtype, result.result) == ("success", "")
@@ -237,8 +240,8 @@ def test_a_synthetic_sentinel_is_never_the_result_text():
 
 def test_the_recorded_run_resumes_as_the_same_conversation(tmp_path):
     """End to end: the engine writes the chain, `load_conversation_for_resume` reads it back."""
-    from app.loop.storage.recovery import load_conversation_for_resume
-    from app.loop.storage.session_storage import TranscriptStore
+    from app.utils.conversation_recovery import load_conversation_for_resume
+    from app.utils.session_storage import TranscriptStore
 
     store = TranscriptStore("sess", tmp_path, version="v", git_branch=None)
     task = HumanMessage(content="task")
@@ -295,7 +298,7 @@ class TestResultDetails:
 
 class TestContentShapes:
     def test_last_content_type(self):
-        from app.loop.query_engine import _last_content_type
+        from app.query_engine import _last_content_type
 
         calls = [{"name": "A", "args": {}, "id": "1"}]
         assert _last_content_type(AIMessage(content="", tool_calls=calls)) == "tool_use"
@@ -305,7 +308,7 @@ class TestContentShapes:
         assert _last_content_type(AIMessage(content=[{"type": "thinking", "thinking": "t"}])) == "thinking"
 
     def test_text_result_reads_only_a_final_text_block(self):
-        from app.loop.query_engine import _text_result
+        from app.query_engine import _text_result
 
         two: list[str | dict[Any, Any]] = [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
         assert _text_result(AIMessage(content=two)) == "b"
@@ -350,7 +353,7 @@ def test_a_second_turn_continues_the_transcript_chain(tmp_path):
     """A follow-up turn (a task notification) chains onto the first turn's last message."""
     import json
 
-    from app.loop.storage.session_storage import TranscriptStore
+    from app.utils.session_storage import TranscriptStore
 
     store = TranscriptStore("sess", tmp_path, version="v", git_branch=None)
     model = FakeModel([[AIMessage(content="first")], [AIMessage(content="second")]])

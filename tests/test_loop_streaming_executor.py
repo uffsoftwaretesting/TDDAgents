@@ -11,14 +11,15 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import ToolContext, tool_context_for
-from app.loop.messages import ToolCall
-from app.loop.streaming.abort import AbortController
-from app.loop.streaming.executor import StreamingToolExecutor, TrackedTool
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import CANCEL_MESSAGE
-from app.loop.tools.types import ToolResult
+from app.services.tools.streaming_tool_executor import (
+    StreamingToolExecutor,
+    TrackedTool,
+)
+from app.services.tools.tool_execution import CANCEL_MESSAGE
+from app.state.app_state_store import AppStateStore
+from app.tool import ToolContext, ToolResult, build_tool, tool_context_for
+from app.utils.abort_controller import AbortController
+from app.utils.messages import ToolCall
 
 
 def make_context() -> ToolContext:
@@ -698,7 +699,7 @@ def test_tool_execution_unexpected_runner_exception(
         async def crash_runner(*args: Any, **kwargs: Any) -> Any:
             raise RuntimeError("runner crashed")
 
-        import app.loop.streaming.executor as exec_mod
+        import app.services.tools.streaming_tool_executor as exec_mod
         monkeypatch.setattr(exec_mod, "run_tool_use", crash_runner)
 
         with caplog.at_level(logging.WARNING):
@@ -764,8 +765,8 @@ def test_in_flight_tool_ids_lifecycle() -> None:
 
 def test_context_modifiers_applied_for_non_concurrent_tools() -> None:
     async def _run() -> None:
-        from app.loop.context.app_state import AppState
-        from app.loop.ledger import PhaseLedger, TddPhase
+        from app.state.app_state_store import AppState
+        from app.tdd.ledger import PhaseLedger, TddPhase
 
         context = make_context()
         initial_ledger = context.get_app_state().phase_ledger

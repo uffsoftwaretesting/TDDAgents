@@ -10,14 +10,12 @@ from typing import Any, AsyncIterator
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.config import RunConfig, build_run_config
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import ToolContext, tool_context_for
-from app.loop.deps import CompactionResult, LoopDeps
-from app.loop.engine import run_loop
-from app.loop.messages import Message, ToolCall
-from app.loop.state import LoopState, initial_loop_state
-from app.loop.streaming.withhold import (
+from app.query.config import RunConfig, build_run_config
+from app.query.deps import LoopDeps
+from app.query.query import run_loop
+from app.query.state import CompactionResult, LoopState, initial_loop_state
+from app.query.transitions import Continue, Terminal, Terminated, Transition
+from app.query.withhold import (
     WithholdGateSnapshot,
     _get_api_error,
     is_max_output_tokens,
@@ -26,9 +24,9 @@ from app.loop.streaming.withhold import (
     is_withheld_error,
     take_withhold_gate_snapshot,
 )
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import ToolResult
-from app.loop.transitions import Continue, Terminal, Terminated, Transition
+from app.state.app_state_store import AppStateStore
+from app.tool import ToolContext, ToolResult, build_tool, tool_context_for
+from app.utils.messages import Message, ToolCall
 
 CONFIG = build_run_config("recovery-test", postgres_checkpointing=False)
 

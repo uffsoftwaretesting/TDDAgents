@@ -8,9 +8,9 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-import app.loop.storage.entries as entries
-from app.loop.compact.compact import create_compact_boundary_message
-from app.loop.storage.entries import (
+import app.utils.session_storage as entries
+from app.services.compact.compact import create_compact_boundary_message
+from app.utils.session_storage import (
     EntryStamp,
     build_entry,
     ensure_message_uuid,

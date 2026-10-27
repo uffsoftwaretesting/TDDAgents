@@ -8,10 +8,9 @@ import asyncio
 
 import pytest
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase, TestRunRecord
-from app.loop.tools.run_tests import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
+from app.tdd.run_tests_tool.run_tests_tool import (
     LEDGER_EXIT_CODES,
     PYTEST_EXIT_REASONS,
     RunTests,
@@ -21,6 +20,7 @@ from app.loop.tools.run_tests import (
     pytest_command,
     run_tests_timeout_seconds,
 )
+from app.tool import tool_context_for
 from app.workspace.base import WorkspaceTimeout
 
 
@@ -158,7 +158,7 @@ def test_ledger_codes_constant():
 
 
 def test_default_instance_and_properties():
-    from app.loop.tools.run_tests import RUN_TESTS_PROMPT
+    from app.tdd.run_tests_tool.run_tests_tool import RUN_TESTS_PROMPT
 
     built_instance = build_run_tests_tool()
     for t in (RunTests, built_instance):
@@ -210,7 +210,7 @@ class _Wrap:
 
 def test_default_test_runner_context_runner_shapes():
     async def go():
-        from app.loop.tools.run_tests import _default_test_runner
+        from app.tdd.run_tests_tool.run_tests_tool import _default_test_runner
 
         base = tool_context_for(AppStateStore())
 
@@ -248,7 +248,7 @@ def test_default_test_runner_context_runner_shapes():
 
 @pytest.mark.parametrize("bad_exit", [None, "1", 1.0, object()])
 def test_context_runner_without_an_int_exit_code_is_unavailable(bad_exit):
-    from app.loop.tools.run_tests import _default_test_runner
+    from app.tdd.run_tests_tool.run_tests_tool import _default_test_runner
 
     class NoCode(_Wrap):
         def test_runner(self, path):
@@ -259,7 +259,7 @@ def test_context_runner_without_an_int_exit_code_is_unavailable(bad_exit):
 
 
 def test_non_callable_context_runner_falls_through_to_workspace_rule():
-    from app.loop.tools.run_tests import _default_test_runner
+    from app.tdd.run_tests_tool.run_tests_tool import _default_test_runner
 
     class NotCallable(_Wrap):
         test_runner = "nope"
@@ -393,7 +393,7 @@ BANNER = "______ ERROR collecting tests/test_mod.py ______\n"
     "E   AttributeError: module 'calc2' has no attribute 'nothing'",
 ])
 def test_missing_code_collection_errors_are_failing_tests(error_line):
-    from app.loop.tools.run_tests import (
+    from app.tdd.run_tests_tool.run_tests_tool import (
         is_missing_code_collection_error,
         ledger_exit_code,
     )
@@ -420,7 +420,7 @@ def test_missing_code_collection_errors_are_failing_tests(error_line):
     ("", BANNER + "E   ModuleNotFoundError: No module named 'calculator'"),           # stderr counts too
 ])
 def test_other_exit_2_runs_are_not_evidence(stdout, stderr):
-    from app.loop.tools.run_tests import (
+    from app.tdd.run_tests_tool.run_tests_tool import (
         is_missing_code_collection_error,
         ledger_exit_code,
     )
@@ -432,7 +432,7 @@ def test_other_exit_2_runs_are_not_evidence(stdout, stderr):
 
 
 def test_collection_shape_only_applies_to_exit_2():
-    from app.loop.tools.run_tests import (
+    from app.tdd.run_tests_tool.run_tests_tool import (
         is_missing_code_collection_error,
         ledger_exit_code,
     )

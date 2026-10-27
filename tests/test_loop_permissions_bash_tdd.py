@@ -1,5 +1,5 @@
 """
-Barrier 2 through `Bash`: `app/loop/permissions/bash_tdd.py`.
+Barrier 2 through `Bash`: `app/tdd/bash_phase_permissions.py`.
 
 The hole these tests exist for: the phase gate reads a tool's declared path argument, so it
 saw `WriteFile(file_path="calculator.py")` and refused it in RED, but never saw
@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.bash_tdd import check_bash_tdd_phase, redirect_targets
+from app.tdd.bash_phase_permissions import check_bash_tdd_phase, redirect_targets
+from app.tdd.ledger import PhaseLedger, TddPhase
 
 RED = PhaseLedger()
 GREEN = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
@@ -113,8 +113,8 @@ def test_the_implementing_phases_also_refuse_an_unverifiable_target(ledger):
 # ── through the gate, which is where it actually matters ────────────────────
 
 def test_the_permission_gate_routes_bash_through_the_phase_check():
-    from app.loop.permissions.tdd import check_tdd_phase_permission
-    from app.loop.tools.base import build_tool
+    from app.tdd.phase_permissions import check_tdd_phase_permission
+    from app.tool import build_tool
 
     async def noop(args, ctx):  # pragma: no cover - never called
         raise AssertionError
@@ -127,8 +127,8 @@ def test_the_permission_gate_routes_bash_through_the_phase_check():
 
 
 def test_run_tests_is_never_denied_even_though_it_is_not_bash():
-    from app.loop.permissions.tdd import check_tdd_phase_permission
-    from app.loop.tools.base import build_tool
+    from app.tdd.phase_permissions import check_tdd_phase_permission
+    from app.tool import build_tool
 
     async def noop(args, ctx):  # pragma: no cover - never called
         raise AssertionError

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.messages import Message, tool_calls_in
+from app.utils.messages import Message, tool_calls_in
 
 
 class TestAMessageAsking:

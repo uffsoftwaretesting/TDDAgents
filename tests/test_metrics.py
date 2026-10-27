@@ -14,8 +14,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from app.loop.transitions import Continue, Terminal
-from app.metrics.event_log import EventEntry, EventLog, EventType
+from app.query.transitions import Continue, Terminal
+from app.tdd.event_log import EventEntry, EventLog, EventType
 
 # ==============================================================================
 # Part L1: EventEntry & EventLog Tests
@@ -202,7 +202,7 @@ class TestMetricsReporting:
 
         with (
             patch("builtins.open") as mock_open,
-            patch("app.metrics.event_log.json.dumps", return_value="{}") as mock_dumps,
+            patch("app.tdd.event_log.json.dumps", return_value="{}") as mock_dumps,
         ):
             log.export_jsonl(out_file)
 

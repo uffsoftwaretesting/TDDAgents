@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.loop.mcp.env_expansion import expand_env_vars_in_string
-from app.loop.mcp.normalization import (
+from app.services.mcp.env_expansion import expand_env_vars_in_string
+from app.services.mcp.normalization import (
     build_mcp_tool_name,
     get_mcp_display_name,
     get_mcp_prefix,
@@ -65,12 +65,12 @@ def test_env_expansion(monkeypatch):
 
 
 def test_only_the_leading_prefix_is_removed_for_display():
-    from app.loop.mcp.normalization import get_mcp_display_name
+    from app.services.mcp.normalization import get_mcp_display_name
 
     assert get_mcp_display_name("mcp__a__mcp__a__x", "a") == "mcp__a__x"
 
 
 def test_a_claude_ai_name_keeps_a_trailing_x():
-    from app.loop.mcp.normalization import normalize_name_for_mcp
+    from app.services.mcp.normalization import normalize_name_for_mcp
 
     assert normalize_name_for_mcp("claude.ai My ToolX ") == "claude_ai_My_ToolX"

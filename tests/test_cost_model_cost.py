@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.loop.cost.model_cost import (
+from app.utils.model_cost import (
     COST_HAIKU_35,
     COST_HAIKU_45,
     COST_TIER_3_15,

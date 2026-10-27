@@ -8,18 +8,19 @@ from types import SimpleNamespace
 
 from langchain_core.messages import HumanMessage
 
-from app.loop.attachments.skills import get_skill_listing_attachments
-from app.loop.attachments.types import Attachment, normalize_attachment_for_api
-from app.loop.skills.definition import SkillCommand
-from app.loop.skills.loader import SkillRegistry
-from app.loop.skills.prompt import (
+from app.skills.load_skills_dir import SkillCommand, SkillRegistry
+from app.tool import ToolResult, build_tool
+from app.tools.skill_tool.prompt import (
     DEFAULT_CHAR_BUDGET,
     MAX_LISTING_DESC_CHARS,
     format_commands_within_budget,
     get_char_budget,
 )
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import ToolResult
+from app.utils.attachments import (
+    Attachment,
+    get_skill_listing_attachments,
+    normalize_attachment_for_api,
+)
 
 
 def _cmd(name: str, description: str = "does things", source: str = "userSettings", **kw) -> SkillCommand:
@@ -79,7 +80,7 @@ class TestBudget:
         assert format_commands_within_budget(cmds) == "- b1: does things\n- b2: does things"
 
     def test_truncate_at_its_edges(self):
-        from app.loop.skills.prompt import truncate
+        from app.tools.skill_tool.prompt import truncate
 
         assert truncate("abcde", 5) == "abcde"
         assert truncate("abc", 2) == "a…"
@@ -133,7 +134,7 @@ class TestListingAttachment:
         assert _listing(_ctx(None)) == []
 
     def test_the_budget_follows_the_registrys_model(self, monkeypatch):
-        import app.loop.attachments.skills as skills_mod
+        import app.utils.attachments as skills_mod
 
         seen: list[object] = []
 
@@ -144,7 +145,7 @@ class TestListingAttachment:
         monkeypatch.setattr(skills_mod, "format_commands_within_budget", record)
         _listing(_ctx(SkillRegistry([_cmd("a")], model="claude-sonnet-4-6")))
         _listing(_ctx(SkillRegistry([_cmd("a")])))
-        from app.loop.context.tokens import get_context_window_for_model
+        from app.utils.tokens import get_context_window_for_model
 
         assert seen == [get_context_window_for_model("claude-sonnet-4-6"), None]
 

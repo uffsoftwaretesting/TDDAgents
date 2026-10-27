@@ -8,8 +8,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.storage.entries import EntryStamp, build_entry
-from app.loop.storage.recovery import (
+from app.utils.conversation_recovery import (
     CONTINUATION_MESSAGE,
     NO_RESPONSE_REQUESTED,
     DeserializeResult,
@@ -21,6 +20,7 @@ from app.loop.storage.recovery import (
     filter_whitespace_only_assistant_messages,
     load_conversation_for_resume,
 )
+from app.utils.session_storage import EntryStamp, build_entry
 
 
 def call(cid: str, mid: str | None = None, content: str | list = "") -> AIMessage:
@@ -316,7 +316,7 @@ def test_trailing_system_messages_are_skipped_one_by_one():
 def test_remove_interrupted_message_drops_it_and_its_sentinel():
     from langchain_core.messages import AIMessage, HumanMessage
 
-    from app.loop.storage.recovery import remove_interrupted_message
+    from app.utils.conversation_recovery import remove_interrupted_message
 
     first, prompt, sentinel, later = (HumanMessage(content="a"), HumanMessage(content="b"),
                                       AIMessage(content="No response requested."), HumanMessage(content="c"))

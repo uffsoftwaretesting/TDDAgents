@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.storage.session_storage import TranscriptStore
-from app.loop.tasks.disk_output import (
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.utils.session_storage import TranscriptStore
+from app.utils.task.disk_output import (
     TASK_MAX_OUTPUT_DEFAULT,
     TASK_MAX_OUTPUT_UPPER_LIMIT,
     format_task_output,
@@ -29,7 +29,7 @@ def test_the_output_dir_sits_in_the_session_directory_beside_the_transcript(tmp_
 
 
 def test_without_a_transcript_the_dir_comes_from_the_workspace_and_run(tmp_path, monkeypatch):
-    from app.loop.storage.paths import get_project_dir
+    from app.utils.session_storage_portable import get_project_dir
 
     ctx = tool_context_for(AppStateStore(), workspace=SimpleNamespace(root=str(tmp_path)), run_id="loop-2")
     assert get_task_output_dir(ctx) == get_project_dir(str(tmp_path)) / "loop-2" / "tasks"
@@ -100,7 +100,7 @@ def test_format_truncates_from_the_front_with_a_header(monkeypatch):
 # ── mutation-gate pins (Phase 8) ────────────────────────────────────────────
 
 def test_a_bare_context_falls_back_to_the_cwd_and_its_run(tmp_path, monkeypatch):
-    from app.loop.storage.paths import get_project_dir
+    from app.utils.session_storage_portable import get_project_dir
 
     monkeypatch.chdir(tmp_path)
     expected = get_project_dir(str(tmp_path)) / "r9" / "tasks"

@@ -1,5 +1,5 @@
 """
-`app/loop/permissions/bash_permissions.py`: port of claude-code's `bashToolHasPermission`
+`app/tools/bash_tool/bash_permissions.py`: port of claude-code's `bashToolHasPermission`
 flow (bashPermissions.ts, bashCommandHelpers.ts, modeValidation.ts, the path checks).
 """
 
@@ -7,9 +7,8 @@ import os
 
 import pytest
 
-import app.loop.permissions.bash_permissions as bp
-from app.loop.permissions.bash_commands import OutputRedirection
-from app.loop.permissions.bash_permissions import (
+import app.tools.bash_tool.bash_permissions as bp
+from app.tools.bash_tool.bash_permissions import (
     ACCEPT_EDITS_ALLOWED_COMMANDS,
     ANT_ONLY_SAFE_ENV_VARS,
     BASH_TOOL_NAME,
@@ -33,7 +32,7 @@ from app.loop.permissions.bash_permissions import (
     strip_safe_wrappers,
     validate_output_redirections,
 )
-from app.loop.permissions.types import (
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionResult,
@@ -41,6 +40,7 @@ from app.loop.permissions.types import (
     PermissionRuleSource,
     ToolPermissionContext,
 )
+from app.utils.bash.commands import OutputRedirection
 
 
 def rule(content, behavior=PermissionBehavior.ALLOW, tool="Bash"):
@@ -415,6 +415,6 @@ def test_has_permission_pipe_with_injection_is_asked(cwd):
 
 
 def test_module_reexports_path_helpers():
-    import app.loop.permissions.bash_path_validation as pv
+    import app.tools.bash_tool.path_validation as pv
     assert bp.format_directory_list is pv.format_directory_list
     assert bp.MAX_DIRS_TO_LIST == 5

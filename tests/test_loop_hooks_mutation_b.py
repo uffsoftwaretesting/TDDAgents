@@ -15,11 +15,14 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.loop.hooks.exec_agent as ea
-import app.loop.hooks.exec_prompt as ep
-from app.loop.context.app_state import AppState, AppStateStore, discard_app_state_update
-from app.loop.context.tool_context import CancelToken, tool_context_for
-from app.loop.hooks.exec_agent import (
+import app.utils.hooks.exec_agent_hook as ea
+import app.utils.hooks.exec_prompt_hook as ep
+from app.schemas.hooks import AgentHook, PromptHook
+from app.state.app_state_store import AppState, AppStateStore, discard_app_state_update
+from app.tdd.ledger import PhaseLedger
+from app.tool import CancelToken, tool_context_for
+from app.utils.abort_controller import AbortController
+from app.utils.hooks.exec_agent_hook import (
     STRUCTURED_OUTPUT_PROMPT,
     AgentHookRequest,
     AgentHookRunOutcome,
@@ -28,10 +31,11 @@ from app.loop.hooks.exec_agent import (
     create_structured_output_tool,
     exec_agent_hook,
 )
-from app.loop.hooks.exec_prompt import HookCancelled, exec_prompt_hook, run_with_signal
-from app.loop.hooks.schemas import AgentHook, PromptHook
-from app.loop.ledger import PhaseLedger
-from app.loop.streaming.abort import AbortController
+from app.utils.hooks.exec_prompt_hook import (
+    HookCancelled,
+    exec_prompt_hook,
+    run_with_signal,
+)
 
 HOOK_NAME = "PreToolUse:Bash"
 HOOK_EVENT = "PreToolUse"
@@ -311,7 +315,7 @@ def test_structured_output_tool_prompt_and_description():
 
 
 def _parent():
-    from app.loop.runner import build_builtin_tools
+    from app.cli.print import build_builtin_tools
 
     store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
     parent = tool_context_for(
@@ -388,7 +392,7 @@ def test_runner_does_not_compact_on_prompt_too_long():
 
 
 def test_runner_closes_the_loop_before_returning(monkeypatch):
-    import app.loop.engine as engine
+    import app.query.query as engine
 
     real = engine.run_loop
     closed: list[bool] = []
@@ -413,8 +417,8 @@ def test_runner_closes_the_loop_before_returning(monkeypatch):
 
 
 def test_live_call_model_binds_the_context_tools_and_streams_framed_blocks(monkeypatch):
-    import app.loop.model as model_mod
-    import app.loop.streaming.blocks as blocks_mod
+    import app.services.api.claude as blocks_mod
+    import app.services.api.claude as model_mod
     import app.utils.chat_model_factory as factory
     from app.config.config import Config
 

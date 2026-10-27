@@ -14,9 +14,9 @@ from dataclasses import FrozenInstanceError, replace
 import pytest
 from langchain_core.messages import HumanMessage
 
-from app.loop.context.app_state import AppState, AppStateStore, discard_app_state_update
-from app.loop.context.tool_context import CancelToken, ToolContext, tool_context_for
-from app.loop.ledger import PhaseLedger
+from app.state.app_state_store import AppState, AppStateStore, discard_app_state_update
+from app.tdd.ledger import PhaseLedger
+from app.tool import CancelToken, ToolContext, tool_context_for
 
 
 def confirm_red(state: AppState) -> AppState:

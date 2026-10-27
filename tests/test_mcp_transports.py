@@ -1,4 +1,4 @@
-"""`app/loop/mcp/transports.py`: the real stdio and ws transports, headers, the factory (offline)."""
+"""`app/services/mcp/client.py`: the real stdio and ws transports, headers, the factory (offline)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-import app.loop.mcp.transports as mtr
-from app.loop.mcp.client import call_mcp_tool, connect_to_server
-from app.loop.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
+import app.services.mcp.client as mtr
+from app.services.mcp.client import call_mcp_tool, connect_to_server
+from app.services.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
 
 SERVER = str(Path(__file__).parent / "fixtures" / "mcp_stdio_server.py")
 

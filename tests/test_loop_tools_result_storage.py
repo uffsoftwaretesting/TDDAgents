@@ -1,5 +1,5 @@
 """
-Oversized tool-result governance: `app/loop/tools/result_storage.py`.
+Oversized tool-result governance: `app/utils/tool_result_storage.py`.
 
 The numbers here are upstream's and the tests exist to keep them so. The behavioural
 claims — head-only preview, clamp not default, infinity opt-out, fail-open, create-only —
@@ -12,7 +12,7 @@ import math
 
 import pytest
 
-from app.loop.tools.result_storage import (
+from app.utils.tool_result_storage import (
     DEFAULT_MAX_RESULT_SIZE_CHARS,
     MAX_TOOL_RESULT_BYTES,
     PERSISTED_OUTPUT_CLOSING_TAG,
@@ -215,7 +215,7 @@ def test_a_tool_that_opted_out_is_never_persisted():
 
 def test_a_write_failure_leaves_the_original_content_alone(monkeypatch):
     """Fail-open: a storage problem must not also destroy the output."""
-    monkeypatch.setattr("app.loop.tools.result_storage.persist_tool_result", lambda *a, **k: None)
+    monkeypatch.setattr("app.utils.tool_result_storage.persist_tool_result", lambda *a, **k: None)
     content = "x" * 3000
     assert _persist(content, max_result_size_chars=1000) == content
 
@@ -227,7 +227,7 @@ def test_the_declared_limit_only_bites_when_it_is_below_the_clamp():
 
 
 def test_a_well_formed_tool_use_id_is_used_verbatim_as_the_filename():
-    from app.loop.tools.result_storage import safe_file_stem
+    from app.utils.tool_result_storage import safe_file_stem
 
     assert safe_file_stem("toolu_01ABCdef") == "toolu_01ABCdef"
     assert safe_file_stem("call-7.part") == "call-7.part"
@@ -236,7 +236,7 @@ def test_a_well_formed_tool_use_id_is_used_verbatim_as_the_filename():
 @pytest.mark.parametrize("hostile", ["../../etc/passwd", "a/b", "..", "", "...", "~/x", "a\\b"])
 def test_an_id_that_could_leave_the_directory_cannot(hostile):
     """No separator survives and no name starts with a dot, so the result stays one file."""
-    from app.loop.tools.result_storage import safe_file_stem
+    from app.utils.tool_result_storage import safe_file_stem
 
     stem = safe_file_stem(hostile)
     assert stem
@@ -245,7 +245,7 @@ def test_an_id_that_could_leave_the_directory_cannot(hostile):
 
 
 def test_an_empty_or_dotted_id_still_produces_a_usable_name():
-    from app.loop.tools.result_storage import safe_file_stem
+    from app.utils.tool_result_storage import safe_file_stem
 
     assert safe_file_stem("") == "result"
     assert safe_file_stem("...") == "result"

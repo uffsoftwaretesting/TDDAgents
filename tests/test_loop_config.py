@@ -13,7 +13,7 @@ from dataclasses import FrozenInstanceError, fields
 import pytest
 
 from app.config.config import Config
-from app.loop.config import Gates, RunConfig, build_run_config
+from app.query.config import Gates, RunConfig, build_run_config
 
 
 class TestBuildRunConfig:
@@ -64,7 +64,7 @@ class TestNoCeilings:
         The one ceiling, and it is upstream's: `withRetry.ts` -> `DEFAULT_MAX_RETRIES`.
         Nothing else in this record may become a budget — see the module docstring.
         """
-        from app.loop.retry import DEFAULT_MAX_RETRIES
+        from app.services.api.with_retry import DEFAULT_MAX_RETRIES
 
         config = build_run_config("r", postgres_checkpointing=True)
         assert config.max_retries == DEFAULT_MAX_RETRIES

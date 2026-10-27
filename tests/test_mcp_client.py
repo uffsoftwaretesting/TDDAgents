@@ -1,5 +1,5 @@
 """
-`app/loop/mcp/client.py`: connecting, listing, calling and result transformation (Phase 8),
+`app/services/mcp/client.py`: connecting, listing, calling and result transformation (Phase 8),
 against an in-memory SDK server (`mcp.client._memory.InMemoryTransport`), never the network.
 """
 
@@ -17,8 +17,8 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import EmbeddedResource, ImageContent, TextContent, TextResourceContents
 from pydantic import BaseModel
 
-import app.loop.mcp.client as mc
-from app.loop.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
+import app.services.mcp.client as mc
+from app.services.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
 
 CONFIG = McpServerConfig(type="stdio", scope="project", command="unused")
 
@@ -473,12 +473,12 @@ def test_get_mcp_instructions():
 
 def _frozen(monkeypatch: Any) -> None:
     """A fixed clock (1.5 s) and token, so persisted names are exact."""
-    monkeypatch.setattr("app.loop.mcp.client.time.time", lambda: 1.5)
-    monkeypatch.setattr("app.loop.mcp.client.secrets.token_hex", lambda n: "ab" * n)
+    monkeypatch.setattr("app.services.mcp.client.time.time", lambda: 1.5)
+    monkeypatch.setattr("app.services.mcp.client.secrets.token_hex", lambda n: "ab" * n)
 
 
 def test_blobs_are_saved_under_the_runs_tool_results_with_upstreams_name(tmp_path, monkeypatch):
-    from app.loop.tools.result_storage import tool_results_dir
+    from app.utils.tool_result_storage import tool_results_dir
 
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     _frozen(monkeypatch)
@@ -494,7 +494,7 @@ def test_blobs_are_saved_under_the_runs_tool_results_with_upstreams_name(tmp_pat
 
 
 def test_a_processed_result_saves_its_blobs_under_the_run(tmp_path, monkeypatch):
-    from app.loop.tools.result_storage import tool_results_dir
+    from app.utils.tool_result_storage import tool_results_dir
 
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     _frozen(monkeypatch)
@@ -505,7 +505,7 @@ def test_a_processed_result_saves_its_blobs_under_the_run(tmp_path, monkeypatch)
 
 
 def test_a_large_result_is_saved_as_indented_json_under_the_run(tmp_path, monkeypatch):
-    from app.loop.tools.result_storage import tool_results_dir
+    from app.utils.tool_result_storage import tool_results_dir
 
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.setenv("TDDAGENTS_MAX_MCP_OUTPUT_TOKENS", "10")
@@ -520,7 +520,7 @@ def test_a_large_result_is_saved_as_indented_json_under_the_run(tmp_path, monkey
 
 
 def test_a_called_tools_large_output_lands_under_the_calls_cwd(tmp_path, monkeypatch):
-    from app.loop.tools.result_storage import tool_results_dir
+    from app.utils.tool_result_storage import tool_results_dir
 
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     call("big", {}, tmp_path)
@@ -528,7 +528,7 @@ def test_a_called_tools_large_output_lands_under_the_calls_cwd(tmp_path, monkeyp
 
 
 def test_a_read_resource_blob_lands_under_the_run(tmp_path, monkeypatch):
-    from app.loop.tools.result_storage import tool_results_dir
+    from app.utils.tool_result_storage import tool_results_dir
 
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     _frozen(monkeypatch)
@@ -659,7 +659,7 @@ def test_the_client_introduces_itself_as_tddagents(monkeypatch):
         seen.update(k)
         return ClientSession(*a, **k)
 
-    monkeypatch.setattr("app.loop.mcp.client.ClientSession", spy)
+    monkeypatch.setattr("app.services.mcp.client.ClientSession", spy)
 
     async def scenario() -> None:
         await close(await connected())

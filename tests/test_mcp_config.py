@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.mcp.config import (
+from app.services.mcp.config import (
     get_claude_code_mcp_configs,
     get_global_config_path,
     get_mcp_configs_by_scope,
@@ -18,8 +18,8 @@ from app.loop.mcp.config import (
     parse_mcp_config,
     parse_mcp_config_from_file_path,
 )
-from app.loop.mcp.types import McpServerConfig
-from app.loop.permissions.settings import SettingsLocations
+from app.services.mcp.types import McpServerConfig
+from app.utils.settings.settings import SettingsLocations
 
 
 def _locations(tmp_path: Path) -> SettingsLocations:
@@ -244,7 +244,7 @@ class TestServerSchema:
         {"type": "claudeai-proxy", "url": "u", "id": "i"},
     ])
     def test_accepted(self, raw):
-        from app.loop.mcp.types import adheres_to_server_schema
+        from app.services.mcp.types import adheres_to_server_schema
 
         assert adheres_to_server_schema(raw) is True
 
@@ -268,12 +268,12 @@ class TestServerSchema:
         {"type": "claudeai-proxy", "url": "u", "ideName": "i"},
     ])
     def test_rejected(self, raw):
-        from app.loop.mcp.types import adheres_to_server_schema
+        from app.services.mcp.types import adheres_to_server_schema
 
         assert adheres_to_server_schema(raw) is False
 
     def test_the_headers_helper_is_kept(self):
-        from app.loop.mcp.types import server_config_from_raw
+        from app.services.mcp.types import server_config_from_raw
 
         assert server_config_from_raw({"type": "http", "url": "u", "headersHelper": "h.sh"}, "user").headers_helper == (
             "h.sh")
@@ -283,21 +283,21 @@ class TestValidationErrors:
     """`parseMcpConfig` / `parseMcpConfigFromFilePath`'s error objects, field for field."""
 
     def test_no_servers_object(self):
-        from app.loop.mcp.types import ValidationError
+        from app.services.mcp.types import ValidationError
 
         assert parse_mcp_config({}, expand_vars=False, scope="user", file_path="/f") == (None, [ValidationError(
             path="mcpServers", message="Does not adhere to MCP server configuration schema", scope="user",
             severity="fatal", file="/f")])
 
     def test_an_invalid_server(self):
-        from app.loop.mcp.types import ValidationError
+        from app.services.mcp.types import ValidationError
 
         assert parse_mcp_config({"mcpServers": {"b": {}}}, expand_vars=False, scope="local", file_path="/f") == (
             None, [ValidationError(path="mcpServers.b", message="Does not adhere to MCP server configuration schema",
                                    scope="local", severity="fatal", file="/f")])
 
     def test_missing_variables(self, monkeypatch):
-        from app.loop.mcp.types import ValidationError
+        from app.services.mcp.types import ValidationError
 
         monkeypatch.delenv("NOPE_A", raising=False)
         monkeypatch.delenv("NOPE_B", raising=False)
@@ -309,7 +309,7 @@ class TestValidationErrors:
             server_name="s")]
 
     def test_file_errors(self, tmp_path):
-        from app.loop.mcp.types import ValidationError
+        from app.services.mcp.types import ValidationError
 
         none = tmp_path / "none.json"
         assert parse_mcp_config_from_file_path(none, expand_vars=True, scope="project") == (None, [ValidationError(

@@ -51,7 +51,7 @@ def node_analyst(
     interaction_count = int(state.get("interaction_count") or 0) + 1
 
     if analyzer_fn is None:
-        from app.agents.langgraph.analyst import analyze_requirements
+        from app.session.agents.analyst import analyze_requirements
 
         analyzer_fn = analyze_requirements
 

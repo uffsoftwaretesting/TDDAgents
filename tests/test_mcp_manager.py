@@ -1,4 +1,4 @@
-"""`app/loop/mcp/manager.py`: connecting a run's servers, collecting their tools, shutting down."""
+"""`app/services/mcp/mcp_connection_manager.py`: connecting a run's servers, collecting their tools, shutting down."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 from mcp.client._memory import InMemoryTransport
 
-import app.loop.mcp.manager as mm
-from app.loop.mcp.config import get_global_config_path
-from app.loop.mcp.types import (
+import app.services.mcp.mcp_connection_manager as mm
+from app.services.mcp.config import get_global_config_path
+from app.services.mcp.types import (
     ConnectedMCPServer,
     DisabledMCPServer,
     FailedMCPServer,
@@ -91,7 +91,7 @@ def test_connect_collects_clients_tools_and_resource_tools_once(tmp_path):
 def test_a_disabled_server_is_recorded_not_connected(tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     (tmp_path / "cfg").mkdir()
-    from app.loop.mcp.config import get_project_config_key
+    from app.services.mcp.config import get_project_config_key
     get_global_config_path().write_text(json.dumps(
         {"projects": {get_project_config_key(tmp_path): {"disabledMcpServers": ["off"]}}}))
     mgr = manager(tmp_path, off=OSError("must not connect"))
@@ -155,7 +155,7 @@ def test_the_clients_feed_the_instructions_delta(tmp_path, monkeypatch):
     """`attachments/deltas.py` reads `type`, `name` and `instructions` off the manager's clients."""
     from types import SimpleNamespace
 
-    from app.loop.attachments.deltas import (
+    from app.utils.attachments import (
         MCP_INSTR_DELTA_ENV,
         get_mcp_instructions_delta_attachment,
     )

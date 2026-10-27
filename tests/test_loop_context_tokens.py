@@ -1,10 +1,10 @@
 """
-Tests for Part E1: Token counting substrate (app/loop/context/tokens.py).
+Tests for Part E1: Token counting substrate (app/utils/tokens.py).
 """
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.context.tokens import (
+from app.utils.tokens import (
     TokenCounter,
     TokenWarningState,
     calculate_token_warning_state,

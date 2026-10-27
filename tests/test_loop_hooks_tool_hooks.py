@@ -1,5 +1,5 @@
 """
-Tests for `app/loop/hooks/tool_hooks.py`: the hooks around one tool call.
+Tests for `app/services/tools/tool_hooks.py`: the hooks around one tool call.
 
 Ported from `reference/claude-code/src/services/tools/toolHooks.ts` -> `runPreToolUseHooks`,
 `runPostToolUseHooks`, `runPostToolUseFailureHooks`. Every branch is driven through a
@@ -11,21 +11,21 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.messages import HookAttachment, HookBlockingError
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.hooks.tool_hooks import (
+from app.services.tools.tool_hooks import (
     get_rule_behavior_description,
     run_post_tool_use_failure_hooks,
     run_post_tool_use_hooks,
     run_pre_tool_use_hooks,
 )
-from app.loop.permissions.types import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tool import tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     ToolPermissionContext,
 )
+from app.utils.messages import HookAttachment, HookBlockingError
 from tests.hook_doubles import ScriptedDispatcher
 
 BLOCK = HookBlockingError(blocking_error="no writes", command="vet.sh")

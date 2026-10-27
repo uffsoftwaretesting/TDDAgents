@@ -3,13 +3,13 @@
 
 from __future__ import annotations
 
-from app.loop.storage.paths import (
+from app.utils.session_storage_portable import (
     get_agent_transcript_path,
     get_project_dir,
     get_projects_dir,
     get_transcript_path,
 )
-from app.loop.tools.result_storage import sanitize_path, tool_results_dir
+from app.utils.tool_result_storage import sanitize_path, tool_results_dir
 
 
 def test_the_projects_dir_is_under_the_config_home(tmp_path, monkeypatch):

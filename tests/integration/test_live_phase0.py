@@ -39,7 +39,7 @@ def real_openai_key(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 def test_live_runner_completes_a_red_green_cycle(real_openai_key: str, python_workspace) -> None:
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
 
     result = asyncio.run(tdd_loop_runner(SPEC, 0, {"session_id": "live"}, workspace=python_workspace))
 
@@ -56,13 +56,13 @@ def test_live_model_call_yields_whole_messages(real_openai_key: str, python_work
     """A real stream with a tool call must reach the loop as one complete AIMessage."""
     from langchain_core.messages import AIMessageChunk, HumanMessage
 
-    from app.loop.config import build_run_config
-    from app.loop.context.app_state import AppStateStore
-    from app.loop.context.tool_context import tool_context_for
-    from app.loop.messages import tool_calls_in
-    from app.loop.model import stream_call_model
-    from app.loop.runner import build_builtin_tools
-    from app.loop.state import initial_loop_state
+    from app.cli.print import build_builtin_tools
+    from app.query.config import build_run_config
+    from app.query.state import initial_loop_state
+    from app.services.api.claude import stream_call_model
+    from app.state.app_state_store import AppStateStore
+    from app.tool import tool_context_for
+    from app.utils.messages import tool_calls_in
 
     tools = tuple(build_builtin_tools())
     ctx = tool_context_for(AppStateStore(), tools=tools, workspace=python_workspace)

@@ -1,4 +1,4 @@
-"""Parsing hook output and turning it into a result (`app/loop/hooks/output.py`)."""
+"""Parsing hook output and turning it into a result (`app/types/hooks.py`)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from app.loop.hooks.messages import HookAttachment, HookBlockingError
-from app.loop.hooks.output import (
+from app.schemas.hooks import CommandHook
+from app.types.hooks import (
     EXPECTED_SCHEMA_HINT,
     AggregatedHookResult,
     HookOutputError,
@@ -24,7 +24,7 @@ from app.loop.hooks.output import (
     process_hook_json_output,
     validate_hook_json,
 )
-from app.loop.hooks.schemas import CommandHook
+from app.utils.messages import HookAttachment, HookBlockingError
 
 HOOK = CommandHook(command="vet.sh")
 

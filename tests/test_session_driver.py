@@ -111,7 +111,7 @@ def test_default_workspace_and_runner_are_the_production_ones() -> None:
         made.append(thread_id)
         return "ws"
 
-    with patch("app.loop.runner.session_workspace", fake_workspace):
+    with patch("app.cli.print.session_workspace", fake_workspace):
         shell, ws = build_session_shell("t-9", SessionOptions(checkpoint=MEMORY_CHECKPOINT))
     assert made == ["t-9"] and ws == "ws"
     assert isinstance(shell, SessionShell)
@@ -231,7 +231,7 @@ def test_a_headless_session_end_to_end_through_the_real_runner(python_workspace:
 
     from langchain_core.messages import AIMessage
 
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
     from tests.test_phase0_baseline import CALC_IMPL, CALC_TEST, _call, _scripted_deps
 
     turns = [

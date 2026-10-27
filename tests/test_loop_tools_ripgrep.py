@@ -1,5 +1,5 @@
 """
-`app/loop/tools/ripgrep.py`, the port of claude-code's `src/utils/ripgrep.ts`.
+`app/utils/ripgrep.py`, the port of claude-code's `src/utils/ripgrep.ts`.
 
 A scripted workspace stands in for the shell so each upstream branch — exit 0/1, critical
 exit, EAGAIN retry, timeout, partial output, first-use probe, sandbox provisioning — is
@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-import app.loop.tools.ripgrep as rg
-from app.loop.tools.ripgrep import (
+import app.utils.ripgrep as rg
+from app.utils.ripgrep import (
     RIPGREP_PIP_SPEC,
     SANDBOX_RIPGREP_DIR,
     RipgrepTimeoutError,

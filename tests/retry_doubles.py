@@ -1,4 +1,4 @@
-"""Doubles for code that goes through `app/loop/retry.py::with_retry`."""
+"""Doubles for code that goes through `app/services/api/with_retry.py::with_retry`."""
 
 from __future__ import annotations
 

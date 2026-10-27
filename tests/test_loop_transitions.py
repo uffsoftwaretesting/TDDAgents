@@ -14,7 +14,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from app.loop.transitions import Continue, Terminal, Terminated, Transition
+from app.query.transitions import Continue, Terminal, Terminated, Transition
 
 
 class TestTheSetIsClosed:

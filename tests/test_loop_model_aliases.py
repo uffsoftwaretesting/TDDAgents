@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.loop.model_aliases import (
+from app.utils.model.model import (
     DEFAULT_MODEL_ALIAS,
     MODEL_ALIASES,
     get_agent_model,

@@ -1,6 +1,6 @@
 """
 Mutation-driven pins for Phase 4's hook call sites (cluster A: the runner, the tool pipeline,
-PermissionRequest, and the per-event entry points and runners in `app/loop/hooks/`).
+PermissionRequest, and the per-event entry points and runners in `app/utils/hooks/`).
 
 Each test names what a surviving mutant got away with: an argument dropped on the way to a
 hook (its payload, its tool-use id, the cancel signal), or a value the hook system hands on.
@@ -19,12 +19,27 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.deps import CompactionResult, LoopDeps, StopHookResult
-from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.execute import (
+from app.query.config import build_run_config
+from app.query.deps import LoopDeps
+from app.query.state import CompactionResult, initial_loop_state
+from app.query.stop_hooks import (
+    StopHookResult,
+    build_stop_hooks_runner,
+    handle_stop_hooks,
+)
+from app.schemas.hooks import CommandHook, HookMatcher
+from app.services.tools.tool_execution import run_tool_use
+from app.services.tools.tool_hooks import (
+    run_post_tool_use_failure_hooks,
+    run_post_tool_use_hooks,
+    run_pre_tool_use_hooks,
+)
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import ToolResult, build_tool, tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import PermissionMode, ToolPermissionContext
+from app.utils.hooks.hooks import (
     HookDispatcher,
     execute_session_start_hooks,
     execute_stop_hooks,
@@ -32,25 +47,12 @@ from app.loop.hooks.execute import (
     execute_user_prompt_submit_hooks,
     last_assistant_text,
 )
-from app.loop.hooks.messages import HookBlockingError
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.hooks.schemas import CommandHook, HookMatcher
-from app.loop.hooks.session import process_session_start_hooks
-from app.loop.hooks.stop_hooks import build_stop_hooks_runner, handle_stop_hooks
-from app.loop.hooks.tool_hooks import (
-    run_post_tool_use_failure_hooks,
-    run_post_tool_use_hooks,
-    run_pre_tool_use_hooks,
-)
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.permission_request import (
+from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
+from app.utils.messages import HookBlockingError
+from app.utils.permissions.permissions import (
     run_permission_request_hooks_for_headless_agent,
 )
-from app.loop.permissions.types import PermissionMode, ToolPermissionContext
-from app.loop.state import initial_loop_state
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import run_tool_use
-from app.loop.tools.types import ToolResult
+from app.utils.session_start import process_session_start_hooks
 from tests.hook_doubles import ScriptedDispatcher
 
 CONFIG = build_run_config("mutation-a", postgres_checkpointing=False)
@@ -243,7 +245,7 @@ def test_session_start_context_is_recorded_as_a_session_start_attachment():
 
 
 def test_prompt_context_is_recorded_as_a_user_prompt_submit_attachment():
-    from app.loop.hooks.session import process_user_prompt_submit_hooks
+    from app.utils.session_start import process_user_prompt_submit_hooks
 
     d = ScriptedDispatcher(script={"UserPromptSubmit": [AggregatedHookResult(additional_contexts=("ctx",))]})
     outcome = asyncio.run(process_user_prompt_submit_hooks(worker_context(d), "p", "default"))
@@ -271,7 +273,7 @@ def test_pipeline_hooks_are_handed_the_call_id():
 
 def test_the_permission_request_is_handed_the_call_id():
     """A default-mode write is an 'ask'; headless, PermissionRequest hooks get the call id."""
-    from app.loop.tools.fs import build_write_file_tool
+    from app.tools.file_tools import build_write_file_tool
 
     d = Recorder()
     context = worker_context(d, mode=PermissionMode.DEFAULT)
@@ -335,8 +337,8 @@ def loop_deps(model: Model) -> LoopDeps:
 
 
 def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
-    import app.loop.hooks.runtime as runtime
-    from app.loop.runner import run_settings_locations, tdd_loop_runner
+    import app.utils.hooks.hook_dispatcher as runtime
+    from app.cli.print import run_settings_locations, tdd_loop_runner
     from tests.conftest import FakeWorkspace
 
     project, home, managed, ws_root = (tmp_path / n for n in ("proj", "home", "etc", "ws"))
@@ -368,7 +370,7 @@ def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
     assert seen["cwd"] == str(ws_root)
     assert seen["project_dir"] == str(project)
     assert seen["model"] == config.model
-    from app.loop.storage.paths import get_transcript_path
+    from app.utils.session_storage_portable import get_transcript_path
 
     assert seen["transcript_path"] == str(get_transcript_path(config.run_id, str(ws_root)))
     perm = state.tool_context.get_app_state().tool_permission_context
@@ -376,7 +378,7 @@ def test_the_runner_builds_its_dispatcher_from_the_run(monkeypatch, tmp_path):
 
 
 def test_a_stopped_prompt_reports_its_plan_item(monkeypatch, tmp_path):
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
     from tests.conftest import FakeWorkspace
 
     d = ScriptedDispatcher(script={"UserPromptSubmit": [

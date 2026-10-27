@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import asyncio
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.tools.fs import build_read_file_tool
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.tools.file_tools import build_read_file_tool
 from tests.conftest import FakeWorkspace
 
 

@@ -25,12 +25,12 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 import app.workspace.pyenv as pyenv
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.types import PermissionMode
-from app.loop.state import initial_loop_state
+from app.query.state import initial_loop_state
 from app.session.export import EXPORT_EXCLUDES, export_run_workspace
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import tool_context_for
+from app.types.permissions import PermissionMode
 from app.workspace.local import LocalWorkspace
 from app.workspace.pyenv import (
     REQUIRED_PACKAGES,
@@ -217,15 +217,15 @@ def _clean_env(**extra: str) -> dict[str, str]:
 def test_app_main_imports_without_an_e2b_key(tmp_path):
     """The import chain app.main -> session driver -> runner -> factory was broken (ImportError)."""
     env = _clean_env(OPENAI_API_KEY="k", POSTGRES_URL="postgresql://x")
-    res = subprocess.run([sys.executable, "-c", "import app.main, app.loop.factory, app.loop.runner"],
+    res = subprocess.run([sys.executable, "-c", "import app.main, app.query.deps, app.cli.print"],
                          cwd=tmp_path, env=env, capture_output=True, text=True, check=False)
     assert res.returncode == 0, res.stderr
 
 
 def test_production_deps_are_complete():
-    from app.loop.factory import get_production_deps
-    from app.loop.model import stream_call_model
-    from app.loop.tools.orchestration import run_tools
+    from app.query.deps import get_production_deps
+    from app.services.api.claude import stream_call_model
+    from app.services.tools.tool_orchestration import run_tools
 
     deps = get_production_deps()
     assert deps.call_model is stream_call_model
@@ -281,8 +281,8 @@ def test_run_tests_is_the_only_ledger_writer():
     evidence and never create an observation — pinned here so another writer, or a spawn
     write that bypasses `transition_to`, cannot appear unnoticed.
     """
-    spawn_writers = ["app/loop/agents/tool.py", "app/loop/skills/tool.py"]
-    assert _ledger_writers() == [*spawn_writers, "app/loop/tools/run_tests.py"]
+    spawn_writers = ["app/tools/agent_tool/agent_tool.py", "app/tools/skill_tool/skill_tool.py"]
+    assert _ledger_writers() == ["app/tdd/run_tests_tool/run_tests_tool.py", *spawn_writers]
     for path in spawn_writers:
         nodes = original_nodes(REPO / path)
         writes = calls_to(nodes, "set_app_state")
@@ -304,9 +304,11 @@ def test_initial_state_reads_the_store_and_never_writes_it():
 
 def test_engine_does_not_write_a_stale_state_ledger_back():
     """A LoopState ledger that differs from the store must not overwrite the store."""
-    from app.loop.config import build_run_config
-    from app.loop.deps import CompactionResult, LoopDeps, StopHookResult
-    from app.loop.engine import drain, run_loop
+    from app.query.config import build_run_config
+    from app.query.deps import LoopDeps
+    from app.query.query import drain, run_loop
+    from app.query.state import CompactionResult
+    from app.query.stop_hooks import StopHookResult
 
     store = AppStateStore()
     state = dataclasses.replace(initial_loop_state((), tool_context_for(store)),
@@ -335,7 +337,7 @@ def test_engine_does_not_write_a_stale_state_ledger_back():
 # ── the production runner, end to end with a scripted model ──────────────────
 
 def _scripted_deps(turns: list[list[AIMessage]], seen: list[Any] | None = None) -> Any:
-    from app.loop.factory import get_production_deps
+    from app.query.deps import get_production_deps
 
     async def model(state: Any, config: Any) -> AsyncIterator[Any]:
         if seen is not None:
@@ -357,7 +359,7 @@ CALC_IMPL = "def add(a, b):\n    return a + b\n"
 
 
 def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
 
     project = tmp_path / "project"
     (project / ".tddagents").mkdir(parents=True)
@@ -428,7 +430,7 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
 
 def test_runner_blocks_production_writes_in_red(python_workspace):
     """Barrier 2 at the runtime gate: the first write to production code in RED is refused."""
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
 
     turns = [
         [_call("WriteFile", "c1", file_path="calculator.py", content=CALC_IMPL)],
@@ -444,13 +446,13 @@ def test_runner_blocks_production_writes_in_red(python_workspace):
 
 
 def test_runner_reports_failure_without_inventing_progress(python_workspace):
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
 
     async def crashing(state: Any, config: Any) -> AsyncIterator[Any]:
         raise RuntimeError("provider down")
         yield  # pragma: no cover
 
-    from app.loop.factory import get_production_deps
+    from app.query.deps import get_production_deps
 
     deps = dataclasses.replace(get_production_deps(), call_model=crashing)
     result = asyncio.run(tdd_loop_runner("x", 1, {"session_id": "s"}, workspace=python_workspace, deps=deps))
@@ -460,8 +462,8 @@ def test_runner_reports_failure_without_inventing_progress(python_workspace):
 
 
 def test_runner_crash_is_a_model_error(python_workspace, monkeypatch):
-    import app.loop.query_engine as query_engine
-    import app.loop.runner as runner_mod
+    import app.cli.print as runner_mod
+    import app.query_engine as query_engine
 
     def boom(*a: Any, **k: Any) -> Any:
         raise RuntimeError("engine exploded")
@@ -475,8 +477,8 @@ def test_runner_crash_is_a_model_error(python_workspace, monkeypatch):
 def test_runner_writes_the_transcript_outside_the_workspace(python_workspace):
     """Phase 6: upstream's `<config>/projects/<sanitized cwd>/<session>.jsonl`, plus the
     session's `events.jsonl`; nothing lands in the workspace."""
-    from app.loop.runner import tdd_loop_runner
-    from app.loop.storage.paths import get_project_dir
+    from app.cli.print import tdd_loop_runner
+    from app.utils.session_storage_portable import get_project_dir
 
     asyncio.run(tdd_loop_runner("x", 0, {"session_id": "s"}, workspace=python_workspace,
                                 deps=_scripted_deps([[AIMessage(content="done")]])))
@@ -488,7 +490,7 @@ def test_runner_writes_the_transcript_outside_the_workspace(python_workspace):
 
 
 def _recording_deps(seen: list[Any]) -> Any:
-    from app.loop.factory import get_production_deps
+    from app.query.deps import get_production_deps
 
     async def model(state: Any, config: Any) -> AsyncIterator[Any]:
         seen.append((state, config))
@@ -500,7 +502,7 @@ def _recording_deps(seen: list[Any]) -> Any:
 def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     import re
 
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
 
     seen: list[Any] = []
     asyncio.run(tdd_loop_runner("spec", 0, {"session_id": "s"}, workspace=python_workspace,
@@ -508,7 +510,7 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
     state, config = seen[0]
     assert re.fullmatch(r"loop-[0-9a-f]{32}", config.run_id)
     assert config.gates.postgres_checkpointing is False
-    from app.loop.storage.paths import get_transcript_path
+    from app.utils.session_storage_portable import get_transcript_path
 
     assert get_transcript_path(config.run_id, str(python_workspace.root)).is_file()
     # Phase 8: the skill listing precedes the TDD state (upstream's source order).
@@ -519,8 +521,8 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
 
 
 def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatch, python_workspace):
-    import app.loop.factory as factory
-    import app.loop.runner as runner_mod
+    import app.cli.print as runner_mod
+    import app.query.deps as factory
 
     asked: list[Any] = []
 
@@ -544,7 +546,7 @@ def test_runner_defaults_to_the_session_workspace_and_production_deps(monkeypatc
 
 
 def test_runner_tolerates_a_workspace_without_a_run_dir(make_fake_workspace):
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
 
     ws = make_fake_workspace()
     assert not hasattr(ws, "run_dir")
@@ -553,7 +555,7 @@ def test_runner_tolerates_a_workspace_without_a_run_dir(make_fake_workspace):
 
 
 def test_runner_needs_a_session_id_for_its_default_workspace():
-    from app.loop.runner import default_workspace
+    from app.cli.print import default_workspace
 
     with pytest.raises(ValueError, match="^tdd_loop_runner needs a session_id to locate the session workspace$"):
         default_workspace({})
@@ -562,7 +564,7 @@ def test_runner_needs_a_session_id_for_its_default_workspace():
 
 
 def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):
-    import app.loop.runner as runner_mod
+    import app.cli.print as runner_mod
     from app.config.config import Config
 
     monkeypatch.setattr(Config, "LOCAL_WORKSPACE_ROOT", str(tmp_path / "runs"))
@@ -583,7 +585,7 @@ def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):
 # ── edges the mutation run surfaced ──────────────────────────────────────────
 
 def test_production_compact_is_an_inert_passthrough():
-    from app.loop.factory import get_production_deps, production_compact
+    from app.query.deps import get_production_deps, production_compact
 
     assert get_production_deps().compact is production_compact
     state = initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
@@ -599,8 +601,8 @@ async def _as_coroutine(awaitable: Any) -> Any:
 
 def test_production_stop_hooks_enforce_barrier_three():
     """Phase 4: the production stop hooks are no longer a no-op — RED cannot terminate."""
-    from app.loop.deps import StopHookResult
-    from app.loop.factory import get_production_deps
+    from app.query.deps import get_production_deps
+    from app.query.stop_hooks import StopHookResult
 
     state = initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
     pending = get_production_deps().stop_hooks(state, None)  # type: ignore[arg-type]
@@ -653,7 +655,7 @@ def test_local_resolve_names_the_escaping_path(tmp_path):
 
 
 def test_run_tests_carries_workspace_stderr(make_fake_workspace):
-    from app.loop.tools.run_tests import _default_test_runner
+    from app.tdd.run_tests_tool.run_tests_tool import _default_test_runner
     from app.workspace.base import CommandResult
 
     ws = make_fake_workspace()
@@ -665,7 +667,10 @@ def test_run_tests_carries_workspace_stderr(make_fake_workspace):
 
 
 def test_run_tests_rejects_a_runner_result_without_an_exit_code():
-    from app.loop.tools.run_tests import RunTestsUnavailable, _default_test_runner
+    from app.tdd.run_tests_tool.run_tests_tool import (
+        RunTestsUnavailable,
+        _default_test_runner,
+    )
 
     ctx: Any = SimpleNamespace(test_runner=lambda path: object())
     with pytest.raises(RunTestsUnavailable, match="^the attached test runner returned no exit code$"):
@@ -673,7 +678,7 @@ def test_run_tests_rejects_a_runner_result_without_an_exit_code():
 
 
 def test_run_tests_tool_is_serial():
-    from app.loop.tools.run_tests import build_run_tests_tool
+    from app.tdd.run_tests_tool.run_tests_tool import build_run_tests_tool
 
     assert build_run_tests_tool().is_concurrency_safe({}) is False
 
@@ -683,8 +688,8 @@ def test_the_runner_refreshes_the_pool_only_when_the_phase_moves(python_workspac
     `refreshTools` wiring: RED hides the production writers, and the GREEN that RunTests
     records must bring them back — on the next turn, not the next sub-requirement.
     """
-    from app.loop.ledger import TddPhase
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
+    from app.tdd.ledger import TddPhase
 
     seen: list[Any] = []
     turns = [

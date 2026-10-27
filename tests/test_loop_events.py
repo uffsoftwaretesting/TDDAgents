@@ -6,11 +6,11 @@ from __future__ import annotations
 import dataclasses
 import json
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.events import TransitionEventRecorder, events_path
-from app.loop.ledger import PhaseLedger, TddPhase, TestRunRecord
-from app.loop.transitions import Continue, Terminal, Terminated, Transition
-from app.metrics.event_log import EventLog, EventType
+from app.query.transitions import Continue, Terminal, Terminated, Transition
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.event_log import EventLog, EventType
+from app.tdd.events import TransitionEventRecorder, events_path
+from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 
 
 def _recorder(tmp_path, store, **kw):
@@ -104,7 +104,7 @@ def test_unknown_events_are_ignored(tmp_path):
 
 def test_the_events_file_lives_in_the_session_directory(tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path))
-    from app.loop.tools.result_storage import sanitize_path
+    from app.utils.tool_result_storage import sanitize_path
 
     assert events_path("s1", "/w/x") == tmp_path / "projects" / sanitize_path("/w/x") / "s1" / "events.jsonl"
 

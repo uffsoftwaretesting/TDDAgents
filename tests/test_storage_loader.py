@@ -11,14 +11,16 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.compact.compact import create_compact_boundary_message
-from app.loop.storage.entries import EntryStamp, build_entry, message_uuid
-from app.loop.storage.loader import (
+from app.services.compact.compact import create_compact_boundary_message
+from app.utils.session_storage import (
+    EntryStamp,
     LoadedTranscript,
     build_conversation_chain,
+    build_entry,
     get_agent_transcript,
     load_messages_from_jsonl_path,
     load_transcript_file,
+    message_uuid,
 )
 
 STAMP = EntryStamp(session_id="s1", cwd="/w", version="v", git_branch=None)
@@ -146,7 +148,7 @@ def test_a_compact_boundary_starts_a_new_chain(tmp_path):
 def test_a_parent_cycle_returns_the_partial_chain(caplog):
     a = entry(HumanMessage(content="a"), "a", "b", ts(1))
     b = entry(AIMessage(content="b"), "b", "a", ts(2))
-    with caplog.at_level(logging.ERROR, logger="app.loop.storage.loader"):
+    with caplog.at_level(logging.ERROR, logger="app.utils.session_storage"):
         chain = build_conversation_chain({"a": a, "b": b}, b)
     assert [e["uuid"] for e in chain] == ["a", "b"]
     assert "Cycle detected in parentUuid chain at message b" in caplog.text
@@ -285,7 +287,7 @@ def test_a_non_message_terminal_whose_parent_is_missing_is_no_leaf(tmp_path):
 
 
 def test_a_cycle_behind_a_terminal_ends_the_ancestor_walk():
-    from app.loop.storage.loader import _leaf_uuids
+    from app.utils.session_storage import _leaf_uuids
 
     t = entry(SystemMessage(content="t"), "t", "a", ts(1))
     a = entry(SystemMessage(content="a"), "a", "b", ts(2))
@@ -348,7 +350,7 @@ def test_an_agent_leaf_is_the_entry_nobody_points_at_not_the_newest(tmp_path):
 
 
 def test_a_chain_of_non_messages_that_runs_out_of_parents_has_no_leaf():
-    from app.loop.storage.loader import _leaf_uuids
+    from app.utils.session_storage import _leaf_uuids
 
     entries: dict[str, dict[str, Any]] = {
         "s1": {"uuid": "s1", "type": "system", "parentUuid": None},
@@ -358,7 +360,7 @@ def test_a_chain_of_non_messages_that_runs_out_of_parents_has_no_leaf():
 
 
 def test_a_cycle_of_non_messages_behind_a_terminal_ends_the_walk():
-    from app.loop.storage.loader import _leaf_uuids
+    from app.utils.session_storage import _leaf_uuids
 
     entries: dict[str, dict[str, Any]] = {
         "t": {"uuid": "t", "type": "system", "parentUuid": "a"},

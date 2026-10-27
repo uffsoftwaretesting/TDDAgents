@@ -6,14 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.agents.definition import AgentDefinition, AgentFrontmatterError
-from app.loop.agents.loader import (
+from app.tdd.ledger import TddPhase
+from app.tools.agent_tool.load_agents_dir import (
+    AgentDefinition,
+    AgentFrontmatterError,
     get_agent_definitions_with_overrides,
     load_agent_definition,
     load_agent_definition_from_path,
     parse_markdown_frontmatter,
 )
-from app.loop.ledger import TddPhase
 
 
 def test_agent_definition_dataclass_fields() -> None:

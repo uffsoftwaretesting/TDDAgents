@@ -13,24 +13,22 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import DenialTrackingBox, tool_context_for
-from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.execute import HookDispatcher, execute_permission_denied_hooks
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.hooks.schemas import CommandHook, HookMatcher, hooks_schema_errors
-from app.loop.hooks.tool_hooks import run_permission_denied_hooks
-from app.loop.permissions.denial_tracking import DenialTrackingState
-from app.loop.permissions.rules import extract_permission_context
-from app.loop.permissions.types import (
+from app.schemas.hooks import CommandHook, HookMatcher, hooks_schema_errors
+from app.services.tools.tool_execution import run_tool_use
+from app.services.tools.tool_hooks import run_permission_denied_hooks
+from app.state.app_state_store import AppStateStore
+from app.tool import DenialTrackingBox, ToolResult, build_tool, tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionResult,
 )
-from app.loop.permissions.yolo_classifier import format_action_for_classifier
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import run_tool_use
-from app.loop.tools.types import ToolResult
+from app.utils.hooks.hooks import HookDispatcher, execute_permission_denied_hooks
+from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
+from app.utils.permissions.denial_tracking import DenialTrackingState
+from app.utils.permissions.permissions import extract_permission_context
+from app.utils.permissions.yolo_classifier import format_action_for_classifier
 from tests.hook_doubles import ScriptedDispatcher
 from tests.test_loop_permissions_auto_mode import (
     AUTO,
@@ -296,7 +294,7 @@ def test_an_allowlisted_call_resets_the_streak():
 
 
 def test_the_classifier_is_handed_the_action_tools_and_memory(monkeypatch):
-    import app.loop.permissions.yolo_classifier as yc
+    import app.utils.permissions.yolo_classifier as yc
 
     monkeypatch.setattr(yc, "cached_tddagents_md", lambda run_id: f"md:{run_id}")
     tool = AskTool()

@@ -15,7 +15,7 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END
 
-from app.loop.transitions import Terminal
+from app.query.transitions import Terminal
 from app.session.analyst import (
     APPROVAL,
     HEADLESS_CLARIFICATION_ERROR,
@@ -332,7 +332,7 @@ class TestEngineerNode:
         assert "Specification generated: 3 characters." in caplog.text
 
     def test_default_seam_is_the_engineer_agent(self) -> None:
-        with patch("app.agents.langgraph.engineer.generate_specification", return_value="S") as seam:
+        with patch("app.session.agents.engineer.generate_specification", return_value="S") as seam:
             out = node_engineer({"requirements": "R", "conversation_history": "H"})
         seam.assert_called_once_with("R", "H")
         assert out["specification"] == "S"
@@ -821,11 +821,11 @@ class TestMutationDefensePhase9:
     """Gaps the Phase 9 mutation run surfaced."""
 
     def test_default_seams_are_the_agents(self) -> None:
-        with patch("app.agents.langgraph.analyst.analyze_requirements", return_value=direct("", "")) as seam:
+        with patch("app.session.agents.analyst.analyze_requirements", return_value=direct("", "")) as seam:
             out = node_analyst({"user_input": "u", "conversation_history": "h"})
         seam.assert_called_once_with("u", "h")
         assert out["status"] == SessionStatus.ANALYSIS_COMPLETE
-        with patch("app.agents.langgraph.planner.generate_plan", return_value=["A"]) as plan_seam:
+        with patch("app.session.agents.planner.generate_plan", return_value=["A"]) as plan_seam:
             assert node_plan({"specification": "S"})["plan"] == ["A"]
         plan_seam.assert_called_once_with("S")
 

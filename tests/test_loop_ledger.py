@@ -12,7 +12,7 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
-from app.loop.ledger import PhaseLedger
+from app.tdd.ledger import PhaseLedger
 
 
 class TestStartingPosition:
@@ -53,13 +53,13 @@ class TestGreenInRedNeedsNoSpecialCase:
 
 class TestTddPhaseValidation:
     def test_phase_accepts_tdd_phase_enum(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         ledger = PhaseLedger(phase=TddPhase.GREEN)
         assert ledger.phase == TddPhase.GREEN
 
     def test_phase_accepts_valid_string_and_normalizes(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         ledger = PhaseLedger(phase="REFACTOR")
         assert ledger.phase == TddPhase.REFACTOR
@@ -72,7 +72,7 @@ class TestTddPhaseValidation:
 
 class TestWithTestResult:
     def test_failing_test_in_red_advances_to_green_and_confirms_red(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False)
         updated = initial.with_test_result(exit_code=1)
@@ -82,7 +82,7 @@ class TestWithTestResult:
         assert updated.is_cycle_complete is False
 
     def test_failing_test_in_green_leaves_green_passed_false(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
         updated = initial.with_test_result(exit_code=1)
@@ -91,7 +91,7 @@ class TestWithTestResult:
         assert updated.green_passed is False
 
     def test_failing_test_in_refactor_marks_green_passed_false(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.REFACTOR, red_confirmed=True, green_passed=True)
         updated = initial.with_test_result(exit_code=2)
@@ -100,7 +100,7 @@ class TestWithTestResult:
         assert updated.is_cycle_complete is False
 
     def test_passing_test_after_red_confirmed_marks_green_passed_true(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=False)
         updated = initial.with_test_result(exit_code=0)
@@ -110,7 +110,7 @@ class TestWithTestResult:
         assert updated.is_cycle_complete is True
 
     def test_passing_test_without_red_confirmed_is_f2_case(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False)
         updated = initial.with_test_result(exit_code=0)
@@ -122,28 +122,28 @@ class TestWithTestResult:
 
 class TestTransitionTo:
     def test_transition_to_refactor_succeeds_when_cycle_complete(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
         refactored = initial.transition_to(TddPhase.REFACTOR)
         assert refactored.phase == TddPhase.REFACTOR
 
     def test_transition_to_refactor_by_string_succeeds_when_cycle_complete(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
         refactored = initial.transition_to("REFACTOR")
         assert refactored.phase == TddPhase.REFACTOR
 
     def test_transition_to_refactor_fails_when_cycle_incomplete(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=False)
         with pytest.raises(ValueError, match="Cannot transition to REFACTOR before cycle has passed GREEN"):
             initial.transition_to(TddPhase.REFACTOR)
 
     def test_transition_to_other_phases_succeeds(self):
-        from app.loop.ledger import TddPhase
+        from app.tdd.ledger import TddPhase
 
         initial = PhaseLedger(phase=TddPhase.RED, red_confirmed=True)
         green = initial.transition_to(TddPhase.GREEN)

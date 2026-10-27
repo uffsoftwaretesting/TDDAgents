@@ -8,11 +8,9 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.gate import has_permissions_to_use_tool
-from app.loop.permissions.tdd import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.phase_permissions import (
     GENERIC_WRITER_TOOL_NAMES,
     IMPLEMENTATION_WRITER_TOOL_NAMES,
     TEST_WRITER_TOOL_NAMES,
@@ -22,17 +20,17 @@ from app.loop.permissions.tdd import (
     is_test_path,
     is_test_writing_tool,
 )
-from app.loop.permissions.types import (
+from app.tdd.run_tests_tool.run_tests_tool import RunTests
+from app.tool import BuiltTool, Tool, ToolResult, build_tool, tool_context_for
+from app.tools.tools import assemble_tool_pool
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionRule,
     PermissionRuleSource,
     ToolPermissionContext,
 )
-from app.loop.tools.base import BuiltTool, Tool, build_tool
-from app.loop.tools.pool import assemble_tool_pool
-from app.loop.tools.run_tests import RunTests
-from app.loop.tools.types import ToolResult
+from app.utils.permissions.permissions import has_permissions_to_use_tool
 
 
 def make_dummy_tool(
@@ -81,7 +79,7 @@ def test_is_test_path():
 
     # Non-test paths
     assert is_test_path("src/engine.py") is False
-    assert is_test_path("app/loop/engine.py") is False
+    assert is_test_path("app/query/query.py") is False
     assert is_test_path("main.py") is False
     assert is_test_path("") is False
     assert is_test_path("   ") is False

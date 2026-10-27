@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.loop.tools.base import build_tool
-from app.loop.tools.bash import bash_permission_matcher, build_bash_tool
-from app.loop.tools.fs import (
+from app.tool import ToolResult, build_tool
+from app.tools.bash_tool.bash_tool import bash_permission_matcher, build_bash_tool
+from app.tools.file_tools import (
     build_edit_tool,
     build_glob_tool,
     build_grep_tool,
@@ -15,7 +15,6 @@ from app.loop.tools.fs import (
     file_path_permission_matcher,
     search_pattern_permission_matcher,
 )
-from app.loop.tools.types import ToolResult
 
 
 async def _call(args: dict[str, Any], ctx: Any) -> ToolResult:  # pragma: no cover - never called
@@ -84,7 +83,7 @@ def test_bash_matches_every_condition_in_the_external_build():
 def test_bash_missing_command_never_reaches_the_matcher():
     """A schema-failing input gets no matcher at all (`prepareIfConditionMatcher`), so only a
     bare `Bash` condition matches it; the matcher itself is input-independent."""
-    from app.loop.hooks.matching import prepare_if_condition_matcher
+    from app.utils.hooks.hooks import prepare_if_condition_matcher
 
     matcher = prepare_if_condition_matcher(
         {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}, [build_bash_tool()]

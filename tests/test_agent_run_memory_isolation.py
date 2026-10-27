@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.agents.memory import AgentMemoryStore
+from app.tools.agent_tool.agent_memory import AgentMemoryStore
 
 
 def test_run_scope_without_a_run_id_has_no_shared_fallback(tmp_path):
@@ -24,8 +24,8 @@ def test_the_runner_discards_run_memory_when_the_run_ends(tmp_path, make_fake_wo
 
     from langchain_core.messages import AIMessage
 
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
+    from app.query.deps import get_production_deps
 
     seen: list[AgentMemoryStore] = []
 

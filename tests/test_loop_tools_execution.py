@@ -8,21 +8,21 @@ import asyncio
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.messages import ToolCall
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import (
+from app.services.tools.tool_execution import (
     CANCEL_MESSAGE,
     SYNTHETIC_TOOL_RESULT_PLACEHOLDER,
     run_tool_use,
     yield_missing_tool_results,
 )
-from app.loop.tools.types import (
+from app.state.app_state_store import AppStateStore
+from app.tool import (
     PermissionResult,
     ToolResult,
     ValidationResult,
+    build_tool,
+    tool_context_for,
 )
+from app.utils.messages import ToolCall
 
 
 class TestRunToolUse:

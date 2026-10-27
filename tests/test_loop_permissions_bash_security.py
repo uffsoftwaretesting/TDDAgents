@@ -7,8 +7,8 @@ test pins the bypass that motivated its validator.
 
 import pytest
 
-import app.loop.permissions.bash_security as bs
-from app.loop.permissions.bash_security import (
+import app.tools.bash_tool.bash_security as bs
+from app.tools.bash_tool.bash_security import (
     EARLY_VALIDATORS,
     NON_MISPARSING_VALIDATORS,
     VALIDATORS,
@@ -1011,7 +1011,7 @@ def test_early_allow_becomes_passthrough_with_reason():
 
 
 def test_early_allow_without_reason_says_command_allowed(monkeypatch):
-    from app.loop.permissions.types import PermissionResult
+    from app.types.permissions import PermissionResult
 
     def allow_no_reason(c):
         return PermissionResult(behavior="allow")
@@ -1021,7 +1021,7 @@ def test_early_allow_without_reason_says_command_allowed(monkeypatch):
 
 
 def test_early_deny_is_returned_unchanged(monkeypatch):
-    from app.loop.permissions.types import PermissionResult
+    from app.types.permissions import PermissionResult
 
     deny = PermissionResult(behavior="deny", message="no")
     monkeypatch.setattr(bs, "EARLY_VALIDATORS", (lambda c: deny,))
@@ -1029,7 +1029,7 @@ def test_early_deny_is_returned_unchanged(monkeypatch):
 
 
 def test_misparsing_wrapper_preserves_fields():
-    from app.loop.permissions.types import PermissionResult
+    from app.types.permissions import PermissionResult
 
     src = PermissionResult(behavior="ask", updated_input={"a": 1}, message="m", decision_reason={"type": "x"})
     out = bs._misparsing(src)

@@ -20,24 +20,26 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import ToolContext, tool_context_for
-from app.loop.deps import CompactionResult, LoopDeps
-from app.loop.engine import drain, run_loop
-from app.loop.hooks.stop_hooks import build_stop_hooks_runner
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.messages import Message, ToolCall
-from app.loop.state import initial_loop_state
-from app.loop.streaming.abort import (
+from app.query.config import build_run_config
+from app.query.deps import LoopDeps
+from app.query.query import drain, run_loop
+from app.query.state import CompactionResult, initial_loop_state
+from app.query.stop_hooks import build_stop_hooks_runner
+from app.query.transitions import Continue, Terminal
+from app.services.tools.tool_orchestration import run_tools
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.run_tests_tool.run_tests_tool import (
+    SuiteExecutionResult,
+    build_run_tests_tool,
+)
+from app.tool import BuiltTool, ToolContext, ToolResult, build_tool, tool_context_for
+from app.utils.abort_controller import (
     AbortController,
     bridge_cancel_token,
     create_child_abort_controller,
 )
-from app.loop.tools.base import BuiltTool, ToolResult, build_tool
-from app.loop.tools.orchestration import run_tools
-from app.loop.tools.run_tests import SuiteExecutionResult, build_run_tests_tool
-from app.loop.transitions import Continue, Terminal
+from app.utils.messages import Message, ToolCall
 from app.workspace.local import LocalWorkspace
 
 # ============================================================================
@@ -348,7 +350,7 @@ async def test_e2e_streaming_cancellation_and_abort_tree_cascade(tmp_path: Path)
     assert results[0].tool_call_id == "call_slow"
     assert results[0].content == "Slow tool done."
 
-    from app.loop.tools.execution import CANCEL_MESSAGE
+    from app.services.tools.tool_execution import CANCEL_MESSAGE
 
     assert isinstance(results[1], ToolMessage)
     assert results[1].tool_call_id == "call_second"
@@ -406,11 +408,13 @@ async def test_e2e_live_openai_skill_activation_and_execution(tmp_path) -> None:
     from langchain_openai import ChatOpenAI
     from pydantic import SecretStr
 
-    from app.loop.attachments.skills import get_skill_listing_attachments
-    from app.loop.attachments.types import normalize_attachment_for_api
-    from app.loop.config import build_run_config
-    from app.loop.skills.loader import get_skill_registry
-    from app.loop.skills.tool import build_skill_tool
+    from app.query.config import build_run_config
+    from app.skills.load_skills_dir import get_skill_registry
+    from app.tools.skill_tool.skill_tool import build_skill_tool
+    from app.utils.attachments import (
+        get_skill_listing_attachments,
+        normalize_attachment_for_api,
+    )
     from tests.test_loop_engine import FakeModel, make_fake_deps
 
     # 1. Discover the bundled skills and build the listing the model receives

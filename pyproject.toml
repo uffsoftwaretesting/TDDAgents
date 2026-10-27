@@ -20,7 +20,7 @@ mypy_path = "."
 # gate. Legacy modules are excluded until the phase that rewrites them brings them up.
 strict = true
 
-files = ["app/loop", "app/workspace", "app/sandbox", "app/session", "app/metrics", "app/main.py", "tests"]
+files = ["app", "tests"]
 
 [[tool.mypy.overrides]]
 # The E2B SDK ships no py.typed marker. app/sandbox/adapter.py casts at the boundary so
@@ -39,20 +39,25 @@ disallow_untyped_calls = false
 disallow_any_generics = false
 
 [[tool.mypy.overrides]]
-# Legacy un-refactored modules imported by Session Shell until rewritten in Phase 2
-module = ["app.utils.*", "app.agents.*"]
+# The seam modules (CLAUDE.md "Exempt: the seam modules"): the LLM provider factory, its
+# token callback and the session shell's LLM agents.
+module = ["app.utils.chat_model_factory", "app.utils.token_metrics", "app.session.agents.*"]
 ignore_errors = true
 
 [tool.mutmut]
 # Only modules that carry offline unit tests. Mutating untested code produces a wall of
 # survivors that says nothing about test quality. This list grows as later phases add
 # tested modules — that growth is part of the quality gate, not an afterthought.
-paths_to_mutate = [
-    "app/loop/",
-    "app/workspace/",
-    "app/session/",
-    "app/metrics/",
-    "app/main.py",
+paths_to_mutate = ["app/"]
+# The seam modules are exempt (CLAUDE.md): they are the boundary to E2B and the LLM, and
+# are verified by a static surface check and an end-to-end run instead. app/config holds
+# environment constants only.
+do_not_mutate = [
+    "app/sandbox/*",
+    "app/utils/chat_model_factory.py",
+    "app/utils/token_metrics.py",
+    "app/session/agents/*",
+    "app/config/*",
 ]
 tests_dir = ["tests/"]
 
@@ -69,6 +74,6 @@ also_copy = ["app/", "requirements.txt", ".tddagents/", "docs/", "scripts/"]
 external = ["E302", "E402", "E501", "W291", "W293"]
 
 [tool.ruff.lint.isort]
-# `app/loop/mcp/` shares its name with the MCP SDK, which isort would otherwise take for a
+# `app/services/mcp/` shares its name with the MCP SDK, which isort would otherwise take for a
 # local package inside that directory.
 known-third-party = ["mcp"]

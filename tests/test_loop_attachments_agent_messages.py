@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from app.loop.attachments.agent_messages import get_agent_pending_message_attachments
-from app.loop.attachments.types import (
+from app.state.app_state_store import AppStateStore
+from app.tasks.local_agent_task.local_agent_task import (
+    queue_pending_message,
+    register_async_agent,
+)
+from app.tool import tool_context_for
+from app.utils.attachments import (
     Attachment,
+    get_agent_pending_message_attachments,
     normalize_attachment_for_api,
     wrap_command_text,
 )
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.tasks.local_agent_task import queue_pending_message, register_async_agent
 
 
 def _context(store: AppStateStore, agent_id: str | None):

@@ -11,11 +11,11 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from app.loop.cost.tracker import CostTracker
-from app.loop.factory import get_production_deps
-from app.loop.runner import tdd_loop_runner
-from app.loop.storage.paths import get_project_dir
-from app.metrics.event_log import EventLog
+from app.cli.print import tdd_loop_runner
+from app.cost_tracker import CostTracker
+from app.query.deps import get_production_deps
+from app.tdd.event_log import EventLog
+from app.utils.session_storage_portable import get_project_dir
 
 
 def _run(make_fake_workspace, model, tmp_path) -> tuple[Any, Any]:

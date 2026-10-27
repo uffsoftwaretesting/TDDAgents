@@ -1,5 +1,5 @@
 """
-Phase 5: the per-turn attachments pipeline (`app/loop/attachments/`), offline.
+Phase 5: the per-turn attachments pipeline (`app/utils/attachments.py`), offline.
 
 Ported from `reference/claude-code/src/utils/attachments.ts` -> `getAttachments`,
 `getAttachmentMessages` and the sources this build has subsystems for, and
@@ -15,27 +15,26 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-import app.loop.attachments.dates as dates_mod
-from app.loop.attachments.pipeline import get_attachment_messages, get_attachments
-from app.loop.attachments.reminders import (
+import app.utils.attachments as dates_mod
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
+from app.tdd.tdd_state_attachment import create_tdd_state_attachment_message
+from app.tool import tool_context_for
+from app.tools.todo_write_tool.todo_write_tool import TodoItem
+from app.types.permissions import PermissionMode, ToolPermissionContext
+from app.utils.attachments import (
     AUTO_MODE_ATTACHMENT_CONFIG,
     TODO_REMINDER_CONFIG,
-)
-from app.loop.attachments.tdd_state import create_tdd_state_attachment_message
-from app.loop.attachments.types import (
     Attachment,
     attachment_of,
     create_attachment_messages,
+    get_attachment_messages,
+    get_attachments,
     normalize_attachment_for_api,
 )
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.file_state import FileState
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.async_registry import AsyncHookRegistry
-from app.loop.ledger import PhaseLedger, TddPhase, TestRunRecord
-from app.loop.messages import wrap_in_system_reminder
-from app.loop.permissions.types import PermissionMode, ToolPermissionContext
-from app.loop.tools.todo import TodoItem
+from app.utils.file_state_cache import FileState
+from app.utils.hooks.async_hook_registry import AsyncHookRegistry
+from app.utils.messages import wrap_in_system_reminder
 from tests.conftest import FakeWorkspace
 
 
@@ -181,7 +180,7 @@ def test_a_fresh_run_says_only_the_tdd_state_and_then_nothing():
 
 
 def test_a_failing_source_is_dropped_not_raised(monkeypatch):
-    import app.loop.attachments.pipeline as pipeline
+    import app.utils.attachments as pipeline
 
     def boom(*a: Any, **k: Any) -> list[Attachment]:
         raise RuntimeError("source broke")
@@ -191,7 +190,7 @@ def test_a_failing_source_is_dropped_not_raised(monkeypatch):
 
 
 def test_disable_attachments_keeps_only_queued_commands(monkeypatch):
-    from app.loop.command_queue import CommandQueue, QueuedCommand
+    from app.utils.message_queue_manager import CommandQueue, QueuedCommand
 
     queue = CommandQueue()
     queue.enqueue(QueuedCommand(value="note", mode="prompt"))
@@ -203,7 +202,7 @@ def test_disable_attachments_keeps_only_queued_commands(monkeypatch):
 
 
 def test_messages_are_produced_in_attachment_order(monkeypatch):
-    import app.loop.attachments.pipeline as pipeline
+    import app.utils.attachments as pipeline
 
     monkeypatch.setattr(pipeline, "get_date_change_attachments",
                         lambda messages, context: [Attachment("date_change", {"newDate": "d"})])
@@ -214,7 +213,7 @@ def test_messages_are_produced_in_attachment_order(monkeypatch):
 
 def test_the_skill_listing_follows_nested_memory(monkeypatch):
     """Upstream's order: `nested_memory`, then `skill_listing`, then `auto_mode`/`todo_reminders`."""
-    import app.loop.attachments.pipeline as pipeline
+    import app.utils.attachments as pipeline
 
     monkeypatch.setattr(pipeline, "get_nested_memory_source",
                         lambda messages, context: [Attachment("nested_memory", {"path": "p", "content": "c"})])
@@ -228,7 +227,7 @@ def test_the_skill_listing_follows_nested_memory(monkeypatch):
 
 def test_agent_pending_messages_follow_todo_reminders_and_precede_the_tdd_state(monkeypatch):
     """Upstream's order: `todo_reminders`, then `agent_pending_messages`; `tdd_state` stays last."""
-    import app.loop.attachments.pipeline as pipeline
+    import app.utils.attachments as pipeline
 
     monkeypatch.setattr(pipeline, "get_todo_reminder_attachments",
                         lambda messages, context: [Attachment("todo_reminder", {"content": [], "itemCount": 0})])
@@ -241,7 +240,7 @@ def test_agent_pending_messages_follow_todo_reminders_and_precede_the_tdd_state(
 # ── queued commands and async hook responses ─────────────────────────────────
 
 def test_async_responses_come_from_the_registry():
-    from app.loop.hooks.async_registry import AsyncHookResponse
+    from app.utils.hooks.async_hook_registry import AsyncHookResponse
 
     registry = AsyncHookRegistry()
 
@@ -257,7 +256,7 @@ def test_async_responses_come_from_the_registry():
 
 
 def test_async_responses_are_main_thread_only():
-    from app.loop.hooks.async_registry import AsyncHookResponse
+    from app.utils.hooks.async_hook_registry import AsyncHookResponse
 
     registry = AsyncHookRegistry()
     calls: list[int] = []
@@ -336,7 +335,7 @@ def test_changed_files_without_a_workspace_say_nothing():
 # ── todo_reminders ───────────────────────────────────────────────────────────
 
 def _todo_ctx(todos: tuple[TodoItem, ...] = ()) -> Any:
-    from app.loop.tools.todo import build_todo_write_tool
+    from app.tools.todo_write_tool.todo_write_tool import build_todo_write_tool
 
     state = AppState(todos={"main": todos})
     return tool_context_for(AppStateStore(state=state), tools=(build_todo_write_tool(),))
@@ -427,7 +426,7 @@ def test_no_auto_mode_reminder_outside_auto():
 # ── token_usage ──────────────────────────────────────────────────────────────
 
 def test_token_usage_is_env_gated_and_reads_the_last_response(monkeypatch):
-    import app.loop.attachments.usage as usage
+    import app.utils.attachments as usage
 
     ctx = ctx_for()
     reply = AIMessage(content="x", usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120,
@@ -443,14 +442,14 @@ def test_token_usage_is_env_gated_and_reads_the_last_response(monkeypatch):
 # ── agent_listing_delta / mcp_instructions_delta (gated off by default upstream) ─
 
 def test_deltas_are_off_unless_their_env_gate_is_set(monkeypatch):
-    from app.loop.agents.definition import AgentDefinition
+    from app.tools.agent_tool.load_agents_dir import AgentDefinition
 
     agent = AgentDefinition(name="tester", description="writes tests", prompt="p")
     agent_tool = type("T", (), {"name": "Agent", "aliases": ()})()
     ctx = replace(ctx_for(), tools=(agent_tool,))
     assert [a for a in run(get_attachments(ctx, [])) if a.type == "agent_listing_delta"] == []
     monkeypatch.setenv("TDDAGENTS_AGENT_LIST_IN_MESSAGES", "1")
-    import app.loop.attachments.deltas as deltas
+    import app.utils.attachments as deltas
 
     monkeypatch.setattr(deltas, "agent_definitions_for", lambda context: (agent,))
     (att,) = [a for a in run(get_attachments(ctx, [])) if a.type == "agent_listing_delta"]
@@ -469,8 +468,8 @@ def test_agent_listing_requires_the_agent_tool(monkeypatch):
 
 
 def test_agent_tools_description_matches_upstream():
-    from app.loop.agents.definition import AgentDefinition
-    from app.loop.attachments.deltas import format_agent_line
+    from app.tools.agent_tool.load_agents_dir import AgentDefinition
+    from app.utils.attachments import format_agent_line
 
     def line(**kw: Any) -> str:
         return format_agent_line(AgentDefinition(name="a", description="d", prompt="p", **kw))
@@ -483,7 +482,7 @@ def test_agent_tools_description_matches_upstream():
 
 
 def test_mcp_instructions_delta(monkeypatch):
-    import app.loop.attachments.deltas as deltas
+    import app.utils.attachments as deltas
 
     monkeypatch.setenv("TDDAGENTS_MCP_INSTR_DELTA", "1")
     clients = [{"name": "b", "type": "connected", "instructions": "use b"},
@@ -544,7 +543,7 @@ def test_post_compaction_tdd_state_without_a_run():
 
 
 def test_snippet_hunks_numbering_and_truncation():
-    from app.loop.attachments.changed_files import (
+    from app.utils.attachments import (
         DIFF_SNIPPET_MAX_BYTES,
         get_snippet_for_two_file_diff,
     )

@@ -10,20 +10,18 @@ from dataclasses import replace
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from app.loop.config import Gates, RunConfig
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.messages import ToolCall
-from app.loop.state import initial_loop_state
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import CANCEL_MESSAGE
-from app.loop.tools.orchestration import (
+from app.query.config import Gates, RunConfig
+from app.query.state import initial_loop_state
+from app.services.tools.tool_execution import CANCEL_MESSAGE
+from app.services.tools.tool_orchestration import (
     ToolBatch,
     apply_context_modifier,
     partition_tool_calls,
     run_tools,
 )
-from app.loop.tools.types import ToolResult
+from app.state.app_state_store import AppState, AppStateStore
+from app.tool import ToolResult, build_tool, tool_context_for
+from app.utils.messages import ToolCall
 
 
 def dummy_call(args, ctx):
@@ -550,7 +548,7 @@ class TestPhase2Orchestration:
         assert batches[0].is_concurrency_safe is True
 
     def test_the_concurrency_cap_defaults_to_ten(self, monkeypatch):
-        from app.loop.tools.orchestration import (
+        from app.services.tools.tool_orchestration import (
             DEFAULT_MAX_TOOL_USE_CONCURRENCY,
             get_max_tool_use_concurrency,
         )
@@ -563,7 +561,7 @@ class TestPhase2Orchestration:
     ])
     def test_the_cap_is_overridable_and_zero_falls_back(self, monkeypatch, raw, expected):
         """Upstream writes `parseInt(env) || 10`, so 0 and NaN both mean the default."""
-        from app.loop.tools.orchestration import get_max_tool_use_concurrency
+        from app.services.tools.tool_orchestration import get_max_tool_use_concurrency
 
         monkeypatch.setenv("TDDAGENTS_MAX_TOOL_USE_CONCURRENCY", raw)
         assert get_max_tool_use_concurrency() == expected
@@ -631,8 +629,8 @@ class TestContextModifierFields:
         A tool that widens or narrows permissions for the rest of the turn does it here;
         if the field were not copied across, the change would silently not happen.
         """
-        from app.loop.permissions.types import ToolPermissionContext
-        from app.loop.tools.orchestration import apply_context_modifier
+        from app.services.tools.tool_orchestration import apply_context_modifier
+        from app.types.permissions import ToolPermissionContext
 
         store = AppStateStore(AppState())
         context = tool_context_for(store, permission_context=ToolPermissionContext())
@@ -645,7 +643,7 @@ class TestContextModifierFields:
         assert applied.permission_context is replacement
 
     def test_a_modifier_can_replace_the_tool_roster(self):
-        from app.loop.tools.orchestration import apply_context_modifier
+        from app.services.tools.tool_orchestration import apply_context_modifier
 
         store = AppStateStore(AppState())
         tool = build_tool(name="A", prompt="p", call=dummy_call)
@@ -657,7 +655,7 @@ class TestContextModifierFields:
         assert apply_context_modifier(context, modifier).tools == (tool,)
 
     def test_a_modifier_returning_the_same_context_changes_nothing(self):
-        from app.loop.tools.orchestration import apply_context_modifier
+        from app.services.tools.tool_orchestration import apply_context_modifier
 
         store = AppStateStore(AppState())
         context = tool_context_for(store, tools=())

@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import re
 
-from app.loop.config import build_run_config
-from app.loop.coordinator import (
+from app.coordinator.coordinator_mode import (
     COORDINATOR_MODE_ALLOWED_TOOLS,
     COORDINATOR_MODE_ENV,
     INTERNAL_WORKER_TOOLS,
@@ -15,8 +14,8 @@ from app.loop.coordinator import (
     get_coordinator_user_context,
     is_coordinator_mode,
 )
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import ToolResult
+from app.query.config import build_run_config
+from app.tool import ToolResult, build_tool
 
 
 def _tool(name: str):
@@ -41,7 +40,7 @@ def test_the_coordinator_keeps_only_orchestration_tools():
 
 
 def test_the_user_context_names_the_worker_tools():
-    from app.loop.agents.resolution import ASYNC_AGENT_ALLOWED_TOOLS
+    from app.tools.agent_tool.agent_tool_utils import ASYNC_AGENT_ALLOWED_TOOLS
 
     context = get_coordinator_user_context()
     expected = sorted(ASYNC_AGENT_ALLOWED_TOOLS - INTERNAL_WORKER_TOOLS)

@@ -7,12 +7,10 @@ import asyncio
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.messages import ToolCall
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import run_tool_use
-from app.loop.tools.types import ToolResult
+from app.services.tools.tool_execution import run_tool_use
+from app.state.app_state_store import AppStateStore
+from app.tool import ToolResult, build_tool, tool_context_for
+from app.utils.messages import ToolCall
 
 SKILL_BODY = HumanMessage(content="skill instructions", additional_kwargs={"is_meta": True})
 
@@ -35,8 +33,8 @@ def test_no_new_messages_by_default():
 
 
 def test_new_messages_come_before_a_preventing_hooks_stop(monkeypatch):
-    import app.loop.tools.execution as execution
-    from app.loop.hooks.tool_hooks import PreToolHooksOutcome
+    import app.services.tools.tool_execution as execution
+    from app.services.tools.tool_hooks import PreToolHooksOutcome
 
     async def pre(*args, **kwargs):
         return PreToolHooksOutcome(prevent_continuation=True, stop_reason="halt")

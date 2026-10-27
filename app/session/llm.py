@@ -2,7 +2,7 @@
 The session shell's model calls, under the loop's one retry policy (Phase 9).
 
 The analyst, engineer and planner are single LLM calls made from synchronous LangGraph
-nodes. Each goes through `app/loop/retry.py::with_retry` — the port of `withRetry.ts`,
+nodes. Each goes through `app/services/api/with_retry.py::with_retry` — the port of `withRetry.ts`,
 and the one ceiling in the codebase — so the shell and the loop retry the same errors with
 the same backoff, instead of the old graph's three attempts and fixed 3 s sleep.
 
@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from app.config.config import Config
-from app.loop.retry import RetryContext, RetryOptions, with_retry
+from app.services.api.with_retry import RetryContext, RetryOptions, with_retry
 
 T = TypeVar("T")
 

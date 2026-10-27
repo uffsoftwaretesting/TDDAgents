@@ -183,7 +183,7 @@ class E2BAdapter:
         adapter = cls(sandbox)
         # Grep/Glob run ripgrep in the sandbox; install the pinned wheel up front. A failure
         # is not fatal here: `ensure_ripgrep` retries on first use and reports it there.
-        from app.loop.tools.ripgrep import provision_sandbox_ripgrep
+        from app.utils.ripgrep import provision_sandbox_ripgrep
 
         try:
             provision_sandbox_ripgrep(adapter)

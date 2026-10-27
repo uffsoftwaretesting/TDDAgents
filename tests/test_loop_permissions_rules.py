@@ -10,9 +10,15 @@ from typing import Any
 
 import pytest
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.permissions.rules import (
+from app.state.app_state_store import AppStateStore
+from app.tool import PermissionResult, ToolResult, build_tool, tool_context_for
+from app.types.permissions import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionRule,
+    ToolPermissionContext,
+)
+from app.utils.permissions.permissions import (
     check_rule_based_permissions,
     extract_permission_context,
     get_allow_rule_for_tool,
@@ -22,14 +28,6 @@ from app.loop.permissions.rules import (
     rule_matches,
     tool_name_matches_rule,
 )
-from app.loop.permissions.types import (
-    PermissionBehavior,
-    PermissionMode,
-    PermissionRule,
-    ToolPermissionContext,
-)
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import PermissionResult, ToolResult
 
 
 class TestRuleMatching:
@@ -249,8 +247,8 @@ class TestCheckRuleBasedPermissions:
 
     def test_phase_tier_runs_first(self):
         async def go():
-            from app.loop.context.app_state import AppState
-            from app.loop.ledger import PhaseLedger, TddPhase
+            from app.state.app_state_store import AppState
+            from app.tdd.ledger import PhaseLedger, TddPhase
 
             tool = build_tool(name="WriteImplementation", prompt="p", call=lambda a, c: ToolResult(content="ok"))
             ctx = tool_context_for(AppStateStore(state=AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED))))

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import app.session.llm as session_llm
-from app.loop.retry import DEFAULT_MAX_RETRIES, CannotRetryError
+from app.services.api.with_retry import DEFAULT_MAX_RETRIES, CannotRetryError
 from app.session.prompts import (
     PROMPTS_DIR,
     analyst_prompts,

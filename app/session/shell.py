@@ -10,7 +10,7 @@ START → analyst ⇄ analyst_review (interrupt) → engineer → planner
 LangGraph keeps the three things the loop has no answer for: checkpointing (so a session
 survives a restart and resumes by thread id), the analyst's human-in-the-loop `interrupt()`,
 and iteration over plan items. Each plan item is one `run_loop` session
-(`app/loop/runner.py::tdd_loop_runner`); the TDD barriers live there, not in this graph.
+(`app/cli/print.py::tdd_loop_runner`); the TDD barriers live there, not in this graph.
 
 **No ceiling on super-steps.** LangGraph's `recursion_limit` would bound the analyst rounds
 and the plan length; claude-code has no such bound and this codebase invents none, so it is

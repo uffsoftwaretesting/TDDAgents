@@ -17,30 +17,31 @@ from typing import AsyncIterator
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.deps import LoopDeps
-from app.loop.engine import run_loop
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.gate import has_permissions_to_use_tool
-from app.loop.permissions.tdd import (
+from app.query.config import build_run_config
+from app.query.deps import LoopDeps
+from app.query.query import run_loop
+from app.query.state import initial_loop_state
+from app.query.transitions import Terminal, Terminated
+from app.services.tools.tool_orchestration import run_tools
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.phase_permissions import (
     IMPLEMENTATION_WRITER_TOOL_NAMES,
     is_implementation_writing_tool,
 )
-from app.loop.permissions.types import (
+from app.tdd.run_tests_tool.run_tests_tool import (
+    SuiteExecutionResult,
+    build_run_tests_tool,
+)
+from app.tdd.stop_hook import tdd_phase_incomplete_hook
+from app.tool import BuiltTool, Tool, ToolResult, build_tool, tool_context_for
+from app.tools.tools import assemble_tool_pool
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     ToolPermissionContext,
 )
-from app.loop.state import initial_loop_state
-from app.loop.tdd.hooks import tdd_phase_incomplete_hook
-from app.loop.tools.base import BuiltTool, Tool, build_tool
-from app.loop.tools.orchestration import run_tools
-from app.loop.tools.pool import assemble_tool_pool
-from app.loop.tools.run_tests import SuiteExecutionResult, build_run_tests_tool
-from app.loop.tools.types import ToolResult
-from app.loop.transitions import Terminal, Terminated
+from app.utils.permissions.permissions import has_permissions_to_use_tool
 
 
 def make_test_tool(name: str, *, is_impl: bool = False, is_test: bool = False) -> BuiltTool:
@@ -195,7 +196,7 @@ class TestInvariant2NoCompletionWithoutRedThenGreen:
                 yield r
 
         async def fake_compact(s, c):
-            from app.loop.deps import CompactionResult
+            from app.query.state import CompactionResult
             return CompactionResult(compacted=False, messages=s.messages)
 
         return LoopDeps(

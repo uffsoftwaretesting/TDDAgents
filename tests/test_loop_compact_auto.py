@@ -8,8 +8,8 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.loop.compact.auto_compact as ac
-from app.loop.compact.auto_compact import (
+import app.services.compact.auto_compact as ac
+from app.services.compact.auto_compact import (
     AUTOCOMPACT_BUFFER_TOKENS,
     ERROR_THRESHOLD_BUFFER_TOKENS,
     MANUAL_COMPACT_BUFFER_TOKENS,
@@ -131,8 +131,8 @@ _NO_SUMMARIZER: Any = None
 
 
 def _ctx() -> Any:
-    from app.loop.context.app_state import AppStateStore
-    from app.loop.context.tool_context import tool_context_for
+    from app.state.app_state_store import AppStateStore
+    from app.tool import tool_context_for
 
     return tool_context_for(AppStateStore(), run_id="r1")
 

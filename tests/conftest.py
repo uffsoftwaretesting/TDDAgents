@@ -192,5 +192,5 @@ def no_retry_sleep(monkeypatch: Any) -> list[float]:
     async def record(delay_ms: float) -> None:
         delays.append(delay_ms)
 
-    monkeypatch.setattr("app.loop.retry._default_sleep", record)
+    monkeypatch.setattr("app.services.api.with_retry._default_sleep", record)
     return delays

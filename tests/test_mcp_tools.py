@@ -1,5 +1,5 @@
 """
-`app/loop/mcp/tools.py`: MCP tools as loop tools, the resource tools, and how the real
+`app/tools/mcp_tool/mcp_tool.py`: MCP tools as loop tools, the resource tools, and how the real
 permission gate treats them (Phase 8).
 """
 
@@ -14,20 +14,19 @@ import pytest
 from langchain_core.messages import ToolMessage
 from mcp.client._memory import InMemoryTransport
 
-import app.loop.mcp.tools as mt
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.mcp.client import connect_to_server
-from app.loop.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
-from app.loop.permissions.gate import has_permissions_to_use_tool
-from app.loop.permissions.types import (
+import app.tools.mcp_tool.mcp_tool as mt
+from app.services.mcp.client import connect_to_server
+from app.services.mcp.types import ConnectedMCPServer, FailedMCPServer, McpServerConfig
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import ToolResult, tool_context_for
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionRule,
     ToolPermissionContext,
 )
-from app.loop.tools.types import ToolResult
+from app.utils.permissions.permissions import has_permissions_to_use_tool
 from tests.test_mcp_client import demo_server
 
 
@@ -196,7 +195,7 @@ def test_another_servers_rule_does_not_allow():
 
 
 def test_the_tdd_phase_tier_runs_before_the_allow_rule(monkeypatch):
-    import app.loop.permissions.tdd as tdd
+    import app.tdd.phase_permissions as tdd
 
     seen: list[str] = []
 
@@ -305,7 +304,7 @@ def test_the_resource_tools_schemas_are_upstreams():
 
 def test_resource_results_are_compact_json_with_unicode_kept(monkeypatch):
     """`jsonStringify`: no spaces, non-ASCII as is."""
-    from app.loop.mcp.types import ServerResource
+    from app.services.mcp.types import ServerResource
 
     async def fetch(_client: Any) -> list[ServerResource]:
         return [ServerResource(uri="u", name="café", server="s")]

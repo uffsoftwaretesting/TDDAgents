@@ -1,5 +1,5 @@
 """
-`app/loop/context/assembly.py`: ports of `getSystemPrompt`, `computeSimpleEnvInfo`,
+`app/context.py`: ports of `getSystemPrompt`, `computeSimpleEnvInfo`,
 `getGitStatus`, `getSystemContext`, `getUserContext`, `appendSystemContext` and
 `prependUserContext`. Git and uname go through a scripted workspace, plus one real repo.
 """
@@ -12,8 +12,14 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.loop.context.assembly as a
-from app.loop.context.assembly import (
+import app.context as a
+from app.constants.system_prompt_sections import (
+    SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    invalidate_context_caches,
+    resolve_system_prompt_sections,
+    split_system_prompt_sections,
+)
+from app.context import (
     STATIC_SECTION_FILES,
     append_system_context,
     compute_simple_env_info,
@@ -24,12 +30,6 @@ from app.loop.context.assembly import (
     get_user_context,
     prepend_user_context,
     reset_session_context,
-)
-from app.loop.context.cleanup import invalidate_context_caches
-from app.loop.prompts.sections import (
-    SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-    resolve_system_prompt_sections,
-    split_system_prompt_sections,
 )
 from app.workspace.base import CommandResult
 from app.workspace.local import LocalWorkspace
@@ -101,7 +101,7 @@ def test_get_system_prompt_structure():
 
 
 def _mcp_server(name: str, instructions: str | None) -> Any:
-    from app.loop.mcp.types import ConnectedMCPServer
+    from app.services.mcp.types import ConnectedMCPServer
 
     return ConnectedMCPServer(name=name, config=None, session=None, capabilities=None,  # type: ignore[arg-type]
                               instructions=instructions)
@@ -353,7 +353,7 @@ def test_default_branch_prefers_main_over_master():
 
 def test_user_context_passes_env_and_home(tmp_path, monkeypatch):
     monkeypatch.delenv("TDDAGENTS_ENABLE_AUTO_MEMORY", raising=False)
-    from app.loop.context.memory import get_auto_mem_entrypoint
+    from app.utils.claudemd import get_auto_mem_entrypoint
 
     entry = Path(get_auto_mem_entrypoint("sandbox", str(tmp_path)))
     entry.parent.mkdir(parents=True)

@@ -1,16 +1,16 @@
-"""Tests for `app/loop/hooks/async_registry.py`: background hooks and rewake notifications."""
+"""Tests for `app/utils/hooks/async_hook_registry.py`: background hooks and rewake notifications."""
 
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
-from app.loop.hooks.async_registry import (
+from app.utils.hooks.async_hook_registry import (
     DEFAULT_ASYNC_TIMEOUT_MS,
     AsyncHookRegistry,
     AsyncHookResponse,
 )
-from app.loop.hooks.process import CapturedProcess
+from app.utils.shell_command import CapturedProcess
 
 
 class FakeCapture:

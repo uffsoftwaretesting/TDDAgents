@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import asyncio
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.execute import execute_permission_denied_hooks
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.hooks.tool_hooks import (
+from app.services.tools.tool_hooks import (
     PERMISSION_DENIED_RETRY_MESSAGE,
     run_permission_denied_hooks,
 )
-from app.loop.permissions.classifier_decision import (
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.utils.hooks.hooks import execute_permission_denied_hooks
+from app.utils.permissions.classifier_decision import (
     SAFE_YOLO_ALLOWLISTED_TOOLS,
+    YOLO_CLASSIFIER_TOOL_NAME,
     is_auto_mode_allowlisted_tool,
 )
-from app.loop.permissions.denial_tracking import (
+from app.utils.permissions.denial_tracking import (
     MAX_CONSECUTIVE_DENIALS,
     MAX_TOTAL_DENIALS,
     DenialTrackingState,
@@ -25,7 +26,6 @@ from app.loop.permissions.denial_tracking import (
     record_success,
     should_fallback_to_prompting,
 )
-from app.loop.permissions.yolo_classifier_names import YOLO_CLASSIFIER_TOOL_NAME
 from tests.hook_doubles import ScriptedDispatcher
 
 

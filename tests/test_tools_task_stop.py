@@ -8,12 +8,15 @@ import json
 
 import pytest
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.tasks.local_agent_task import register_async_agent
-from app.loop.tasks.stop_task import StopTaskError, stop_task
-from app.loop.tasks.task import create_task_state_base
-from app.loop.tools.task_stop import TASK_STOP_TOOL_NAME, build_task_stop_tool
+from app.state.app_state_store import AppStateStore
+from app.task import create_task_state_base
+from app.tasks.local_agent_task.local_agent_task import register_async_agent
+from app.tasks.stop_task import StopTaskError, stop_task
+from app.tool import tool_context_for
+from app.tools.task_stop_tool.task_stop_tool import (
+    TASK_STOP_TOOL_NAME,
+    build_task_stop_tool,
+)
 
 
 def _store_with_agent() -> tuple[AppStateStore, object]:

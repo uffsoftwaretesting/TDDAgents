@@ -8,10 +8,8 @@ import dataclasses
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.command_queue import CommandQueue
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import CancelToken
-from app.loop.tasks.local_agent_task import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tasks.local_agent_task.local_agent_task import (
     LocalAgentTaskState,
     complete_agent_task,
     drain_pending_messages,
@@ -23,6 +21,8 @@ from app.loop.tasks.local_agent_task import (
     register_async_agent,
     run_async_agent_lifecycle,
 )
+from app.tool import CancelToken
+from app.utils.message_queue_manager import CommandQueue
 
 
 def _register(store: AppStateStore, task_id: str = "a1", now: float = 10.0) -> LocalAgentTaskState:
@@ -277,7 +277,7 @@ def test_partial_text_skips_non_text_blocks_and_blank_texts():
 
 
 def test_a_started_lifecycle_is_held_until_it_finishes():
-    import app.loop.tasks.local_agent_task as lat
+    import app.tasks.local_agent_task.local_agent_task as lat
 
     async def go() -> None:
         gate = asyncio.Event()

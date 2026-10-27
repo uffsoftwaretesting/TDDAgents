@@ -12,7 +12,7 @@ resumable later with the same thread id.
 A thread with a checkpoint is never restarted: a finished one is reported as it stands, an
 unfinished one continues from its last checkpoint (`continue_session`). That is how a
 session survives a restart — the plan item that was running when the process died runs
-again and resumes its own transcript (`app/loop/runner.py::load_initial_messages`).
+again and resumes its own transcript (`app/cli/print.py::load_initial_messages`).
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def build_session_shell(
     `tdd_loop_runner` on that workspace, told whether the checkpointer really persists and
     given the run's permission flags.
     """
-    from app.loop.runner import session_workspace, tdd_loop_runner
+    from app.cli.print import session_workspace, tdd_loop_runner
 
     checkpointer = build_checkpointer(checkpoint_uri(options.checkpoint))
     persistent = is_persistent_checkpointer(checkpointer)

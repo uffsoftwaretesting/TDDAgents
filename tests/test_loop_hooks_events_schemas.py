@@ -6,9 +6,8 @@ import logging
 
 import pytest
 
-import app.loop.hooks.events as ev
-from app.loop.hooks.events import HOOK_EVENTS, HookEvent, is_hook_event, match_query_for
-from app.loop.hooks.schemas import (
+import app.utils.hooks.hook_events as ev
+from app.schemas.hooks import (
     DEFAULT_HOOK_SHELL,
     SHELL_TYPES,
     AgentHook,
@@ -20,6 +19,12 @@ from app.loop.hooks.schemas import (
     parse_hook_command,
     parse_hook_matcher,
     parse_hooks_settings,
+)
+from app.utils.hooks.hook_events import (
+    HOOK_EVENTS,
+    HookEvent,
+    is_hook_event,
+    match_query_for,
 )
 
 LOGGER = "TDDOrchestrator.Hooks"

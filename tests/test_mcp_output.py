@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from app.loop.mcp.output import (
+from app.utils.mcp_validation import (
     DEFAULT_MAX_MCP_OUTPUT_TOKENS,
     IMAGE_TOKEN_ESTIMATE,
     extension_for_mime_type,
@@ -98,7 +98,7 @@ def test_binary_content_is_saved_under_the_runs_tool_results(tmp_path, monkeypat
 # ── mutation-gate pins (Phase 8) ────────────────────────────────────────────
 
 def test_the_large_output_instructions_are_upstreams_verbatim():
-    from app.loop.mcp.output import get_large_output_instructions
+    from app.utils.mcp_validation import get_large_output_instructions
 
     assert get_large_output_instructions("/p", 1234, "Plain text") == (
         "Error: result (1,234 characters) exceeds maximum allowed tokens. Output has been saved to /p.\n"
@@ -115,7 +115,7 @@ def test_the_large_output_instructions_are_upstreams_verbatim():
 
 
 def test_the_truncation_notice_is_upstreams_verbatim(monkeypatch):
-    from app.loop.mcp.output import truncate_mcp_content
+    from app.utils.mcp_validation import truncate_mcp_content
 
     monkeypatch.setenv("TDDAGENTS_MAX_MCP_OUTPUT_TOKENS", "1")
     out = truncate_mcp_content([{"type": "text", "text": "abcdef"}])
@@ -127,7 +127,7 @@ def test_the_truncation_notice_is_upstreams_verbatim(monkeypatch):
 
 
 def test_block_truncation_boundaries():
-    from app.loop.mcp.output import IMAGE_TOKEN_ESTIMATE, _truncate_blocks
+    from app.utils.mcp_validation import IMAGE_TOKEN_ESTIMATE, _truncate_blocks
 
     image = {"type": "image", "source": {}}
     other = {"type": "other"}
@@ -154,7 +154,7 @@ def test_block_truncation_boundaries():
 
 
 def test_the_size_estimate_sums_text_and_images():
-    from app.loop.mcp.output import IMAGE_TOKEN_ESTIMATE, get_content_size_estimate
+    from app.utils.mcp_validation import IMAGE_TOKEN_ESTIMATE, get_content_size_estimate
 
     assert get_content_size_estimate([{"type": "text", "text": "a" * 8}, {"type": "text", "text": "b" * 8},
                                       {"type": "other", "text": "c" * 400}]) == 4
@@ -162,7 +162,7 @@ def test_the_size_estimate_sums_text_and_images():
 
 
 def test_the_output_limit_and_its_threshold(monkeypatch):
-    from app.loop.mcp.output import (
+    from app.utils.mcp_validation import (
         get_max_mcp_output_tokens,
         mcp_content_needs_truncation,
     )
@@ -175,7 +175,7 @@ def test_the_output_limit_and_its_threshold(monkeypatch):
 
 
 def test_an_exact_text_fit_keeps_going_and_images_accumulate():
-    from app.loop.mcp.output import IMAGE_TOKEN_ESTIMATE, _truncate_blocks
+    from app.utils.mcp_validation import IMAGE_TOKEN_ESTIMATE, _truncate_blocks
 
     other = {"type": "other"}
     image = {"type": "image", "source": {}}

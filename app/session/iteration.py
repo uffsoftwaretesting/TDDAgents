@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from app.loop.transitions import Terminal
+from app.query.transitions import Terminal
 from app.session.llm import call_with_retry, run_sync
 from app.session.state import PlanItemResult, SessionState, SessionStatus
 
@@ -43,7 +43,7 @@ def node_plan(
         }
 
     if planner_fn is None:
-        from app.agents.langgraph.planner import generate_plan
+        from app.session.agents.planner import generate_plan
 
         planner_fn = generate_plan
 

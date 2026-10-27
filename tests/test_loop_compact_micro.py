@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.compact.micro_compact import (
+from app.services.compact.micro_compact import (
     COMPACTABLE_TOOLS,
     TIME_BASED_MC_CLEARED_MESSAGE,
     TIME_BASED_MC_CONFIG_DEFAULTS,

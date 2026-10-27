@@ -10,17 +10,17 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.agents.resume import resume_agent_background
-from app.loop.command_queue import CommandQueue
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.storage.session_storage import TranscriptStore
-from app.loop.tasks.local_agent_task import register_async_agent
-from app.loop.tools.send_message import (
+from app.state.app_state_store import AppStateStore
+from app.tasks.local_agent_task.local_agent_task import register_async_agent
+from app.tool import tool_context_for
+from app.tools.agent_tool.resume_agent import resume_agent_background
+from app.tools.send_message_tool.send_message_tool import (
     AGENT_TEAMS_ENV,
     SEND_MESSAGE_TOOL_NAME,
     build_send_message_tool,
 )
+from app.utils.message_queue_manager import CommandQueue
+from app.utils.session_storage import TranscriptStore
 from tests.test_agents_agent_tool import DEFS, EXPLORE, TESTER, _tool
 from tests.test_loop_engine import CONFIG, FakeModel, make_fake_deps
 
@@ -159,7 +159,7 @@ def test_a_stopped_task_is_resumed_with_its_status_named(tmp_path):
     agent_id = _sync_agent(ctx, store)
     register_async_agent(agent_id=agent_id, description="d", prompt="p", agent_type="Explore",
                          set_app_state=store.update, output_file="/o")
-    from app.loop.tasks.local_agent_task import complete_agent_task
+    from app.tasks.local_agent_task.local_agent_task import complete_agent_task
 
     complete_agent_task(agent_id, "r", store.update)
     out = _send(_send_tool(), {"to": agent_id, "message": "again", "summary": "s"}, ctx, store)
@@ -188,7 +188,7 @@ def test_a_stopped_task_that_cannot_resume_reports_why(tmp_path):
     store, ctx, _ = _ctx(tmp_path)
     register_async_agent(agent_id=AGENT_ID, description="d", prompt="p", agent_type="Explore",
                          set_app_state=store.update, output_file="/o")
-    from app.loop.tasks.local_agent_task import fail_agent_task
+    from app.tasks.local_agent_task.local_agent_task import fail_agent_task
 
     fail_agent_task(AGENT_ID, "boom", store.update)
     out = _send(_send_tool(), {"to": AGENT_ID, "message": "m", "summary": "s"}, ctx, store)
@@ -280,7 +280,7 @@ class _Workspace:
 
 
 def _resume_ctx(tmp_path):
-    from app.loop.agents.memory import AgentMemoryStore
+    from app.tools.agent_tool.agent_memory import AgentMemoryStore
 
     store = AppStateStore()
     transcript = TranscriptStore("loop-1", tmp_path, version="v", git_branch=None)
@@ -294,9 +294,9 @@ def _resume_ctx(tmp_path):
 def test_resume_hands_the_worker_everything_it_recorded(tmp_path, agent_model):
     import dataclasses
 
-    from app.loop.agents.tool import agent_system_prompt
-    from app.loop.context.assembly import enhance_system_prompt_with_env_details
-    from app.loop.model_aliases import get_agent_model
+    from app.context import enhance_system_prompt_with_env_details
+    from app.tools.agent_tool.agent_tool import agent_system_prompt
+    from app.utils.model.model import get_agent_model
 
     explore = dataclasses.replace(EXPLORE, model=agent_model, memory="run")
     defs = {**DEFS, "Explore": explore}

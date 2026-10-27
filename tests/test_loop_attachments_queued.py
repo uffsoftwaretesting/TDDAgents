@@ -8,10 +8,10 @@ from dataclasses import replace
 
 from langchain_core.messages import HumanMessage
 
-from app.loop.attachments.queued import get_queued_command_attachments
-from app.loop.command_queue import CommandQueue, QueuedCommand
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.utils.attachments import get_queued_command_attachments
+from app.utils.message_queue_manager import CommandQueue, QueuedCommand
 
 
 def _ctx(queue: CommandQueue, agent_id: str | None = None):
@@ -59,7 +59,7 @@ def test_no_queue_means_nothing():
 
 
 def test_the_hook_registry_feeds_the_queue_at_later_priority():
-    from app.loop.hooks.async_registry import AsyncHookRegistry
+    from app.utils.hooks.async_hook_registry import AsyncHookRegistry
 
     q = CommandQueue()
     registry = AsyncHookRegistry(queue=q)

@@ -1,11 +1,11 @@
 """
 Comprehensive mutation booster tests for Part I: Agents and delegation.
 
-Guarantees >= 90% mutation test score across app/loop/agents/:
-- app/loop/agents/loader.py
-- app/loop/agents/memory.py
-- app/loop/agents/resolution.py
-- app/loop/agents/tool.py
+Guarantees >= 90% mutation test score across app/tools/agent_tool/:
+- app/tools/agent_tool/load_agents_dir.py
+- app/tools/agent_tool/agent_memory.py
+- app/tools/agent_tool/agent_tool_utils.py
+- app/tools/agent_tool/agent_tool.py
 """
 
 from __future__ import annotations
@@ -20,8 +20,13 @@ from unittest.mock import patch
 
 import pytest
 
-from app.loop.agents.definition import AgentDefinition, AgentFrontmatterError
-from app.loop.agents.loader import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import CancelToken, Tool, ToolContext, ToolResult, build_tool
+from app.tools.agent_tool.agent_memory import AgentMemoryStore
+from app.tools.agent_tool.load_agents_dir import (
+    AgentDefinition,
+    AgentFrontmatterError,
     _scan_agent_dir,
     get_agent_definitions_with_overrides,
     load_agent_definition,
@@ -29,13 +34,7 @@ from app.loop.agents.loader import (
     parse_markdown_frontmatter,
     render_prompt,
 )
-from app.loop.agents.memory import AgentMemoryStore
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import CancelToken, ToolContext
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.messages import Message
-from app.loop.tools.base import Tool, build_tool
-from app.loop.tools.types import ToolResult
+from app.utils.messages import Message
 
 
 def _make_dummy_tool(name: str, aliases: tuple[str, ...] = ()) -> Tool:
@@ -283,7 +282,7 @@ Body
         corrupted_sub = test_dir / "corrupted"
         corrupted_sub.mkdir()
         (corrupted_sub / "AGENT.md").write_text("corrupted content", encoding="utf-8")
-        with patch("app.loop.agents.loader.load_agent_definition_from_path", side_effect=[
+        with patch("app.tools.agent_tool.load_agents_dir.load_agent_definition_from_path", side_effect=[
             RuntimeError("Unexpected load error"),
             AgentDefinition(name="worker", description="", prompt=""),
             AgentDefinition(name="direct", description="", prompt=""),

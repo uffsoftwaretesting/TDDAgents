@@ -11,9 +11,9 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.command_queue import QueuedCommand
-from app.loop.deps import StopHookResult
-from app.loop.tasks.task import create_task_state_base
+from app.query.stop_hooks import StopHookResult
+from app.task import create_task_state_base
+from app.utils.message_queue_manager import QueuedCommand
 
 
 def _settings(tmp_path) -> Any:
@@ -28,8 +28,8 @@ async def _no_stop_hooks(state: Any, config: Any) -> StopHookResult:
 
 
 def _run(workspace, tmp_path, model, *, stop_hooks: Any = _no_stop_hooks):
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
+    from app.query.deps import get_production_deps
 
     deps = dataclasses.replace(get_production_deps(), call_model=model, stop_hooks=stop_hooks)
     return asyncio.run(tdd_loop_runner(
@@ -163,8 +163,8 @@ def test_the_context_queue_is_the_hook_registrys(python_workspace, tmp_path):
 
 def test_an_unsupported_queued_mode_is_an_error(python_workspace, tmp_path):
     """`print.ts`: only prompt, orphaned-permission and task-notification run in headless mode."""
-    from app.loop.command_queue import CommandQueue
-    from app.loop.runner import next_main_thread_command
+    from app.cli.print import next_main_thread_command
+    from app.utils.message_queue_manager import CommandQueue
 
     queue = CommandQueue()
     queue.enqueue(QueuedCommand(value="/x", mode="bash"))
@@ -222,11 +222,11 @@ def test_the_run_loads_one_skill_registry_and_offers_the_skill_tool(python_works
 
 
 def test_workers_draw_the_skill_tool_too(tmp_path, monkeypatch):
-    import app.loop.agents.tool as agent_tool_mod
-    from app.loop.config import build_run_config
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import main_thread_tools
-    from app.loop.skills.loader import get_skill_registry
+    import app.tools.agent_tool.agent_tool as agent_tool_mod
+    from app.cli.print import main_thread_tools
+    from app.query.config import build_run_config
+    from app.query.deps import get_production_deps
+    from app.skills.load_skills_dir import get_skill_registry
 
     captured: dict[str, Any] = {}
     real = agent_tool_mod.build_agent_tool
@@ -260,8 +260,8 @@ def _mcp_project(tmp_path, allow: list[str]) -> Any:
 
 
 def _run_mcp(workspace, tmp_path, model, allow: list[str]):
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
+    from app.query.deps import get_production_deps
 
     deps = dataclasses.replace(get_production_deps(), call_model=model, stop_hooks=_no_stop_hooks)
     return asyncio.run(tdd_loop_runner(
@@ -272,7 +272,7 @@ def _run_mcp(workspace, tmp_path, model, allow: list[str]):
 def test_the_projects_mcp_servers_are_connected_offered_and_closed(python_workspace, tmp_path, monkeypatch):
     from langchain_core.messages import ToolMessage
 
-    from app.loop.mcp.manager import McpConnectionManager
+    from app.services.mcp.mcp_connection_manager import McpConnectionManager
 
     monkeypatch.delenv("TDDAGENTS_COORDINATOR_MODE", raising=False)
     closed: list[int] = []
@@ -325,7 +325,7 @@ def test_an_mcp_call_without_an_allow_rule_is_denied_headless(python_workspace, 
 
 def test_the_coordinator_hands_mcp_tools_to_its_workers_only(python_workspace, tmp_path, monkeypatch):
     """`mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included."""
-    import app.loop.agents.tool as agent_tool_mod
+    import app.tools.agent_tool.agent_tool as agent_tool_mod
 
     captured: dict[str, Any] = {}
     real = agent_tool_mod.build_agent_tool
@@ -370,10 +370,10 @@ def test_a_follow_up_turn_carries_its_attachments(python_workspace, tmp_path):
 
 
 def test_the_runner_hands_its_scopes_to_skills_mcp_and_the_task_tools(python_workspace, tmp_path, monkeypatch):
-    import app.loop.runner as runner_mod
-    import app.loop.skills.loader as skill_loader
-    import app.loop.skills.tool as skill_tool_mod
-    import app.loop.tools.send_message as send_mod
+    import app.cli.print as runner_mod
+    import app.skills.load_skills_dir as skill_loader
+    import app.tools.send_message_tool.send_message_tool as send_mod
+    import app.tools.skill_tool.skill_tool as skill_tool_mod
 
     captured: dict[str, Any] = {}
     real_registry, real_skill, real_send = (
@@ -426,7 +426,7 @@ def test_the_runner_hands_its_scopes_to_skills_mcp_and_the_task_tools(python_wor
 
 def test_the_mcp_tools_survive_a_phase_move(python_workspace, tmp_path, monkeypatch):
     """`refreshTools` re-derives the pool with the MCP tools, not the built-ins alone."""
-    from app.loop.ledger import TddPhase
+    from app.tdd.ledger import TddPhase
 
     monkeypatch.delenv("TDDAGENTS_COORDINATOR_MODE", raising=False)
     refreshed: list[Any] = []

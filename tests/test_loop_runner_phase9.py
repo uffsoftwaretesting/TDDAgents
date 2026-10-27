@@ -12,12 +12,12 @@ from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-import app.loop.runner as runner_mod
-from app.loop.factory import get_production_deps
-from app.loop.runner import item_run_id, tdd_loop_runner
-from app.loop.storage.paths import get_project_dir
-from app.loop.storage.recovery import CONTINUATION_MESSAGE
-from app.loop.storage.session_storage import TranscriptStore
+import app.cli.print as runner_mod
+from app.cli.print import item_run_id, tdd_loop_runner
+from app.query.deps import get_production_deps
+from app.utils.conversation_recovery import CONTINUATION_MESSAGE
+from app.utils.session_storage import TranscriptStore
+from app.utils.session_storage_portable import get_project_dir
 
 
 def _run(make_fake_workspace, model, tmp_path, session_id: Any = "s", idx: int = 2, **kwargs: Any) -> Any:
@@ -83,7 +83,7 @@ def test_flags_default_to_off(make_fake_workspace, tmp_path) -> None:
 
 def test_a_fresh_item_starts_with_session_start_startup(make_fake_workspace, tmp_path) -> None:
     sources: list[str] = []
-    import app.loop.hooks.session as hook_session
+    import app.utils.session_start as hook_session
 
     original = hook_session.process_session_start_hooks
 
@@ -99,7 +99,7 @@ def test_a_fresh_item_starts_with_session_start_startup(make_fake_workspace, tmp
 
 
 def test_a_rerun_item_resumes_its_conversation(make_fake_workspace, tmp_path) -> None:
-    import app.loop.hooks.session as hook_session
+    import app.utils.session_start as hook_session
 
     original = hook_session.process_session_start_hooks
     sources: list[str] = []
@@ -178,6 +178,6 @@ def test_prompt_text_of_block_content() -> None:
 
 def test_the_session_context_is_reset_after_each_item(make_fake_workspace, tmp_path) -> None:
     reset: list[Any] = []
-    with patch("app.loop.context.assembly.reset_session_context", reset.append):
+    with patch("app.context.reset_session_context", reset.append):
         _run(make_fake_workspace, _recording_model([]), tmp_path)
     assert reset == [item_run_id("s", 2)]

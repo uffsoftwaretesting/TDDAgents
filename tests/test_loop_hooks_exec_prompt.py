@@ -1,5 +1,5 @@
 """
-Tests for the prompt-hook executor (`app/loop/hooks/exec_prompt.py`), a port of
+Tests for the prompt-hook executor (`app/utils/hooks/exec_prompt_hook.py`), a port of
 `execPromptHook.ts`. The model is always a fake.
 """
 
@@ -11,9 +11,10 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.loop.hooks.exec_prompt as ep
-from app.loop.context.tool_context import CancelToken
-from app.loop.hooks.exec_prompt import (
+import app.utils.hooks.exec_prompt_hook as ep
+from app.schemas.hooks import PromptHook
+from app.tool import CancelToken
+from app.utils.hooks.exec_prompt_hook import (
     DEFAULT_PROMPT_HOOK_TIMEOUT_MS,
     HOOK_RESPONSE_JSON_SCHEMA,
     PROMPT_HOOK_SYSTEM_PROMPT,
@@ -27,7 +28,6 @@ from app.loop.hooks.exec_prompt import (
     run_with_signal,
     substitute_arguments,
 )
-from app.loop.hooks.schemas import PromptHook
 
 
 class FakeCaller:

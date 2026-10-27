@@ -12,25 +12,23 @@ from typing import Any
 
 import pytest
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.gate import (
-    DENIAL_WORKAROUND_GUIDANCE,
-    auto_reject_message,
-    has_permissions_to_use_tool,
-)
-from app.loop.permissions.messages import dont_ask_reject_message
-from app.loop.permissions.types import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import PermissionResult, ToolResult, build_tool, tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionRule,
     PermissionRuleSource,
     ToolPermissionContext,
 )
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import PermissionResult, ToolResult
+from app.utils.messages import (
+    DENIAL_WORKAROUND_GUIDANCE,
+    auto_reject_message,
+    dont_ask_reject_message,
+)
+from app.utils.permissions.permissions import has_permissions_to_use_tool
 from tests.hook_doubles import ScriptedDispatcher
 
 ALLOW, DENY, ASK, PASS = (
@@ -111,7 +109,7 @@ def test_phase_check_fails_closed(monkeypatch):
     def boom(tool, args, ledger):
         raise RuntimeError("ledger unreadable")
 
-    monkeypatch.setattr("app.loop.permissions.tdd.check_tdd_phase_permission", boom)
+    monkeypatch.setattr("app.tdd.phase_permissions.check_tdd_phase_permission", boom)
     tool = _Tool(result=PermissionResult(behavior=ALLOW))
     res = _gate(tool, ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS))
     assert res.behavior == DENY

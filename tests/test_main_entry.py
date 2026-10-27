@@ -519,7 +519,7 @@ def test_token_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cap
             return {"by_model": {"m": {"total_tokens": 3}},
                     "totals": {"total_tokens": 3, "prompt_tokens": 2, "completion_tokens": 1, "cached_tokens": 0}}
 
-    monkeypatch.setattr("app.loop.model.get_global_token_tracker", lambda: Tracker())
+    monkeypatch.setattr("app.services.api.claude.get_global_token_tracker", lambda: Tracker())
     with caplog.at_level(logging.INFO, logger="TDDMain"):
         entry._write_token_report(str(tmp_path))
     assert (tmp_path / "token_usage.txt").read_text(encoding="utf-8") == (

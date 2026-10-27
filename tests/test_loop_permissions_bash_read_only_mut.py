@@ -14,11 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.loop.permissions.bash_read_only as ro
-import app.loop.permissions.bash_read_only_commands as roc
-import app.loop.permissions.bash_security as bs
-import app.loop.tools.bash as bash_mod
-from app.loop.permissions.bash_read_only_commands import CommandConfig, validate_flags
+import app.tools.bash_tool.bash_security as bs
+import app.tools.bash_tool.bash_tool as bash_mod
+import app.tools.bash_tool.read_only_validation as ro
+import app.utils.shell.read_only_command_validation as roc
+from app.utils.shell.read_only_command_validation import CommandConfig, validate_flags
 
 safe = ro.is_command_safe_via_flag_parsing
 
@@ -341,7 +341,7 @@ def test_zero_max_timeout_override_is_ignored():
 
 
 def test_permission_cwd_without_a_workspace_attribute():
-    from app.loop.permissions.filesystem import permission_cwd
+    from app.utils.permissions.filesystem import permission_cwd
 
     assert permission_cwd(SimpleNamespace()) == os.getcwd()  # type: ignore[arg-type]
 

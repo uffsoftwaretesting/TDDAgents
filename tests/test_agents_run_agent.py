@@ -8,15 +8,13 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.agents.definition import AgentDefinition
-from app.loop.agents.run_agent import create_agent_id, run_agent
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.types import PermissionMode, ToolPermissionContext
-from app.loop.storage.session_storage import TranscriptStore
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import ToolResult
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import ToolResult, build_tool, tool_context_for
+from app.tools.agent_tool.load_agents_dir import AgentDefinition
+from app.tools.agent_tool.run_agent import create_agent_id, run_agent
+from app.types.permissions import PermissionMode, ToolPermissionContext
+from app.utils.session_storage import TranscriptStore
 from tests.test_loop_engine import CONFIG, FakeModel, asks_for, make_fake_deps
 
 TESTER = AgentDefinition(name="tester", description="writes tests", prompt="You write tests.", phase=TddPhase.RED)
@@ -82,7 +80,7 @@ def test_a_sync_worker_shares_the_parents_ledger():
         ctx.set_app_state(lambda s: dataclasses.replace(s, phase_ledger=s.phase_ledger.with_test_result(1)))
         return ToolResult(content="1 failed")
 
-    from app.loop.tools.orchestration import run_tools
+    from app.services.tools.tool_orchestration import run_tools
 
     model = FakeModel([[asks_for("RunTests", "c1")], [AIMessage(content="red")]])
     deps = dataclasses.replace(make_fake_deps(model), run_tools=run_tools)
@@ -172,7 +170,7 @@ def test_max_turns_ends_the_worker():
 def test_the_resolved_model_is_the_workers_model():
     haiku = dataclasses.replace(TESTER, model="haiku")
     model, _ = _run(definition=haiku)
-    from app.loop.model_aliases import parse_user_specified_model
+    from app.utils.model.model import parse_user_specified_model
 
     assert model.seen_configs[0].model == parse_user_specified_model("haiku")
     model, _ = _run(definition=haiku, model_override="o4-mini")
@@ -180,7 +178,7 @@ def test_the_resolved_model_is_the_workers_model():
 
 
 def test_subagent_start_context_is_attached():
-    from app.loop.hooks.output import AggregatedHookResult
+    from app.types.hooks import AggregatedHookResult
     from tests.hook_doubles import ScriptedDispatcher
 
     d = ScriptedDispatcher(script={"SubagentStart": [AggregatedHookResult(additional_contexts=("use pytest",))]})
@@ -232,7 +230,7 @@ def test_the_worker_starts_from_fresh_per_agent_state():
 
 
 def test_denial_tracking_is_shared_only_by_a_sync_worker():
-    from app.loop.context.tool_context import DenialTrackingBox
+    from app.tool import DenialTrackingBox
 
     box = DenialTrackingBox()
     parent = dataclasses.replace(_parent(), local_denial_tracking=box)
@@ -276,7 +274,7 @@ def test_max_turns_allows_exactly_that_many_turns():
 
 
 def test_only_next_turns_count_toward_max_turns():
-    from app.loop.deps import StopHookResult
+    from app.query.stop_hooks import StopHookResult
     from tests.test_loop_engine import FakeStopHooks
 
     bounded = dataclasses.replace(TESTER, max_turns=1)
@@ -288,7 +286,7 @@ def test_only_next_turns_count_toward_max_turns():
 
 
 def test_closing_the_worker_closes_its_loop(monkeypatch):
-    import app.loop.agents.run_agent as run_agent_mod
+    import app.tools.agent_tool.run_agent as run_agent_mod
 
     closed: list[bool] = []
 
@@ -315,7 +313,7 @@ def test_closing_the_worker_closes_its_loop(monkeypatch):
 
 
 def test_the_subagent_start_attachment_names_its_hook():
-    from app.loop.hooks.output import AggregatedHookResult
+    from app.types.hooks import AggregatedHookResult
     from tests.hook_doubles import ScriptedDispatcher
 
     d = ScriptedDispatcher(script={"SubagentStart": [AggregatedHookResult(additional_contexts=("ctx",))]})
@@ -330,8 +328,8 @@ def test_the_subagent_start_attachment_names_its_hook():
 def test_a_compact_boundary_is_recorded_in_the_sidechain(tmp_path):
     import json
 
-    from app.loop.compact.auto_compact import AutoCompactOutcome
-    from app.loop.compact.compact import (
+    from app.services.compact.auto_compact import AutoCompactOutcome
+    from app.services.compact.compact import (
         CompactionResult,
         create_compact_boundary_message,
     )
@@ -369,7 +367,7 @@ def test_an_async_worker_writes_task_state_through_to_the_root():
 
 
 def test_an_async_worker_has_its_own_cancel_token_unless_given_one():
-    from app.loop.context.tool_context import CancelToken
+    from app.tool import CancelToken
 
     parent = _parent()
     model, _ = _run(parent=parent, is_async=True)
@@ -394,7 +392,7 @@ def test_the_worker_writes_its_metadata_sidecar(tmp_path):
 # ── Phase 8: preloaded skills and the main-loop model ───────────────────────
 
 def _registry(tmp_path):
-    from app.loop.skills.loader import get_skill_registry
+    from app.skills.load_skills_dir import get_skill_registry
 
     skill = tmp_path / "bundled" / "probe"
     skill.mkdir(parents=True)
@@ -429,7 +427,7 @@ def test_a_worker_never_inherits_the_main_loops_model_override():
 
 
 def test_preloaded_skills_see_the_runs_session_id(tmp_path):
-    from app.loop.skills.loader import get_skill_registry
+    from app.skills.load_skills_dir import get_skill_registry
 
     skill = tmp_path / "bundled" / "sid"
     skill.mkdir(parents=True)

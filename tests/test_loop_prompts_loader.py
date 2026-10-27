@@ -1,10 +1,10 @@
 """
-Tests for Part E4: Markdown prompt loader (app/loop/prompts/loader.py).
+Tests for Part E4: Markdown prompt loader (app/utils/frontmatter_parser.py).
 """
 
 import pytest
 
-from app.loop.prompts.loader import (
+from app.utils.frontmatter_parser import (
     parse_markdown_frontmatter,
     render_prompt,
 )

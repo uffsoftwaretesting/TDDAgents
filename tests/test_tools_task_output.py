@@ -6,14 +6,17 @@ import asyncio
 
 import pytest
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.tasks.local_agent_task import (
+from app.state.app_state_store import AppStateStore
+from app.tasks.local_agent_task.local_agent_task import (
     complete_agent_task,
     fail_agent_task,
     register_async_agent,
 )
-from app.loop.tools.task_output import TASK_OUTPUT_TOOL_NAME, build_task_output_tool
+from app.tool import tool_context_for
+from app.tools.task_output_tool.task_output_tool import (
+    TASK_OUTPUT_TOOL_NAME,
+    build_task_output_tool,
+)
 
 
 def _setup(tmp_path, transcript_text: str = "line one\n"):
@@ -127,7 +130,7 @@ def test_a_vanished_task_times_out_with_no_task(tmp_path):
 
 
 def test_a_cancelled_wait_aborts(tmp_path):
-    from app.loop.agents.tool import AbortError
+    from app.tools.agent_tool.agent_tool import AbortError
 
     _store, ctx, _ = _setup(tmp_path)
     ctx.cancel.cancel()

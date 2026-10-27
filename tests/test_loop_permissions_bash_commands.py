@@ -1,12 +1,12 @@
 """
-`app/loop/permissions/bash_commands.py`: port of claude-code's `utils/bash/commands.ts`
+`app/utils/bash/commands.py`: port of claude-code's `utils/bash/commands.ts`
 splitting and redirection extraction (legacy path), plus `RegexParsedCommand_DEPRECATED`.
 """
 
 import pytest
 
-import app.loop.permissions.bash_commands as bc
-from app.loop.permissions.bash_commands import (
+import app.utils.bash.commands as bc
+from app.utils.bash.commands import (
     ALL_SUPPORTED_CONTROL_OPERATORS,
     ALLOWED_FILE_DESCRIPTORS,
     COMMAND_LIST_SEPARATORS,

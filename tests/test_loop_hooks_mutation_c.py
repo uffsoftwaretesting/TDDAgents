@@ -25,35 +25,35 @@ from typing import Any, ClassVar
 import pytest
 from langchain_core.messages import ToolMessage
 
-from app.loop.hooks.async_registry import AsyncHookRegistry
-from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.exec_command import exec_command_hook
-from app.loop.hooks.exec_http import (
+from app.schemas.hooks import (
+    CommandHook,
+    HookMatcher,
+    HttpHook,
+    parse_hooks_settings,
+)
+from app.types.hooks import validate_hook_json
+from app.utils.hooks.async_hook_registry import AsyncHookRegistry
+from app.utils.hooks.exec_http_hook import (
     HttpHookPolicy,
     HttpRequest,
     _send_blocking,
     exec_http_hook,
     should_bypass_proxy,
 )
-from app.loop.hooks.matching import (
+from app.utils.hooks.hooks import (
     _find_tool,
+    exec_command_hook,
     get_matching_hooks,
     prepare_if_condition_matcher,
 )
-from app.loop.hooks.messages import reorder_attachments_for_api
-from app.loop.hooks.output import validate_hook_json
-from app.loop.hooks.process import CapturedProcess
-from app.loop.hooks.schemas import (
-    CommandHook,
-    HookMatcher,
-    HttpHook,
-    parse_hooks_settings,
-)
-from app.loop.hooks.ssrf_guard import (
+from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
+from app.utils.hooks.ssrf_guard import (
     expand_ipv6_groups,
     is_blocked_address,
     ssrf_guarded_lookup,
 )
+from app.utils.messages import reorder_attachments_for_api
+from app.utils.shell_command import CapturedProcess
 
 PINNED = "127.0.0.2"
 

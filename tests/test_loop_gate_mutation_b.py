@@ -1,5 +1,5 @@
 """
-Pre-push gate, cluster B: mutation-driven pins for `app/loop/permissions/yolo_classifier.py`.
+Pre-push gate, cluster B: mutation-driven pins for `app/utils/permissions/yolo_classifier.py`.
 
 Every model call is scripted; the production caller runs against a fake `get_chat_model`.
 """
@@ -14,9 +14,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.loop.permissions.yolo_classifier as yc
-from app.loop.permissions.settings import SettingsLocations
-from app.loop.permissions.types import ToolPermissionContext
+import app.utils.permissions.yolo_classifier as yc
+from app.types.permissions import ToolPermissionContext
+from app.utils.settings.settings import SettingsLocations
 
 TOOLS = (SimpleNamespace(name="Bash", aliases=()), SimpleNamespace(name="RunTests", aliases=()))
 

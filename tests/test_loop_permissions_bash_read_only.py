@@ -1,5 +1,5 @@
 """
-`app/loop/permissions/bash_read_only.py` and `bash_read_only_commands.py`: ports of
+`app/tools/bash_tool/read_only_validation.py` and `bash_read_only_commands.py`: ports of
 claude-code's `readOnlyValidation.ts` and `utils/shell/readOnlyCommandValidation.ts`.
 Attack examples are the ones upstream documents next to each defense.
 """
@@ -8,9 +8,9 @@ import os
 
 import pytest
 
-import app.loop.permissions.bash_read_only as ro
-import app.loop.permissions.bash_read_only_commands as roc
-from app.loop.permissions.bash_read_only import (
+import app.tools.bash_tool.read_only_validation as ro
+import app.utils.shell.read_only_command_validation as roc
+from app.tools.bash_tool.read_only_validation import (
     check_read_only_constraints,
     command_writes_to_git_internal_paths,
     contains_unquoted_expansion,
@@ -22,7 +22,7 @@ from app.loop.permissions.bash_read_only import (
     is_git_internal_path,
     make_regex_for_safe_command,
 )
-from app.loop.permissions.bash_read_only_commands import (
+from app.utils.shell.read_only_command_validation import (
     CommandConfig,
     contains_vulnerable_unc_path,
     get_command_allowlist,
@@ -31,8 +31,8 @@ from app.loop.permissions.bash_read_only_commands import (
     validate_flags,
 )
 
-
 # ── tables ───────────────────────────────────────────────────────────────────
+
 
 def test_table_shape():
     allow = roc.COMMAND_ALLOWLIST
@@ -73,6 +73,7 @@ def test_get_platform(monkeypatch):
 
 
 # ── validate_flag_argument / validate_flags ──────────────────────────────────
+
 
 @pytest.mark.parametrize("value, kind, ok", [
     ("10", "number", True), ("1a", "number", False), ("", "number", False),
@@ -201,6 +202,7 @@ def test_hostname_regex():
 
 # ── UNC ──────────────────────────────────────────────────────────────────────
 
+
 def test_unc_paths_only_matter_on_windows(monkeypatch):
     assert contains_vulnerable_unc_path("\\\\server\\share") is False
     monkeypatch.setattr(roc, "get_platform", lambda: "windows")
@@ -213,6 +215,7 @@ def test_unc_paths_only_matter_on_windows(monkeypatch):
 
 
 # ── is_command_safe_via_flag_parsing ─────────────────────────────────────────
+
 
 @pytest.mark.parametrize("command, safe", [
     ("git status", True),
@@ -262,6 +265,7 @@ def test_flag_parsing_ignores_ls_remote_flags_and_empty_tokens():
 
 
 # ── regex allowlist ──────────────────────────────────────────────────────────
+
 
 def test_make_regex_for_safe_command():
     rx = make_regex_for_safe_command("cat")
@@ -330,6 +334,7 @@ def test_is_command_read_only_unc(monkeypatch):
 
 # ── git hardening ────────────────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize("path, internal", [
     ("HEAD", True), ("./HEAD", True), ("/HEAD", True), ("objects", True), ("objects/x", True), ("refs/heads", True),
     ("hooks/pre-commit", True), ("HEADS", False), ("src/hooks", False), ("objectsx", False),
@@ -389,6 +394,7 @@ def test_bare_git_repo_detection(tmp_path):
 
 # ── check_read_only_constraints ──────────────────────────────────────────────
 
+
 def test_check_read_only_constraints(tmp_path, monkeypatch):
     cwd = str(tmp_path)
     allow = check_read_only_constraints("ls && cat f", False, cwd)
@@ -436,10 +442,11 @@ def test_readonly_vocabularies():
     assert "cat" in ro.READONLY_COMMANDS and "docker ps" in ro.READONLY_COMMANDS
     assert len(ro.READONLY_COMMANDS) == 50
     assert ro.NON_CREATING_WRITE_COMMANDS == frozenset({"rm", "rmdir", "sed"})
-    assert os.path.basename(ro.__file__) == "bash_read_only.py"
+    assert os.path.basename(ro.__file__) == "read_only_validation.py"
 
 
 # ── direct coverage for import-time and callback branches ────────────────────
+
 
 def test_configs_builds_command_configs():
     rx = roc.REGEXES["hostname"]

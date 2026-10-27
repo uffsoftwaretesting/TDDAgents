@@ -10,12 +10,11 @@ import asyncio
 import pytest
 from langchain_core.messages import AIMessage, ToolCall
 
-import app.loop.tools.bash as bash_mod
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.permissions.gate import has_permissions_to_use_tool
-from app.loop.permissions.types import PermissionMode, ToolPermissionContext
-from app.loop.tools.bash import (
+import app.tools.bash_tool.bash_tool as bash_mod
+from app.services.tools.tool_execution import run_tool_use
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.tools.bash_tool.bash_tool import (
     DEFAULT_TIMEOUT_MS,
     MAX_TIMEOUT_MS,
     build_bash_tool,
@@ -24,7 +23,8 @@ from app.loop.tools.bash import (
     get_max_bash_timeout_ms,
     validate_bash_input,
 )
-from app.loop.tools.execution import run_tool_use
+from app.types.permissions import PermissionMode, ToolPermissionContext
+from app.utils.permissions.permissions import has_permissions_to_use_tool
 from app.workspace.base import CommandResult
 from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
@@ -278,7 +278,7 @@ def test_output_redirection_inside_cwd_needs_approval_in_default_mode(tmp_path):
 
 
 def test_allow_rule_resolves_and_headless_gate_denies_the_rest():
-    from app.loop.permissions.types import (
+    from app.types.permissions import (
         PermissionBehavior,
         PermissionRule,
         PermissionRuleSource,

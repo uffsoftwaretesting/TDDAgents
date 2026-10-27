@@ -1,5 +1,5 @@
 """
-`app/loop/context/memory.py`, the port of claude-code's `utils/claudemd.ts` memory loader.
+`app/utils/claudemd.py`, the port of claude-code's `utils/claudemd.ts` memory loader.
 
 Host-side files (Managed/User/AutoMem) live under tmp dirs passed as `home`/`managed_dir`;
 workspace files go through a real LocalWorkspace or the root-less FakeWorkspace.
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-import app.loop.context.memory as m
-from app.loop.context.memory import (
+import app.utils.claudemd as m
+from app.utils.claudemd import (
     MEMORY_INSTRUCTION_PROMPT,
     HostSource,
     MemoryFileInfo,

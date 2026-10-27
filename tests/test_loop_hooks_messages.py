@@ -1,4 +1,4 @@
-"""Hook attachments and the messages the model sees (`app/loop/hooks/messages.py`)."""
+"""Hook attachments and the messages the model sees (`app/utils/messages.py`)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.hooks.messages import (
+from app.utils.messages import (
     ATTACHMENT_KEY,
     HookAttachment,
     HookBlockingError,

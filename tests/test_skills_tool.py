@@ -11,22 +11,15 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.agents.definition import AgentDefinition
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.gate import has_permissions_to_use_tool
-from app.loop.permissions.types import (
-    PermissionBehavior,
-    PermissionMode,
-    PermissionRule,
-    PermissionRuleSource,
-    ToolPermissionContext,
-)
-from app.loop.skills.definition import SkillCommand
-from app.loop.skills.loader import SkillRegistry
-from app.loop.skills.preload import resolve_skill_name, skill_preload_messages
-from app.loop.skills.tool import (
+from app.services.tools.tool_orchestration import apply_context_modifier
+from app.skills.load_skills_dir import SkillCommand, SkillRegistry
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import tool_context_for
+from app.tools.agent_tool.load_agents_dir import AgentDefinition
+from app.tools.agent_tool.run_agent import resolve_skill_name, skill_preload_messages
+from app.tools.file_tools import build_write_file_tool
+from app.tools.skill_tool.skill_tool import (
     MAX_RESULT_SIZE_CHARS,
     SKILL_TOOL_SCHEMA,
     build_skill_tool,
@@ -38,8 +31,14 @@ from app.loop.skills.tool import (
     skill_has_only_safe_properties,
     with_allowed_tools,
 )
-from app.loop.tools.fs import build_write_file_tool
-from app.loop.tools.orchestration import apply_context_modifier
+from app.types.permissions import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionRule,
+    PermissionRuleSource,
+    ToolPermissionContext,
+)
+from app.utils.permissions.permissions import has_permissions_to_use_tool
 from tests.test_loop_engine import CONFIG, FakeModel, asks_for, make_fake_deps
 
 COMMAND = PermissionRuleSource.COMMAND
@@ -362,7 +361,7 @@ class TestForkWorkerContext:
         assert model.seen[0].tool_context.cancel is ctx.cancel
 
     def test_an_agent_with_memory_reads_it_through_the_forked_context(self, tmp_path):
-        from app.loop.agents.memory import AgentMemoryStore
+        from app.tools.agent_tool.agent_memory import AgentMemoryStore
 
         agent = dataclasses.replace(EXPLORE, memory="run")
         model, _ = self._fork(_skill(context="fork"), agent, agent_memory_store=AgentMemoryStore(base_dir=tmp_path))
@@ -496,7 +495,7 @@ class TestModelOverride:
 
 
 def test_the_listing_reads_the_contexts_registry():
-    from app.loop.attachments.skills import get_skill_listing_attachments
+    from app.utils.attachments import get_skill_listing_attachments
 
     registry = SkillRegistry([_skill()])
     ctx = _ctx(skill_registry=registry)

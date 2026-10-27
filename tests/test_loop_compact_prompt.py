@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.loop.compact.prompt import (
+from app.services.compact.prompt import (
     COMPACT_SUMMARIZER_SYSTEM_PROMPT,
     format_compact_summary,
     get_compact_prompt,

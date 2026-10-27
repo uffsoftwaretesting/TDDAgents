@@ -1,6 +1,6 @@
 """
-Mutation-driven pins for `app/loop/permissions/bash_commands.py` and
-`app/loop/permissions/bash_sed_validation.py`.
+Mutation-driven pins for `app/utils/bash/commands.py` and
+`app/tools/bash_tool/sed_validation.py`.
 
 The tables below were produced by the port and checked against upstream
 (`src/utils/bash/commands.ts` -> `extractOutputRedirections`, `reconstructCommand`,
@@ -13,10 +13,10 @@ double a `"` that sits inside single quotes.
 
 import pytest
 
-import app.loop.permissions.bash_commands as bc
-import app.loop.permissions.bash_sed_validation as sv
-from app.loop.permissions.bash_security import ParseEntry
-from app.loop.permissions.types import (
+import app.tools.bash_tool.sed_validation as sv
+import app.utils.bash.commands as bc
+from app.tools.bash_tool.bash_security import ParseEntry
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     ToolPermissionContext,

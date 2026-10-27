@@ -10,9 +10,12 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from app.loop.coordinator import COORDINATOR_MODE_ENV, get_coordinator_system_prompt
-from app.loop.storage.paths import get_project_dir
-from app.metrics.event_log import EventLog
+from app.coordinator.coordinator_mode import (
+    COORDINATOR_MODE_ENV,
+    get_coordinator_system_prompt,
+)
+from app.tdd.event_log import EventLog
+from app.utils.session_storage_portable import get_project_dir
 
 CALC_TEST = "import calculator\n\ndef test_add():\n    assert calculator.add(2, 3) == 5\n"
 CALC_IMPL = "def add(a, b):\n    return a + b\n"
@@ -38,8 +41,8 @@ def _settings(tmp_path, ws_root) -> Any:
 
 def _run(workspace, tmp_path, scripts: dict[str | None, list[list[AIMessage]]], seen: list[Any]):
     """A model scripted per agent type (`None` is the main thread)."""
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
+    from app.query.deps import get_production_deps
 
     async def model(state: Any, config: Any):
         agent_type = state.tool_context.agent_type
@@ -144,9 +147,9 @@ def _agent_tool(tools: Any) -> Any:
 
 
 def test_the_agent_tool_sees_project_and_user_agents(tmp_path, monkeypatch):
-    from app.loop.config import build_run_config
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import main_thread_tools
+    from app.cli.print import main_thread_tools
+    from app.query.config import build_run_config
+    from app.query.deps import get_production_deps
 
     monkeypatch.delenv(COORDINATOR_MODE_ENV, raising=False)
     _agent_file(tmp_path / "proj" / ".tddagents" / "agents", "projector")
@@ -158,11 +161,13 @@ def test_the_agent_tool_sees_project_and_user_agents(tmp_path, monkeypatch):
 
 
 def test_the_coordinators_agent_tool_has_the_coordinator_prompt(tmp_path, monkeypatch):
-    from app.loop.agents.loader import get_agent_definitions_with_overrides
-    from app.loop.agents.prompt import get_prompt
-    from app.loop.config import build_run_config
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import main_thread_tools
+    from app.cli.print import main_thread_tools
+    from app.query.config import build_run_config
+    from app.query.deps import get_production_deps
+    from app.tools.agent_tool.load_agents_dir import (
+        get_agent_definitions_with_overrides,
+    )
+    from app.tools.agent_tool.prompt import get_prompt
 
     monkeypatch.setenv(COORDINATOR_MODE_ENV, "1")
     config = build_run_config("r", postgres_checkpointing=False)
@@ -175,7 +180,7 @@ def test_the_coordinators_agent_tool_has_the_coordinator_prompt(tmp_path, monkey
 
 
 def test_run_memory_lives_in_the_run_dir_or_a_named_temp_dir(tmp_path):
-    from app.loop.runner import run_agent_memory_store
+    from app.cli.print import run_agent_memory_store
 
     store, root = run_agent_memory_store(tmp_path)
     assert (store.base_dir, root) == (tmp_path.resolve(), None)
@@ -188,9 +193,9 @@ def test_run_memory_lives_in_the_run_dir_or_a_named_temp_dir(tmp_path):
 def test_the_runner_wires_its_model_session_and_user_agents(make_fake_workspace, tmp_path, monkeypatch):
     """The cost tracker prices the run's model; events carry the run id; the caller's own
     sink still gets the real events; user agents come from the given home."""
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import tdd_loop_runner
-    from app.loop.transitions import Terminated, Transition
+    from app.cli.print import tdd_loop_runner
+    from app.query.deps import get_production_deps
+    from app.query.transitions import Terminated, Transition
 
     monkeypatch.delenv(COORDINATOR_MODE_ENV, raising=False)
     _agent_file(tmp_path / "home" / ".tddagents" / "agents", "homer")
@@ -216,8 +221,8 @@ def test_the_runner_wires_its_model_session_and_user_agents(make_fake_workspace,
 
 def test_agent_memory_lives_in_the_workspaces_run_dir(make_fake_workspace, tmp_path):
     """Part I5: the run's memory store is rooted in the workspace's run dir when it has one."""
-    from app.loop.factory import get_production_deps
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
+    from app.query.deps import get_production_deps
 
     seen: list[Any] = []
 

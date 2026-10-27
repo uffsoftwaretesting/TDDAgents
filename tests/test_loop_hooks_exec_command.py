@@ -1,4 +1,4 @@
-"""Tests for `app/loop/hooks/exec_command.py` (`execCommandHook`), against real shells."""
+"""Tests for `app/utils/hooks/hooks.py` (`execCommandHook`), against real shells."""
 
 from __future__ import annotations
 
@@ -11,18 +11,18 @@ from typing import Any
 
 import pytest
 
-import app.loop.hooks.exec_command as ec
-from app.loop.context.tool_context import CancelToken
-from app.loop.hooks.async_registry import AsyncHookRegistry
-from app.loop.hooks.exec_command import (
+import app.utils.hooks.hooks as ec
+from app.schemas.hooks import CommandHook
+from app.tool import CancelToken
+from app.utils.hooks.async_hook_registry import AsyncHookRegistry
+from app.utils.hooks.hooks import (
     PROJECT_DIR_ENV,
     CommandHookResult,
     exec_command_hook,
     hook_env,
     safe_cwd,
 )
-from app.loop.hooks.process import CapturedProcess
-from app.loop.hooks.schemas import CommandHook
+from app.utils.shell_command import CapturedProcess
 
 
 def script(tmp_path: Path, name: str, body: str) -> str:
@@ -138,11 +138,11 @@ def test_explicit_timeout_ms_wins_over_the_hooks(tmp_path):
 
 
 def test_the_default_timeout_is_ten_minutes(tmp_path, monkeypatch):
-    from app.loop.hooks.events import TOOL_HOOK_EXECUTION_TIMEOUT_MS
+    from app.utils.hooks.hook_events import TOOL_HOOK_EXECUTION_TIMEOUT_MS
 
     assert getattr(ec, "TOOL_HOOK_EXECUTION_TIMEOUT_MS") is TOOL_HOOK_EXECUTION_TIMEOUT_MS  # noqa: B009
     assert TOOL_HOOK_EXECUTION_TIMEOUT_MS == 600_000
-    monkeypatch.setattr("app.loop.hooks.exec_command.TOOL_HOOK_EXECUTION_TIMEOUT_MS", 150)
+    monkeypatch.setattr("app.utils.hooks.hooks.TOOL_HOOK_EXECUTION_TIMEOUT_MS", 150)
     started = time.monotonic()
     result = run(CommandHook(command=script(tmp_path, "h.sh", "sleep 5")), tmp_path)
     assert result.aborted is True

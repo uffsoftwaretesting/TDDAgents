@@ -3,12 +3,12 @@ skill command becomes (`createSkillCommand` -> `getPromptForCommand`)."""
 
 from __future__ import annotations
 
-from app.loop.skills.arguments import (
+from app.skills.load_skills_dir import SkillCommand
+from app.utils.argument_substitution import (
     parse_argument_names,
     parse_arguments,
     substitute_arguments,
 )
-from app.loop.skills.definition import SkillCommand
 
 
 def test_parse_arguments_is_shell_like_with_a_whitespace_fallback():

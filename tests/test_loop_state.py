@@ -15,10 +15,10 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger
-from app.loop.state import CompactionTracking, LoopState, initial_loop_state
+from app.query.state import CompactionTracking, LoopState, initial_loop_state
+from app.state.app_state_store import AppStateStore
+from app.tdd.ledger import PhaseLedger
+from app.tool import tool_context_for
 
 
 def make_state(**overrides: Any) -> LoopState:

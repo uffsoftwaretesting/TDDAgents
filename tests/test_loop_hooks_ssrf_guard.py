@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.loop.hooks.ssrf_guard import (
+from app.utils.hooks.ssrf_guard import (
     SSRF_ERROR_CODE,
     SsrfBlockedError,
     default_resolver,
@@ -120,7 +120,7 @@ def test_default_resolver_literal_and_dedup() -> None:
 
 
 def test_default_used_when_no_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.loop.hooks.ssrf_guard as guard
+    import app.utils.hooks.ssrf_guard as guard
 
     monkeypatch.setattr(guard, "default_resolver", lambda h: [("192.168.1.1", 4)])
     with pytest.raises(SsrfBlockedError):

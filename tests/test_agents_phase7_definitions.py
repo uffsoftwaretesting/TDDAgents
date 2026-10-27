@@ -10,13 +10,9 @@ from typing import Any
 
 import pytest
 
-from app.loop.agents.definition import AgentDefinition, AgentFrontmatterError
-from app.loop.agents.loader import (
-    get_agent_definitions_with_overrides,
-    load_agent_definition,
-)
-from app.loop.agents.prompt import format_agent_line, get_prompt, get_tools_description
-from app.loop.agents.resolution import (
+from app.tdd.ledger import TddPhase
+from app.tool import build_tool
+from app.tools.agent_tool.agent_tool_utils import (
     ALL_AGENT_DISALLOWED_TOOLS,
     ASYNC_AGENT_ALLOWED_TOOLS,
     filter_denied_agents,
@@ -24,14 +20,23 @@ from app.loop.agents.resolution import (
     get_deny_rule_for_agent,
     resolve_agent_tools,
 )
-from app.loop.ledger import TddPhase
-from app.loop.permissions.types import (
+from app.tools.agent_tool.load_agents_dir import (
+    AgentDefinition,
+    AgentFrontmatterError,
+    get_agent_definitions_with_overrides,
+    load_agent_definition,
+)
+from app.tools.agent_tool.prompt import (
+    format_agent_line,
+    get_prompt,
+    get_tools_description,
+)
+from app.types.permissions import (
     PermissionBehavior,
     PermissionRule,
     PermissionRuleSource,
     ToolPermissionContext,
 )
-from app.loop.tools.base import build_tool
 
 PROMPTS = Path(__file__).parent.parent / "app" / "prompts" / "agents"
 
@@ -169,7 +174,7 @@ class TestDefinitionsWithOverrides:
     def test_no_prompt_registry_is_consulted(self):
         import inspect
 
-        import app.loop.agents.loader as loader
+        import app.tools.agent_tool.load_agents_dir as loader
 
         assert "global_prompt_registry" not in inspect.getsource(loader)
 
@@ -184,7 +189,7 @@ class TestTheShippedRoster:
         ("plan", "Plan", None),
     ])
     def test_each_agent(self, directory, name, phase):
-        from app.loop.agents.loader import load_agent_definition_from_path
+        from app.tools.agent_tool.load_agents_dir import load_agent_definition_from_path
 
         defn = load_agent_definition_from_path(PROMPTS / directory / "AGENT.md")
         assert defn is not None
@@ -498,7 +503,7 @@ class TestTriageResolution:
 
 class TestTriageLoader:
     def test_every_placeholder_form_is_rendered(self):
-        from app.loop.agents.loader import render_prompt
+        from app.tools.agent_tool.load_agents_dir import render_prompt
 
         assert render_prompt("{{A}} ${B} {C}", {"A": "1", "B": "2", "C": "3"}) == "1 2 3"
 
@@ -511,7 +516,7 @@ class TestTriageLoader:
         assert load_agent_definition(_md(name="a", description=123)) is None
 
     def test_only_markdown_files_and_agent_dirs_are_scanned(self, tmp_path):
-        from app.loop.agents.loader import _scan_agent_dir
+        from app.tools.agent_tool.load_agents_dir import _scan_agent_dir
 
         (tmp_path / "README.md").write_text(_md(name="readme", description="d"))
         (tmp_path / "notes.txt").write_text(_md(name="notes", description="d"))
@@ -520,7 +525,7 @@ class TestTriageLoader:
 
     def test_html_comment_frontmatter_is_not_frontmatter(self):
         """Upstream's `FRONTMATTER_REGEX` accepts `---` fences only."""
-        from app.loop.agents.loader import parse_markdown_frontmatter
+        from app.tools.agent_tool.load_agents_dir import parse_markdown_frontmatter
 
         assert parse_markdown_frontmatter("<!--\nname: a\n-->\nbody") == ({}, "<!--\nname: a\n-->\nbody")
         assert parse_markdown_frontmatter("---\nname: a\n---\n body ") == ({"name": "a"}, "body")

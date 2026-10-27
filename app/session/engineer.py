@@ -29,7 +29,7 @@ def node_engineer(
     audit_log = list(state.get("audit_log") or [])
 
     if engineer_fn is None:
-        from app.agents.langgraph.engineer import generate_specification
+        from app.session.agents.engineer import generate_specification
 
         engineer_fn = generate_specification
 

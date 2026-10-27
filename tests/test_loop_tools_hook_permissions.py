@@ -1,5 +1,5 @@
 """
-Hook verdict versus permission rules: `app/loop/tools/hook_permissions.py`.
+Hook verdict versus permission rules: `app/services/tools/tool_hooks.py`.
 
 The invariant upstream states in its own docstring — *hook 'allow' does NOT bypass
 settings.json deny/ask rules* — matters more here than there, because the TDD phase rules
@@ -15,21 +15,20 @@ from typing import Any
 
 import pytest
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.types import (
+from app.services.tools.tool_hooks import (
+    HookPermissionVerdict,
+    resolve_hook_permission_decision,
+)
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import build_tool, tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionResult,
     PermissionRule,
     ToolPermissionContext,
-)
-from app.loop.tools.base import build_tool
-from app.loop.tools.hook_permissions import (
-    HookPermissionVerdict,
-    resolve_hook_permission_decision,
 )
 from tests.hook_doubles import ScriptedDispatcher
 
@@ -157,7 +156,7 @@ def _never_the_full_gate(monkeypatch):
     async def full_gate(tool, args, context, tool_use_id=""):
         raise AssertionError("a hook ask is a forced decision: the full gate must not run")
 
-    monkeypatch.setattr("app.loop.tools.hook_permissions.has_permissions_to_use_tool", full_gate)
+    monkeypatch.setattr("app.services.tools.tool_hooks.has_permissions_to_use_tool", full_gate)
 
 
 def interactive_context(ledger=None, perm=None):
@@ -181,10 +180,7 @@ def test_a_hook_ask_without_a_message_names_the_hook(monkeypatch):
 
 
 def test_a_hook_ask_is_denied_where_no_prompt_can_be_shown():
-    from app.loop.permissions.messages import (
-        auto_reject_message,
-        dont_ask_reject_message,
-    )
+    from app.utils.messages import auto_reject_message, dont_ask_reject_message
 
     resolved = resolve(HookPermissionVerdict(behavior=PermissionBehavior.ASK, message="m"))
     assert (resolved.decision.behavior, resolved.decision.message) == (
@@ -286,7 +282,7 @@ def test_the_gate_is_asked_about_the_hooks_input_not_the_models():
 # ── hook allow: re-checked by rules only (upstream checkRuleBasedPermissions) ──
 
 def _write_tool():
-    from app.loop.tools.fs import build_write_file_tool
+    from app.tools.file_tools import build_write_file_tool
 
     return build_write_file_tool()
 
@@ -340,7 +336,7 @@ def _spy(monkeypatch, name, result):
         seen.append(args)
         return result
 
-    monkeypatch.setattr(f"app.loop.tools.hook_permissions.{name}", spy)
+    monkeypatch.setattr(f"app.services.tools.tool_hooks.{name}", spy)
     return seen
 
 
@@ -379,7 +375,7 @@ def test_hook_ask_handler_receives_input_and_tool_use_id(monkeypatch):
 
 
 def test_check_file_read_permissions_passes_the_input_through(tmp_path):
-    from app.loop.permissions.filesystem import check_file_read_permissions
+    from app.utils.permissions.filesystem import check_file_read_permissions
 
     ctx = tool_context_for(AppStateStore(), permission_context=ToolPermissionContext(),
                            workspace=SimpleNamespace(root=str(tmp_path)))

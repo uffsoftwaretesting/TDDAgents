@@ -1,13 +1,20 @@
-"""Which configured hooks run for one event (`app/loop/hooks/matching.py`)."""
+"""Which configured hooks run for one event (`app/utils/hooks/hooks.py`)."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-import app.loop.hooks.matching as matching_mod
-from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.matching import (
+import app.utils.hooks.hooks as matching_mod
+from app.schemas.hooks import (
+    AgentHook,
+    CommandHook,
+    HookMatcher,
+    HttpHook,
+    PromptHook,
+)
+from app.tool import ToolResult, build_tool
+from app.utils.hooks.hooks import (
     MatchedHook,
     get_hooks_config,
     get_legacy_tool_names,
@@ -16,15 +23,7 @@ from app.loop.hooks.matching import (
     matches_pattern,
     prepare_if_condition_matcher,
 )
-from app.loop.hooks.schemas import (
-    AgentHook,
-    CommandHook,
-    HookMatcher,
-    HttpHook,
-    PromptHook,
-)
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import ToolResult
+from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
 
 # ── matchesPattern ────────────────────────────────────────────────────────────
 

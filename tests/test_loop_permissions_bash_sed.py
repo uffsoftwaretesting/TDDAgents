@@ -1,11 +1,11 @@
 """
-`app/loop/permissions/bash_sed_validation.py`: port of claude-code's
+`app/tools/bash_tool/sed_validation.py`: port of claude-code's
 `tools/BashTool/sedValidation.ts`.
 """
 
 import pytest
 
-from app.loop.permissions.bash_sed_validation import (
+from app.tools.bash_tool.sed_validation import (
     IN_PLACE_FLAGS,
     LINE_PRINTING_FLAGS,
     SED_ASK_MESSAGE,
@@ -22,7 +22,7 @@ from app.loop.permissions.bash_sed_validation import (
     sed_command_is_allowed_by_allowlist,
     validate_flags_against_allowlist,
 )
-from app.loop.permissions.types import PermissionMode, ToolPermissionContext
+from app.types.permissions import PermissionMode, ToolPermissionContext
 
 
 def test_flag_vocabularies():

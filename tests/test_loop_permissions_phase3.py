@@ -4,7 +4,7 @@ Phase 3 — permissions and settings wired at runtime.
 Covers the modules the phase added (`dangerous.py`, `permission_request.py`, `messages.py`),
 the settings sources added to `settings.py` (flag, policy with drop-ins,
 `allowManagedPermissionRulesOnly`, mode resolution, `initializeToolPermissionContext`), the
-PermissionRequest decision parsing (`app/loop/hooks/` since Phase 4), and the D6 structural invariant against
+PermissionRequest decision parsing (`app/utils/hooks/` since Phase 4), and the D6 structural invariant against
 the shipped settings: no settings-loaded allow lets a RED-phase call write production code.
 """
 
@@ -19,37 +19,37 @@ from typing import Any
 
 import pytest
 
-import app.loop.permissions.dangerous as dg
-import app.loop.permissions.settings as st
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.execute import HookDispatcher
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.gate import has_permissions_to_use_tool
-from app.loop.permissions.messages import (
+import app.utils.permissions.dangerous_patterns as dg
+import app.utils.settings.settings as st
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import (
     MODE_TITLES,
-    SOURCE_DISPLAY_NAMES,
-    create_permission_request_message,
-    escape_rule_content,
-    permission_mode_title,
-    permission_rule_source_display_string,
-    permission_rule_value_to_string,
-)
-from app.loop.permissions.permission_request import (
-    PERMISSION_REQUEST_EVENT,
-    permission_request_decision,
-    run_permission_request_hooks_for_headless_agent,
-)
-from app.loop.permissions.types import (
     PermissionBehavior,
     PermissionMode,
     PermissionResult,
     PermissionRule,
     PermissionRuleSource,
     ToolPermissionContext,
+    permission_mode_title,
 )
+from app.utils.hooks.hooks import HookDispatcher
+from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
+from app.utils.permissions.permission_rule_parser import (
+    escape_rule_content,
+    permission_rule_value_to_string,
+)
+from app.utils.permissions.permissions import (
+    PERMISSION_REQUEST_EVENT,
+    create_permission_request_message,
+    has_permissions_to_use_tool,
+    permission_request_decision,
+    permission_rule_source_display_string,
+    run_permission_request_hooks_for_headless_agent,
+)
+from app.utils.settings.constants import SOURCE_DISPLAY_NAMES
 
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK
 S = PermissionRuleSource
@@ -560,7 +560,7 @@ def _repo_context(tmp_path: Path, ws: Path) -> ToolPermissionContext:
 
 
 def _gate_call(tool_name, args, perm, ledger, ws, dispatcher=None):
-    from app.loop.runner import build_builtin_tools
+    from app.cli.print import build_builtin_tools
 
     tool = next(t for t in build_builtin_tools() if t.name == tool_name)
     store = AppStateStore(state=AppState(phase_ledger=ledger, tool_permission_context=perm))
@@ -672,22 +672,22 @@ def test_additional_directories_inside_the_working_dir_are_skipped(tmp_path):
 
 
 def test_claude_worktrees_as_the_last_two_segments():
-    from app.loop.permissions.filesystem import is_dangerous_file_path_to_auto_edit
+    from app.utils.permissions.filesystem import is_dangerous_file_path_to_auto_edit
 
     assert not is_dangerous_file_path_to_auto_edit("/w/.claude/worktrees")
 
 
 def test_unc_paths_are_suspicious_on_their_own(monkeypatch):
     """`containsVulnerableUncPath` is Windows-only upstream, so the platform is faked."""
-    from app.loop.permissions.filesystem import has_suspicious_windows_path_pattern
+    from app.utils.permissions.filesystem import has_suspicious_windows_path_pattern
 
     assert not has_suspicious_windows_path_pattern("\\\\server\\share\\x")
-    monkeypatch.setattr("app.loop.permissions.bash_read_only_commands.get_platform", lambda: "windows")
+    monkeypatch.setattr("app.utils.shell.read_only_command_validation.get_platform", lambda: "windows")
     assert has_suspicious_windows_path_pattern("\\\\server\\share\\x")
 
 
 def test_matching_rule_keeps_scanning_patterns_and_roots():
-    from app.loop.permissions.filesystem import matching_rule_for_input
+    from app.utils.permissions.filesystem import matching_rule_for_input
 
     cwd = "/work/ws"
     other, src = PermissionRule("Edit", DENY, "other/**", S.PROJECT_SETTINGS), PermissionRule(
@@ -704,7 +704,7 @@ def test_matching_rule_keeps_scanning_patterns_and_roots():
 
 
 def test_matching_rule_ignores_the_parent_of_the_root():
-    from app.loop.permissions.filesystem import matching_rule_for_input
+    from app.utils.permissions.filesystem import matching_rule_for_input
 
     star = PermissionRule("Edit", DENY, "*", S.PROJECT_SETTINGS)
     assert matching_rule_for_input("/work", ToolPermissionContext(always_deny_rules=(star,)), "edit", "deny",
@@ -712,7 +712,7 @@ def test_matching_rule_ignores_the_parent_of_the_root():
 
 
 def test_is_path_allowed_honours_the_given_candidates_and_floating_allows():
-    from app.loop.permissions.filesystem import PathCheckResult, is_path_allowed
+    from app.utils.permissions.filesystem import PathCheckResult, is_path_allowed
 
     cwd = "/work/ws"
     edits = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
@@ -723,14 +723,14 @@ def test_is_path_allowed_honours_the_given_candidates_and_floating_allows():
 
 
 def test_write_check_resolves_a_relative_path_against_the_working_dir():
-    from app.loop.permissions.filesystem import check_write_permission_for_tool
+    from app.utils.permissions.filesystem import check_write_permission_for_tool
 
     edits = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
     assert check_write_permission_for_tool("a.py", {}, edits, "/work/ws").behavior == ALLOW
 
 
 def test_workspace_absolute_path_strips_only_slashes():
-    from app.loop.permissions.filesystem import workspace_absolute_path
+    from app.utils.permissions.filesystem import workspace_absolute_path
 
     assert workspace_absolute_path("/XX/f", "/ws") == "/ws/XX/f"
 
@@ -756,8 +756,8 @@ def test_interaction_predicate_receives_the_input():
 
 
 def test_run_permission_context_threads_every_input(tmp_path):
-    from app.loop.config import build_run_config
-    from app.loop.runner import run_permission_context
+    from app.cli.print import run_permission_context
+    from app.query.config import build_run_config
 
     home, etc, project = tmp_path / "home", tmp_path / "etc", tmp_path / "proj"
     write(home / ".tddagents/settings.json", {"permissions": {"deny": ["Bash(from-home)"]}})
@@ -781,8 +781,8 @@ def test_run_permission_context_threads_every_input(tmp_path):
 
 
 def test_run_permission_context_defaults_to_cwd_and_etc(tmp_path, monkeypatch):
-    from app.loop.config import build_run_config
-    from app.loop.runner import run_permission_context
+    from app.cli.print import run_permission_context
+    from app.query.config import build_run_config
 
     monkeypatch.chdir(tmp_path)
     write(tmp_path / ".tddagents/settings.json", {"permissions": {"defaultMode": "acceptEdits"}})
@@ -792,7 +792,7 @@ def test_run_permission_context_defaults_to_cwd_and_etc(tmp_path, monkeypatch):
         seen.update(kwargs, args=args)
         return ToolPermissionContext()
 
-    monkeypatch.setattr("app.loop.runner.build_tool_permission_context", spy)
+    monkeypatch.setattr("app.cli.print.build_tool_permission_context", spy)
     run_permission_context(build_run_config("r", postgres_checkpointing=False), object())
     assert seen["args"] == (tmp_path, None)
     assert seen["managed_dir"] == "/etc/tddagents"

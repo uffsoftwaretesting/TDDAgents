@@ -4,7 +4,7 @@ Unit tests for I5: Agent memory management and run-scoped cleanup.
 
 from pathlib import Path
 
-from app.loop.agents.memory import AgentMemoryStore
+from app.tools.agent_tool.agent_memory import AgentMemoryStore
 
 
 def test_get_memory_dir_scopes(tmp_path: Path) -> None:

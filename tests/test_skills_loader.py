@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.skills.loader import (
+from app.skills.load_skills_dir import (
     BUNDLED_SKILLS_DIR,
     SkillRegistry,
     get_project_dirs_up_to_home,
@@ -229,7 +229,7 @@ def test_each_shipped_skill_references_its_material_relative_to_its_base_dir(nam
 
 def test_frontmatter_keeps_the_bodys_own_leading_text():
     """`parseFrontmatter` drops only the newlines after the closing `---`."""
-    from app.loop.skills.loader import parse_frontmatter
+    from app.skills.load_skills_dir import parse_frontmatter
 
     assert parse_frontmatter("---\na: 1\n---\n\n  Xray\n") == ({"a": 1}, "  Xray\n")
     assert parse_frontmatter("---\na: [\n---\nbody") == ({}, "body")
@@ -237,7 +237,7 @@ def test_frontmatter_keeps_the_bodys_own_leading_text():
 
 
 def test_a_description_line_is_capped_past_100_characters():
-    from app.loop.skills.loader import extract_description_from_markdown
+    from app.skills.load_skills_dir import extract_description_from_markdown
 
     assert extract_description_from_markdown("x" * 100) == "x" * 100
     assert extract_description_from_markdown("x" * 101) == "x" * 97 + "..."
@@ -256,7 +256,7 @@ def test_a_file_among_the_skill_dirs_is_skipped_not_the_end(tmp_path):
 
 def test_an_absolute_path_matches_relative_to_cwd_and_outsiders_are_skipped(tmp_path):
     def registry() -> SkillRegistry:
-        from app.loop.skills.definition import SkillCommand
+        from app.skills.load_skills_dir import SkillCommand
 
         late = SkillCommand(name="late", description="d", markdown_content="x", source="projectSettings",
                             loaded_from="skills", skill_root=None, paths=("src/**",))

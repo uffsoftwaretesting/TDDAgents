@@ -35,7 +35,6 @@ if __package__ in (None, ""):
 
 from dotenv import load_dotenv
 
-from app.loop.permissions.types import PERMISSION_MODES
 from app.session.driver import (
     SessionOptions,
     SessionRun,
@@ -46,6 +45,7 @@ from app.session.driver import (
     fresh_thread_id,
 )
 from app.session.export import export_run_workspace
+from app.types.permissions import PERMISSION_MODES
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -244,7 +244,7 @@ def session_options(args: argparse.Namespace) -> SessionOptions:
 
 def _write_token_report(artifacts_dir: str) -> None:
     """Logs token usage and persists a report to artifacts_dir/token_usage.txt."""
-    from app.loop.model import get_global_token_tracker
+    from app.services.api.claude import get_global_token_tracker
 
     summary = get_global_token_tracker().summary()
     totals = summary["totals"]

@@ -1,5 +1,5 @@
 """
-Tests for the auto-mode (YOLO) classifier port (`app/loop/permissions/yolo_classifier.py`).
+Tests for the auto-mode (YOLO) classifier port (`app/utils/permissions/yolo_classifier.py`).
 
 Every model call goes through a scripted `ClassifierModelCaller`; nothing reaches a provider.
 """
@@ -15,13 +15,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-import app.loop.context.assembly as assembly
-import app.loop.permissions.yolo_classifier as yc
-from app.loop.permissions.settings import SettingsLocations
-from app.loop.permissions.types import ToolPermissionContext
-from app.loop.permissions.yolo_classifier_names import (
+import app.context as assembly
+import app.utils.permissions.yolo_classifier as yc
+from app.types.permissions import ToolPermissionContext
+from app.utils.permissions.classifier_decision import (
     YOLO_CLASSIFIER_TOOL_NAME as NAME_CONSTANT,
 )
+from app.utils.settings.settings import SettingsLocations
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 

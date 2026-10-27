@@ -1,5 +1,5 @@
 """
-Tests for the agent-hook executor (`app/loop/hooks/exec_agent.py`), a port of
+Tests for the agent-hook executor (`app/utils/hooks/exec_agent_hook.py`), a port of
 `execAgentHook.ts`. The runner is a fake, and the production runner is driven with a fake model.
 """
 
@@ -11,9 +11,18 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import CancelToken, tool_context_for
-from app.loop.hooks.exec_agent import (
+from app.schemas.hooks import AgentHook
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import CancelToken, tool_context_for
+from app.types.permissions import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionRule,
+    PermissionRuleSource,
+    ToolPermissionContext,
+)
+from app.utils.hooks.exec_agent_hook import (
     DEFAULT_AGENT_HOOK_TIMEOUT_MS,
     HOOK_AGENT_DISALLOWED_TOOLS,
     MAX_AGENT_TURNS,
@@ -32,16 +41,7 @@ from app.loop.hooks.exec_agent import (
     hook_agent_tools,
     structured_output_enforcement,
 )
-from app.loop.hooks.exec_prompt import SMALL_FAST_MODEL_ENV
-from app.loop.hooks.schemas import AgentHook
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.types import (
-    PermissionBehavior,
-    PermissionMode,
-    PermissionRule,
-    PermissionRuleSource,
-    ToolPermissionContext,
-)
+from app.utils.hooks.exec_prompt_hook import SMALL_FAST_MODEL_ENV
 
 
 def _run(awaitable: Any) -> Any:
@@ -266,7 +266,7 @@ def test_enforcement_blocks_until_output():
 
 
 def _parent_context(ledger: PhaseLedger | None = None):
-    from app.loop.runner import build_builtin_tools
+    from app.cli.print import build_builtin_tools
 
     store = AppStateStore(AppState(phase_ledger=ledger or PhaseLedger()))
     return store, tool_context_for(store, tools=tuple(build_builtin_tools()), agent_id=None)
@@ -313,7 +313,7 @@ def test_runner_outcome_fields_and_abort():
     _, parent = _parent_context()
     runner = build_agent_hook_runner(_scripted([[_so_call("c1", {"ok": True})]], []))
     req = AgentHookRequest(prompt="p", system_prompt="s", model="m", tool_context=parent,
-                           transcript_path="/t", abort=__import__("app.loop.streaming.abort",
+                           transcript_path="/t", abort=__import__("app.utils.abort_controller",
                                                                   fromlist=["AbortController"]).AbortController())
     out = _run(runner(req))
     assert out.structured_output == {"ok": True}
@@ -348,7 +348,7 @@ def test_runner_tdd_stop_hook_does_not_apply():
 
 
 def test_runner_hits_max_turns():
-    from app.loop.streaming.abort import AbortController
+    from app.utils.abort_controller import AbortController
 
     _, parent = _parent_context()
     runner = build_agent_hook_runner(_scripted([], []))
@@ -395,7 +395,7 @@ def test_verifier_cannot_write_production_path_in_red(tmp_path):
     from app.workspace.local import LocalWorkspace
 
     ws = LocalWorkspace(tmp_path / "ws")
-    from app.loop.runner import build_builtin_tools
+    from app.cli.print import build_builtin_tools
 
     store = AppStateStore(AppState(
         phase_ledger=PhaseLedger(phase=TddPhase.RED),
@@ -424,8 +424,11 @@ def test_verifier_cannot_write_production_path_in_red(tmp_path):
 
 
 def test_verifier_run_tests_never_moves_parent_ledger():
-    from app.loop.runner import build_builtin_tools
-    from app.loop.tools.run_tests import SuiteExecutionResult, build_run_tests_tool
+    from app.cli.print import build_builtin_tools
+    from app.tdd.run_tests_tool.run_tests_tool import (
+        SuiteExecutionResult,
+        build_run_tests_tool,
+    )
 
     runs: list[str] = []
 

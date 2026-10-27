@@ -1,6 +1,6 @@
 """
-Settings-file permission rules (`app/loop/permissions/settings.py`) and shell rule matching
-(`app/loop/permissions/shell_rules.py`): ports of `permissionRuleParser.ts`,
+Settings-file permission rules (`app/utils/settings/settings.py`) and shell rule matching
+(`app/utils/permissions/shell_rule_matching.py`): ports of `permissionRuleParser.ts`,
 `permissionsLoader.ts` and `shellRuleMatching.ts`.
 """
 
@@ -10,8 +10,21 @@ from pathlib import Path
 
 import pytest
 
-import app.loop.permissions.settings as st
-from app.loop.permissions.settings import (
+import app.utils.settings.settings as st
+from app.types.permissions import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionRule,
+    PermissionRuleSource,
+)
+from app.utils.permissions.shell_rule_matching import (
+    ShellPermissionRule,
+    has_wildcards,
+    match_wildcard_pattern,
+    parse_permission_rule,
+    permission_rule_extract_prefix,
+)
+from app.utils.settings.settings import (
     LEGACY_TOOL_NAME_ALIASES,
     SETTINGS_SOURCES,
     SUPPORTED_RULE_BEHAVIORS,
@@ -22,19 +35,6 @@ from app.loop.permissions.settings import (
     permission_rule_value_from_string,
     settings_json_to_rules,
     unescape_rule_content,
-)
-from app.loop.permissions.shell_rules import (
-    ShellPermissionRule,
-    has_wildcards,
-    match_wildcard_pattern,
-    parse_permission_rule,
-    permission_rule_extract_prefix,
-)
-from app.loop.permissions.types import (
-    PermissionBehavior,
-    PermissionMode,
-    PermissionRule,
-    PermissionRuleSource,
 )
 
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK

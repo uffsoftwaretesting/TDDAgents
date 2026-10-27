@@ -15,14 +15,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from app.loop.attachments.nested_memory import (
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.utils.attachments import (
     NestedMemoryState,
     get_directories_to_process,
     get_nested_memory_attachments,
 )
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.file_state import FileState
-from app.loop.context.tool_context import tool_context_for
+from app.utils.file_state_cache import FileState
 from tests.conftest import FakeWorkspace
 
 

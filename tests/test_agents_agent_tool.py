@@ -11,8 +11,10 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.agents.definition import AgentDefinition
-from app.loop.agents.tool import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import tool_context_for
+from app.tools.agent_tool.agent_tool import (
     AGENT_TOOL_NAME,
     NO_OUTPUT_MARKER,
     AgentToolResult,
@@ -21,16 +23,14 @@ from app.loop.agents.tool import (
     map_agent_result,
     phase_on_spawn,
 )
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.model_aliases import MODEL_ALIASES
-from app.loop.permissions.types import (
+from app.tools.agent_tool.load_agents_dir import AgentDefinition
+from app.types.permissions import (
     PermissionBehavior,
     PermissionRule,
     PermissionRuleSource,
     ToolPermissionContext,
 )
+from app.utils.model.model import MODEL_ALIASES
 from tests.test_loop_engine import CONFIG, FakeModel, asks_for, make_fake_deps
 
 TESTER = AgentDefinition(name="tester", description="Writes failing tests.", prompt="You write tests.",
@@ -166,7 +166,7 @@ class TestRun:
         assert state.tool_context.agent_type == "tester"
 
     def test_run_memory_is_appended_to_the_agents_prompt(self, tmp_path):
-        from app.loop.agents.memory import AgentMemoryStore
+        from app.tools.agent_tool.agent_memory import AgentMemoryStore
 
         model = FakeModel([[AIMessage(content="report")]])
         store = AppStateStore(AppState())
@@ -251,7 +251,7 @@ class TestCallWiring:
         assert tool.aliases == ("Task",)
 
     def test_a_coordinator_gets_the_slim_prompt(self):
-        from app.loop.agents.prompt import get_prompt
+        from app.tools.agent_tool.prompt import get_prompt
 
         coordinator = _tool(is_coordinator=True).prompt
         assert coordinator == get_prompt(list(DEFS.values()), True, default_agent_type=None)
@@ -264,7 +264,7 @@ class TestCallWiring:
         store = AppStateStore(AppState())
         ctx = tool_context_for(store, workspace=SimpleNamespace(root="/proj"))
         _call(_tool(model), {**ARGS, "model": "haiku"}, ctx)
-        from app.loop.model_aliases import parse_user_specified_model
+        from app.utils.model.model import parse_user_specified_model
 
         assert model.seen_configs[0].model == parse_user_specified_model("haiku")
         system = model.seen[0].tool_context.agent_system_prompt
@@ -328,7 +328,7 @@ class TestCallWiring:
         assert result.content.startswith("partial findings\n")
 
     def test_a_cancelled_run_is_an_abort(self):
-        from app.loop.agents.tool import AbortError
+        from app.tools.agent_tool.agent_tool import AbortError
 
         _, ctx = _ctx()
         ctx.cancel.cancel()
@@ -382,8 +382,8 @@ def _background(tool, args, ctx, store):
 
 
 def _bg_ctx(tmp_path, tools=()):
-    from app.loop.command_queue import CommandQueue
-    from app.loop.storage.session_storage import TranscriptStore
+    from app.utils.message_queue_manager import CommandQueue
+    from app.utils.session_storage import TranscriptStore
 
     store = AppStateStore()
     transcript = TranscriptStore("loop-1", tmp_path, version="v", git_branch=None)
@@ -417,8 +417,7 @@ def test_a_background_agent_launches_and_reports_through_the_queue(tmp_path, mon
 
 
 def test_a_caller_that_can_read_gets_the_output_file_instructions(tmp_path):
-    from app.loop.tools.base import build_tool
-    from app.loop.tools.types import ToolResult
+    from app.tool import ToolResult, build_tool
 
     reader = build_tool(name="ReadFile", prompt="r", call=lambda a, c: ToolResult(content=""))
     store, ctx, _transcript = _bg_ctx(tmp_path, tools=(reader,))
@@ -506,7 +505,7 @@ def test_a_background_launch_is_recorded_exactly(tmp_path, monkeypatch):
 
 
 def test_the_prompt_carries_the_background_notes_when_background_is_on(monkeypatch):
-    from app.loop.agents.prompt import get_prompt
+    from app.tools.agent_tool.prompt import get_prompt
 
     monkeypatch.delenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", raising=False)
     assert _tool().prompt == get_prompt(list(DEFS.values()), False, default_agent_type=None,
@@ -521,7 +520,7 @@ def test_every_truthy_value_disables_background_tasks(monkeypatch, value):
 
 
 def test_the_background_refusal_explains_itself():
-    from app.loop.agents.tool import refuse_background_phase_agent
+    from app.tools.agent_tool.agent_tool import refuse_background_phase_agent
 
     with pytest.raises(ValueError) as err:
         refuse_background_phase_agent(TESTER, True)

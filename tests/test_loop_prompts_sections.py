@@ -1,12 +1,12 @@
 """
-Tests for Part E4b: Section registry, memoized/volatile split, boundary (app/loop/prompts/sections.py).
+Tests for Part E4b: Section registry, memoized/volatile split, boundary (app/constants/system_prompt_sections.py).
 """
 
 import asyncio
 
 import pytest
 
-from app.loop.prompts.sections import (
+from app.constants.system_prompt_sections import (
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     DANGEROUS_uncachedSystemPromptSection,
     PromptSectionCache,

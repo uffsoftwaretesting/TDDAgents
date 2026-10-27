@@ -18,16 +18,17 @@ from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import ToolContext, tool_context_for
-from app.loop.deps import CompactionResult, LoopDeps
-from app.loop.engine import run_loop
-from app.loop.messages import Message, ToolCall
-from app.loop.state import LoopState, initial_loop_state
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import ToolResult
-from app.loop.transitions import Terminated
+from app.query.config import build_run_config
+from app.state.app_state_store import AppStateStore
+from app.tool import ToolContext, tool_context_for
+from app.query.deps import LoopDeps
+from app.services.compact.compact import CompactionResult
+from app.query.query import run_loop
+from app.utils.messages import Message, ToolCall
+from app.query.state import LoopState, initial_loop_state
+from app.tool import build_tool
+from app.tool import ToolResult
+from app.query.transitions import Terminated
 
 
 load_dotenv()

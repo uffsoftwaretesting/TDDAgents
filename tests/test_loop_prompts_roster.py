@@ -4,10 +4,9 @@ Tests verifying all authored system, tool, and agent prompt files under app/prom
 
 from pathlib import Path
 
-from app.loop.agents.loader import load_agent_definition_from_path
-from app.loop.context.instructions import load_instruction_file
-from app.loop.ledger import TddPhase
-from app.loop.prompts.loader import parse_markdown_frontmatter
+from app.tdd.ledger import TddPhase
+from app.tools.agent_tool.load_agents_dir import load_agent_definition_from_path
+from app.utils.frontmatter_parser import parse_markdown_frontmatter, strip_html_comments
 
 PROMPTS_ROOT = Path(__file__).parent.parent / "app" / "prompts"
 
@@ -26,9 +25,7 @@ def test_system_prompt_files_exist_and_load() -> None:
     for filename in expected_files:
         p = system_dir / filename
         assert p.is_file(), f"Missing system prompt file: {p}"
-        loaded = load_instruction_file(p)
-        assert loaded is not None
-        assert len(loaded.content) > 20, f"Prompt {filename} is too short"
+        assert len(strip_html_comments(p.read_text(encoding="utf-8")).strip()) > 20, f"Prompt {filename} is too short"
 
 
 def test_tool_prompt_files_exist_and_load() -> None:
@@ -80,6 +77,4 @@ def test_agent_roster_loads_cleanly() -> None:
 def test_refactorer_catalogue_reference_exists() -> None:
     cat_path = PROMPTS_ROOT / "agents" / "refactorer" / "references" / "refactoring-catalogue.md"
     assert cat_path.is_file()
-    loaded = load_instruction_file(cat_path)
-    assert loaded is not None
-    assert "Extract Function" in loaded.content
+    assert "Extract Function" in cat_path.read_text(encoding="utf-8")

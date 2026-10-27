@@ -12,9 +12,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.permissions.filesystem import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tool import tool_context_for
+from app.types.permissions import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionRule,
+    PermissionRuleSource,
+    ToolPermissionContext,
+)
+from app.utils.permissions.filesystem import (
     DANGEROUS_DIRECTORIES,
     DANGEROUS_FILES,
     FILE_EDIT_TOOL_NAME,
@@ -39,13 +46,6 @@ from app.loop.permissions.filesystem import (
     permission_cwd,
     root_path_for_source,
     workspace_absolute_path,
-)
-from app.loop.permissions.types import (
-    PermissionBehavior,
-    PermissionMode,
-    PermissionRule,
-    PermissionRuleSource,
-    ToolPermissionContext,
 )
 
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK
@@ -397,7 +397,7 @@ def test_check_file_write_permissions_reads_the_app_state_context(tmp_path):
 
 
 def test_fs_tools_carry_the_write_check():
-    from app.loop.tools.fs import build_edit_tool, build_write_file_tool
+    from app.tools.file_tools import build_edit_tool, build_write_file_tool
 
     ctx = tool_context_for(AppStateStore(), permission_context=ToolPermissionContext(),
                            workspace=SimpleNamespace(root="/ws"))
@@ -409,7 +409,7 @@ def test_fs_tools_carry_the_write_check():
 
 # ── checkReadPermissionForTool and its tools ─────────────────────────────────
 
-from app.loop.permissions.filesystem import (  # noqa: E402
+from app.utils.permissions.filesystem import (  # noqa: E402
     check_file_read_permissions,
     check_read_permission_for_tool,
     check_readable_internal_path,
@@ -473,7 +473,7 @@ def test_read_inside_working_dirs_in_any_mode():
 
 
 def test_read_project_dir_is_an_internal_readable_path(tmp_path, monkeypatch):
-    from app.loop.tools.result_storage import sanitize_path
+    from app.utils.tool_result_storage import sanitize_path
 
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     project = tmp_path / "cfg" / "projects" / sanitize_path(CWD)

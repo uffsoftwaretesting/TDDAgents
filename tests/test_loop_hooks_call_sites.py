@@ -16,20 +16,19 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.deps import CompactionResult, LoopDeps, StopHookResult
-from app.loop.engine import drain, run_loop
-from app.loop.hooks.messages import HookBlockingError
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.permissions.types import ToolPermissionContext
-from app.loop.state import initial_loop_state
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import CANCEL_MESSAGE, run_tool_use
-from app.loop.tools.orchestration import run_tools
-from app.loop.tools.types import ToolResult
-from app.loop.transitions import Terminal
+from app.query.config import build_run_config
+from app.query.deps import LoopDeps
+from app.query.query import drain, run_loop
+from app.query.state import CompactionResult, initial_loop_state
+from app.query.stop_hooks import StopHookResult
+from app.query.transitions import Terminal
+from app.services.tools.tool_execution import CANCEL_MESSAGE, run_tool_use
+from app.services.tools.tool_orchestration import run_tools
+from app.state.app_state_store import AppStateStore
+from app.tool import ToolResult, build_tool, tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import ToolPermissionContext
+from app.utils.messages import HookBlockingError
 from tests.hook_doubles import ScriptedDispatcher
 
 CONFIG = build_run_config("sites", postgres_checkpointing=False)
@@ -136,8 +135,8 @@ def test_the_deny_path_keeps_hook_messages():
 
 
 def test_a_deny_without_a_message_names_the_hook_stop(monkeypatch):
-    import app.loop.tools.execution as execution_mod
-    from app.loop.permissions.types import PermissionBehavior, PermissionResult
+    import app.services.tools.tool_execution as execution_mod
+    from app.types.permissions import PermissionBehavior, PermissionResult
 
     async def silent_deny(*a: Any, **k: Any) -> Any:
         return SimpleNamespace(decision=PermissionResult(behavior=PermissionBehavior.DENY, message=""), input={})
@@ -196,8 +195,8 @@ def test_serial_and_concurrent_batches_emit_extras_after_each_result():
 
 
 def test_the_streaming_executor_emits_extras_after_each_result():
-    from app.loop.streaming.abort import AbortController
-    from app.loop.streaming.executor import StreamingToolExecutor
+    from app.services.tools.streaming_tool_executor import StreamingToolExecutor
+    from app.utils.abort_controller import AbortController
 
     tool = probe()
     d = _post_dispatcher()
@@ -338,7 +337,7 @@ def without_skill_listing(messages: Any) -> list[Any]:
 
 
 def run_runner(monkeypatch, tmp_path: Path, d: ScriptedDispatcher, model: Model) -> Any:
-    from app.loop.runner import tdd_loop_runner
+    from app.cli.print import tdd_loop_runner
     from tests.conftest import FakeWorkspace
 
     finalized: list[bool] = []
@@ -410,8 +409,8 @@ def test_a_stopped_prompt_never_reaches_the_model(monkeypatch, tmp_path):
 
 
 def test_run_settings_locations(tmp_path):
-    from app.loop.permissions.settings import MANAGED_DIR, SettingsLocations
-    from app.loop.runner import run_settings_locations
+    from app.cli.print import run_settings_locations
+    from app.utils.settings.settings import MANAGED_DIR, SettingsLocations
 
     flagged = replace(CONFIG, settings_path=str(tmp_path / "flag.json"))
     assert run_settings_locations(flagged, tmp_path, tmp_path / "home", tmp_path / "etc") == SettingsLocations(
@@ -424,7 +423,7 @@ def test_run_settings_locations(tmp_path):
 # ── workers and the request builder ─────────────────────────────────────────
 
 def test_the_request_builder_reorders_hook_messages_after_tool_results(monkeypatch):
-    import app.loop.model as model_mod
+    import app.services.api.claude as model_mod
 
     note = HumanMessage(content="n", additional_kwargs={"is_meta": True, "attachment": {"type": "x"}})
     call = AIMessage(content="", tool_calls=[{"name": "Probe", "args": {}, "id": "a"},
@@ -457,20 +456,20 @@ def test_an_exception_in_the_permission_phase_becomes_a_tool_use_error_and_the_r
 
     from langchain_core.messages import AIMessage as _AI
 
-    from app.loop.context.app_state import AppState
-    from app.loop.context.app_state import AppStateStore as _Store
-    from app.loop.context.tool_context import tool_context_for as _ctx
-    from app.loop.permissions.denial_tracking import DenialTrackingState
-    from app.loop.permissions.types import (
+    from app.services.tools.tool_execution import run_tool_use as _run
+    from app.state.app_state_store import AppState
+    from app.state.app_state_store import AppStateStore as _Store
+    from app.tool import ToolResult as _Result
+    from app.tool import build_tool as _build
+    from app.tool import tool_context_for as _ctx
+    from app.types.permissions import (
         PermissionBehavior,
         PermissionMode,
         PermissionResult,
         ToolPermissionContext,
     )
-    from app.loop.permissions.yolo_classifier import YoloClassifierResult
-    from app.loop.tools.base import build_tool as _build
-    from app.loop.tools.execution import run_tool_use as _run
-    from app.loop.tools.types import ToolResult as _Result
+    from app.utils.permissions.denial_tracking import DenialTrackingState
+    from app.utils.permissions.yolo_classifier import YoloClassifierResult
 
     async def block(*args, **kwargs):
         return YoloClassifierResult(should_block=True, reason="risky", model="m")
@@ -503,12 +502,12 @@ def test_stop_failure_hooks_are_fire_and_forget_but_finish_before_the_run_ends()
     from langchain_core.messages import AIMessage as _AI
     from langchain_core.messages import HumanMessage as _Human
 
-    from app.loop.config import build_run_config
-    from app.loop.context.app_state import AppStateStore as _Store
-    from app.loop.context.tool_context import tool_context_for as _ctx
-    from app.loop.engine import drain, run_loop
-    from app.loop.state import initial_loop_state
-    from app.loop.transitions import Terminal
+    from app.query.config import build_run_config
+    from app.query.query import drain, run_loop
+    from app.query.state import initial_loop_state
+    from app.query.transitions import Terminal
+    from app.state.app_state_store import AppStateStore as _Store
+    from app.tool import tool_context_for as _ctx
     from tests.hook_doubles import ScriptedDispatcher
 
     class SlowOutside(ScriptedDispatcher):
@@ -530,7 +529,7 @@ def test_stop_failure_hooks_are_fire_and_forget_but_finish_before_the_run_ends()
         state = initial_loop_state((_Human(content="t"),), ctx)
         import dataclasses
 
-        from app.loop.factory import get_production_deps
+        from app.query.deps import get_production_deps
 
         deps = dataclasses.replace(get_production_deps(), call_model=model)
         terminal = await drain(run_loop(state, build_run_config("r", postgres_checkpointing=False), deps))

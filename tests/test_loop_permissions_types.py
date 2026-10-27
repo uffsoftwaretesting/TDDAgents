@@ -4,7 +4,7 @@ Tests for permission modes, behaviors, rules, and ladder cycling (Part C1).
 
 from __future__ import annotations
 
-from app.loop.permissions.types import (
+from app.types.permissions import (
     EXTERNAL_PERMISSION_MODES,
     INTERNAL_PERMISSION_MODES,
     PermissionBehavior,
@@ -12,8 +12,6 @@ from app.loop.permissions.types import (
     PermissionRule,
     PermissionRuleSource,
     ToolPermissionContext,
-    cycle_permission_mode,
-    get_next_permission_mode,
 )
 
 
@@ -84,71 +82,3 @@ class TestPermissionDataStructures:
         assert ctx.additional_working_directories == ()
         assert dict(ctx.settings_roots) == {}
         assert ctx.stripped_dangerous_rules == ()
-
-
-class TestModeLadderCycling:
-    def test_mode_ladder_with_bypass_available(self):
-        # Ladder: default -> acceptEdits -> plan -> bypassPermissions -> default
-        assert get_next_permission_mode(PermissionMode.DEFAULT) == PermissionMode.ACCEPT_EDITS
-        assert get_next_permission_mode(PermissionMode.ACCEPT_EDITS) == PermissionMode.PLAN
-        assert get_next_permission_mode(PermissionMode.PLAN) == PermissionMode.DEFAULT  # unavailable by default
-        assert (
-            get_next_permission_mode(PermissionMode.PLAN, is_bypass_available=True)
-            == PermissionMode.BYPASS_PERMISSIONS
-        )
-        assert (
-            get_next_permission_mode(PermissionMode.BYPASS_PERMISSIONS, is_bypass_available=True)
-            == PermissionMode.DEFAULT
-        )
-        assert get_next_permission_mode(PermissionMode.BYPASS_PERMISSIONS) == PermissionMode.DEFAULT
-
-    def test_mode_ladder_without_bypass(self):
-        # Without bypass: plan skips directly to default
-        assert get_next_permission_mode(PermissionMode.PLAN, is_bypass_available=False) == PermissionMode.DEFAULT
-
-    def test_mode_ladder_from_dont_ask_and_auto(self):
-        assert get_next_permission_mode(PermissionMode.DONT_ASK) == PermissionMode.DEFAULT
-        assert get_next_permission_mode(PermissionMode.AUTO) == PermissionMode.DEFAULT
-        assert get_next_permission_mode("bubble") == PermissionMode.DEFAULT
-
-    def test_cycle_permission_mode_helper(self):
-        allow_rule = PermissionRule(tool_name="ReadFile")
-        deny_rule = PermissionRule(tool_name="Dangerous", rule_behavior=PermissionBehavior.DENY)
-        ask_rule = PermissionRule(tool_name="AskMe", rule_behavior=PermissionBehavior.ASK)
-
-        ctx = ToolPermissionContext(
-            mode=PermissionMode.DEFAULT,
-            always_allow_rules=(allow_rule,),
-            always_deny_rules=(deny_rule,),
-            always_ask_rules=(ask_rule,),
-            is_bypass_permissions_mode_available=False,
-            additional_working_directories=("/extra/path",),
-        )
-
-        c1 = cycle_permission_mode(ctx)
-        assert c1.mode == PermissionMode.ACCEPT_EDITS
-        assert c1.always_allow_rules == (allow_rule,)
-        assert c1.always_deny_rules == (deny_rule,)
-        assert c1.always_ask_rules == (ask_rule,)
-        assert c1.additional_working_directories == ("/extra/path",)
-        assert c1.is_bypass_permissions_mode_available is False
-
-        c2 = cycle_permission_mode(c1)
-        assert c2.mode == PermissionMode.PLAN
-        assert c2.always_allow_rules == (allow_rule,)
-        assert c2.always_deny_rules == (deny_rule,)
-        assert c2.always_ask_rules == (ask_rule,)
-
-        c3 = cycle_permission_mode(c2)
-        assert c3.mode == PermissionMode.DEFAULT  # bypass not available
-        assert c3.always_allow_rules == (allow_rule,)
-        assert c3.always_deny_rules == (deny_rule,)
-        assert c3.always_ask_rules == (ask_rule,)
-
-        # Cycle with bypass available: plan -> bypassPermissions
-        ctx_bypass = ToolPermissionContext(
-            mode=PermissionMode.PLAN,
-            is_bypass_permissions_mode_available=True,
-        )
-        c_bypass = cycle_permission_mode(ctx_bypass)
-        assert c_bypass.mode == PermissionMode.BYPASS_PERMISSIONS

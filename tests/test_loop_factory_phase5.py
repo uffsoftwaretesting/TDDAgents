@@ -7,15 +7,15 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-import app.loop.factory as factory
-from app.loop.compact.auto_compact import AutoCompactOutcome
-from app.loop.compact.compact import CompactionResult as CompactResult
-from app.loop.compact.compact import create_compact_boundary_message
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase, TestRunRecord
-from app.loop.state import CompactionTracking, initial_loop_state
+import app.query.deps as factory
+from app.query.config import build_run_config
+from app.query.state import CompactionTracking, initial_loop_state
+from app.services.compact.auto_compact import AutoCompactOutcome
+from app.services.compact.compact import CompactionResult as CompactResult
+from app.services.compact.compact import create_compact_boundary_message
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
+from app.tool import tool_context_for
 
 CONFIG = build_run_config("r1", postgres_checkpointing=False)
 

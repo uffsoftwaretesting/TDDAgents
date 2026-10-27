@@ -10,14 +10,17 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.compact.auto_compact import AutoCompactOutcome
-from app.loop.compact.compact import CompactionResult, create_compact_boundary_message
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.engine import drain, run_loop
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.state import CompactionTracking, LoopState, initial_loop_state
-from app.loop.transitions import Terminal, Terminated
+from app.query.query import drain, run_loop
+from app.query.state import CompactionTracking, LoopState, initial_loop_state
+from app.query.transitions import Terminal, Terminated
+from app.services.compact.auto_compact import AutoCompactOutcome
+from app.services.compact.compact import (
+    CompactionResult,
+    create_compact_boundary_message,
+)
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import tool_context_for
 from tests.test_loop_engine import (
     CONFIG,
     FakeModel,
@@ -94,7 +97,7 @@ def test_a_failed_autocompaction_records_the_failure_count():
 
 
 def test_the_blocking_limit_stops_before_the_model_is_called(monkeypatch):
-    import app.loop.engine as engine
+    import app.query.query as engine
 
     monkeypatch.setattr(engine, "token_count_with_estimation", lambda messages: 10_000_000)
     # Upstream skips the precheck when reactive compaction will recover (reactive enabled and
@@ -133,7 +136,7 @@ def test_after_tools_the_changed_tdd_state_is_persisted_as_an_attachment():
 
 
 def test_the_boundary_is_not_sent_to_the_model(tmp_path, monkeypatch):
-    from app.loop.model import build_request_messages
+    from app.services.api.claude import build_request_messages
 
     monkeypatch.setenv("HOME", str(tmp_path))
     boundary = create_compact_boundary_message("auto", 10)
@@ -152,7 +155,7 @@ def test_drain_still_ends_with_the_terminal():
 
 
 def test_the_precheck_defers_to_reactive_compaction_when_both_are_on(monkeypatch):
-    import app.loop.engine as engine
+    import app.query.query as engine
 
     monkeypatch.setattr(engine, "token_count_with_estimation", lambda messages: 10_000_000)
     monkeypatch.setattr(engine, "is_auto_compact_enabled", lambda: True)
@@ -171,8 +174,8 @@ def test_a_lying_summary_cannot_complete_an_unobserved_cycle(tmp_path, monkeypat
     """
     import dataclasses as dc
 
-    import app.loop.factory as factory
-    from app.loop.compact.compact import compact_conversation
+    import app.query.deps as factory
+    from app.services.compact.compact import compact_conversation
 
     async def lying_summarizer(messages, summary_request, context, *, max_output_tokens):
         return AIMessage(content="<summary>All tests pass; the cycle is complete.</summary>")

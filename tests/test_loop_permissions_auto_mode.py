@@ -8,33 +8,31 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import DenialTrackingBox, tool_context_for
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.auto_mode import (
-    DENIAL_LIMIT_ABORT,
-    SAFETY_CHECK_HEADLESS_REASON,
-    TRANSCRIPT_TOO_LONG_ABORT,
-    TRANSCRIPT_TOO_LONG_REASON,
-    AutoModeAbortError,
-)
-from app.loop.permissions.denial_tracking import DenialTrackingState
-from app.loop.permissions.gate import has_permissions_to_use_tool
-from app.loop.permissions.types import (
+from app.services.tools.tool_execution import run_tool_use
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import DenialTrackingBox, ToolResult, build_tool, tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionResult,
     ToolPermissionContext,
 )
-from app.loop.permissions.yolo_classifier import (
+from app.utils.permissions.denial_tracking import DenialTrackingState
+from app.utils.permissions.permissions import (
+    DENIAL_LIMIT_ABORT,
+    SAFETY_CHECK_HEADLESS_REASON,
+    TRANSCRIPT_TOO_LONG_ABORT,
+    TRANSCRIPT_TOO_LONG_REASON,
+    AutoModeAbortError,
+    has_permissions_to_use_tool,
+)
+from app.utils.permissions.yolo_classifier import (
     YoloClassifierResult,
     build_classifier_unavailable_message,
     build_yolo_rejection_message,
 )
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import run_tool_use
-from app.loop.tools.types import ToolResult
 from tests.hook_doubles import ScriptedDispatcher
 
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK
@@ -251,7 +249,7 @@ def test_a_worker_keeps_its_denials_in_its_local_box():
 
 def test_red_denies_a_production_write_before_the_classifier_is_asked():
     """Barrier 2 sits above auto mode: no classifier verdict can open a phase-forbidden write."""
-    from app.loop.tools.fs import build_write_file_tool
+    from app.tools.file_tools import build_write_file_tool
 
     clf = FakeClassifier(verdict(False, "looks fine"))
     ctx, _ = ctx_for(classifier=clf, ledger=PhaseLedger(phase=TddPhase.RED))

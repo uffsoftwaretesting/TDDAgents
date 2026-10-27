@@ -8,23 +8,23 @@ from typing import Any
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-import app.loop.context.assembly as assembly
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.assembly import (
+import app.context as assembly
+from app.context import (
     AGENT_NOTES,
     SessionContext,
     compute_env_info,
     enhance_system_prompt_with_env_details,
 )
-from app.loop.context.tool_context import tool_context_for
-from app.loop.model import (
+from app.query.config import build_run_config
+from app.query.state import initial_loop_state
+from app.services.api.claude import (
     build_request_messages,
     request_system_context,
     request_system_texts,
     request_user_context,
 )
-from app.loop.state import initial_loop_state
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
 
 CONFIG = build_run_config("run-ctx", postgres_checkpointing=False)
 
@@ -37,8 +37,10 @@ def _session(monkeypatch):
         system_context={"gitStatus": "STATUS"},
     )
     monkeypatch.setattr(assembly, "_SESSIONS", {CONFIG.run_id: session})
-    monkeypatch.setattr("app.loop.model.get_system_prompt", lambda ws, model, mcp: ["unused"])
-    monkeypatch.setattr("app.loop.model.resolve_system_prompt_sections", lambda sections, cache: ["DEFAULT PROMPT"])
+    monkeypatch.setattr("app.services.api.claude.get_system_prompt", lambda ws, model, mcp: ["unused"])
+    monkeypatch.setattr(
+        "app.services.api.claude.resolve_system_prompt_sections", lambda sections, cache: ["DEFAULT PROMPT"]
+    )
     return session
 
 
@@ -103,9 +105,9 @@ def test_the_worker_request_starts_with_its_own_system_prompt():
 
 
 def test_anthropic_breakpoints_cover_the_worker_prompt(monkeypatch):
-    import app.loop.model as model_mod
+    import app.services.api.claude as model_mod
     from app.config.config import Config
-    from app.loop.retry import RetryContext
+    from app.services.api.with_retry import RetryContext
 
     seen: dict[str, Any] = {}
 

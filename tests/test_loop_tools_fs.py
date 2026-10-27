@@ -15,15 +15,13 @@ from typing import Any, cast
 import pytest
 from langchain_core.messages import AIMessage
 
-import app.loop.tools.fs as fs
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.file_state import FileState
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.tdd import check_tdd_phase_permission
-from app.loop.permissions.types import PermissionMode, ToolPermissionContext
-from app.loop.tools.execution import run_tool_use
-from app.loop.tools.fs import (
+import app.tools.file_tools as fs
+from app.services.tools.tool_execution import run_tool_use
+from app.state.app_state_store import AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.phase_permissions import check_tdd_phase_permission
+from app.tool import tool_context_for
+from app.tools.file_tools import (
     DEFAULT_HEAD_LIMIT,
     FILE_MODIFIED_SINCE_READ_ERROR,
     FILE_NOT_FOUND_CWD_NOTE,
@@ -49,7 +47,9 @@ from app.loop.tools.fs import (
     preserve_quote_style,
     split_grep_globs,
 )
-from app.loop.tools.pool import assemble_tool_pool
+from app.tools.tools import assemble_tool_pool
+from app.types.permissions import PermissionMode, ToolPermissionContext
+from app.utils.file_state_cache import FileState
 from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
 
@@ -1295,7 +1295,7 @@ def test_tool_prompt_is_its_markdown_body(builder, filename):
 # ── Read(...) rules: checkReadPermissionForTool and the ripgrep exclude globs ──
 
 def _deny_reads(ws, *patterns):
-    from app.loop.permissions.types import (
+    from app.types.permissions import (
         PermissionBehavior,
         PermissionRule,
         PermissionRuleSource,
@@ -1343,7 +1343,7 @@ def test_build_grep_args_appends_the_ignore_globs():
 
 
 def test_reading_a_persisted_result_of_this_project(tmp_path, monkeypatch):
-    from app.loop.tools.result_storage import sanitize_path
+    from app.utils.tool_result_storage import sanitize_path
 
     local_ws = LocalWorkspace(str(tmp_path / "ws"))
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
@@ -1364,7 +1364,7 @@ def test_reading_a_persisted_result_of_this_project(tmp_path, monkeypatch):
 # ── Phase 8: conditional skills activate on the files the tools touch ────────
 
 def _conditional_registry(tmp_path):
-    from app.loop.skills.loader import get_skill_registry
+    from app.skills.load_skills_dir import get_skill_registry
 
     skill = tmp_path / "project" / ".tddagents" / "skills" / "py-style"
     skill.mkdir(parents=True)

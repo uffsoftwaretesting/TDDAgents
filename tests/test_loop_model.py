@@ -11,21 +11,19 @@ from langchain_core.messages import (
 )
 
 from app.config.config import Config
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.assembly import reset_session_context
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.messages import tool_calls_in
-from app.loop.model import (
+from app.context import reset_session_context
+from app.query.config import build_run_config
+from app.query.state import initial_loop_state
+from app.services.api.claude import (
     build_request_messages,
     convert_tool_to_langchain,
+    frame_content_blocks,
     stream_call_model,
 )
-from app.loop.state import initial_loop_state
-from app.loop.streaming.blocks import frame_content_blocks
-from app.loop.tools.base import build_tool
-from app.loop.tools.types import ToolResult
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import ToolResult, build_tool, tool_context_for
+from app.utils.messages import tool_calls_in
 from tests.conftest import FakeWorkspace
 
 
@@ -96,7 +94,7 @@ def _state(ws=None, messages=(), ledger=None, tools=(), todos=()):
 
 def test_stream_call_model_gives_up_on_an_unretryable_factory_error(monkeypatch, config):
     """A ValueError carries no retryable status, so `shouldRetry` refuses it on attempt 1."""
-    from app.loop.retry import CannotRetryError
+    from app.services.api.with_retry import CannotRetryError
 
     calls = []
 
@@ -104,7 +102,7 @@ def test_stream_call_model_gives_up_on_an_unretryable_factory_error(monkeypatch,
         calls.append(1)
         raise ValueError("Mock Error")
 
-    monkeypatch.setattr("app.loop.model.get_chat_model", boom)
+    monkeypatch.setattr("app.services.api.claude.get_chat_model", boom)
     with pytest.raises(CannotRetryError) as excinfo:
         _collect(_state(), config)
     assert isinstance(excinfo.value.original_error, ValueError)
@@ -120,7 +118,7 @@ def test_stream_call_model_resolves_model_from_config_and_binds_tools(monkeypatc
         got.update(kwargs)
         return model
 
-    monkeypatch.setattr("app.loop.model.get_chat_model", factory)
+    monkeypatch.setattr("app.services.api.claude.get_chat_model", factory)
     chunks = _collect(_state(FakeWorkspace(), tools=(_tool("A"), _tool("B"))), config)
     assert [c.content for c in chunks] == ["chunk1", "chunk2"]
     assert got == {"provider": Config.CHAT_MODEL, "model": Config.MODEL, "temperature": Config.TEMPERATURE}
@@ -130,13 +128,13 @@ def test_stream_call_model_resolves_model_from_config_and_binds_tools(monkeypatc
 
 def test_stream_call_model_does_not_bind_without_tools(monkeypatch, config):
     model = MockModel()
-    monkeypatch.setattr("app.loop.model.get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr("app.services.api.claude.get_chat_model", lambda *a, **k: model)
     assert len(_collect(_state(), config)) == 2
     assert model.tools is None
 
 
 def test_request_shape(config):
-    from app.loop.tools.todo import TodoItem
+    from app.tools.todo_write_tool.todo_write_tool import TodoItem
 
     ws = FakeWorkspace(files={"TDDAGENTS.md": "project rules"})
     history = (HumanMessage(content="hi"),)
@@ -166,15 +164,15 @@ def test_request_memoizes_the_session_context(config):
 
 
 def test_system_context_is_appended(config, monkeypatch):
-    monkeypatch.setattr("app.loop.context.assembly.get_system_context", lambda ws: {"gitStatus": "GS"})
+    monkeypatch.setattr("app.context.get_system_context", lambda ws: {"gitStatus": "GS"})
     msgs = build_request_messages(_state(FakeWorkspace()), config)
     assert str(msgs[0].content).endswith("gitStatus: GS")
 
 
 def test_request_is_keyed_by_run_and_memoizes_sections(monkeypatch, tmp_path):
-    import app.loop.context.assembly as assembly
-    from app.loop.context.assembly import append_system_context, get_system_prompt
-    from app.loop.prompts.sections import resolve_system_prompt_sections
+    import app.context as assembly
+    from app.constants.system_prompt_sections import resolve_system_prompt_sections
+    from app.context import append_system_context, get_system_prompt
     from app.workspace.local import LocalWorkspace
 
     calls = []
@@ -313,10 +311,10 @@ def test_stream_call_model_frames_a_chunked_reply_into_blocks(monkeypatch, confi
             for c in [AIMessageChunk(content="a"), AIMessageChunk(content="b")] + _tool_call_chunks():
                 yield c
 
-    from app.loop.model import get_global_token_tracker
+    from app.services.api.claude import get_global_token_tracker
 
     model = ChunkModel()
-    monkeypatch.setattr("app.loop.model.get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr("app.services.api.claude.get_chat_model", lambda *a, **k: model)
     out = _collect(_state(tools=(_tool("WriteFile"),)), config)
     assert model.config == {"callbacks": [get_global_token_tracker()]}
     assert model.sent and isinstance(model.sent, list)

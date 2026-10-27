@@ -1,11 +1,12 @@
-"""Which hooks a run may execute (`app/loop/hooks/config.py`)."""
+"""Which hooks a run may execute (`app/utils/hooks/hooks_config_snapshot.py`)."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from app.loop.hooks.config import (
+from app.schemas.hooks import CommandHook, HookMatcher
+from app.utils.hooks.hooks_config_snapshot import (
     HooksConfigSnapshot,
     capture_hooks_config_snapshot,
     get_hooks_from_allowed_sources,
@@ -13,8 +14,7 @@ from app.loop.hooks.config import (
     should_allow_managed_hooks_only,
     should_disable_all_hooks_including_managed,
 )
-from app.loop.hooks.schemas import CommandHook, HookMatcher
-from app.loop.permissions.settings import SettingsLocations
+from app.utils.settings.settings import SettingsLocations
 
 POLICY_HOOKS = {"Stop": [{"hooks": [{"type": "command", "command": "policy"}]}]}
 USER_HOOKS = {"Stop": [{"hooks": [{"type": "command", "command": "user"}]}]}
@@ -143,8 +143,8 @@ def test_an_invalid_hook_discards_the_whole_settings_file(tmp_path, caplog):
     import json as _json
     import logging as _logging
 
-    from app.loop.hooks.config import capture_hooks_config_snapshot
-    from app.loop.permissions.settings import (
+    from app.utils.hooks.hooks_config_snapshot import capture_hooks_config_snapshot
+    from app.utils.settings.settings import (
         SettingsLocations,
         load_permission_rules,
         parse_settings_file,
@@ -168,7 +168,7 @@ def test_an_invalid_hook_discards_the_whole_settings_file(tmp_path, caplog):
 def test_each_hook_schema_violation_invalidates_the_file(tmp_path):
     import json as _json
 
-    from app.loop.permissions.settings import parse_settings_file
+    from app.utils.settings.settings import parse_settings_file
 
     bad_documents = [
         {"hooks": {"NoSuchEvent": []}},

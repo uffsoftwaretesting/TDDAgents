@@ -10,7 +10,8 @@ from typing import Any, ClassVar
 
 import pytest
 
-from app.loop.hooks.exec_http import (
+from app.schemas.hooks import HttpHook
+from app.utils.hooks.exec_http_hook import (
     DEFAULT_HTTP_HOOK_TIMEOUT_MS,
     HttpHookPolicy,
     HttpRequest,
@@ -25,8 +26,7 @@ from app.loop.hooks.exec_http import (
     should_bypass_proxy,
     url_matches_pattern,
 )
-from app.loop.hooks.schemas import HttpHook
-from app.loop.hooks.ssrf_guard import SsrfBlockedError
+from app.utils.hooks.ssrf_guard import SsrfBlockedError
 
 
 class FakeTransport:

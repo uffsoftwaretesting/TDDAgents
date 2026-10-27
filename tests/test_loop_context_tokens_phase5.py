@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.loop.context.tokens import (
+from app.utils.tokens import (
     COMPACT_MAX_OUTPUT_TOKENS,
     MODEL_CONTEXT_WINDOW_DEFAULT,
     get_context_window_for_model,

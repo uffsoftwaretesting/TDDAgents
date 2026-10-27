@@ -1,6 +1,6 @@
 """
-Tests for `app/loop/hooks/session.py` (SessionStart, UserPromptSubmit) and
-`app/loop/hooks/runtime.py` (`build_hook_dispatcher`).
+Tests for `app/utils/session_start.py` (SessionStart, UserPromptSubmit) and
+`app/utils/hooks/hook_dispatcher.py` (`build_hook_dispatcher`).
 """
 
 from __future__ import annotations
@@ -10,20 +10,20 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.exec_agent import exec_agent_hook
-from app.loop.hooks.exec_http import HttpHookPolicy, exec_http_hook
-from app.loop.hooks.exec_prompt import exec_prompt_hook
-from app.loop.hooks.messages import HookAttachment, HookBlockingError
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.hooks.runtime import build_hook_dispatcher
-from app.loop.hooks.schemas import CommandHook, HookMatcher
-from app.loop.hooks.session import (
+from app.schemas.hooks import CommandHook, HookMatcher
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.utils.hooks.exec_agent_hook import exec_agent_hook
+from app.utils.hooks.exec_http_hook import HttpHookPolicy, exec_http_hook
+from app.utils.hooks.exec_prompt_hook import exec_prompt_hook
+from app.utils.hooks.hook_dispatcher import build_hook_dispatcher
+from app.utils.messages import HookAttachment, HookBlockingError
+from app.utils.session_start import (
     process_session_start_hooks,
     process_user_prompt_submit_hooks,
 )
-from app.loop.permissions.settings import SettingsLocations
+from app.utils.settings.settings import SettingsLocations
 from tests.hook_doubles import ScriptedDispatcher
 
 SUCCESS = HookAttachment(type="hook_success", hook_name="SessionStart:startup", tool_use_id="t",

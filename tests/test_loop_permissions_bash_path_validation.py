@@ -1,5 +1,5 @@
 """
-`app/loop/permissions/bash_path_validation.py`: port of claude-code's
+`app/tools/bash_tool/path_validation.py`: port of claude-code's
 `tools/BashTool/pathValidation.ts` (legacy path) and `utils/permissions/pathValidation.ts`.
 """
 
@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-import app.loop.permissions.bash_path_validation as pv
-from app.loop.permissions.bash_path_validation import (
+import app.tools.bash_tool.path_validation as pv
+from app.tools.bash_tool.path_validation import (
     ACTION_VERBS,
     COMMAND_OPERATION_TYPE,
     PATH_EXTRACTORS,
@@ -28,7 +28,7 @@ from app.loop.permissions.bash_path_validation import (
     validate_path,
     validate_single_path_command,
 )
-from app.loop.permissions.types import (
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     PermissionRule,

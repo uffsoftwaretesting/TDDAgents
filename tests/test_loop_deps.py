@@ -12,16 +12,18 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.deps import (
+from app.query.config import build_run_config
+from app.query.deps import LoopDeps
+from app.query.state import (
     CompactionResult,
-    LoopDeps,
-    StopHookResult,
+    CompactionTracking,
+    LoopState,
+    initial_loop_state,
 )
-from app.loop.messages import Message, ToolCall
-from app.loop.state import CompactionTracking, LoopState, initial_loop_state
+from app.query.stop_hooks import StopHookResult
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.utils.messages import Message, ToolCall
 
 CONFIG = build_run_config("test-run-a4", postgres_checkpointing=False)
 

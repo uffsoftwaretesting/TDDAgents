@@ -4,14 +4,13 @@ Tests for assemble_tool_pool with partition-sort and prompt-cache stability (Par
 
 from __future__ import annotations
 
-from app.loop.permissions.types import (
+from app.tool import ToolResult, build_tool
+from app.tools.tools import assemble_tool_pool, is_tool_denied
+from app.types.permissions import (
     PermissionBehavior,
     PermissionRule,
     PermissionRuleSource,
 )
-from app.loop.tools.base import build_tool
-from app.loop.tools.pool import assemble_tool_pool, is_tool_denied
-from app.loop.tools.types import ToolResult
 
 
 def dummy_call(args, ctx):

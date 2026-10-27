@@ -8,8 +8,8 @@ import dataclasses
 
 from langchain_core.messages import AIMessage
 
-from app.loop.factory import get_production_deps
-from app.loop.runner import tdd_loop_runner
+from app.cli.print import tdd_loop_runner
+from app.query.deps import get_production_deps
 
 
 def test_the_first_turn_carries_the_initial_tdd_state(tmp_path, make_fake_workspace):

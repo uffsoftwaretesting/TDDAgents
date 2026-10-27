@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-import app.loop.compact.compact as cc
-from app.loop.compact.compact import (
+import app.services.compact.compact as cc
+from app.services.compact.compact import (
     ERROR_MESSAGE_INCOMPLETE_RESPONSE,
     ERROR_MESSAGE_NOT_ENOUGH_MESSAGES,
     ERROR_MESSAGE_PROMPT_TOO_LONG,
@@ -30,11 +30,11 @@ from app.loop.compact.compact import (
     is_compact_boundary_message,
     truncate_head_for_ptl_retry,
 )
-from app.loop.compact.grouping import group_messages_by_api_round
-from app.loop.compact.prompt import get_compact_prompt
-from app.loop.context.app_state import AppStateStore
-from app.loop.context.file_state import FileState
-from app.loop.context.tool_context import tool_context_for
+from app.services.compact.grouping import group_messages_by_api_round
+from app.services.compact.prompt import get_compact_prompt
+from app.state.app_state_store import AppStateStore
+from app.tool import tool_context_for
+from app.utils.file_state_cache import FileState
 from tests.conftest import FakeWorkspace
 from tests.hook_doubles import ScriptedDispatcher
 
@@ -314,9 +314,9 @@ def test_prompt_too_long_retries_then_gives_up():
 
 
 def test_hooks_shape_the_compaction():
-    from app.loop.hooks.execute import HookOutsideReplResult
-    from app.loop.hooks.messages import HookAttachment
-    from app.loop.hooks.output import AggregatedHookResult
+    from app.types.hooks import AggregatedHookResult
+    from app.utils.hooks.hooks import HookOutsideReplResult
+    from app.utils.messages import HookAttachment
 
     dispatcher = ScriptedDispatcher(
         script={"SessionStart": [AggregatedHookResult(attachment=HookAttachment(

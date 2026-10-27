@@ -18,28 +18,28 @@ from pathlib import Path
 
 import pytest
 
-from app.loop.agents.definition import AgentDefinition
-from app.loop.agents.memory import AgentMemoryStore
-from app.loop.agents.resolution import resolve_agent_tools
-from app.loop.hooks.exec_command import exec_command_hook
-from app.loop.hooks.exec_http import interpolate_env_vars
-from app.loop.hooks.exec_prompt import add_arguments_to_prompt
-from app.loop.hooks.schemas import CommandHook
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.filesystem import (
-    check_write_permission_for_tool,
-    is_dangerous_file_path_to_auto_edit,
-)
-from app.loop.permissions.tdd import (
+from app.schemas.hooks import CommandHook
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.phase_permissions import (
     check_tdd_phase_permission,
     get_phase_deny_rules,
 )
-from app.loop.permissions.types import (
+from app.tool import ToolResult, build_tool
+from app.tools.agent_tool.agent_memory import AgentMemoryStore
+from app.tools.agent_tool.agent_tool_utils import resolve_agent_tools
+from app.tools.agent_tool.load_agents_dir import AgentDefinition
+from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
     ToolPermissionContext,
 )
-from app.loop.tools.base import ToolResult, build_tool
+from app.utils.hooks.exec_http_hook import interpolate_env_vars
+from app.utils.hooks.exec_prompt_hook import add_arguments_to_prompt
+from app.utils.hooks.hooks import exec_command_hook
+from app.utils.permissions.filesystem import (
+    check_write_permission_for_tool,
+    is_dangerous_file_path_to_auto_edit,
+)
 from app.workspace.base import (
     WorkspacePathError,
     normalize_path,
@@ -262,7 +262,7 @@ def test_tdd_phase_rule_generic_writer_target_path_classification() -> None:
 
 
 def test_agent_tool_resolution_strips_disallowed_and_enforces_phase_in_subagent() -> None:
-    from app.loop.tools.pool import assemble_tool_pool
+    from app.tools.tools import assemble_tool_pool
 
     t_impl = build_tool(name="WriteImplementation", prompt="", call=_dummy_call)
     t_read = build_tool(name="ReadFile", prompt="", call=_dummy_call)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import get_args
 
-from app.loop.command_queue import (
+from app.utils.message_queue_manager import (
     CommandQueue,
     QueuedCommand,
     QueuePriority,
@@ -81,6 +81,6 @@ def test_an_empty_queue():
 
 def test_app_state_carries_the_task_registry():
     """`appState.tasks`, empty at the start of a run."""
-    from app.loop.context.app_state import AppState
+    from app.state.app_state_store import AppState
 
     assert AppState().tasks == {}

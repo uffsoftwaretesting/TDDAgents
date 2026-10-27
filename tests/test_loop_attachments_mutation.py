@@ -1,5 +1,5 @@
 """
-Phase 5 pre-push gate: the `app/loop/attachments/` behaviours mutation testing found unpinned.
+Phase 5 pre-push gate: the `app/utils/attachments.py` behaviours mutation testing found unpinned.
 
 Each test pins one upstream behaviour the earlier suites reached only through
 `get_attachments`, whose `maybe` wrapper swallows a raising source, or did not reach at all:
@@ -18,64 +18,53 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.loop.attachments.dates as dates_mod
-import app.loop.attachments.pipeline as pipeline
-from app.loop.attachments.changed_files import (
-    DIFF_SNIPPET_MAX_BYTES,
-    get_changed_files,
-    get_snippet_for_two_file_diff,
-)
-from app.loop.attachments.deltas import (
-    agent_definitions_for,
-    get_agent_listing_delta_attachment,
-    get_mcp_instructions_delta_attachment,
-    get_tools_description,
-    mcp_clients_for,
-)
-from app.loop.attachments.nested_memory import (
-    NestedMemoryState,
-    _matches,
-    get_directories_to_process,
-    get_nested_memory_attachments,
-    get_nested_memory_source,
-    process_conditioned_md_rules,
-)
-from app.loop.attachments.queued import (
-    get_async_hook_response_attachments,
-    get_queued_command_attachments,
-)
-from app.loop.attachments.reminders import (
-    _has_tool,
-    count_auto_mode_attachments_since_last_exit,
-    get_auto_mode_attachment_turn_count,
-    get_todo_reminder_turn_counts,
-    is_thinking_message,
-)
-from app.loop.attachments.tdd_state import create_tdd_state_attachment_message
-from app.loop.attachments.types import (
-    Attachment,
-    attachment_of,
-    create_attachment_messages,
-    normalize_attachment_for_api,
-    wrap_command_text,
-)
-from app.loop.attachments.usage import (
-    effective_context_window,
-    get_token_usage_attachment,
-    token_count_from_last_api_response,
-    token_count_from_usage,
-)
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.file_state import FileState
-from app.loop.context.memory import HostSource
-from app.loop.context.tool_context import tool_context_for
-from app.loop.ledger import PhaseLedger, TestRunRecord
-from app.loop.permissions.types import (
+import app.utils.attachments as dates_mod
+import app.tdd.tdd_state_attachment as tdd_state_attachment
+import app.utils.attachments as pipeline
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TestRunRecord
+from app.tdd.tdd_state_attachment import create_tdd_state_attachment_message
+from app.tool import tool_context_for
+from app.types.permissions import (
     PermissionBehavior,
     PermissionRule,
     ToolPermissionContext,
 )
-from app.loop.tools.result_storage import PREVIEW_SIZE_BYTES
+from app.utils.attachments import (
+    DIFF_SNIPPET_MAX_BYTES,
+    Attachment,
+    NestedMemoryState,
+    _has_tool,
+    _matches,
+    agent_definitions_for,
+    attachment_of,
+    count_auto_mode_attachments_since_last_exit,
+    create_attachment_messages,
+    effective_context_window,
+    get_agent_listing_delta_attachment,
+    get_async_hook_response_attachments,
+    get_auto_mode_attachment_turn_count,
+    get_changed_files,
+    get_directories_to_process,
+    get_mcp_instructions_delta_attachment,
+    get_nested_memory_attachments,
+    get_nested_memory_source,
+    get_queued_command_attachments,
+    get_snippet_for_two_file_diff,
+    get_todo_reminder_turn_counts,
+    get_token_usage_attachment,
+    get_tools_description,
+    is_thinking_message,
+    mcp_clients_for,
+    normalize_attachment_for_api,
+    process_conditioned_md_rules,
+    token_count_from_last_api_response,
+    token_count_from_usage,
+    wrap_command_text,
+)
+from app.utils.claudemd import HostSource
+from app.utils.file_state_cache import FileState
+from app.utils.tool_result_storage import PREVIEW_SIZE_BYTES
 from app.workspace.base import WorkspaceError
 from tests.conftest import FakeWorkspace
 
@@ -269,7 +258,8 @@ def _logged(caplog: Any) -> list[str]:
 
 def test_a_failing_source_is_logged_under_its_own_label(monkeypatch, caplog):
     for _, name in SOURCE_LABELS:
-        monkeypatch.setattr(pipeline, name, _boom)
+        # TDDAgents' own source lives in app/tdd/ and is imported by `get_attachments` itself.
+        monkeypatch.setattr(tdd_state_attachment if name == "get_tdd_state_attachments" else pipeline, name, _boom)
     caplog.set_level(logging.ERROR)
     assert run(pipeline.get_attachments(tool_context_for(AppStateStore()), [])) == []
     assert _logged(caplog) == [f"Attachment error in {label}" for label, _ in SOURCE_LABELS]
@@ -503,7 +493,7 @@ def test_last_api_response_tolerates_bare_objects():
 
 
 def test_effective_context_window_is_the_token_modules():
-    import app.loop.context.tokens as tokens
+    import app.utils.tokens as tokens
     from app.config.config import Config
 
     assert effective_context_window(Config.MODEL) == tokens.get_effective_context_window_size(Config.MODEL)
@@ -511,7 +501,7 @@ def test_effective_context_window_is_the_token_modules():
 
 @pytest.mark.parametrize("value", ["1", "true", "yes", "on", " TRUE "])
 def test_token_usage_accepts_every_truthy_spelling(monkeypatch, value):
-    import app.loop.attachments.usage as usage
+    import app.utils.attachments as usage
     from app.config.config import Config
 
     seen: list[str] = []
@@ -630,7 +620,7 @@ def test_contexts_without_a_registry_queue_nothing():
 
 
 def test_async_hook_responses_drop_the_type_from_the_record():
-    from app.loop.hooks.async_registry import AsyncHookRegistry, AsyncHookResponse
+    from app.utils.hooks.async_hook_registry import AsyncHookRegistry, AsyncHookResponse
 
     registry = AsyncHookRegistry()
     response = AsyncHookResponse(process_id="p", response={"systemMessage": "hi"}, hook_name="h",
@@ -650,7 +640,7 @@ def test_async_hook_responses_drop_the_type_from_the_record():
 # ── deltas ───────────────────────────────────────────────────────────────────
 
 def agent(name: str, **kw: Any) -> Any:
-    from app.loop.agents.definition import AgentDefinition
+    from app.tools.agent_tool.load_agents_dir import AgentDefinition
 
     return AgentDefinition(name=name, description=f"{name} agent", prompt="p", **kw)
 

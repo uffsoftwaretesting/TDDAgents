@@ -1,5 +1,5 @@
 """
-`TodoWrite`: `app/loop/tools/todo.py`.
+`TodoWrite`: `app/tools/todo_write_tool/todo_write_tool.py`.
 
 The list is state, not a file. The thing worth pinning is that a subagent's checklist never
 overwrites the coordinator's, and that an all-complete list is cleared from state while
@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.tools.todo import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.tool import tool_context_for
+from app.tools.todo_write_tool.todo_write_tool import (
     TODO_INPUT_SCHEMA,
     TODO_RESULT_MESSAGE,
     TODO_STATUSES,
@@ -25,7 +25,7 @@ from app.loop.tools.todo import (
     build_todo_write_tool,
     read_todos,
 )
-from app.loop.tools.validation import validate_against_schema
+from app.utils.tool_errors import validate_against_schema
 
 
 def tool() -> Any:

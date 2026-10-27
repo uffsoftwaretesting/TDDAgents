@@ -1,5 +1,5 @@
 """
-The tool-execution pipeline order: `app/loop/tools/execution.py`.
+The tool-execution pipeline order: `app/services/tools/tool_execution.py`.
 
 The individual steps have their own tests. What these pin is the *sequence*, because that
 is what upstream's ordering decisions actually encode:
@@ -19,15 +19,13 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.hooks.messages import HookBlockingError
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.types import ToolPermissionContext
-from app.loop.tools.base import build_tool
-from app.loop.tools.execution import run_tool_use
-from app.loop.tools.types import ToolResult, ValidationResult
+from app.services.tools.tool_execution import run_tool_use
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import ToolResult, ValidationResult, build_tool, tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import ToolPermissionContext
+from app.utils.messages import HookBlockingError
 from tests.hook_doubles import ScriptedDispatcher
 
 SCHEMA = {
@@ -299,7 +297,7 @@ def test_a_cancelled_context_refuses_before_validation():
 
 def test_the_result_is_filed_under_the_contexts_run_and_workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "config"))
-    from app.loop.tools.result_storage import tool_results_dir
+    from app.utils.tool_result_storage import tool_results_dir
 
     async def do_call(args: dict[str, Any], ctx: Any) -> ToolResult:
         return ToolResult(content="z" * 3000)
@@ -315,7 +313,7 @@ def test_the_result_is_filed_under_the_contexts_run_and_workspace(tmp_path, monk
 
 def test_a_context_without_a_run_id_still_files_the_result(tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "config"))
-    from app.loop.tools.result_storage import tool_results_dir
+    from app.utils.tool_result_storage import tool_results_dir
 
     async def do_call(args: dict[str, Any], ctx: Any) -> ToolResult:
         return ToolResult(content="z" * 3000)
@@ -327,8 +325,8 @@ def test_a_context_without_a_run_id_still_files_the_result(tmp_path, monkeypatch
 
 def test_a_tool_that_declares_no_limit_is_governed_by_the_global_budget():
     """The fallback must be a number, not None — `math.isfinite(None)` would raise."""
-    from app.loop.tools.execution import _persist_if_oversized
-    from app.loop.tools.result_storage import MAX_TOOL_RESULT_BYTES
+    from app.services.tools.tool_execution import _persist_if_oversized
+    from app.utils.tool_result_storage import MAX_TOOL_RESULT_BYTES
 
     bare = SimpleNamespace(name="Bare")
     assert not hasattr(bare, "max_result_size_chars")
@@ -343,8 +341,8 @@ def test_the_persisted_file_is_readable_back_through_read_file(tmp_path, monkeyp
     decoration. Ours is workspace-bounded, so the store is an explicit extra read root.
     """
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "config"))
-    from app.loop.tools.fs import read_text
-    from app.loop.tools.result_storage import persist_tool_result
+    from app.tools.file_tools import read_text
+    from app.utils.tool_result_storage import persist_tool_result
 
     path = persist_tool_result("the whole thing", "toolu_1", "run-1", "/proj")
     assert path is not None
@@ -353,7 +351,7 @@ def test_the_persisted_file_is_readable_back_through_read_file(tmp_path, monkeyp
 
 def test_a_path_outside_the_store_is_not_read_off_the_host(tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "config"))
-    from app.loop.tools.fs import is_persisted_result_path
+    from app.tools.file_tools import is_persisted_result_path
 
     secret = tmp_path / "secret.txt"
     secret.write_text("private")

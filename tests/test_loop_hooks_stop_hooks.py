@@ -1,5 +1,5 @@
 """
-Tests for `app/loop/hooks/stop_hooks.py`: `handleStopHooks` and barrier 3.
+Tests for `app/query/stop_hooks.py`: `handleStopHooks` and barrier 3.
 
 The barrier tests drive `run_loop` end to end with a scripted model: whatever a configured
 Stop hook says, an incomplete Red->Green cycle never terminates `completed`.
@@ -21,21 +21,25 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.loop.config import build_run_config
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.context.tool_context import tool_context_for
-from app.loop.deps import CompactionResult, LoopDeps, StopHookResult
-from app.loop.engine import drain, run_loop
-from app.loop.hooks.config import HooksConfigSnapshot
-from app.loop.hooks.execute import HookDispatcher
-from app.loop.hooks.messages import HookBlockingError
-from app.loop.hooks.output import AggregatedHookResult
-from app.loop.hooks.schemas import CommandHook, HookMatcher
-from app.loop.hooks.stop_hooks import build_stop_hooks_runner, handle_stop_hooks
-from app.loop.ledger import PhaseLedger, TddPhase
-from app.loop.permissions.types import PermissionMode, ToolPermissionContext
-from app.loop.state import initial_loop_state
-from app.loop.transitions import Terminal
+from app.query.config import build_run_config
+from app.query.deps import LoopDeps
+from app.query.query import drain, run_loop
+from app.query.state import CompactionResult, initial_loop_state
+from app.query.stop_hooks import (
+    StopHookResult,
+    build_stop_hooks_runner,
+    handle_stop_hooks,
+)
+from app.query.transitions import Terminal
+from app.schemas.hooks import CommandHook, HookMatcher
+from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tool import tool_context_for
+from app.types.hooks import AggregatedHookResult
+from app.types.permissions import PermissionMode, ToolPermissionContext
+from app.utils.hooks.hooks import HookDispatcher
+from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
+from app.utils.messages import HookBlockingError
 from tests.hook_doubles import ScriptedDispatcher
 
 CONFIG = build_run_config("stop-test", postgres_checkpointing=False)

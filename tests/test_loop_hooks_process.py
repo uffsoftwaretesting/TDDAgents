@@ -1,4 +1,4 @@
-"""Tests for `app/loop/hooks/process.py`: the captured hook child process."""
+"""Tests for `app/utils/hooks/hooks.py`: the captured hook child process."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
-from app.loop.context.tool_context import CancelToken
-from app.loop.hooks.process import ABORT_POLL_SECONDS, CapturedProcess, is_aborted
-from app.loop.streaming.abort import AbortController
+from app.tool import CancelToken
+from app.utils.abort_controller import AbortController
+from app.utils.shell_command import ABORT_POLL_SECONDS, CapturedProcess, is_aborted
 
 
 async def _spawn(command: str, **kwargs: Any) -> CapturedProcess:

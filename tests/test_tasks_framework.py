@@ -7,19 +7,19 @@ import dataclasses
 
 import pytest
 
-from app.loop.context.app_state import AppState, AppStateStore
-from app.loop.tasks.framework import (
-    get_running_tasks,
-    is_background_task,
-    register_task,
-    update_task_state,
-)
-from app.loop.tasks.task import (
+from app.state.app_state_store import AppState, AppStateStore
+from app.task import (
     TASK_ID_ALPHABET,
     TaskStateBase,
     create_task_state_base,
     generate_task_id,
     is_terminal_task_status,
+)
+from app.utils.task.framework import (
+    get_running_tasks,
+    is_background_task,
+    register_task,
+    update_task_state,
 )
 
 

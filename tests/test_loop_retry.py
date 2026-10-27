@@ -1,5 +1,5 @@
 """
-The retry layer: `app/loop/retry.py`, the port of `withRetry.ts`.
+The retry layer: `app/services/api/with_retry.py`, the port of `withRetry.ts`.
 
 Every constant asserted here is upstream's, so a drift in either direction is a failure.
 The schedule is checked with a deterministic `random` so the jitter is pinned rather than
@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from app.loop.retry import (
+from app.services.api.with_retry import (
     BASE_DELAY_MS,
     CONTEXT_OVERFLOW_SAFETY_BUFFER,
     DEFAULT_MAX_DELAY_MS,
@@ -528,7 +528,7 @@ def test_an_unrelated_class_name_is_not_a_connection_error():
 def test_the_default_sleep_treats_its_argument_as_milliseconds():
     import time
 
-    from app.loop.retry import _default_sleep
+    from app.services.api.with_retry import _default_sleep
 
     started = time.monotonic()
     asyncio.run(_default_sleep(200))
