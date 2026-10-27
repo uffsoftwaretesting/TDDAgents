@@ -332,3 +332,24 @@ def test_replace_pending_keeps_done_items_and_replaces_the_rest():
     p = done_first(plan("A", "B", "C")).replace_pending(["X", "Y"])
     assert p.items == (PlanItem("1", "A", ItemStatus.DONE), PlanItem("2", "X"), PlanItem("3", "Y"))
     assert plan("A").replace_pending([]) == TddPlan()
+
+
+def test_moving_the_work_to_another_item_restarts_the_ledger(tmp_path: Path):
+    from app.tdd.ledger import TestRunRecord
+
+    record = TestRunRecord(test_path="t", exit_code=1)
+    red = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    for change in (lambda p: p.remove("1"), lambda p: p.move("2", 1), lambda p: p.edit("1", "A2"),
+                   lambda p: p.replace_pending(["X"])):
+        store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), phase_ledger=red, last_test_run=record))
+        update_tdd_plan(tool_context_for(store), change)
+        assert store.get().phase_ledger == PhaseLedger()
+        assert store.get().last_test_run is None
+
+
+def test_a_change_that_keeps_the_current_item_keeps_the_ledger():
+    red = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    for change in (lambda p: p.add("C"), lambda p: p.edit("2", "B2"), lambda p: p.move("2", 3)):
+        store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), phase_ledger=red))
+        update_tdd_plan(tool_context_for(store), change)
+        assert store.get().phase_ledger == red

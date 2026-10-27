@@ -49,7 +49,7 @@ import logging
 import shutil
 import tempfile
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -72,7 +72,7 @@ from app.query_engine import QueryEngine
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
-from app.tool import Tool, tool_context_for
+from app.tool import CancelToken, Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.tools.tools import assemble_tool_pool
 from app.types.permissions import ToolPermissionContext
@@ -271,6 +271,8 @@ class DevelopmentRun:
     transcript: TranscriptStore
     #: Why the last turn's UserPromptSubmit hooks stopped it, when they did.
     stopped_reason: str | None = None
+    #: Every event a turn produces, as it arrives (the REPL renders them); `None` discards.
+    on_message: Callable[[Any], None] | None = None
 
 
 def session_run_id(session_id: Any) -> str:
@@ -475,7 +477,9 @@ def _has_running_background_task(store: AppStateStore) -> bool:
     return any(is_background_task(task) for task in get_running_tasks(store.get()))
 
 
-async def wait_for_background_work(engine: QueryEngine, ctx: Any, store: AppStateStore) -> None:
+async def wait_for_background_work(
+    engine: QueryEngine, ctx: Any, store: AppStateStore, on_message: Callable[[Any], None] | None = None
+) -> None:
     """
     `print.ts`'s `do … while (waitingForAgents)`: after a turn, while a background task runs or
     a main-thread command is queued, wait for the queue and submit each command as a new turn
@@ -499,8 +503,9 @@ async def wait_for_background_work(engine: QueryEngine, ctx: Any, store: AppStat
         messages = (*messages, *await get_attachment_messages(ctx, messages, user_input=command.value))
         turn_ctx = replace(ctx, messages=messages)
         logger.info("Delivering queued %s as a new turn", command.mode)
-        async for _ in engine.submit(initial_loop_state(messages, turn_ctx)):
-            pass
+        async for event in engine.submit(initial_loop_state(messages, turn_ctx)):
+            if on_message is not None:
+                on_message(event)
 
 
 def _both(first: Any, second: Any) -> Any:
@@ -578,11 +583,16 @@ async def _submit(
     # `processUserInput`: the user-input attachments (the TDD state among them), persisted into
     # the history the loop starts from.
     messages = (*messages, *await get_attachment_messages(run.ctx, messages, user_input=prompt_text))
+    if run.ctx.cancel.cancelled:
+        # A fresh abort signal per turn, as upstream creates an `AbortController` per query: the
+        # Esc that ended the last turn must not end this one.
+        run.ctx.cancel = CancelToken()
     turn_ctx = replace(run.ctx, messages=messages)
     try:
-        async for _ in run.engine.submit(initial_loop_state(messages, turn_ctx)):
-            pass
-        await wait_for_background_work(run.engine, run.ctx, run.store)
+        async for event in run.engine.submit(initial_loop_state(messages, turn_ctx)):
+            if run.on_message is not None:
+                run.on_message(event)
+        await wait_for_background_work(run.engine, run.ctx, run.store, run.on_message)
         reason = run.engine.terminal.reason if run.engine.terminal is not None else Terminal.MODEL_ERROR
     except Exception:
         logger.exception("Loop %s crashed", run.run_id)
@@ -610,10 +620,10 @@ async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal:
 
 
 @dataclass(frozen=True, slots=True)
-class HeadlessOutcome:
-    """How a headless development session ended: the last turn's terminal and the plan."""
+class DevelopmentOutcome:
+    """How a development session ended: the last turn's terminal (`None` if none ran) and the plan."""
 
-    terminal: Terminal
+    terminal: Terminal | None
     plan: TddPlan
 
     @property
@@ -624,7 +634,7 @@ class HeadlessOutcome:
 
 async def run_headless(
     session_id: str, specification: str, plan_texts: Sequence[str], *, workspace: Any, **run_options: Any
-) -> HeadlessOutcome:
+) -> DevelopmentOutcome:
     """
     `runHeadless` for the development phase (Phase 11): one conversation over the whole plan
     with nobody to ask, so a permission 'ask' (a plan change among them) is denied and the
@@ -638,11 +648,11 @@ async def run_headless(
         reason = await begin_session(
             run, development_start_prompt(specification, plan), development_resume_prompt(plan)
         )
-        return HeadlessOutcome(terminal=reason, plan=run.store.get().tdd_plan)
+        return DevelopmentOutcome(terminal=reason, plan=run.store.get().tdd_plan)
 
 
 __all__ = [
-    "HeadlessOutcome",
+    "DevelopmentOutcome",
     "DevelopmentRun",
     "begin_session",
     "build_builtin_tools",

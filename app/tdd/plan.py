@@ -28,7 +28,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from app.tdd.ledger import PhaseLedger
+from app.tdd.ledger import PhaseLedger, TddPhase
 from app.utils.session_storage_portable import get_project_dir
 
 logger = logging.getLogger("TDDOrchestrator.Plan")
@@ -210,10 +210,19 @@ def update_tdd_plan(context: Any, change: Callable[[TddPlan], TddPlan]) -> TddPl
     Apply `change` to the session's plan in app state and save it (`ToolContext.tdd_plan_path`).
 
     The change is computed from the current plan first, so a refused operation (`PlanError`)
-    leaves both the state and the file untouched.
+    leaves both the state and the file untouched. When the change moves the work to another
+    sub-requirement — the current one done, removed, moved, reworded or replaced — the TDD
+    ledger restarts in RED: what it observed belonged to the old item, and each item is done
+    only by its own Red -> Green cycle. Like phase-on-spawn, the restart can only erase evidence.
     """
-    updated = change(context.get_app_state().tdd_plan)
-    context.set_app_state(lambda state: replace(state, tdd_plan=updated))
+    app_state = context.get_app_state()
+    updated = change(app_state.tdd_plan)
+    if updated.current != app_state.tdd_plan.current:
+        ledger = app_state.phase_ledger
+        reset_ledger = ledger.transition_to(TddPhase.RED)
+        context.set_app_state(lambda s: replace(s, tdd_plan=updated, phase_ledger=reset_ledger, last_test_run=None))
+    else:
+        context.set_app_state(lambda state: replace(state, tdd_plan=updated))
     if context.tdd_plan_path:
         save_plan(Path(context.tdd_plan_path), updated)
     return updated

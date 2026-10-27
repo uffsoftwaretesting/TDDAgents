@@ -15,7 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.cli.print import (
-    HeadlessOutcome,
+    DevelopmentOutcome,
     begin_session,
     open_session_run,
     run_headless,
@@ -85,7 +85,7 @@ def test_headless_works_through_the_whole_plan_in_one_conversation(python_worksp
     seen: list[Any] = []
     outcome = asyncio.run(run_headless("s1", "# Calculator", ["add", "sub"], workspace=python_workspace,
                                        **options(tmp_path, scripted(turns, seen))))
-    assert outcome == HeadlessOutcome(terminal=Terminal.COMPLETED, plan=outcome.plan)
+    assert outcome == DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=outcome.plan)
     assert outcome.completed is True
     assert [i.status for i in outcome.plan.items] == [ItemStatus.DONE, ItemStatus.DONE]
     first_prompt = seen[0].messages[0].content
@@ -107,7 +107,7 @@ def test_headless_stops_at_the_first_unfinished_item(python_workspace, tmp_path)
 
 
 def test_a_completed_terminal_with_items_left_is_not_completed():
-    outcome = HeadlessOutcome(terminal=Terminal.COMPLETED, plan=TddPlan.from_texts(["a"]))
+    outcome = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=TddPlan.from_texts(["a"]))
     assert outcome.completed is False
 
 

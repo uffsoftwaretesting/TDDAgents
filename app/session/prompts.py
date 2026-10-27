@@ -79,9 +79,23 @@ def development_resume_prompt(plan: TddPlan) -> str:
     return render_prompt(_read("development", "resume.md"), values).strip()
 
 
+def development_continue_prompt(plan: TddPlan) -> str:
+    """`/resume`: go on with the plan."""
+    values = {"PLAN": render_plan(plan), "CURRENT": _current(plan)}
+    return render_prompt(_read("development", "continue.md"), values).strip()
+
+
+def development_replanned_prompt(specification: str, plan: TddPlan) -> str:
+    """After `/requirements`: the new specification and plan replace the old ones."""
+    values = {"SPECIFICATION": specification.strip() or "(none)", "PLAN": render_plan(plan), "CURRENT": _current(plan)}
+    return render_prompt(_read("development", "replanned.md"), values).strip()
+
+
 __all__ = [
     "PROMPTS_DIR",
     "analyst_prompts",
+    "development_continue_prompt",
+    "development_replanned_prompt",
     "development_resume_prompt",
     "development_start_prompt",
     "engineer_prompts",

@@ -1,22 +1,26 @@
 """
-The TDDAgents entry point (Phase 9).
+The TDDAgents entry point (Phases 9 and 11).
 
 Two modes, as claude-code has them:
 
 * **Interactive** (default): the use-case menu picks the initial request, and the analyst's
   questions and checklist are answered on the terminal (`/yes` approves a checklist;
-  `/exit` or `/quit` leaves, with the session paused at its checkpoint).
+  `/exit` or `/quit` leaves, with the session paused at its checkpoint). Once planned, the
+  session is a REPL (`app/screens/repl.py`): the agents work through the plan while the user
+  talks to them, edits the plan (`/plan`), answers permission questions, re-scopes
+  (`/requirements`) or interrupts (Esc).
 * **Headless** (`-p/--print`, upstream `claude -p` -> `runHeadless`): the request comes from
   `--spec FILE`, the prompt argument or stdin, and nobody is asked anything. The analyst's
-  checklist is approved; a clarifying question fails the session. The exit code is 0 only
-  when every plan item completed a Red-then-Green cycle.
+  checklist is approved; a clarifying question fails the session; the plan is worked through
+  in one conversation and a permission 'ask' is denied. The exit code is 0 only when every
+  sub-requirement completed a Red-then-Green cycle.
 
 Either way the session is one LangGraph thread (`app/session/`): it checkpoints to
 `POSTGRES_URL` by default (`--checkpoint memory` opts out), and `--thread-id` continues a
-thread from its last checkpoint. Each plan item is one loop run in the thread's shared local
-workspace; `--permission-mode`, `--settings` and `--dangerously-skip-permissions` are
-upstream's startup flags for those runs, and `--coordinator` turns on coordinator mode
-(`TDDAGENTS_COORDINATOR_MODE`).
+thread from its last checkpoint — and its development conversation from its transcript.
+Development runs in the thread's shared local workspace; `--permission-mode`, `--settings` and
+`--dangerously-skip-permissions` are upstream's startup flags for it, and `--coordinator` turns
+on coordinator mode (`TDDAGENTS_COORDINATOR_MODE`).
 """
 
 import argparse
@@ -37,11 +41,14 @@ from dotenv import load_dotenv
 
 from app.query.transitions import Terminal
 from app.session.driver import (
+    EXIT_COMMANDS,
     SessionOptions,
     SessionRun,
+    analyst_review_text,
     build_session_shell,
     derive_thread_id,
     develop_headless,
+    develop_interactive,
     drive_session,
     fresh_thread_id,
 )
@@ -59,9 +66,6 @@ for noisy_logger in ("httpx", "httpcore", "anthropic", "e2b"):
 
 logger = logging.getLogger("TDDMain")
 logger.setLevel(logging.INFO)
-
-#: The answers that leave the interactive session (paused at its checkpoint).
-EXIT_COMMANDS = ("/exit", "/quit")
 
 
 def get_initial_user_prompt() -> str:
@@ -140,14 +144,7 @@ def read_initial_request(args: argparse.Namespace) -> str | None:
 
 def interactive_answer(payload: dict[str, Any]) -> str | None:
     """Show the analyst's answer and read the user's; `None` when the user leaves."""
-    print(f"\n🤖 [Requirements Analyst]:\n{payload.get('prompt', '')}\n")
-    if payload.get("has_checklist"):
-        print("💡 TIP: The Analyst has generated the Final Checklist.")
-        print("   - Type '/yes' to proceed to Engineering.")
-        print("   - Or type the changes you'd like to make (e.g. 'Missing validation X').")
-    else:
-        print("💡 TIP: The Analyst needs more details.")
-        print("   - Answer the question to help define the scope.")
+    print(analyst_review_text(payload))
     try:
         reply = input("\n👤 [Your Response] (or '/exit'): ").strip()
     except (KeyboardInterrupt, EOFError):
@@ -207,7 +204,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Runs the TDDAgents pipeline: requirements, plan, one TDD loop per item.",
+        description="Runs the TDDAgents pipeline: requirements, plan, then test-driven development of the plan.",
     )
     parser.add_argument("prompt", nargs="?", default=None, help="The initial request (instead of the menu).")
     parser.add_argument("-p", "--print", action="store_true", help="Headless: ask nothing, exit non-zero on failure.")
@@ -221,7 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--permission-mode", choices=[str(m) for m in PERMISSION_MODES], default=None)
     parser.add_argument("--settings", default=None, help="A settings file (upstream's flag settings).")
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
-    parser.add_argument("--coordinator", action="store_true", help="Run each plan item in coordinator mode.")
+    parser.add_argument("--coordinator", action="store_true", help="Run development in coordinator mode.")
     return parser
 
 
@@ -417,10 +414,13 @@ def main(argv: list[str] | None = None) -> int:
             if not run.planned:
                 report(run, thread_id, workspace)
                 return 1
-            outcome = develop_headless(shell, thread_id, run.values, workspace, session_options(args))
+            develop = develop_headless if args.print else develop_interactive
+            outcome = develop(shell, thread_id, run.values, workspace, session_options(args))
         except KeyboardInterrupt:
             print(f"\n🛑 Interrupted. Continue later with --thread-id {thread_id}.")
             return 130
+        # `/requirements` may have re-planned the thread: report it as it now stands.
+        run = SessionRun(values=dict(shell.get_state(thread_id).values))
         report(run, thread_id, workspace, outcome.plan, outcome.terminal)
         return 0 if outcome.completed else 1
     finally:

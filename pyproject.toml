@@ -58,6 +58,7 @@ do_not_mutate = [
     "app/utils/token_metrics.py",
     "app/session/agents/*",
     "app/config/*",
+    "app/screens/terminal_io.py",
 ]
 tests_dir = ["tests/"]
 

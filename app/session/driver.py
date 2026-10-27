@@ -30,7 +30,7 @@ from app.session.shell import SessionShell
 from app.session.state import SessionStatus
 
 if TYPE_CHECKING:
-    from app.cli.print import HeadlessOutcome
+    from app.cli.print import DevelopmentOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def development_run_options(shell: SessionShell, options: SessionOptions) -> dic
 def develop_headless(
     shell: SessionShell, thread_id: str, values: dict[str, Any], workspace: Any, options: SessionOptions,
     **run_options: Any,
-) -> HeadlessOutcome:
+) -> DevelopmentOutcome:
     """A planned session's development with nobody to ask (`run_headless`), to its end."""
     from app.cli.print import run_headless
     from app.session.llm import run_sync
@@ -155,6 +155,24 @@ def drive_session(
     return answer_interrupts(shell, thread_id, answer)
 
 
+#: The answers that leave the analyst's question (the session stays paused at its checkpoint).
+EXIT_COMMANDS = ("/exit", "/quit")
+
+
+def analyst_review_text(payload: dict[str, Any]) -> str:
+    """The analyst's answer and the tip on how to reply to it."""
+    lines = [f"\n🤖 [Requirements Analyst]:\n{payload.get('prompt', '')}\n"]
+    if payload.get("has_checklist"):
+        lines += [
+            "💡 TIP: The Analyst has generated the Final Checklist.",
+            "   - Type '/yes' to proceed to Engineering.",
+            "   - Or type the changes you'd like to make (e.g. 'Missing validation X').",
+        ]
+    else:
+        lines += ["💡 TIP: The Analyst needs more details.", "   - Answer the question to help define the scope."]
+    return "\n".join(lines)
+
+
 def answer_interrupts(
     shell: SessionShell, thread_id: str, answer: Callable[[dict[str, Any]], str | None] | None
 ) -> SessionRun:
@@ -182,6 +200,77 @@ def rescope_session(
     return answer_interrupts(shell, thread_id, answer)
 
 
+def develop_interactive(
+    shell: SessionShell, thread_id: str, values: dict[str, Any], workspace: Any, options: SessionOptions,
+    *, io_factory: Callable[[Callable[[], None]], Any] | None = None, **run_options: Any,
+) -> DevelopmentOutcome:
+    """
+    A planned session's development at the terminal (`app/screens/repl.py`), until the user
+    leaves. Permission questions and `/requirements` (the analyst's questions included) are
+    answered on the same terminal.
+    """
+    from app.session.llm import run_sync
+
+    return run_sync(_develop_interactive(shell, thread_id, values, workspace, options, io_factory, run_options))
+
+
+async def _develop_interactive(
+    shell: SessionShell, thread_id: str, values: dict[str, Any], workspace: Any, options: SessionOptions,
+    io_factory: Callable[[Callable[[], None]], Any] | None, run_options: dict[str, Any],
+) -> DevelopmentOutcome:
+    import asyncio
+
+    from app.cli.print import DevelopmentOutcome, open_session_run, session_run_id
+    from app.hooks.use_can_use_tool import (
+        PermissionAnswer,
+        PermissionPrompt,
+        build_interactive_can_use_tool,
+    )
+    from app.screens.repl import Repl
+    from app.session.prompts import development_resume_prompt, development_start_prompt
+    from app.tdd.plan import ItemStatus, TddPlan
+
+    if io_factory is None:
+        from app.screens.terminal_io import TerminalIO
+
+        io_factory = TerminalIO
+    holder: dict[str, Repl] = {}
+
+    async def ask(prompt: PermissionPrompt) -> PermissionAnswer:
+        return await holder["repl"].ask_permission(prompt)
+
+    specification = str(values.get("specification") or "")
+    plan = TddPlan.from_texts(list(values.get("plan") or []))
+    opts = {**development_run_options(shell, options), **run_options}
+    async with open_session_run(run_id=session_run_id(thread_id), plan=plan, workspace=workspace,
+                                can_use_tool=build_interactive_can_use_tool(ask), **opts) as run:
+        io = io_factory(lambda: holder["repl"].interrupt())
+        loop = asyncio.get_running_loop()
+
+        def answer(payload: dict[str, Any]) -> str | None:
+            io.write(analyst_review_text(payload))
+            line = asyncio.run_coroutine_threadsafe(io.read_line("👤 "), loop).result()
+            if line is None or line.strip().lower() in EXIT_COMMANDS:
+                return None
+            return str(line)
+
+        async def rescope(request: str) -> tuple[str, list[str]] | None:
+            done = [item.text for item in run.store.get().tdd_plan.items if item.status == ItemStatus.DONE]
+            result = await asyncio.to_thread(rescope_session, shell, thread_id, request, done, answer)
+            if not result.planned:
+                return None
+            return str(result.values.get("specification") or ""), list(result.values.get("plan") or [])
+
+        repl = Repl(run, io, specification=specification, rescope=rescope)
+        holder["repl"] = repl
+        current = run.store.get().tdd_plan
+        with io:
+            terminal = await repl.run_session(
+                development_start_prompt(specification, current), development_resume_prompt(current)
+            )
+        return DevelopmentOutcome(terminal=terminal, plan=run.store.get().tdd_plan)
+
+
 __all__ = [
     "MEMORY_CHECKPOINT",
     "SessionOptions",
@@ -189,8 +278,11 @@ __all__ = [
     "build_session_shell",
     "checkpoint_uri",
     "answer_interrupts",
+    "EXIT_COMMANDS",
+    "analyst_review_text",
     "derive_thread_id",
     "develop_headless",
+    "develop_interactive",
     "development_run_options",
     "drive_session",
     "fresh_thread_id",

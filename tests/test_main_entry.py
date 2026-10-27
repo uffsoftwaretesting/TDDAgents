@@ -11,7 +11,7 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
 import app.main as entry
-from app.cli.print import HeadlessOutcome
+from app.cli.print import DevelopmentOutcome
 from app.query.transitions import Terminal
 from app.session.driver import SessionOptions, SessionRun, build_session_shell
 from app.session.state import SessionStatus
@@ -20,8 +20,8 @@ from app.tdd.plan import TddPlan
 
 CYCLE = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
 PLAN = TddPlan.from_texts(["Item A"])
-DONE = HeadlessOutcome(terminal=Terminal.COMPLETED, plan=PLAN.complete_current(CYCLE))
-STOPPED = HeadlessOutcome(terminal=Terminal.STOP_HOOK_PREVENTED, plan=PLAN)
+DONE = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=PLAN.complete_current(CYCLE))
+STOPPED = DevelopmentOutcome(terminal=Terminal.STOP_HOOK_PREVENTED, plan=PLAN)
 PLANNED = SessionRun(values={"status": SessionStatus.PLANNED})
 
 
@@ -53,13 +53,14 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
             engineer_fn=lambda r, h: "# Spec", planner_fn=lambda s, c: ["Item A"],
         )
 
-    def fake_develop(shell: Any, thread_id: str, values: Any, workspace: Any, options: Any) -> HeadlessOutcome:
+    def fake_develop(shell: Any, thread_id: str, values: Any, workspace: Any, options: Any) -> DevelopmentOutcome:
         holder["developed"].append((thread_id, values["plan"], options))
-        outcome: HeadlessOutcome = holder["outcome"]
+        outcome: DevelopmentOutcome = holder["outcome"]
         return outcome
 
     monkeypatch.setattr(entry, "build_session_shell", fake_build)
     monkeypatch.setattr(entry, "develop_headless", fake_develop)
+    monkeypatch.setattr(entry, "develop_interactive", fake_develop)
     # One saver for every build, as one Postgres database would be across processes.
     saver = MemorySaver()
     monkeypatch.setattr("app.session.driver.build_checkpointer", lambda uri: saver)
@@ -397,7 +398,8 @@ def test_format_dialogue_default_width() -> None:
 
 def test_parser_help_and_metadata() -> None:
     parser = entry.build_parser()
-    assert parser.description == "Runs the TDDAgents pipeline: requirements, plan, one TDD loop per item."
+    assert parser.description == (
+        "Runs the TDDAgents pipeline: requirements, plan, then test-driven development of the plan.")
     helps = {action.dest: action.help for action in parser._actions}
     assert helps == {
         "help": "show this help message and exit",
@@ -411,7 +413,7 @@ def test_parser_help_and_metadata() -> None:
         "permission_mode": None,
         "settings": "A settings file (upstream's flag settings).",
         "dangerously_skip_permissions": None,
-        "coordinator": "Run each plan item in coordinator mode.",
+        "coordinator": "Run development in coordinator mode.",
     }
     flags = {action.dest: tuple(action.option_strings) for action in parser._actions}
     assert flags["print"] == ("-p", "--print")

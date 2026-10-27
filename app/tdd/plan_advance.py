@@ -12,19 +12,18 @@ model stops without asking for tools. The advance is ledger-driven (user decisio
 * the user paused (`/pause`) → the turn ends `stop_hook_prevented`, never `completed`;
 * otherwise the TDD hook decides, against the current item.
 
-Like phase-on-spawn, the reset can only erase evidence: the next item's observations are
-made by `RunTests` alone (`test_run_tests_is_the_only_ledger_writer` pins the shape).
+The ledger restart is `update_tdd_plan`'s (`app/tdd/plan.py`): like phase-on-spawn it can only
+erase evidence, and the next item's observations are made by `RunTests` alone
+(`test_run_tests_is_the_only_ledger_writer` pins the shape).
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage
 
 from app.query.stop_hooks import StopHookResult
-from app.tdd.ledger import TddPhase
 from app.tdd.plan import PlanItem, TddPlan, render_plan, update_tdd_plan
 
 if TYPE_CHECKING:
@@ -53,9 +52,9 @@ def advance_plan(state: LoopState) -> StopHookResult | None:
     ledger = app_state.phase_ledger
     done = plan.current
     if done is not None and ledger.is_cycle_complete:
+        # Completing the current item moves the work on, so the ledger restarts in RED for the
+        # next one (`update_tdd_plan`).
         plan = update_tdd_plan(context, lambda p: p.complete_current(ledger))
-        reset_ledger = ledger.transition_to(TddPhase.RED)
-        context.set_app_state(lambda s: replace(s, phase_ledger=reset_ledger, last_test_run=None))
         if plan.is_complete:
             return StopHookResult()
         if app_state.tdd_paused:
