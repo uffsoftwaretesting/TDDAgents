@@ -150,7 +150,7 @@ def post_compact_attachments(context: Any) -> list[Message]:
     app_state = context.get_app_state()
     return [
         create_tdd_state_attachment_message(
-            app_state.phase_ledger, app_state.last_test_run, after_compaction=True
+            app_state.phase_ledger, app_state.last_test_run, after_compaction=True, plan=app_state.tdd_plan
         )
     ]
 

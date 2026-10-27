@@ -19,6 +19,7 @@ PostToolUse hooks that used to live here:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage
@@ -34,23 +35,28 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
     """
     Stop hook that blocks turn completion if the TDD cycle is incomplete (Part D5).
 
-    The stop_hook_active contract:
-    - If state.stop_hook_active is True: the hook already blocked once on this context.
-      To prevent infinite loops, it declines to return blocking errors again, setting
-      prevent_continuation=True to terminate with STOP_HOOK_PREVENTED rather than COMPLETED.
-    - If state.stop_hook_active is not True:
+    The stop_hook_active contract, per sub-requirement (Phase 11):
+    - If the hook already blocked for the current item (`state.stop_hook_active` and
+      `AppState.tdd_blocked_item` is that item), it declines to block again and sets
+      prevent_continuation=True, terminating with STOP_HOOK_PREVENTED rather than COMPLETED.
+      Without a plan the item is `None`, which is the one-block latch of Part D5.
+    - Otherwise:
       - If ledger.is_cycle_complete: cycle complete, allows termination (COMPLETED).
-      - If cycle incomplete: returns blocking_errors explaining why the model cannot stop.
+      - If cycle incomplete: returns blocking_errors explaining why the model cannot stop,
+        naming the current sub-requirement when there is a plan.
     """
-    ledger = state.tool_context.get_app_state().phase_ledger
+    app_state = state.tool_context.get_app_state()
+    ledger = app_state.phase_ledger
 
     if ledger.is_cycle_complete:
         return StopHookResult()
 
-    # Cycle is incomplete
-    if state.stop_hook_active:
+    current = app_state.tdd_plan.current
+    item_id = current.id if current is not None else None
+    if state.stop_hook_active and app_state.tdd_blocked_item == item_id:
         # Honour stop_hook_active: prevent continuation to stop the turn without retrying forever
         return StopHookResult(prevent_continuation=True)
+    state.tool_context.set_app_state(lambda s: replace(s, tdd_blocked_item=item_id))
 
     # First block: build explanation of why turn cannot exit
     if not ledger.red_confirmed:
@@ -70,5 +76,7 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
             "TDD cycle incomplete: tests are not passing yet in GREEN phase "
             "(green_passed=False). You must implement code and run RunTests until tests pass."
         )
+    if current is not None:
+        msg = f"Current sub-requirement {current.id}: {current.text}\n\n{msg}"
 
     return StopHookResult(blocking_errors=(HumanMessage(content=msg),))

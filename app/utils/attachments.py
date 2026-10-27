@@ -389,13 +389,17 @@ TDD_STATE_HEADER = "TDD phase ledger (written only by RunTests from observed tes
 
 
 def tdd_state_lines(data: Mapping[str, Any]) -> list[str]:
-    """The ledger part of a TDD-state attachment."""
-    return [
+    """The ledger part of a TDD-state attachment, with the plan's position when there is one."""
+    lines = [
         TDD_STATE_HEADER,
         f"Current Phase: {data.get('phase')}",
         f"Red Confirmed: {data.get('red_confirmed')}",
         f"Green Passed: {data.get('green_passed')}",
     ]
+    if "plan_progress" in data:
+        lines.append(f"Current Sub-requirement: {data.get('sub_requirement') or '(all done)'}")
+        lines.append(f"Sub-requirements Done: {data['plan_progress']}")
+    return lines
 
 
 def _tdd_state(data: Mapping[str, Any]) -> list[str]:

@@ -280,13 +280,23 @@ def _ledger_writers() -> list[str]:
 def test_run_tests_is_the_only_ledger_writer():
     """
     `RunTests` writes every observation. Since Phase 7 the Agent tool also writes the ledger,
-    and since Phase 8 the Skill tool's forked path (user decision 2026-10-25), but both only
+    since Phase 8 the Skill tool's forked path (user decision 2026-10-25) and since Phase 11 the
+    plan's advance to the next sub-requirement, but all of them only
     through `phase_on_spawn` (`PhaseLedger.transition_to`), which can move the phase or erase
     evidence and never create an observation — pinned here so another writer, or a spawn
     write that bypasses `transition_to`, cannot appear unnoticed.
     """
     spawn_writers = ["app/tools/agent_tool/agent_tool.py", "app/tools/skill_tool/skill_tool.py"]
-    assert _ledger_writers() == ["app/tdd/run_tests_tool/run_tests_tool.py", *spawn_writers]
+    advance = "app/tdd/plan_advance.py"
+    assert _ledger_writers() == [advance, "app/tdd/run_tests_tool/run_tests_tool.py", *spawn_writers]
+    # Phase 11: the plan's advance restarts the ledger in RED for the next sub-requirement, and
+    # nothing else: the same erase-only `transition_to`.
+    advance_nodes = original_nodes(REPO / advance)
+    advance_writes = calls_to(advance_nodes, "set_app_state")
+    assert advance_writes and all("phase_ledger=reset_ledger" in w for w in advance_writes)
+    resets = [ast.unparse(n) for n in advance_nodes if isinstance(n, ast.Assign)
+              and any(isinstance(t, ast.Name) and t.id == "reset_ledger" for t in n.targets)]
+    assert resets == ["reset_ledger = ledger.transition_to(TddPhase.RED)"]
     for path in spawn_writers:
         nodes = original_nodes(REPO / path)
         writes = calls_to(nodes, "set_app_state")

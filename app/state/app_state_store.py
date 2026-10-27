@@ -59,6 +59,9 @@ class AppState:
     #: `/pause` (Phase 11): the stop hook lets a turn end without finishing the plan, and the
     #: run terminates `stop_hook_prevented`, never `completed`.
     tdd_paused: bool = False
+    #: The sub-requirement the TDD stop hook last blocked for (`None` without a plan). Its latch
+    #: is per item: after the plan advances, the next item may be blocked once more.
+    tdd_blocked_item: str | None = None
 
 
 @dataclass(slots=True)

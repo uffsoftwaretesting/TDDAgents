@@ -13,9 +13,11 @@ have no equivalent here; the summary message and notifications are UI.
 
 `build_stop_hooks_runner` is what `LoopDeps.stop_hooks` gets, and it is where barrier 3 lives:
 
-1. **`tdd_phase_incomplete_hook` runs first**, on the main thread. Its latch is
-   `stop_hook_active`: once it has blocked, a second refusal prevents continuation rather
-   than looping. A worker (an `agent_id`) is not guarded by it; the coordinator is.
+1. **The TDD step runs first**, on the main thread: the plan's advance
+   (`app/tdd/plan_advance.py`, Phase 11) and then, for the current item,
+   `tdd_phase_incomplete_hook`. Its latch is `stop_hook_active`, per item: once it has
+   blocked for an item, a second refusal prevents continuation rather than looping. A worker
+   (an `agent_id`) is not guarded by it; the coordinator is.
 2. **Configured hooks can add a block, never clear one.** Their blocking errors are added to
    the TDD hook's; a configured `continue: false` stops the run as `stop_hook_prevented`,
    which the runner records as a failed sub-requirement, not as `completed`. Nothing a
@@ -113,14 +115,16 @@ async def handle_stop_hooks(
 
 def build_stop_hooks_runner() -> StopHooks:
     """The `LoopDeps.stop_hooks` of a production run: the TDD hook, then configured hooks."""
-    # Imported here: the TDD hook returns this module's `StopHookResult`.
+    # Imported here: the TDD modules return this module's `StopHookResult`.
+    from app.tdd.plan_advance import advance_plan
     from app.tdd.stop_hook import tdd_phase_incomplete_hook
 
     async def run_stop_hooks(state: LoopState, config: RunConfig) -> StopHookResult:
         is_worker = bool(getattr(state.tool_context, "agent_id", None))
         tdd = StopHookResult()
         if not is_worker:
-            tdd = await tdd_phase_incomplete_hook(state, config)
+            advanced = advance_plan(state)
+            tdd = advanced if advanced is not None else await tdd_phase_incomplete_hook(state, config)
             if tdd.prevent_continuation:
                 return tdd
         configured = await handle_stop_hooks(state, state.messages, bool(state.stop_hook_active))

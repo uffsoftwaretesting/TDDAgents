@@ -23,15 +23,24 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app.tdd.ledger import PhaseLedger, TestRunRecord
+from app.tdd.plan import TddPlan, render_plan
 from app.utils.attachments import Attachment, attachment_of, tdd_state_lines
 from app.utils.messages import ATTACHMENT_KEY, Message, wrap_in_system_reminder
 from app.utils.tool_result_storage import PREVIEW_SIZE_BYTES
 
-_LEDGER_FIELDS = ("phase", "red_confirmed", "green_passed")
+_LEDGER_FIELDS = ("phase", "red_confirmed", "green_passed", "sub_requirement", "plan_progress")
 
 
-def tdd_state_data(ledger: PhaseLedger) -> dict[str, Any]:
-    return {"phase": str(ledger.phase), "red_confirmed": ledger.red_confirmed, "green_passed": ledger.green_passed}
+def tdd_state_data(ledger: PhaseLedger, plan: TddPlan | None = None) -> dict[str, Any]:
+    """The ledger, and with a plan (Phase 11) the current sub-requirement and the progress."""
+    data: dict[str, Any] = {
+        "phase": str(ledger.phase), "red_confirmed": ledger.red_confirmed, "green_passed": ledger.green_passed,
+    }
+    if plan is not None and plan.items:
+        current = plan.current
+        data["sub_requirement"] = f"{current.id}. {current.text}" if current is not None else None
+        data["plan_progress"] = f"{plan.done_count}/{len(plan.items)}"
+    return data
 
 
 def last_announced_tdd_state(messages: Sequence[Message]) -> dict[str, Any] | None:
@@ -39,13 +48,14 @@ def last_announced_tdd_state(messages: Sequence[Message]) -> dict[str, Any] | No
     for message in reversed(list(messages)):
         attachment = attachment_of(message)
         if attachment and attachment.get("type") == "tdd_state":
-            return {name: attachment.get(name) for name in _LEDGER_FIELDS}
+            return {name: attachment[name] for name in _LEDGER_FIELDS if name in attachment}
     return None
 
 
 def get_tdd_state_attachments(messages: Sequence[Message], context: Any) -> list[Attachment]:
     """The ledger, when it changed since it was last announced."""
-    data = tdd_state_data(context.get_app_state().phase_ledger)
+    app_state = context.get_app_state()
+    data = tdd_state_data(app_state.phase_ledger, app_state.tdd_plan)
     if last_announced_tdd_state(messages) == data:
         return []
     return [Attachment("tdd_state", data)]
@@ -59,14 +69,20 @@ def _tail(text: str, max_bytes: int = PREVIEW_SIZE_BYTES) -> str:
 
 
 def create_tdd_state_attachment_message(
-    ledger: PhaseLedger, last_test_run: TestRunRecord | None, *, after_compaction: bool
+    ledger: PhaseLedger, last_test_run: TestRunRecord | None, *, after_compaction: bool,
+    plan: TddPlan | None = None,
 ) -> Message:
-    """The TDD state as one meta message; after a compaction it also carries the RunTests evidence."""
-    data = tdd_state_data(ledger)
+    """
+    The TDD state as one meta message; after a compaction it also carries the RunTests evidence
+    and the whole plan, from authoritative state rather than the summary.
+    """
+    data = tdd_state_data(ledger, plan)
     lines = tdd_state_lines(data)
     record: dict[str, Any] = {"type": "tdd_state", **data}
     if after_compaction:
         record["afterCompaction"] = True
+        if plan is not None and plan.items:
+            lines += ["", "Plan (recorded by the system, not by the model):", render_plan(plan)]
         lines.append("")
         if last_test_run is None:
             lines.append("No RunTests run has been observed yet.")
