@@ -8,8 +8,9 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage

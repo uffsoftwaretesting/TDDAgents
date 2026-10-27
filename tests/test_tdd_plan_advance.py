@@ -6,9 +6,10 @@ Phase 11: the ledger-driven advance from one sub-requirement to the next
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -47,7 +48,10 @@ def state_for(store: AppStateStore, *, stop_hook_active: bool | None = None, pla
     return replace(state, stop_hook_active=stop_hook_active)
 
 
-def store_with(plan: TddPlan, ledger: PhaseLedger = PhaseLedger(), **kw: Any) -> AppStateStore:
+RED = PhaseLedger()
+
+
+def store_with(plan: TddPlan, ledger: PhaseLedger = RED, **kw: Any) -> AppStateStore:
     return AppStateStore(state=AppState(tdd_plan=plan, phase_ledger=ledger, **kw))
 
 

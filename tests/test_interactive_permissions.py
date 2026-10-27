@@ -252,8 +252,12 @@ class Asker:
         return self.answers.pop(0)
 
 
-def interactive_context(tmp_path: Path, asker: Asker, *, ledger: PhaseLedger = PhaseLedger(),
-                        plan: TddPlan = TddPlan(), mode: str = "default") -> Any:
+RED = PhaseLedger()
+NO_PLAN = TddPlan()
+
+
+def interactive_context(tmp_path: Path, asker: Asker, *, ledger: PhaseLedger = RED,
+                        plan: TddPlan = NO_PLAN, mode: str = "default") -> Any:
     (tmp_path / "home").mkdir(exist_ok=True)
     perm = build_tool_permission_context(tmp_path, tmp_path / "home", managed_dir=tmp_path / "etc",
                                          permission_mode_cli=mode, working_dir=tmp_path / "ws",
