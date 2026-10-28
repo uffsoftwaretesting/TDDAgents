@@ -44,6 +44,7 @@ COVERAGE_CONFIG = (
     "    conftest.py\n"
     "    */conftest.py\n"
     "    .tddagents/*\n"
+    "    .venv/*\n"
 )
 
 #: What pytest-cov prints when nothing was measured.

@@ -188,14 +188,29 @@ def coordinator_context(config: RunConfig) -> dict[str, Any]:
 
 def session_workspace(thread_id: str) -> LocalWorkspace:
     """
-    The session's shared local workspace, with its own Python environment
-    (`app/workspace/pyenv.py`) first on `PATH` for every command the tools run.
+    The session's project (Phase 13): its own folder outside TDDAgents', a git working tree
+    with seeded settings (`app/workspace/project.py`) and its own venv (`app/workspace/pyenv.py`),
+    first on `PATH` for every command the tools run.
     """
+    from app.workspace.project import prepare_project
     from app.workspace.pyenv import ensure_session_python
 
-    probe = LocalWorkspace.for_run(thread_id)
-    python = ensure_session_python(probe.run_dir)
+    project = prepare_project(LocalWorkspace.for_run(thread_id).root)
+    python = ensure_session_python(project)
     return LocalWorkspace.for_run(thread_id, env=python.env())
+
+
+def project_root_of(workspace: Any, project_root: Path | str | None = None) -> Path:
+    """
+    The project folder settings, skills, agents, MCP servers and hooks are read from: upstream's
+    `getOriginalCwd()`, the folder claude-code was opened in. Since Phase 13 that is the session's
+    project (the workspace root), never TDDAgents' own folder; a workspace with no root (a test
+    double) falls back to the process cwd.
+    """
+    if project_root is not None:
+        return Path(project_root)
+    root = getattr(workspace, "root", None)
+    return Path(root) if root is not None else Path.cwd()
 
 
 def run_permission_context(
@@ -215,7 +230,7 @@ def run_permission_context(
 
     root = getattr(workspace, "root", None)
     return build_tool_permission_context(
-        project_root if project_root is not None else Path.cwd(),
+        project_root_of(workspace, project_root),
         home,
         flag_settings_path=config.settings_path,
         managed_dir=managed_dir if managed_dir is not None else MANAGED_DIR,
@@ -311,8 +326,9 @@ async def open_session_run(
     `postgres_checkpointing` is whether the session shell's checkpointer really persists
     (`Gates.postgres_checkpointing`); `permission_mode`, `settings_path` and
     `dangerously_skip_permissions` are upstream's startup flags, given by the entry point.
-    `project_root` is where the project and local settings live (the repository, upstream's
-    original cwd); the workspace is the working directory the rules anchor to. `home` and
+    `project_root` overrides where the project settings, skills, agents, MCP servers and hooks
+    are read from; by default that is the workspace root, the session's project (Phase 13,
+    upstream's original cwd), and the workspace is the working directory the rules anchor to. `home` and
     `managed_dir` relocate the user and policy scopes (tests use them). With `can_use_tool`
     (`app/hooks/use_can_use_tool.py`) the run is interactive: a permission 'ask' on the main
     thread becomes a question to the user instead of a deny.
@@ -336,7 +352,7 @@ async def open_session_run(
         config, workspace, project_root, home, managed_dir, interactive=can_use_tool is not None
     )
     store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan))
-    root_dir = Path(project_root) if project_root is not None else Path.cwd()
+    root_dir = project_root_of(workspace, project_root)
     from app.skills.load_skills_dir import get_skill_registry
 
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
@@ -666,6 +682,7 @@ __all__ = [
     "main_thread_tools",
     "next_main_thread_command",
     "open_session_run",
+    "project_root_of",
     "run_agent_memory_store",
     "run_headless",
     "run_permission_context",

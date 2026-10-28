@@ -23,7 +23,7 @@ from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_permissions import is_test_path
 
 #: Directory names whose contents are never test files.
-IGNORED_SEGMENTS = frozenset({"__pycache__", ".pytest_cache", ".tddagents", ".git", ".mypy_cache"})
+IGNORED_SEGMENTS = frozenset({"__pycache__", ".pytest_cache", ".tddagents", ".git", ".mypy_cache", ".venv"})
 
 #: Deep enough for any project tree (`list_files` counts depth in entries).
 LISTING_DEPTH = 64

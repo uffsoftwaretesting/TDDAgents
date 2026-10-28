@@ -49,6 +49,7 @@ def test_the_config_measures_branches_and_leaves_the_tests_out():
         "    conftest.py\n"
         "    */conftest.py\n"
         "    .tddagents/*\n"
+        "    .venv/*\n"
     )
 
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -107,11 +106,13 @@ def test_claude_worktrees_is_structural_but_nested_claude_is_not():
     assert is_dangerous_file_path_to_auto_edit("/w/.tddagents/worktrees/x")
 
 
-def test_tddagents_runs_is_structural_but_nested_config_is_not():
-    # The session workspaces live at `.tddagents/runs/<thread>/workspace/` (upstream's worktrees).
-    ws = "/repo/.tddagents/runs/tdd-1/workspace"
+def test_tddagents_workspaces_is_structural_but_nested_config_is_not():
+    # The session projects live at `~/.tddagents/workspaces/<thread>/project/` (Phase 13).
+    ws = "/home/u/.tddagents/workspaces/tdd-1/project"
     assert not is_dangerous_file_path_to_auto_edit(f"{ws}/tests/test_a.py")
-    assert not is_dangerous_file_path_to_auto_edit("/repo/.TDDAGENTS/RUNS/t/workspace/a.py")
+    assert not is_dangerous_file_path_to_auto_edit("/home/u/.TDDAGENTS/WORKSPACES/t/project/a.py")
+    # The old in-repo location is no longer a carve-out.
+    assert is_dangerous_file_path_to_auto_edit("/repo/.tddagents/runs/tdd-1/workspace/a.py")
     assert is_dangerous_file_path_to_auto_edit(f"{ws}/.tddagents/settings.json")
     assert is_dangerous_file_path_to_auto_edit(f"{ws}/.claude/settings.json")
     assert is_dangerous_file_path_to_auto_edit(f"{ws}/.git/config")
@@ -601,8 +602,8 @@ def test_every_floating_deny_pattern_becomes_a_glob():
 def test_the_session_workspace_is_writable_without_a_safety_ask():
     # Every write into a run's workspace used to be a safety ask (headless: denied), because its
     # path holds `.tddagents`. Pin the real location, so moving it cannot silently re-break it.
-    from app.config.config import Config
+    from app.workspace.local import PROJECT_DIRNAME, workspaces_root
 
-    root = Path(Config.LOCAL_WORKSPACE_ROOT).resolve() / "tdd-1" / "workspace"
+    root = workspaces_root() / "tdd-1" / PROJECT_DIRNAME
     assert not is_dangerous_file_path_to_auto_edit(str(root / "tests" / "test_a.py"))
     assert not is_dangerous_file_path_to_auto_edit(str(root / "calculator.py"))

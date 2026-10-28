@@ -60,6 +60,8 @@ class SuiteExecutionResult:
     stdout: str = ""
     stderr: str = ""
     coverage: CoverageReading = UNAVAILABLE
+    #: Tests pytest skipped; `None` reads the count from the output (`skipped_count`).
+    skipped: int | None = None
     __test__: bool = False
 
 
@@ -130,7 +132,7 @@ def pytest_command(test_path: str) -> str:
     model the uncovered lines, and the JSON report is what REFACTOR is judged by.
     """
     return (
-        f"PYTHONPATH=. python -m pytest {shlex.quote(test_path)} -vv --tb=short --rootdir=. "
+        f"PYTHONPATH=. python -m pytest {shlex.quote(test_path)} -vv --tb=short -rs --rootdir=. "
         f"--cov=. --cov-config={COVERAGE_CONFIG_PATH} --cov-report=term-missing "
         f"--cov-report=json:{COVERAGE_REPORT_PATH} "
         f"$({PYTEST_CONFIG_PROBE} || printf %s '-c /dev/null')"
@@ -166,15 +168,21 @@ async def _default_test_runner(test_path: str, context: ToolContext) -> SuiteExe
             raise RunTestsUnavailable("the attached test runner returned no exit code")
         return SuiteExecutionResult(exit_code=exit_code)
 
-    ws: Any = getattr(context, "workspace", None)
+    return await asyncio.to_thread(run_suite, getattr(context, "workspace", None), test_path)
+
+
+def run_suite(ws: Any, test_path: str = ".") -> SuiteExecutionResult:
+    """
+    The suite in the workspace, exactly as RunTests runs it: its coverage config, `pytest_command`
+    and the coverage report read back. The session's final run uses it too (Phase 13), so the
+    result reported at the end is the one the agents' own runs saw.
+    """
     if ws is None or not hasattr(ws, "execute"):
         raise RunTestsUnavailable("no workspace is available to run the tests in")
     try:
-        await asyncio.to_thread(ws.write_file, COVERAGE_CONFIG_PATH, COVERAGE_CONFIG)
+        ws.write_file(COVERAGE_CONFIG_PATH, COVERAGE_CONFIG)
         _discard(ws, COVERAGE_REPORT_PATH)
-        res = await asyncio.to_thread(
-            ws.execute, pytest_command(test_path), timeout=run_tests_timeout_seconds()
-        )
+        res = ws.execute(pytest_command(test_path), timeout=run_tests_timeout_seconds())
     except Exception as exc:
         raise RunTestsUnavailable(f"pytest could not be executed in the workspace: {exc}") from exc
     try:
@@ -191,6 +199,25 @@ def _discard(ws: Any, path: str) -> None:
         ws.delete_file(path)
     except Exception:  # noqa: BLE001, S110 - a report that is not there is already discarded
         pass
+
+
+#: pytest's summary line counts skipped tests (`== 3 passed, 1 skipped in 0.1s ==`).
+_SKIPPED = re.compile(r"\b(\d+) skipped\b")
+
+
+def skipped_count(output: str) -> int:
+    """The skipped tests pytest's last summary line reports; 0 when it reports none."""
+    found = _SKIPPED.findall(output)
+    return int(found[-1]) if found else 0
+
+
+#: What a passing run with skipped tests is told in GREEN and REFACTOR (Phase 13).
+SKIPPED_IS_NOT_PASSING = (
+    "{count} test(s) were skipped, so this run does not count as passing: a skipped test checks "
+    "nothing. Install what they need into the project's virtual environment (and record it in the "
+    "requirements files), or fix why they skip, then run RunTests again. The skip reasons are listed "
+    "in the short test summary below."
+)
 
 
 def ledger_status(before: PhaseLedger, after: PhaseLedger, exit_code: int, coverage: CoverageReading) -> str:
@@ -260,6 +287,12 @@ def build_run_tests_tool(
             current = await asyncio.to_thread(fingerprint_test_files, getattr(context, "workspace", None))
             changed = have_tests_changed(current, before.tdd_item_test_baseline)
         coverage = exec_result.coverage
+        skipped = exec_result.skipped if exec_result.skipped is not None else skipped_count(
+            f"{exec_result.stdout}\n{exec_result.stderr}")
+        skips_block_a_pass = observed == 0 and skipped > 0 and before.phase_ledger.phase != TddPhase.RED
+        if skips_block_a_pass:
+            # A skipped test checks nothing, so the run is not a pass (Phase 13, user decision).
+            observed = 1
         after = before.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage)
 
         # Update the authoritative AppState phase_ledger: the only writer (Part D2)
@@ -272,7 +305,9 @@ def build_run_tests_tool(
                 last_test_run=record)
         )
 
-        if code == 0:
+        if skips_block_a_pass:
+            header = f"Tests ran without failures, but {SKIPPED_IS_NOT_PASSING.format(count=skipped)}"
+        elif code == 0:
             header = "All tests passed."
         elif code == 1:
             header = f"Tests failed (exit {code})."

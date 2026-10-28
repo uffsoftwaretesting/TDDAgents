@@ -44,4 +44,4 @@ class Config:
     # explicitly is what makes the path contract in app/workspace/base.py a
     # guarantee rather than an accident of the E2B default working directory.
     SANDBOX_WORKSPACE_ROOT = "/home/user"
-    LOCAL_WORKSPACE_ROOT = ".tddagents/runs"
+    # Local projects live outside TDDAgents' folder (Phase 13): `app/workspace/local.py::workspaces_root`.

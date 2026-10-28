@@ -52,6 +52,7 @@ STATIC_SECTION_FILES: tuple[tuple[str, str], ...] = (
     ("doing_tasks", "doing-tasks.md"),
     ("actions", "actions-with-care.md"),
     ("using_your_tools", "tools.md"),
+    ("project_environment", "environment.md"),
     ("tone_and_style", "tone.md"),
     ("tdd_contract", "tdd-contract.md"),
 )
@@ -101,6 +102,12 @@ def prepend_bullets(items: Sequence[str | Sequence[str]]) -> list[str]:
     return out
 
 
+def _venv_items(ws: Any) -> list[str]:
+    """TDDAgents' addition (Phase 13): the project's own virtualenv, where dependencies go."""
+    venv = getattr(ws, "virtual_env", None) if ws is not None else None
+    return [f"Python virtual environment: {venv} (active for Bash and RunTests)"] if venv else []
+
+
 def compute_simple_env_info(ws: Any, model_id: str) -> str:
     """`computeSimpleEnvInfo`, without the Claude-Code product lines."""
     cwd = str(getattr(ws, "root", ".")) if ws is not None else "."
@@ -110,6 +117,7 @@ def compute_simple_env_info(ws: Any, model_id: str) -> str:
     items: list[str | Sequence[str]] = [
         f"Primary working directory: {cwd}",
         [f"Is a git repository: {'true' if git else 'false'}"],
+        *_venv_items(ws),
         f"Platform: {platform or 'unknown'}",
         "Shell: bash",
         f"OS Version: {uname_sr or 'unknown'}",
@@ -135,6 +143,7 @@ def compute_env_info(ws: Any, model_id: str, additional_working_directories: Seq
         "<env>\n"
         f"Working directory: {cwd}\n"
         f"Is directory a git repo: {'Yes' if git else 'No'}\n"
+        f"{''.join(f'{line}\n' for line in _venv_items(ws))}"
         f"{additional}Platform: {platform or 'unknown'}\n"
         "Shell: bash\n"
         f"OS Version: {uname_sr or 'unknown'}\n"

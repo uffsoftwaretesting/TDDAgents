@@ -28,7 +28,7 @@ anchor there (`ToolPermissionContext.settings_roots` carries the exceptions, use
 **TDDAgents' config directory is protected too.** `.tddagents` and `.tddagents.json` join
 upstream's dangerous lists (the product rename of `.claude` / `.claude.json`, which stay,
 since a workspace may also be opened with Claude Code). Writing there could plant settings
-or memory the next run would load. As upstream skips `.claude/worktrees/`, `.tddagents/runs/`
+or memory the next run would load. As upstream skips `.claude/worktrees/`, `.tddagents/workspaces/`
 is skipped: the session workspaces live there, and a config directory inside one is still
 protected.
 
@@ -91,8 +91,9 @@ DANGEROUS_FILES: tuple[str, ...] = (
 )
 
 #: A dangerous directory followed by one of these is structure, not configuration: upstream's
-#: `.claude/worktrees/` and TDDAgents' session workspaces under `.tddagents/runs/`.
-STRUCTURAL_SUBDIRECTORIES: frozenset[tuple[str, str]] = frozenset({(".claude", "worktrees"), (".tddagents", "runs")})
+#: `.claude/worktrees/` and TDDAgents' session workspaces under `.tddagents/workspaces/` (Phase 13).
+STRUCTURAL_SUBDIRECTORIES: frozenset[tuple[str, str]] = frozenset({(".claude", "worktrees"),
+                                                                   (".tddagents", "workspaces")})
 
 DANGEROUS_DIRECTORIES: tuple[str, ...] = (
     ".git",
@@ -152,7 +153,7 @@ def is_dangerous_file_path_to_auto_edit(path: str) -> bool:
         normalized = normalize_case_for_comparison(segment)
         if normalized not in DANGEROUS_DIRECTORIES:
             continue
-        # `.claude/worktrees/` is structural, not user configuration; so is `.tddagents/runs/`,
+        # `.claude/worktrees/` is structural, not user configuration; so is `.tddagents/workspaces/`,
         # where the session workspaces live (TDDAgents' equivalent of upstream's worktrees).
         following = normalize_case_for_comparison(segments[index + 1]) if index + 1 < len(segments) else None
         if (normalized, following) in STRUCTURAL_SUBDIRECTORIES:

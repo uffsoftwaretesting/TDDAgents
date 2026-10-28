@@ -5,16 +5,17 @@ Full parity with E2BWorkspace, including `execute()`. This is deliberate and the
 trade-off was accepted when the two-execution-target design was locked: there is no
 per-call override and no command allowlist, so the only thing standing between an
 agent and an arbitrary host command is the `workspace:` value in its definition file.
-The mitigation is structural — tester, developer, and refactorer are pinned to
-`sandbox`, and the registry is what enforces it.
-
-Generated code still only ever runs in the sandbox.
+Since Phase 13 every session's project has its own folder outside TDDAgents' own:
+`<workspaces root>/<thread>/project`, a git working tree with its own virtualenv at `.venv`
+(`app/workspace/project.py`, `app/workspace/pyenv.py`), as claude-code works in the folder it
+is opened in. Reports go beside it, in `<thread>/metrics_and_logging/`, outside the git tree.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -37,6 +38,19 @@ logger = logging.getLogger("TDDOrchestrator.LocalWorkspace")
 #: git stops its upward search for a repository at these directories.
 GIT_CEILING_ENV = "GIT_CEILING_DIRECTORIES"
 
+#: Where the session projects live, unless overridden (Phase 13, user decision).
+WORKSPACES_DIR_ENV = "TDDAGENTS_WORKSPACES_DIR"
+#: The project's folder inside a session's directory: the git working tree the model works in.
+PROJECT_DIRNAME = "project"
+
+
+def workspaces_root() -> Path:
+    """`$TDDAGENTS_WORKSPACES_DIR`, else `<config home>/workspaces` (`~/.tddagents/workspaces`)."""
+    from app.utils.tool_result_storage import config_home
+
+    override = os.environ.get(WORKSPACES_DIR_ENV)
+    return (Path(override) if override else config_home() / "workspaces").expanduser().resolve()
+
 
 class LocalWorkspace:
     """A Workspace rooted at a single directory on the host."""
@@ -50,22 +64,20 @@ class LocalWorkspace:
         self._env: dict[str, str] = dict(env or {})
 
     @property
+    def virtual_env(self) -> Path | None:
+        """The project's virtualenv every command runs with (`SessionPython.env()`), if any."""
+        venv = self._env.get("VIRTUAL_ENV")
+        return Path(venv) if venv else None
+
+    @property
     def run_dir(self) -> Path:
-        """The directory that holds this workspace, its venv and transcripts."""
+        """The session's directory: it holds this project and, beside it, the reports."""
         return self._root.parent
 
     @classmethod
     def for_run(cls, thread_id: str, env: dict[str, str] | None = None) -> LocalWorkspace:
-        """
-        The local side of a run, at
-        `<Config.LOCAL_WORKSPACE_ROOT>/<thread_id>/workspace`.
-
-        This is the live mirror the sync engine writes to. It is NOT
-        `workspace_output_<thread_id>/`, which stays exactly what it is today: the
-        end-of-run export written by main.py, so the paper's artifact directory never
-        contains a half-synced tree.
-        """
-        return cls(Path(Config.LOCAL_WORKSPACE_ROOT) / thread_id / "workspace", env=env)
+        """A session's project: `<workspaces_root()>/<thread_id>/project`."""
+        return cls(workspaces_root() / thread_id / PROJECT_DIRNAME, env=env)
 
     @property
     def root(self) -> Path:
@@ -192,14 +204,18 @@ class LocalWorkspace:
         both sides. As in the sandbox, a non-zero exit code is returned, not raised.
         """
         limit = timeout if timeout is not None else Config.COMMAND_TIMEOUT
-        # A local workspace sits inside TDDAgents' own repository: the ceiling (set last, so no
-        # caller lifts it) keeps git from walking up to it, while a repo of its own still works.
+        # The ceiling (set last, so no caller lifts it) keeps git inside the project: its own
+        # repository is found first, and nothing above the session's directory ever is.
         environment = {**os.environ, **self._env, **(env or {}), GIT_CEILING_ENV: str(self._root.parent)}
         started = time.monotonic()
+        # The login profile runs after the environment is set and may put its own directories
+        # (`~/.local/bin`) first: the project's venv goes back in front of them (Phase 13).
+        venv = environment.get("VIRTUAL_ENV")
+        script = f'export PATH={shlex.quote(str(Path(venv) / "bin"))}:"$PATH"; {cmd}' if venv else cmd
 
         try:
             completed = subprocess.run(  # noqa: PLW1510 - a failing command is a result, not an error
-                ["/bin/bash", "-l", "-c", cmd],
+                ["/bin/bash", "-l", "-c", script],
                 cwd=str(self._root),
                 env=environment,
                 capture_output=True,

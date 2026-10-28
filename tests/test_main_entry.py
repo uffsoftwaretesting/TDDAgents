@@ -39,9 +39,10 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     holder: dict[str, Any] = {"outcome": DONE, "options": [], "threads": [], "developed": []}
 
     class Workspace:
-        root = tmp_path / "ws"
+        root = tmp_path / "session" / "project"
+        run_dir = tmp_path / "session"
 
-    Workspace.root.mkdir()
+    Workspace.root.mkdir(parents=True)
     (Workspace.root / "calc.py").write_text("x = 1\n")
 
     def fake_build(thread_id: str, options: SessionOptions) -> Any:
@@ -183,10 +184,12 @@ def test_headless_run_succeeds(fake_session: dict[str, Any], tmp_path: Path,
     (options,) = fake_session["options"]
     assert options.headless is True and options.permission_mode == "acceptEdits"
     (thread_id,) = fake_session["threads"]
-    out_dir = tmp_path / f"workspace_output_{thread_id}"
-    assert (out_dir / "calc.py").read_text() == "x = 1\n"
+    # Phase 13: the reports go beside the project, nothing into TDDAgents' folder (the cwd here).
+    out_dir = tmp_path / "session"
+    assert not list(tmp_path.glob("workspace_output_*"))
     assert (out_dir / "metrics_and_logging" / "execution_logs.txt").exists()
     assert (out_dir / "metrics_and_logging" / "token_usage.txt").exists()
+    assert (out_dir / "metrics_and_logging" / "final_test_run.txt").exists()
     out = capsys.readouterr().out
     assert "PIPELINE COMPLETED SUCCESSFULLY" in out and thread_id in out and "(HEADLESS)" in out
     (developed,) = fake_session["developed"]
@@ -291,7 +294,11 @@ def test_report_status_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         root = tmp_path / "missing"
 
     entry.report(PLANNED, "t", Workspace(), DONE.plan, Terminal.COMPLETED)
-    assert "0 file(s) exported" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # Without a session directory the reports go to `<workspaces root>/<thread>/`.
+    from app.workspace.local import workspaces_root
+
+    assert f"📝 Reports: {workspaces_root() / 't' / 'metrics_and_logging'}/" in out
 
 
 def test_the_log_file_handler_is_removed(fake_session: dict[str, Any]) -> None:
@@ -534,34 +541,54 @@ def test_token_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cap
 
 def test_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.chdir(tmp_path)
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    (ws / "a.py").write_text("x")
+    ws = tmp_path / "session" / "project"
+    ws.mkdir(parents=True)
 
     class Workspace:
         root = ws
+        run_dir = tmp_path / "session"
 
-    out_dir = tmp_path / "workspace_output_t"
+    out_dir = tmp_path / "session" / "metrics_and_logging"
     entry.report(PLANNED, "t", Workspace(), STOPPED.plan, STOPPED.terminal)
     assert capsys.readouterr().out == (
-        f"\n💾 1 file(s) exported from {ws} to {out_dir}/\n"
+        f"\n📁 Project: {ws}\n"
+        f"📝 Reports: {out_dir}/\n"
+        "🧪 Final test run: could not run the tests: no workspace is available to run the tests in\n"
         "\n⚠️  DEVELOPMENT STOPPED: stop_hook_prevented\n"
         "   • 1. Item A: not done\n"
         "\n🔑 Thread ID for this run: t\n"
         "   (To inspect the state or resume later, use --thread-id)\n\n"
     )
-    assert "2. " not in (out_dir / "metrics_and_logging" / "subreq_results.txt").read_text()
+    assert "2. " not in (out_dir / "subreq_results.txt").read_text()
+    assert "could not run the tests" in (out_dir / "final_test_run.txt").read_text()
     entry.report(SessionRun(values={"status": SessionStatus.FAILED}), "t", Workspace())
-    assert "\n⚠️  PIPELINE FINISHED WITH STATUS: 'failed'\n" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "\n⚠️  PIPELINE FINISHED WITH STATUS: 'failed'\n" in out and "Final test run" not in out
     entry.report(PLANNED, "t", Workspace(), DONE.plan, Terminal.MODEL_ERROR)
     out = capsys.readouterr().out
     assert "DEVELOPMENT STOPPED: model_error" in out and "not done" not in out
-    assert (out_dir / "a.py").read_text() == "x"
-    assert (out_dir / "metrics_and_logging" / "token_usage.txt").exists()
+    assert (out_dir / "token_usage.txt").exists()
+    assert not list(tmp_path.glob("workspace_output_*"))
     entry.report(SessionRun(values={}, paused_at={"type": "clarification"}), "t", Workspace())
     assert "\n⏸️  Session paused at the analyst's question.\n" in capsys.readouterr().out
     entry.report(SessionRun(values={}), "t", Workspace())
     assert "STATUS: 'unknown'" in capsys.readouterr().out
+
+
+def test_the_final_test_run_is_the_projects_own_suite(python_workspace, tmp_path: Path) -> None:
+    """Phase 13: exactly RunTests' command in the project; a skipped test means not passing."""
+    python_workspace.write_file("calc.py", "def add(a, b):\n    return a + b\n")
+    python_workspace.write_file("tests/test_calc.py", (
+        "import pytest\nfrom calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n\n"
+        "def test_lint():\n    pytest.importorskip('not_installed_anywhere')\n"))
+    summary = entry.write_final_test_run(str(tmp_path), python_workspace)
+    assert summary == "NOT passing (exit 0, 1 skipped, coverage 100.0% (needs 90%))"
+    text = (tmp_path / "final_test_run.txt").read_text()
+    assert f"Project: {python_workspace.root}" in text and "SKIPPED" in text
+    python_workspace.write_file("tests/test_calc.py",
+                                "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n")
+    assert entry.write_final_test_run(str(tmp_path), python_workspace) == (
+        "passed (exit 0, 0 skipped, coverage 100.0% (needs 90%))")
 
 
 def test_main_output_and_log_file(fake_session: dict[str, Any], tmp_path: Path,
@@ -570,7 +597,7 @@ def test_main_output_and_log_file(fake_session: dict[str, Any], tmp_path: Path,
     (thread_id,) = fake_session["threads"]
     out = capsys.readouterr().out
     assert out.startswith("\n" + "=" * 80 + "\n🚀  TDDAGENTS SESSION (HEADLESS)\n" + "=" * 80 + "\n")
-    log_file = tmp_path / f"workspace_output_{thread_id}" / "metrics_and_logging" / "execution_logs.txt"
+    log_file = tmp_path / "session" / "metrics_and_logging" / "execution_logs.txt"
     assert " [INFO] TDDMain: 📊 Token Usage — total: " in log_file.read_text()
     # Appended, not truncated: a continued session keeps its earlier log.
     entry.main(["-p", "Build X", "--thread-id", thread_id])

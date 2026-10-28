@@ -370,9 +370,9 @@ def test_workspace_command_is_quoted_and_time_limited():
     assert ws.files == {COVERAGE_CONFIG_PATH: COVERAGE_CONFIG}
     assert ws.deleted == [COVERAGE_REPORT_PATH, COVERAGE_REPORT_PATH]
     assert pytest_command("tests/a b.py; rm -rf /").startswith(
-        "PYTHONPATH=. python -m pytest 'tests/a b.py; rm -rf /' -vv --tb=short --rootdir=. ")
+        "PYTHONPATH=. python -m pytest 'tests/a b.py; rm -rf /' -vv --tb=short -rs --rootdir=. ")
     assert pytest_command("tests/x.py") == (
-        "PYTHONPATH=. python -m pytest tests/x.py -vv --tb=short --rootdir=. "
+        "PYTHONPATH=. python -m pytest tests/x.py -vv --tb=short -rs --rootdir=. "
         "--cov=. --cov-config=.tddagents/coverage/coveragerc --cov-report=term-missing "
         "--cov-report=json:.tddagents/coverage/report.json "
         "$([ -f pytest.ini ] || [ -f .pytest.ini ] || grep -qs '^\\[tool\\.pytest' pyproject.toml "

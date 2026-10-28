@@ -52,7 +52,6 @@ from app.session.driver import (
     drive_session,
     fresh_thread_id,
 )
-from app.session.export import export_run_workspace
 from app.tdd.plan import ItemStatus, TddPlan
 from app.types.permissions import PERMISSION_MODES
 
@@ -348,17 +347,57 @@ def write_subreq_results(artifacts_dir: str, plan: TddPlan | None, terminal: Ter
     _write_text(os.path.join(artifacts_dir, "subreq_results.txt"), "SUB-REQUIREMENT RESULTS", "\n".join(lines))
 
 
+def session_dir(workspace: Any, thread_id: str) -> str:
+    """
+    The session's directory, beside the project (Phase 13): `<workspaces root>/<thread>/`. The
+    reports live there, outside the project's git tree and never in TDDAgents' own folder.
+    """
+    from app.workspace.local import workspaces_root
+
+    run_dir = getattr(workspace, "run_dir", None)
+    return str(run_dir) if run_dir is not None else str(workspaces_root() / thread_id)
+
+
+def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
+    """
+    Run the project's whole suite once more, exactly as RunTests does, in the project's own venv
+    (Phase 13), and record it in `final_test_run.txt`. This is the result anyone re-running the
+    project gets. Returns the one-line summary printed in the report.
+    """
+    from app.tdd.run_tests_tool.run_tests_tool import (
+        RunTestsUnavailable,
+        run_suite,
+        skipped_count,
+    )
+
+    try:
+        result = run_suite(workspace, ".")
+    except RunTestsUnavailable as exc:
+        summary = f"could not run the tests: {exc}"
+        _write_text(os.path.join(artifacts_dir, "final_test_run.txt"), "FINAL TEST RUN", summary)
+        return summary
+    output = f"{result.stdout}\n{result.stderr}".strip()
+    skipped = skipped_count(output)
+    verdict = "passed" if result.exit_code == 0 and skipped == 0 else "NOT passing"
+    summary = f"{verdict} (exit {result.exit_code}, {skipped} skipped, {result.coverage.describe()})"
+    lines = [f"Project: {getattr(workspace, 'root', '?')}", f"Result: {summary}", "-" * 80, output]
+    _write_text(os.path.join(artifacts_dir, "final_test_run.txt"), "FINAL TEST RUN", "\n".join(lines))
+    return summary
+
+
 def report(
     run: SessionRun, thread_id: str, workspace: Any, plan: TddPlan | None = None, terminal: Terminal | None = None
 ) -> None:
-    """Export the workspace and the artifacts, then print the outcome."""
-    workspace_dir = os.path.abspath(f"workspace_output_{thread_id}")
-    os.makedirs(workspace_dir, exist_ok=True)
-    artifacts_dir = write_session_artifacts(workspace_dir, run.values)
+    """Write the reports beside the project, run its suite once more, then print the outcome."""
+    target = session_dir(workspace, thread_id)
+    os.makedirs(target, exist_ok=True)
+    artifacts_dir = write_session_artifacts(target, run.values)
     write_subreq_results(artifacts_dir, plan, terminal)
     _write_token_report(artifacts_dir)
-    exported = export_run_workspace(workspace.root, workspace_dir)
-    print(f"\n💾 {len(exported)} file(s) exported from {workspace.root} to {workspace_dir}/")
+    print(f"\n📁 Project: {getattr(workspace, 'root', '?')}")
+    print(f"📝 Reports: {artifacts_dir}/")
+    if run.planned:
+        print(f"🧪 Final test run: {write_final_test_run(artifacts_dir, workspace)}")
 
     if run.paused_at is not None:
         print("\n⏸️  Session paused at the analyst's question.")
@@ -398,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"❌ No session '{thread_id}' to continue, and no initial request to start one.", file=sys.stderr)
         return 1
 
-    log_dir = os.path.join(os.path.abspath(f"workspace_output_{thread_id}"), "metrics_and_logging")
+    log_dir = os.path.join(session_dir(workspace, thread_id), "metrics_and_logging")
     os.makedirs(log_dir, exist_ok=True)
     file_handler = logging.FileHandler(os.path.join(log_dir, "execution_logs.txt"), mode="a", encoding="utf-8")
     file_handler.setLevel(logging.INFO)

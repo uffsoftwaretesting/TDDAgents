@@ -218,8 +218,14 @@ def session_python() -> Any:
 
 @pytest.fixture
 def python_workspace(tmp_path: Path, session_python: Any) -> LocalWorkspace:
-    """A LocalWorkspace whose commands run with the session venv first on PATH."""
-    return LocalWorkspace(str(tmp_path / "workspace"), env=session_python.env())
+    """
+    A project as production makes one (Phase 13, `app/workspace/project.py`): a git working tree
+    with its ignore file and TDDAgents' seeded settings, whose commands run with the session venv
+    first on PATH. The venv itself is the shared test venv, not the project's own `.venv`.
+    """
+    from app.workspace.project import prepare_project
+
+    return LocalWorkspace(str(prepare_project(tmp_path / "workspace")), env=session_python.env())
 
 
 @pytest.fixture
