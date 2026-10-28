@@ -290,7 +290,7 @@ class E2BAdapter:
 
     def resolve(self, path: str) -> str:
         """Turns a workspace-relative path into an absolute sandbox path."""
-        relative = normalize_path(path)
+        relative = normalize_path(path, Config.SANDBOX_WORKSPACE_ROOT)
         if relative == ".":
             return Config.SANDBOX_WORKSPACE_ROOT
         return posixpath.join(Config.SANDBOX_WORKSPACE_ROOT, relative)

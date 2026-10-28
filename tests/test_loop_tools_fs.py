@@ -136,7 +136,7 @@ def test_path_kind(local_ws, tmp_path):
     assert path_kind(local_ws, "") == "dir"
     assert path_kind(local_ws, "d") == "dir"
     assert path_kind(local_ws, "d/f.txt") == "file"
-    assert path_kind(local_ws, "/d/f.txt") == "file"
+    assert path_kind(local_ws, f"{local_ws.root}/d/f.txt") == "file"
     assert path_kind(local_ws, "nope") is None
     ws = FakeWorkspace(files={"top.txt": "x"})
     assert path_kind(ws, "top.txt") == "file"
@@ -355,7 +355,7 @@ def test_ranged_read_records_full_content_with_range():
 def test_read_state_key_is_normalized_and_crlf_is_normalized():
     ws = FakeWorkspace(files={"d/f.txt": "a\r\nb"})
     ctx = ctx_for(ws)
-    assert read(ctx, "/d/./f.txt").content == "1\ta\n2\tb"
+    assert read(ctx, "./d/./f.txt").content == "1\ta\n2\tb"
     assert ctx.read_file_state["d/f.txt"].content == "a\nb"
 
 
@@ -737,10 +737,10 @@ def test_glob_path_scopes_search(local_ws, tmp_path):
     assert glob(local_ws, pattern="src/sub/*.py", path="src").content == "src/sub/b.py"
 
 
-def test_glob_absolute_pattern_is_rerooted_at_workspace(local_ws, tmp_path):
+def test_glob_absolute_pattern_names_its_base_directory(local_ws, tmp_path):
     make_tree(tmp_path, {"src/a.py": "", "lib/b.py": ""})
-    assert glob(local_ws, pattern="/src/*.py").content == "src/a.py"
-    assert glob(local_ws, pattern="/*.py").content == "src/a.py\nlib/b.py"
+    assert glob(local_ws, pattern=f"{local_ws.root}/src/*.py").content == "src/a.py"
+    assert glob(local_ws, pattern=f"{local_ws.root}/*.py").content == "src/a.py\nlib/b.py"
 
 
 def test_glob_validate_path(local_ws, tmp_path):
@@ -801,7 +801,7 @@ def test_glob_runs_upstream_argv(monkeypatch):
         return ["./b", "a"]
 
     monkeypatch.setattr(glob_tool, "rip_grep", fake_rip_grep)
-    res = glob(FakeWorkspace(), pattern="*.py", path="/src/")
+    res = glob(FakeWorkspace(), pattern="*.py", path="./src/")
     assert seen == {"args": ["--files", "--glob", "*.py", "--sort=modified", "--no-ignore", "--hidden"],
                     "target": "src"}
     assert res.content == "b\na"
@@ -1021,7 +1021,7 @@ def test_grep_ripgrep_failure_is_an_error(monkeypatch):
 def test_grep_target_is_normalized(monkeypatch):
     seen: dict[str, str] = {}
     monkeypatch.setattr(grep_tool, "rip_grep", lambda ws, a, t: seen.setdefault("t", t) and [])
-    grep(FakeWorkspace(), pattern="p", path="/src/")
+    grep(FakeWorkspace(), pattern="p", path="./src/")
     assert seen["t"] == "src"
 
 
@@ -1418,3 +1418,22 @@ def test_a_context_without_a_registry_reads_as_before():
     ws = FakeWorkspace()
     ws.write_file("src/a.py", "x\n")
     assert "x" in str(read(ctx_for(ws), "src/a.py").content)
+
+
+def test_an_absolute_path_in_the_project_is_the_real_file_through_the_pipeline(tmp_path):
+    """
+    The live bug (2026-10-28): a tester wrote `<project>/test_palindrome.py` by its absolute path,
+    the gate approved that file, and the workspace wrote `<project>/<project path>/test_palindrome.py`.
+    """
+    ws = LocalWorkspace(str(tmp_path / "project"))
+    perm = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS, should_avoid_permission_prompts=True)
+    ctx = tool_context_for(AppStateStore(), workspace=ws, permission_context=perm)
+    target = f"{ws.root}/test_x.py"
+    assert via_pipeline(build_write_file_tool, {"file_path": target, "content": "a = 1\n"}, ctx).status == "success"
+    assert (ws.root / "test_x.py").read_text() == "a = 1\n"
+    assert not (ws.root / str(ws.root).lstrip("/")).exists()
+    read_back = via_pipeline(build_read_file_tool, {"file_path": target}, ctx)
+    assert read_back.status == "success" and "a = 1" in read_back.content
+    edited = via_pipeline(build_edit_tool, {"file_path": target, "old_string": "a = 1", "new_string": "a = 2"}, ctx)
+    assert edited.status == "success"
+    assert (ws.root / "test_x.py").read_text() == "a = 2\n"

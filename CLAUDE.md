@@ -1272,6 +1272,28 @@ upstream's `-p` ending at the model's stop, which the TDD stop hook would otherw
 headless analyst's clarifying question still fails the session (user decision: TDDAgents is
 mostly interactive).
 
+### Absolute paths follow upstream (2026-10-28)
+
+The interactive live run found the workspace's Phase 1A path rule, "a leading `/` means from the
+workspace root", disagreeing with the permission gate. The tester wrote
+`<project>/test_palindrome.py` by its absolute path, as the env info invites. The gate
+(`expand_path`, upstream's `expandPath`) approved that real file, and the workspace wrote
+`<project>/<project path>/test_palindrome.py`. At the user's direction the path contract is now
+upstream's:
+
+- `normalize_path(path, root)` (`app/workspace/base.py`) reads an absolute path as a real one.
+  Inside `root` it is that file; outside it, or on a workspace with no host root, it raises
+  `WorkspacePathError` ("outside the project"), because the workspace is bounded.
+  `workspace_path(ws, path)` passes the workspace's own root.
+- `LocalWorkspace.resolve`, the E2B adapter (`Config.SANDBOX_WORKSPACE_ROOT`), and the file tools'
+  `readFileState` keys, `path_kind`, Glob and Grep all use it. An absolute Glob pattern names its
+  own base directory, as upstream's `extractGlobBaseDirectory` does.
+- A persisted tool result is keyed by its host path (`read_state_key`), since it lives outside the
+  workspace on purpose.
+
+*Limit, recorded:* `E2BWorkspace` exposes no host root, so the file tools refuse an absolute
+path there; its adapter maps the sandbox root itself.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

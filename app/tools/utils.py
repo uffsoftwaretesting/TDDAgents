@@ -62,7 +62,7 @@ from app.utils.file_state_cache import FileState
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 from app.utils.permissions.shell_rule_matching import match_wildcard_pattern
 from app.utils.tool_result_storage import TOOL_RESULTS_SUBDIR, config_home
-from app.workspace.base import WorkspaceNotFound, normalize_path
+from app.workspace.base import WorkspaceNotFound, workspace_path
 
 FILE_NOT_READ_ERROR = "File has not been read yet. Read it first before writing to it."
 FILE_MODIFIED_SINCE_READ_ERROR = (
@@ -108,11 +108,21 @@ def read_text(ws: Any, path: str) -> str | None:
     return content.replace("\r\n", "\n")
 
 
+def read_state_key(context: ToolContext, path: str) -> str:
+    """
+    The `readFileState` key of `path`: its workspace-relative form, or the host path itself for
+    a persisted tool result, which lives outside the workspace on purpose.
+    """
+    if is_persisted_result_path(path):
+        return str(Path(path).expanduser())
+    return workspace_path(context.workspace, path)
+
+
 def check_read_before_write(
     context: ToolContext, path: str, current: str, not_read_code: int, modified_code: int
 ) -> ValidationResult:
     """The `readFileState` precondition shared by `FileWriteTool` and `FileEditTool`."""
-    state = context.read_file_state.get(normalize_path(path))
+    state = context.read_file_state.get(read_state_key(context, path))
     if state is None or state.is_partial_view:
         return invalid(FILE_NOT_READ_ERROR, not_read_code)
     if state.content != current:
@@ -124,7 +134,7 @@ def is_stale(context: ToolContext, path: str, current: str | None) -> bool:
     """Call-time recheck: upstream re-validates between validation and the write."""
     if current is None:
         return False
-    state = context.read_file_state.get(normalize_path(path))
+    state = context.read_file_state.get(read_state_key(context, path))
     return state is None or state.content != current
 
 
@@ -135,18 +145,18 @@ def activate_conditional_skills(context: ToolContext, file_path: str) -> None:
     and the workspace is the run's working directory, so the path is matched as is.
     """
     registry = context.skill_registry
-    if registry is not None:
-        registry.activate_conditional_skills_for_paths([normalize_path(file_path)], "")
+    if registry is not None and not is_persisted_result_path(file_path):
+        registry.activate_conditional_skills_for_paths([workspace_path(context.workspace, file_path)], "")
 
 
 def record_write(context: ToolContext, path: str, content: str) -> None:
     """Edit/Write store `offset=undefined`, so the next edit needs no fresh Read."""
-    context.read_file_state[normalize_path(path)] = FileState(content=content)
+    context.read_file_state[read_state_key(context, path)] = FileState(content=content)
 
 
 def path_kind(ws: Any, path: str) -> str | None:
     """'dir', 'file', or None if absent — decided through the protocol alone."""
-    normalized = normalize_path(path or ".")
+    normalized = workspace_path(ws, path or ".")
     if normalized == ".":
         return "dir"
     if not ws.exists(normalized):

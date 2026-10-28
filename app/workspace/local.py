@@ -84,7 +84,7 @@ class LocalWorkspace:
         `normalize_path` already rejects `..` escapes; the containment check below is
         the second line of defense, catching an escape smuggled in through a symlink.
         """
-        relative = normalize_path(path)
+        relative = normalize_path(path, str(self._root))
         candidate = self._root if relative == "." else self._root / relative
 
         try:

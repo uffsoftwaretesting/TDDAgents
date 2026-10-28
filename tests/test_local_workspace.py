@@ -31,13 +31,11 @@ from app.workspace.local import LocalWorkspace
     "raw,expected",
     [
         ("src/main.py", "src/main.py"),
-        ("/src/main.py", "src/main.py"),          # leading slash is workspace-relative
         ("./src/main.py", "src/main.py"),
         ("src//main.py", "src/main.py"),
         ("src\\main.py", "src/main.py"),          # Windows separators normalize
         ("src/../src/main.py", "src/main.py"),    # interior .. that stays inside is fine
         (".", "."),
-        ("/", "."),
         ("  src/main.py  ", "src/main.py"),
     ],
 )
@@ -70,13 +68,58 @@ def test_local_workspace_rejects_escape(local_ws):
         local_ws.write_file("../escaped.py", "nope")
 
 
-def test_leading_slash_strip_does_not_eat_other_characters(tmp_path):
-    """
-    The strip is `lstrip("/")`, a character set. A path whose first character happens to
-    be one that a wider set would swallow must survive intact.
-    """
+def test_a_relative_path_keeps_its_first_character():
     assert normalize_path("Xsrc/main.py") == "Xsrc/main.py"
-    assert normalize_path("//src/main.py") == "src/main.py"
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("/proj/src/main.py", "src/main.py"),
+    ("/proj", "."),
+    ("/proj/", "."),
+    ("//proj//src/../src/main.py", "src/main.py"),
+    ("/proj/./a", "a"),
+])
+def test_an_absolute_path_inside_the_root_is_that_file(raw, expected):
+    """As upstream's `expandPath`: an absolute path is a real path (2026-10-28)."""
+    assert normalize_path(raw, "/proj") == expected
+    assert normalize_path(raw, "/proj/") == expected
+
+
+@pytest.mark.parametrize("raw", ["/src/main.py", "/projX/a.py", "/", "/proj/../etc/passwd"])
+def test_an_absolute_path_outside_the_root_is_refused(raw):
+    with pytest.raises(WorkspacePathError) as exc:
+        normalize_path(raw, "/proj")
+    assert str(exc.value) == f"Path '{raw}' is outside the project (/proj)."
+
+
+@pytest.mark.parametrize("root", [None, "relative/root"])
+def test_an_absolute_path_needs_a_host_root(root):
+    with pytest.raises(WorkspacePathError) as exc:
+        normalize_path("/a.py", root)
+    assert str(exc.value) == "Path '/a.py' is absolute, and this workspace has no host root."
+
+
+def test_a_relative_path_ignores_the_root():
+    assert normalize_path("src/main.py", "/proj") == "src/main.py"
+    assert normalize_path("C:\\x", "/proj") == "C:/x"
+
+
+def test_workspace_path_uses_the_workspaces_root(local_ws):
+    from app.workspace.base import workspace_path
+
+    assert workspace_path(local_ws, f"{local_ws.root}/a/b.py") == "a/b.py"
+    assert workspace_path(object(), "a/b.py") == "a/b.py"
+    with pytest.raises(WorkspacePathError):
+        workspace_path(object(), "/a/b.py")
+
+
+def test_the_local_workspace_writes_an_absolute_path_to_the_real_file(local_ws):
+    """The live bug: an absolute path inside the project was nested as project/<abs path>."""
+    local_ws.write_file(f"{local_ws.root}/tests/test_x.py", "x = 1\n")
+    assert (local_ws.root / "tests" / "test_x.py").read_text() == "x = 1\n"
+    assert not (local_ws.root / str(local_ws.root).lstrip("/")).exists()
+    with pytest.raises(WorkspacePathError, match="outside the project"):
+        local_ws.write_file("/tmp/elsewhere.py", "nope")
 
 
 # ── Root construction ────────────────────────────────────────────────────────

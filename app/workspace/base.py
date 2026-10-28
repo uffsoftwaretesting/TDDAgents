@@ -10,7 +10,11 @@ configuration value rather than a code path.
 Path semantics, identical on both sides:
     * paths are workspace-relative and use POSIX separators
     * "." denotes the workspace root
-    * leading "/" is tolerated and treated as workspace-relative, not host-absolute
+    * an absolute path is a real path, as upstream's `expandPath` reads it: one inside the
+      workspace root names that file, one outside it (or on a workspace with no host root)
+      raises WorkspacePathError, because the workspace is bounded. Until 2026-10-28 a
+      leading "/" meant "from the workspace root", which nested a model's correct absolute
+      path inside the project while the permission gate approved the real one.
     * escaping the root via ".." raises WorkspacePathError
     * text is UTF-8 everywhere
 """
@@ -116,9 +120,10 @@ class WorkspaceProviderError(WorkspaceError):
 # Path normalization — shared by every implementation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def normalize_path(path: str) -> str:
+def normalize_path(path: str, root: str | None = None) -> str:
     """
-    Normalizes a caller-supplied path to the canonical workspace-relative form.
+    Normalizes a caller-supplied path to the canonical workspace-relative form. `root` is
+    the workspace's absolute root, which an absolute `path` must lie under.
 
     This is the single place the path contract is enforced, so E2BWorkspace and
     LocalWorkspace cannot drift apart on it.
@@ -127,7 +132,8 @@ def normalize_path(path: str) -> str:
         A POSIX-separated relative path, or "." for the workspace root.
 
     Raises:
-        WorkspacePathError: The path is empty or escapes the workspace root.
+        WorkspacePathError: The path is empty, escapes the workspace root, or is absolute
+            and not under `root`.
     """
     if path is None:
         raise WorkspacePathError("Path must not be None.")
@@ -136,10 +142,17 @@ def normalize_path(path: str) -> str:
     if not candidate:
         raise WorkspacePathError("Path must not be empty.")
 
-    # A leading "/" is read as "from the workspace root", never as a host-absolute path.
-    candidate = candidate.lstrip("/")
-    if not candidate:
-        return "."
+    if candidate.startswith("/"):
+        absolute = posixpath.normpath("/" + candidate.lstrip("/"))
+        given = str(root).replace("\\", "/") if root is not None else ""
+        if not given.startswith("/"):
+            raise WorkspacePathError(f"Path '{path}' is absolute, and this workspace has no host root.")
+        base = posixpath.normpath("/" + given.lstrip("/"))
+        if absolute == base:
+            return "."
+        if not absolute.startswith(base.rstrip("/") + "/"):
+            raise WorkspacePathError(f"Path '{path}' is outside the project ({base}).")
+        candidate = absolute[len(base.rstrip("/")) + 1:]
 
     normalized = posixpath.normpath(candidate)
 
@@ -151,6 +164,12 @@ def normalize_path(path: str) -> str:
         )
 
     return normalized
+
+
+def workspace_path(ws: object, path: str) -> str:
+    """`normalize_path` against `ws`'s own root (its `root` attribute, if it has one)."""
+    root = getattr(ws, "root", None)
+    return normalize_path(path, None if root is None else str(root))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -70,7 +70,12 @@ def test_normalize_path_traversal_attempts_raise_workspace_path_error() -> None:
     for p in malicious_paths:
         with pytest.raises(WorkspacePathError) as exc_info:
             normalize_path(p)
-        assert "escapes the workspace root" in str(exc_info.value) or "must not be empty" in str(exc_info.value)
+        assert ("escapes the workspace root" in str(exc_info.value) or "must not be empty" in str(exc_info.value)
+                or "no host root" in str(exc_info.value))
+        # With a root, an absolute escape is outside the project.
+        if p.startswith("/"):
+            with pytest.raises(WorkspacePathError, match="outside the project"):
+                normalize_path(p, "/proj")
 
 
 def test_normalize_path_empty_or_none_raises_workspace_path_error() -> None:

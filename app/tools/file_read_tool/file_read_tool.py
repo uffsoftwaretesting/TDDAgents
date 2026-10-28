@@ -20,6 +20,8 @@ from app.tools.utils import (
     get_prompt,
     invalid,
     is_non_negative_int,
+    is_persisted_result_path,
+    read_state_key,
     read_text,
 )
 from app.utils.file import FILE_NOT_FOUND_CWD_NOTE, add_line_numbers
@@ -31,7 +33,7 @@ from app.utils.permissions.filesystem import (
     workspace_absolute_path,
 )
 from app.utils.permissions.permissions import extract_permission_context
-from app.workspace.base import normalize_path
+from app.workspace.base import workspace_path
 
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
@@ -75,13 +77,14 @@ def build_read_file_tool() -> BuiltTool:
         line_offset = 0 if offset == 0 else offset - 1
         window = all_lines[line_offset:line_offset + (limit if limit is not None else MAX_LINES_TO_READ)]
         partial = "offset" in input_args or "limit" in input_args
-        context.read_file_state[normalize_path(file_path)] = FileState(
+        context.read_file_state[read_state_key(context, file_path)] = FileState(
             content=content,
             offset=offset if partial else None,
             limit=limit if partial else None,
         )
         # `FileReadTool`: the file's directories may hold nested memory to attach next turn.
-        context.nested_memory_attachment_triggers.add(normalize_path(file_path))
+        if not is_persisted_result_path(file_path):
+            context.nested_memory_attachment_triggers.add(workspace_path(context.workspace, file_path))
         activate_conditional_skills(context, file_path)
 
         if window:

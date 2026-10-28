@@ -82,14 +82,11 @@ def test_normalize_path_empty_raises_workspace_path_error(empty_val: str) -> Non
     [
         (".", "."),
         ("./", "."),
-        ("/", "."),
-        ("///", "."),
         ("a", "a"),
         ("a/b/c", "a/b/c"),
-        ("/a/b/c", "a/b/c"),
         ("a/b/c/", "a/b/c"),
         ("a\\b\\c", "a/b/c"),
-        ("/a\\b/c\\d", "a/b/c/d"),
+        ("a\\b/c\\d", "a/b/c/d"),
         ("a/./b/../c", "a/c"),
         ("a//b///c", "a/b/c"),
     ],
@@ -98,13 +95,18 @@ def test_normalize_path_valid_cases(raw: str, expected: str) -> None:
     assert normalize_path(raw) == expected
 
 
+@pytest.mark.parametrize("raw, expected", [("/", "."), ("///", "."), ("/a/b/c", "a/b/c"), ("/a\\b/c\\d", "a/b/c/d")])
+def test_normalize_path_absolute_cases_under_the_root_dir(raw: str, expected: str) -> None:
+    """An absolute path is a real path (2026-10-28): under a root of "/", it is the root's file."""
+    assert normalize_path(raw, "/") == expected
+
+
 @pytest.mark.parametrize(
     "escaping_path",
     [
         "..",
         "../",
         "../../etc/passwd",
-        "/../escaped",
         "a/b/../../../c",
     ],
 )
