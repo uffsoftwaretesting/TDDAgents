@@ -59,9 +59,10 @@ class AppState:
     #: `/pause` (Phase 11): the stop hook lets a turn end without finishing the plan, and the
     #: run terminates `stop_hook_prevented`, never `completed`.
     tdd_paused: bool = False
-    #: The sub-requirement the TDD stop hook last blocked for (`None` without a plan). Its latch
-    #: is per item: after the plan advances, the next item may be blocked once more.
-    tdd_blocked_item: str | None = None
+    #: Where the TDD stop hook last blocked: the sub-requirement (`None` without a plan) and its
+    #: phase. Its latch is per item and phase (Phase 12, user decision): after the plan advances,
+    #: or the item's phase moves, the hook may block once more.
+    tdd_blocked_at: tuple[str | None, str] | None = None
     #: The fingerprint of the workspace's test files when the current sub-requirement started
     #: (Phase 12, `app/tdd/suite_fingerprint.py`): RunTests ends RED only once they changed.
     #: `None` when it could not be taken.

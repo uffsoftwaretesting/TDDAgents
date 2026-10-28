@@ -1115,6 +1115,13 @@ mandatory and coverage-checked. The three barriers stay; the rules they enforce 
   - The threshold reaches prompts as `{{COVERAGE_THRESHOLD}}` (`TDD_PROMPT_VARS`), so the
     figure is written in one place.
   - `tests/test_tdd_phase12_prompts.py` scans every prompt for the old fail-first rule.
+- **The stop hook's latch is per item and phase** (`AppState.tdd_blocked_at`, user decision).
+  - It re-arms when the phase moved since its last block, so an item gets at most three
+    nudges, and a stop with no progress still ends the turn.
+  - Found by the first live run (palindrome, gpt-5-mini), which completed 6 of 13 items with
+    full cycles at 100% coverage. On item 7 the model *said* it had run REFACTOR's tests
+    without running them. The ledger refused, but the old one-nudge-per-item latch had
+    already been spent at GREEN, so the session ended.
 - **The gate** counts timeouts: each is re-run alone, and one that still hangs counts as
   detected (`scripts/mutmut_score.py --timeouts-reverified`). The integration tests' venv is
   built once (`tests/conftest.py::shared_test_venv`).

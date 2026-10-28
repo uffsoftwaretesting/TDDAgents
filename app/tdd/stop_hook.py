@@ -51,11 +51,13 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
     """
     Stop hook that blocks turn completion if the TDD cycle is incomplete (Part D5).
 
-    The stop_hook_active contract, per sub-requirement (Phase 11):
-    - If the hook already blocked for the current item (`state.stop_hook_active` and
-      `AppState.tdd_blocked_item` is that item), it declines to block again and sets
-      prevent_continuation=True, terminating with STOP_HOOK_PREVENTED rather than COMPLETED.
-      Without a plan the item is `None`, which is the one-block latch of Part D5.
+    The stop_hook_active contract, per sub-requirement (Phase 11) and phase (Phase 12):
+    - If the hook already blocked for the current item in its current phase
+      (`state.stop_hook_active` and `AppState.tdd_blocked_at` is that item and phase), it
+      declines to block again and sets prevent_continuation=True, terminating with
+      STOP_HOOK_PREVENTED rather than COMPLETED. The cycle has three phases, so each item gets
+      at most three nudges; a stop without progress since the last one ends the turn. Without a
+      plan the item is `None`, which is the one-block-per-phase latch of Part D5.
     - Otherwise:
       - If ledger.is_cycle_complete: cycle complete, allows termination (COMPLETED).
       - If cycle incomplete: returns blocking_errors explaining why the model cannot stop,
@@ -69,10 +71,11 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
 
     current = app_state.tdd_plan.current
     item_id = current.id if current is not None else None
-    if state.stop_hook_active and app_state.tdd_blocked_item == item_id:
+    blocked_at = (item_id, ledger.phase)
+    if state.stop_hook_active and app_state.tdd_blocked_at == blocked_at:
         # Honour stop_hook_active: prevent continuation to stop the turn without retrying forever
         return StopHookResult(prevent_continuation=True)
-    state.tool_context.set_app_state(lambda s: replace(s, tdd_blocked_item=item_id))
+    state.tool_context.set_app_state(lambda s: replace(s, tdd_blocked_at=blocked_at))
 
     # First block: build explanation of why turn cannot exit
     msg = incomplete_cycle_message(ledger)

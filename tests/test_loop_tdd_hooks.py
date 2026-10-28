@@ -82,8 +82,10 @@ def test_the_hook_names_what_the_cycle_still_needs(ledger, message):
 def test_hook_honours_stop_hook_active_contract():
 
     async def go():
+        # The hook already blocked here (no plan, RED); `stop_hook_active` says so.
         store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False))
+            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False),
+                     tdd_blocked_at=(None, TddPhase.RED))
         )
         ctx = tool_context_for(store)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)

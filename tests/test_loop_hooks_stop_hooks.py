@@ -54,7 +54,9 @@ TDD_RED_MESSAGE = (
 
 def make_state(dispatcher: Any = None, ledger: PhaseLedger = RED, *, stop_hook_active: bool | None = None,
                agent_id: str | None = None, agent_type: str | None = None, messages: tuple[Any, ...] = ()) -> Any:
-    store = AppStateStore(AppState(phase_ledger=ledger,
+    # A live `stop_hook_active` follows a block, which recorded where it blocked.
+    blocked_at = (None, ledger.phase) if stop_hook_active else None
+    store = AppStateStore(AppState(phase_ledger=ledger, tdd_blocked_at=blocked_at,
                                    tool_permission_context=ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)))
     ctx = tool_context_for(store, hook_dispatcher=dispatcher, agent_id=agent_id, agent_type=agent_type)
     state = initial_loop_state(messages or (HumanMessage(content="task"),), ctx)

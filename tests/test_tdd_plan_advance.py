@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.query.config import build_run_config
@@ -132,7 +133,7 @@ def hook(store: AppStateStore, active: bool | None) -> StopHookResult:
 def test_without_a_plan_the_latch_is_part_d5s_one_block():
     store = AppStateStore()
     first = hook(store, None)
-    assert first.blocking_errors and store.get().tdd_blocked_item is None
+    assert first.blocking_errors and store.get().tdd_blocked_at == (None, TddPhase.RED)
     assert hook(store, True) == StopHookResult(prevent_continuation=True)
 
 
@@ -141,17 +142,31 @@ def test_the_block_names_the_current_sub_requirement():
     result = hook(store, None)
     content = str(result.blocking_errors[0].content)
     assert content.startswith("Current sub-requirement 1: Add numbers\n\nTDD cycle incomplete:")
-    assert store.get().tdd_blocked_item == "1"
+    assert store.get().tdd_blocked_at == ("1", TddPhase.RED)
 
 
 def test_the_latch_is_per_item():
     plan = TddPlan.from_texts(["A", "B"])
-    store = store_with(plan, tdd_blocked_item="1")
+    store = store_with(plan, tdd_blocked_at=("1", TddPhase.RED))
     assert hook(store, True) == StopHookResult(prevent_continuation=True)
-    store = store_with(plan.complete_current(CYCLE), tdd_blocked_item="1")
+    store = store_with(plan.complete_current(CYCLE), tdd_blocked_at=("1", TddPhase.RED))
     blocked = hook(store, True)
     assert blocked.blocking_errors and not blocked.prevent_continuation
-    assert store.get().tdd_blocked_item == "2"
+    assert store.get().tdd_blocked_at == ("2", TddPhase.RED)
+
+
+@pytest.mark.parametrize("phase, ledger", [
+    (TddPhase.GREEN, PhaseLedger(phase=TddPhase.GREEN, tests_written=True)),
+    (TddPhase.REFACTOR, PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)),
+])
+def test_the_latch_re_arms_when_the_phase_moved_since_the_last_block(phase, ledger):
+    """One nudge per item and phase (user decision, 2026-10-28): progress earns another."""
+    store = store_with(TddPlan.from_texts(["A"]), ledger, tdd_blocked_at=("1", TddPhase.RED))
+    blocked = hook(store, True)
+    assert blocked.blocking_errors and not blocked.prevent_continuation
+    assert store.get().tdd_blocked_at == ("1", phase)
+    # A second stop with no progress in that phase ends the turn.
+    assert hook(store, True) == StopHookResult(prevent_continuation=True)
 
 
 def test_a_complete_cycle_never_blocks():
