@@ -9,7 +9,7 @@ The loop enforces a structural Red->Green->Refactor cycle. This ordering is math
 
 2. **GREEN Phase (Make It Pass)**:
    - Once RED is confirmed by the test runner, transition to GREEN.
-   - Implement the minimal code necessary to make the failing tests pass.
+   - Implement the minimal code necessary to make the failing tests pass, and nothing beyond them: behaviour written ahead of its own tests leaves those tests nothing to fail on.
    - Re-run `RunTests` and confirm that all tests pass cleanly.
 
 3. **REFACTOR Phase (Clean Structure)**:

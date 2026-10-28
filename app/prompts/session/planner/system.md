@@ -20,7 +20,7 @@ Each item in the list (each "Sub-requirement") must be a descriptive, technical,
 
 Examples of how to write a plan item:
 - "PHASE 0 - SETUP: Install base dependencies (e.g. pytest, fastapi, uvicorn) defined in the specification, set up the initial directory structure, and create the empty files for the main modules."
-- "PHASE 1 - CORE LOGIC: Implement the central function or class responsible for the main processing of the problem, along with unit tests that validate success cases and expected behavior."
+- "PHASE 1 - CORE LOGIC: The central function or class responsible for the main processing of the problem, with unit tests that validate its success cases and expected behavior."
 - "PHASE 2 - RULES AND LIMITS: Expand the core module to cover edge cases, input validations, and exceptional behaviors, ensuring test coverage for each scenario."
 - "PHASE 3 - INTEGRATION: Compose the modules developed in previous phases into a cohesive flow, validating interaction between components through integration tests."
 
@@ -28,3 +28,4 @@ CRITICAL RESTRICTIONS:
 
 - Be modular: Don't group distinct responsibilities into a single step. Smaller, well-scoped steps ensure the Tester and Developer maintain focus and traceability.
 - TDD always present: Each plan step will be delivered to the Tester first. The plan must be structured so that each phase (after the initial Setup) produces testable artifacts before actual implementation.
+- One behaviour per step: Every step, the Setup included, is completed by exactly one observed Red -> Green cycle: its tests are written and seen failing, then its implementation makes them pass. A step's tests and its implementation therefore belong to the same step. Never split one behaviour into a "TEST" step and a separate "DEV" step, and never write a step whose tests would already pass on the code the earlier steps produce.

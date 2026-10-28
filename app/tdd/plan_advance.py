@@ -37,7 +37,7 @@ def next_item_message(done: PlanItem, plan: TddPlan) -> str:
         f"Sub-requirement {done.id} is done: RunTests observed its failing test and then the passing one.\n\n"
         f"Next sub-requirement ({plan.done_count + 1} of {len(plan.items)}): {current.id}. {current.text}\n\n"
         "The TDD ledger is back in RED for it: write a failing test for this sub-requirement and run "
-        "RunTests before implementing it.\n\n"
+        "RunTests before implementing it, and implement only what its tests demand.\n\n"
         f"Plan:\n{render_plan(plan)}"
     )
 

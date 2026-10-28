@@ -87,7 +87,7 @@ def test_the_next_item_message_names_it_and_its_position():
         "Sub-requirement 1 is done: RunTests observed its failing test and then the passing one.\n\n"
         "Next sub-requirement (2 of 3): 2. B\n\n"
         "The TDD ledger is back in RED for it: write a failing test for this sub-requirement and run "
-        "RunTests before implementing it.\n\n"
+        "RunTests before implementing it, and implement only what its tests demand.\n\n"
         "Plan:\n✔ 1. A\n▶ 2. B\n· 3. C"
     )
 
