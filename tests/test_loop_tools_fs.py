@@ -294,7 +294,7 @@ def test_schemas_follow_sdk_tools_contract():
         return set(builder().input_schema["properties"])
 
     assert build_read_file_tool().input_schema["required"] == ["file_path"]
-    assert props(build_read_file_tool) == {"file_path", "offset", "limit"}
+    assert props(build_read_file_tool) == {"file_path", "offset", "limit", "pages"}
     assert build_write_file_tool().input_schema["required"] == ["file_path", "content"]
     assert build_edit_tool().input_schema["required"] == ["file_path", "old_string", "new_string"]
     assert props(build_edit_tool) == {"file_path", "old_string", "new_string", "replace_all"}
@@ -1083,6 +1083,11 @@ EXPECTED_SCHEMAS = {
                 "type": "integer",
                 "description": "The number of lines to read. Only provide if the file is too large to read at once.",
             },
+            "pages": {
+                "type": "string",
+                "description": 'Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. '
+                "Maximum 20 pages per request.",
+            },
         },
         "required": ["file_path"],
     },
@@ -1299,7 +1304,8 @@ def test_grep_count_pagination_reports_offset(monkeypatch):
 ])
 def test_tool_prompt_is_its_markdown_body(builder, module):
     body = get_prompt(module.PROMPT_PATH, "")
-    assert body and builder().prompt == body
+    # ReadFile's body names its line limit as a placeholder (`renderPromptTemplate`).
+    assert body and builder().prompt == body.replace("{{MAX_LINES_TO_READ}}", "2000")
 
 
 # ── Read(...) rules: checkReadPermissionForTool and the ripgrep exclude globs ──

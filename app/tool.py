@@ -71,7 +71,7 @@ def default_map_result(result: ToolResult, tool_use_id: str) -> ToolMessage:
         additional_kwargs["exit_code"] = result.exit_code
 
     return ToolMessage(
-        content=result.content,
+        content=list(result.content_blocks) if result.content_blocks else result.content,
         tool_call_id=tool_use_id,
         status=status,
         additional_kwargs=additional_kwargs,
@@ -359,6 +359,10 @@ class ToolResult:
     #: result (the Skill tool's skill body). Emitted after PostToolUse's attachments and before
     #: a preventing hook's `hook_stopped_continuation` (`toolExecution.ts`).
     new_messages: tuple[Any, ...] = ()
+    #: The result's content as blocks (LangChain standard `text` / `image` blocks), where
+    #: upstream's `mapToolResultToToolResultBlockParam` returns a block list (ReadFile's images
+    #: and notebooks). `content` stays the text form hooks and governance read.
+    content_blocks: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

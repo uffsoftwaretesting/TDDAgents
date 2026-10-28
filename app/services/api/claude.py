@@ -78,6 +78,7 @@ from app.utils.chat_model_factory import get_chat_model
 from app.utils.messages import (
     Message,
     merge_split_assistant_messages,
+    move_tool_result_media_to_user,
     reorder_attachments_for_api,
 )
 from app.utils.model.model import provider_for_model
@@ -178,8 +179,11 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
     # The provider follows the model: a worker resolved to a Claude alias reaches Anthropic
     # even when the run's configured provider is OpenAI (`utils/model/model.py`).
     provider = provider_for_model(context.model, default=Config.CHAT_MODEL)
+    request = build_request_messages(state, config)
+    if provider != "anthropic":
+        request = move_tool_result_media_to_user(request)
     messages_to_send, cache_kwargs = prepare_cached_request(
-        build_request_messages(state, config),
+        request,
         provider=provider,
         system_texts=request_system_texts(state, config),
     )

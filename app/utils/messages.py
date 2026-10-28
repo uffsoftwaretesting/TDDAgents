@@ -263,6 +263,41 @@ def merge_split_assistant_messages(messages: Sequence[Message]) -> list[Message]
     return out
 
 
+#: What a tool result whose images moved says in their place (`move_tool_result_media_to_user`).
+TOOL_RESULT_MEDIA_MOVED = "[The image from this tool result follows in the next user message.]"
+
+
+def _is_media_block(block: Any) -> bool:
+    return isinstance(block, dict) and block.get("type") in ("image", "image_url")
+
+
+def move_tool_result_media_to_user(messages: Sequence[Message]) -> list[Message]:
+    """
+    For a provider whose tool messages cannot carry images (OpenAI): each tool result's image
+    blocks move into one meta user message after that batch of results, and the result keeps
+    its text, or a note saying where the image went. Anthropic accepts images in a tool result
+    (upstream's `FileReadTool.mapToolResultToToolResultBlockParam`), so its requests are
+    untouched. The stored history is untouched either way.
+    """
+    out: list[Message] = []
+    pending: list[Any] = []
+    for message in messages:
+        if isinstance(message, ToolMessage) and isinstance(message.content, list) and any(
+                _is_media_block(b) for b in message.content):
+            media = [b for b in message.content if _is_media_block(b)]
+            text = [b for b in message.content if not _is_media_block(b)]
+            pending.extend(media)
+            out.append(message.model_copy(update={"content": text or TOOL_RESULT_MEDIA_MOVED}))
+            continue
+        if pending and not isinstance(message, ToolMessage):
+            out.append(HumanMessage(content=pending, additional_kwargs={"is_meta": True}))
+            pending = []
+        out.append(message)
+    if pending:
+        out.append(HumanMessage(content=pending, additional_kwargs={"is_meta": True}))
+    return out
+
+
 def reorder_attachments_for_api(messages: Sequence[Message]) -> list[Message]:
     """
     `reorderAttachmentsForAPI`, for this message format: attachments emitted between the

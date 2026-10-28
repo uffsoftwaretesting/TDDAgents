@@ -42,6 +42,9 @@ def estimate_block_tokens(block: Any) -> int:
         block_type = block.get("type")
         if block_type == "text":
             return estimate_string_tokens(block.get("text", ""))
+        if block_type in _MEDIA_TYPES:
+            # A media block is a fixed estimate, never its base64 length.
+            return MEDIA_BLOCK_TOKENS
         if block_type == "thinking":
             return estimate_string_tokens(block.get("thinking", ""))
         if block_type == "tool_use":
@@ -182,7 +185,7 @@ MEDIA_BLOCK_TOKENS = 2000
 
 _ONE_M_SUFFIX = re.compile(r"\[1m\]", re.IGNORECASE)
 _LEADING_INT = re.compile(r"^\s*([+-]?\d+)")
-_MEDIA_TYPES = frozenset({"image", "image_url", "document"})
+_MEDIA_TYPES = frozenset({"image", "image_url", "document", "file"})
 
 
 def _js_round(value: float) -> int:

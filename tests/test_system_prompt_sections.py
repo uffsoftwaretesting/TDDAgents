@@ -225,3 +225,25 @@ def test_the_read_only_agents_are_upstreams(name: str, source: str, function: st
     agent = _agent(name)
     assert agent.prompt == _agent_template(text, function)  # type: ignore[attr-defined]
     assert "Claude" not in agent.prompt  # type: ignore[attr-defined]
+
+
+@needs_reference
+def test_read_is_upstreams_default_template():
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
+
+    source = (TOOLS / "FileReadTool" / "prompt.ts").read_text()
+    body = _template(_function(source, "renderPromptTemplate"))
+    pdf_line = re.search(r"\? '\\n([^']*)'", body)
+    assert pdf_line is not None
+    body = re.sub(r"\$\{\s*isPDFSupported\(\)[^}]*\}", "\n" + pdf_line.group(1), body, flags=re.DOTALL)
+
+    def constant(name: str) -> str:
+        found = re.search(rf"export const {name} =\s*\n?\s*(['\"])((?:(?!\1)[^\\]|\\.)*)\1", source)
+        assert found is not None
+        return found.group(2)
+
+    body = (body.replace("${MAX_LINES_TO_READ}", "2000").replace("${maxSizeInstruction}", "")
+            .replace("${offsetInstruction}", constant("OFFSET_INSTRUCTION_DEFAULT"))
+            .replace("${lineFormat}", constant("LINE_FORMAT_INSTRUCTION")).replace("${BASH_TOOL_NAME}", "Bash")
+            .replace("Claude Code", "TDDAgents"))
+    assert build_read_file_tool().prompt == body
