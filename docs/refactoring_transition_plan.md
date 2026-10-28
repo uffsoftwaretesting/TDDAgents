@@ -498,6 +498,24 @@ sub-requirement has been observed Red → Green.
   upstream). A turn ends early only on pause, abort, a configured `continue: false` or an
   error.
 
+### Phase 13 — Each project in its own folder, venv and git tree
+
+*Phase 13 outcome (2026-10-28), per the interview:*
+- **Location:** each session's project is `~/.tddagents/workspaces/<thread>/project`
+  (`TDDAGENTS_WORKSPACES_DIR` overrides), outside TDDAgents' folder.
+- **Project setup:** the project is a git working tree (TDDAgents `git init`s it and never
+  commits; the model gets upstream's never-commit-unless-asked rule). It has its own
+  `.venv`, and settings seeded from TDDAgents' shipped defaults.
+- **Lookups:** settings, skills, agents, MCP and hooks are read from the project.
+- **What the model is told:** its project, git repository and venv. A new system section
+  says to install dependencies there and record them in requirements files.
+- **Skips:** a run with skipped tests does not pass GREEN or REFACTOR.
+- **Final run:** the session ends with the project's suite run once more in its own venv
+  (`final_test_run.txt`).
+- **Reports:** they go beside the project; the `workspace_output_<thread>` copy is gone.
+- **The cycle:** unchanged. GREEN keeps failing runs, and goes back to RED only for a wrong
+  test.
+
 ---
 
 ## 3. Verification

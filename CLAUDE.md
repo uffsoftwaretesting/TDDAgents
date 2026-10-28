@@ -65,7 +65,7 @@ TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
 | `utils/` (rest) | `utils/*.ts` | `messages.py`, `message_queue_manager.py`, `claudemd.py` (memory files), `session_storage.py` + `session_storage_portable.py` + `conversation_recovery.py` (transcripts, resume), `session_start.py`, `tokens.py`, `tool_result_storage.py`, `tool_errors.py`, `ripgrep.py`, `file.py`, `glob.py`, `file_state_cache.py`, `abort_controller.py`, `argument_substitution.py`, `frontmatter_parser.py`, `mcp_validation.py`, `shell_command.py`, `bash/commands.py`, `shell/read_only_command_validation.py`, `model/model.py` (model aliases) |
 | **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`); `plan.py` (`TddPlan`, the `tdd-plan.json` sidecar, `update_tdd_plan`), `plan_advance.py` (the ledger-driven advance), `tdd_plan_tool/` (`UpdatePlan`); `coverage_gate.py` (REFACTOR's coverage threshold and reading), `suite_fingerprint.py` (RED's evidence: the test files' fingerprint and the item baseline) |
 | `session/` | — (TDDAgents) | The LangGraph session shell: `analyst ⇄ analyst_review → engineer → planner` (ends `PLANNED`), checkpointing, resume, `rescope`; `driver.py` hands over to `develop_interactive` / `develop_headless`; `session/agents/` are its LLM seams |
-| `workspace/`, `sandbox/` | — (TDDAgents) | The `Workspace` protocol, `LocalWorkspace` (+ the per-session venv), `E2BWorkspace` over the E2B adapter |
+| `workspace/`, `sandbox/` | — (TDDAgents) | The `Workspace` protocol, `LocalWorkspace` (`workspaces_root()`, `for_run` → `<root>/<thread>/project`), `project.py` (`prepare_project`: git init, ignore file, seeded settings), `pyenv.py` (the project's `.venv`), `E2BWorkspace` over the E2B adapter |
 | `prompts/` | `constants/prompts.ts`, bundled agents and skills | System sections, the TDD agents (`AGENT.md` + `references/`), bundled skills, compact / permission / session prompts, specs. Tool prompts live beside their tools |
 
 Three things about the loop are load-bearing and easy to undo by accident:
@@ -1146,6 +1146,58 @@ mandatory and coverage-checked. The three barriers stay; the rules they enforce 
   workspace root is not counted;
 - the TodoWrite example "Write the failing test" is kept as a sample task name.
 
+### What Phase 13 changed (2026-10-28)
+
+Each project gets its own folder, venv and git tree, and the agents' own test run is final.
+The user's direction: follow claude-code's style (a project folder is the working directory,
+told to the model with its git context) and keep the Phase 12 cycle. Decisions are recorded
+in the plan's Phase 13 outcome.
+
+- **Layout** (`app/workspace/`):
+  - `workspaces_root()` is `$TDDAGENTS_WORKSPACES_DIR` or `<config home>/workspaces`.
+  - `LocalWorkspace.for_run(thread)` is `<root>/<thread>/project`, and `run_dir` is the
+    thread dir.
+  - `session_workspace` → `prepare_project` (`git init` once, a `.gitignore`, and
+    `.tddagents/settings.json` seeded from `SHIPPED_SETTINGS` only if absent) →
+    `ensure_session_python(project)`, which builds `project/.venv` with pip.
+  - `Config.LOCAL_WORKSPACE_ROOT` is gone.
+- **The project is the root of every lookup** (`project_root_of`, upstream's
+  `getOriginalCwd()`): settings, skills, agents, MCP (`.mcp.json`) and hooks are read from the
+  workspace root, never from `Path.cwd()`. Only a workspace with no root falls back to the cwd.
+  A project with no settings therefore runs in `default` mode (`tests/conftest.py::python_workspace`
+  prepares one).
+- **The venv wins on `PATH`.** `LocalWorkspace.execute` re-prepends `$VIRTUAL_ENV/bin` after
+  `bash -l`'s profile runs, because `~/.profile`'s `~/.local/bin` used to come first.
+  `LocalWorkspace.virtual_env` exposes it.
+- **What the model is told:**
+  - the environment section adds `Python virtual environment: … (active for Bash and RunTests)`;
+  - `Is a git repository: true`, with `gitStatus`;
+  - the new static section `environment.md` (install every dependency into the venv, record it
+    in `requirements.txt` / `requirements-dev.txt`, never let a test skip, and upstream's
+    "NEVER commit … unless the user explicitly asks");
+  - one line in the start prompt.
+
+  TDDAgents itself never commits.
+- **A skipped test is not a pass.** `pytest_command` adds `-rs`, and `skipped_count` reads the
+  summary line. In GREEN and REFACTOR an exit-0 run with skips is observed as failing, and the
+  header names why. RED is unchanged.
+- **The final run is the project's own suite.** `run_suite` (RunTests' own runner) runs once
+  more at the end, in the project's venv, into `metrics_and_logging/final_test_run.txt`. A
+  skip reads "NOT passing". This answers the live run that "passed" while a flake8 test
+  silently skipped and failed elsewhere.
+- **No export.** `app/session/export.py` and `workspace_output_<thread>/` are deleted; the
+  reports go to `<thread>/metrics_and_logging/`.
+- **Workarounds:**
+  - the write carve-out is now `(".tddagents", "workspaces")`;
+  - `GIT_CEILING_DIRECTORIES` (at the thread dir) and RunTests' `-c /dev/null` probe stay,
+    since a home `pyproject.toml` or repo could still be above the project.
+- The fingerprint, the coverage omit and the ignore file leave out `.venv`.
+
+*Divergences, recorded:*
+- the venv line and `environment.md` are TDDAgents additions (upstream has no venv guidance);
+- `git init` is TDDAgents' (upstream is opened in an existing repository);
+- sessions created before Phase 13 under `.tddagents/runs/` are not migrated.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
@@ -1525,7 +1577,7 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
 
 ## What this is
 
-TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green–Refactor phases of TDD (since Phase 12: robust tests, then code, then a mandatory coverage-checked refactor). Agent-generated code is written and executed in a **local per-session workspace** (`.tddagents/runs/<thread_id>/workspace`) with its own Python virtualenv (`.tddagents/runs/<thread_id>/venv`, pytest pinned), not inside TDDAgents' environment. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL (`POSTGRES_URL`), with an in-memory fallback.
+TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green–Refactor phases of TDD (since Phase 12: robust tests, then code, then a mandatory coverage-checked refactor). Agent-generated code is written and executed in a **per-session project folder outside TDDAgents' own** (since Phase 13: `~/.tddagents/workspaces/<thread_id>/project`, `TDDAGENTS_WORKSPACES_DIR` overrides), a git working tree with its own Python virtualenv (`project/.venv`; pip, pytest and pytest-cov pinned), never inside TDDAgents' environment. The session's reports go beside it, in `<thread_id>/metrics_and_logging/`. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL (`POSTGRES_URL`), with an in-memory fallback.
 
 It is **claude-code's loop with a LangGraph session shell around it**: each plan item is one loop run, and LangGraph only checkpoints the session, asks the user (`interrupt()`) and iterates the plan. See [The architecture](#the-architecture--claude-codes-loop-laid-out-like-its-source).
 
