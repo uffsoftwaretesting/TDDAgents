@@ -1050,6 +1050,15 @@ the open choices decided by interview (recorded in the plan's Phase 11 outcome).
   - every item adds behaviour its tests can fail on (no TEST/DEV split, no
     verification-only hardening items);
   - the model implements only what the current item's tests demand.
+- **Live runs (2026-10-27/28; palindrome and CPF specs).** The three barriers held in every
+  run. No item was marked done without an observed Red -> Green, and faked REDs and
+  production writes in RED were refused. How far a run got depended on the plan and the
+  model:
+  - gpt-5-mini reached 6/12 palindrome items, but kept implementing later items early;
+  - gpt-5.4 completed CPF items 1-3 cleanly, then met an item an earlier one already
+    satisfied. It proposed an `UpdatePlan` rewording, and headless denied it, **kept at the
+    user's direction**: headless never approves anything, and the REPL is where a plan is
+    repaired.
 - **The default model is `gpt-5-mini`** (user decision): OpenAI answers 404 for `o4-mini`.
 - **Ruff 0.17.1** reported 122 findings on the pushed Phase 10 tree (newer default rules).
   They are fixed, so ruff is back to 0. Every deliberate catch-all now carries
