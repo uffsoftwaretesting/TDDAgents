@@ -45,7 +45,9 @@ from app.utils.messages import Message
 #: `context.ts` -> `MAX_STATUS_CHARS`.
 MAX_STATUS_CHARS = 2000
 
-#: `getSystemPrompt` static order; the file for each upstream section, then ours.
+#: `getSystemPrompt` static order; the file for each upstream section, then ours. `doing-tasks.md`
+#: is `getSimpleDoingTasksSection` verbatim (2026-10-28): the external build's items, without the
+#: `/help` and feedback bullets (this build has neither); the other sections are adaptations.
 STATIC_SECTION_FILES: tuple[tuple[str, str], ...] = (
     ("intro", "identity.md"),
     ("system", "system.md"),

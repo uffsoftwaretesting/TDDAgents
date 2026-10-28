@@ -1316,6 +1316,24 @@ The same run also showed `events.jsonl` stamping `plan_index: 0` on every event:
 one session spans the plan, so the recorder now reads the current item from the plan at each
 event.
 
+### Scope rules from upstream (2026-10-28)
+
+The same run's plan added a README, a CI workflow and a "release preparation" step, although the
+specification said documentation must not be implemented. At the user's direction:
+
+- `app/prompts/system/doing-tasks.md` is now upstream's `getSimpleDoingTasksSection` verbatim (it
+  was a loose paraphrase): the external build's items, with "Don't add features … beyond what was
+  asked", "Do not create files unless they're absolutely necessary" and "Don't use feature flags".
+  `tests/test_doing_tasks_prompt.py` parses `prompts.ts` and compares the whole section when the
+  reference snapshot is present. *Divergence:* the `/help` and feedback bullets are dropped (this
+  build has neither).
+- The planner and engineer prompts (TDDAgents-authored) carry the same rule: specify and plan only
+  what was asked, with no documentation, README, CI, packaging or release steps unless asked, and
+  nothing the requirements say must not be implemented.
+- Env-gated tests (`SKIP_HEAVY_TESTS`) are left to the prompts, as upstream steers behaviour:
+  the ported "no feature flags" rule and RunTests' "never gated behind environment variables".
+  There is no heuristic scanner (user decision).
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
