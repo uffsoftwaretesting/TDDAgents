@@ -16,3 +16,13 @@
 
 ## 5. De-duplicate Test Setup
 - Extract common fixture setup into reusable helpers or pytest fixtures.
+
+## 6. Cover the Uncovered
+- Read the coverage report `RunTests` prints (`Missing` lists the uncovered lines and branches).
+- Add a focused test for each uncovered branch: the other side of an `if`, the exception path, the empty input.
+- If code cannot be reached by any input the requirement allows, remove it rather than testing it.
+
+## 7. Strengthen Weak Tests
+- Replace assertions that only check "no error" or truthiness with checks of the exact result.
+- Add boundary values (zero, one, the limit, one past it) and invalid inputs next to the typical case.
+- A test that would still pass if the code under it were wrong is not yet a test.

@@ -13,7 +13,7 @@ written only through the root setter, and ends in exactly one `<task-notificatio
 
 **TDD.** Only agents without a `phase` may run here (`tools/agent_tool/agent_tool.py` refuses the rest): an
 async worker's app-state writes are discarded upstream (`shareSetAppState: !isAsync`), so a
-background tester's `RunTests` could never confirm RED.
+background tester's `RunTests` could never end RED.
 
 Not ported: progress tracking and summaries (UI), the panel/retain/eviction fields, the
 transcript-viewer message mirror, and `classifyHandoffIfNeeded`.

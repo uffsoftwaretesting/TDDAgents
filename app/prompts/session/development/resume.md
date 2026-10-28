@@ -1,6 +1,6 @@
 The session was resumed. Continue the TDD plan with sub-requirement {{CURRENT}}.
 
-Its TDD ledger restarted in RED, so observe a failing test for it again before implementing.
+Its TDD ledger restarted in RED: write or extend its tests and run RunTests, then GREEN and the mandatory REFACTOR follow again.
 
 ## TDD plan
 

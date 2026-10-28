@@ -96,7 +96,11 @@ def test_get_system_prompt_structure():
     assert len(static) == 7 and [s.name for s in dynamic] == ["env_info_simple", "mcp_instructions"]
     rendered = resolve_system_prompt_sections(sections)
     assert rendered[0] == a.read_system_prompt_file("identity.md").strip()
-    assert rendered[6] == a.read_system_prompt_file("tdd-contract.md").strip()
+    # The contract names the coverage threshold as a placeholder; the code fills it (Phase 12).
+    contract = a.read_system_prompt_file("tdd-contract.md")
+    assert "{{COVERAGE_THRESHOLD}}" in contract
+    assert rendered[6] == contract.replace("{{COVERAGE_THRESHOLD}}", "90").strip()
+    assert "at least 90% coverage" in rendered[6]
     assert rendered[-1].startswith("# Environment")
 
 

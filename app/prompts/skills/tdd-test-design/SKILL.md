@@ -1,6 +1,6 @@
 ---
 name: tdd-test-design
-description: Guidelines for authoring clean, isolated unit tests that establish ground truth in the RED phase.
+description: Guidelines for authoring robust, isolated unit tests that cover a sub-requirement in the RED phase.
 when_to_use: In the RED phase before implementing production code, or when specifying new requirements.
 argument-hint: "[target-test-path]"
 ---
@@ -8,7 +8,7 @@ argument-hint: "[target-test-path]"
 # TDD Test Design Skill
 
 You are applying disciplined Test-Driven Development (TDD) test authoring principles.
-Your goal is to write a single, focused, failing test that pins down the expected behavior.
+Your goal is a robust suite for the sub-requirement: focused tests that, together, cover every relevant scenario and edge case of the expected behavior.
 Target test path: $ARGUMENTS
 
 ## Core Rules
@@ -22,7 +22,8 @@ Target test path: $ARGUMENTS
    - Act: Call the unit under test.
    - Assert: Check the exact expected outcome.
 4. **Isolated & Hermetic**: Tests must never depend on external network calls or shared mutable global state.
-5. **Verify Failure**: After writing the test, immediately run `RunTests` to ensure it fails with the expected failure mode (ImportError, AttributeError, or AssertionError).
+5. **Breadth of Scenarios**: Beyond the typical case, cover boundary values, empty and invalid inputs, error conditions and every rule the requirement states.
+6. **Run Them**: Run `RunTests` once the tests are written. They need not fail: a run of the sub-requirement's new or changed tests completes RED, whether it passes or fails.
 
 ## Reference
 

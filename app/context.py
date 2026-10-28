@@ -37,7 +37,9 @@ from app.constants.system_prompt_sections import (
     SystemPromptSection,
     systemPromptSection,
 )
+from app.tdd.coverage_gate import TDD_PROMPT_VARS
 from app.utils.claudemd import get_claude_mds, get_memory_files, is_env_truthy
+from app.utils.frontmatter_parser import render_prompt
 from app.utils.messages import Message
 
 #: `context.ts` -> `MAX_STATUS_CHARS`.
@@ -167,7 +169,8 @@ def enhance_system_prompt_with_env_details(
 
 
 def _file_section(filename: str) -> Callable[[], str]:
-    return lambda: read_system_prompt_file(filename)
+    """A static section's text, with the TDD values it names filled in (Phase 12)."""
+    return lambda: render_prompt(read_system_prompt_file(filename), TDD_PROMPT_VARS, strip_comments=False)
 
 
 def get_mcp_instructions_section(mcp_clients: Sequence[Any]) -> str | None:

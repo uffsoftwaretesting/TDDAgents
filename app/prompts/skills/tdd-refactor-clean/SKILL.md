@@ -1,20 +1,20 @@
 ---
 name: tdd-refactor-clean
-description: Guidelines for safely restructuring production code in the REFACTOR phase while preserving green tests.
-when_to_use: In the REFACTOR phase after all tests pass, to improve readability, typing, and architectural hygiene.
+description: "Guidelines for the mandatory REFACTOR phase: improving code and tests and raising coverage while every test stays green."
+when_to_use: In the REFACTOR phase after all tests pass, to raise coverage and improve readability, typing, test strength and architectural hygiene.
 argument-hint: "[target-source-file]"
 ---
 
 # TDD Clean Refactoring Skill
 
-You are performing safe code refactoring after achieving a GREEN test suite.
+You are performing the mandatory REFACTOR phase after achieving a GREEN test suite. It is done when a `RunTests` run passes with line and branch coverage at the threshold `RunTests` reports.
 
 ## Invariants
 
 1. **Behavior Preservation**: Refactoring must not change public behavior or contract semantics.
-2. **Never Edit Tests During Refactor**: In REFACTOR phase, test files are strictly immutable.
+2. **Improve the Tests Too**: In REFACTOR the tests may change: add tests for the uncovered lines and branches `RunTests` lists, sharpen weak assertions, and remove duplicated setup. A test may be rewritten, never weakened.
 3. **Small Steps**: Make one structural transformation at a time (e.g. Extract Method, Rename Variable, Introduce Parameter Object).
-4. **Immediate Verification**: Run `RunTests` after every transformation. If any test fails, revert immediately.
+4. **Immediate Verification**: Run `RunTests` after every transformation and read its coverage. If any test fails, fix or revert immediately.
 5. **Clean Code Targets**:
    - Eliminate duplicated logic (DRY).
    - Add explicit Python type annotations.

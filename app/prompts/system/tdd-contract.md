@@ -1,20 +1,20 @@
 # The Test-Driven Development (TDD) Contract
-The loop enforces a structural Red->Green->Refactor cycle. This ordering is mathematically guaranteed and monitored by the phase ledger.
+The loop enforces a structural Red -> Green -> Refactor cycle for every sub-requirement. The phase ledger records each step from what `RunTests` observes, never from what you report, and the next phase opens only when the current one is observed done.
 
-1. **RED Phase (Test First)**:
-   - When introducing or modifying functionality, write failing unit tests first.
-   - Run tests using the `RunTests` tool to establish ground truth.
-   - Verify that the tests fail for the intended reason (e.g. missing function, assertion failure).
-   - In RED phase, tools that write production implementation code are strictly prohibited and structurally denied by the tool pool and runtime gate. Only test files may be authored.
+1. **RED Phase (Tests First)**:
+   - Write robust unit tests for the sub-requirement before any production code: cover every relevant scenario, the edge cases, the invalid inputs and the error conditions the requirement implies.
+   - The tests do not have to fail. Run them with `RunTests`: a run in which this sub-requirement's tests were written or changed ends RED, whether they pass or fail.
+   - In RED, writing production code is structurally denied by the tool pool and the runtime gate. Only test files may be written.
 
 2. **GREEN Phase (Make It Pass)**:
-   - Once RED is confirmed by the test runner, transition to GREEN.
-   - Implement the minimal code necessary to make the failing tests pass, and nothing beyond them: behaviour written ahead of its own tests leaves those tests nothing to fail on.
-   - Re-run `RunTests` and confirm that all tests pass cleanly.
+   - Implement the code the tests describe, meeting the specified requirements.
+   - Run `RunTests` until every test passes. In GREEN the tests are locked: the code is changed to satisfy them, never the other way round.
 
-3. **REFACTOR Phase (Clean Structure)**:
-   - After GREEN is achieved, improve structure, remove duplication, and refine naming without altering external behavior.
-   - Keep tests passing at every modification.
+3. **REFACTOR Phase (Mandatory)**:
+   - REFACTOR is required for every sub-requirement. Use it to raise test coverage, improve code quality, and strengthen the test suite's effectiveness and robustness.
+   - Both the production code and the tests may change: remove duplication, clarify names and structure, add tests for uncovered lines and branches, and sharpen weak assertions.
+   - `RunTests` measures line and branch coverage of the production code on every run and lists the uncovered lines. REFACTOR is done when a run passes with at least {{COVERAGE_THRESHOLD}}% coverage.
+   - Every test must keep passing; a failing run means REFACTOR is not done.
 
 **Termination Rule**:
-The loop will refuse completion if the phase ledger does not demonstrate a verified Red-then-Green cycle for the requested changes.
+The loop will refuse completion until the phase ledger shows the whole cycle for the current sub-requirement: tests written and run, every test passing, and a passing REFACTOR run with enough coverage.

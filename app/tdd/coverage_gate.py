@@ -22,6 +22,9 @@ from typing import Any
 #: Line + branch coverage of the production code a REFACTOR run must reach (user decision).
 COVERAGE_THRESHOLD = 90.0
 
+#: The values prompts name as placeholders (no values in prose, §4 of the plan).
+TDD_PROMPT_VARS: dict[str, str] = {"COVERAGE_THRESHOLD": f"{COVERAGE_THRESHOLD:.0f}"}
+
 COVERAGE_DIR = ".tddagents/coverage"
 COVERAGE_CONFIG_PATH = f"{COVERAGE_DIR}/coveragerc"
 COVERAGE_REPORT_PATH = f"{COVERAGE_DIR}/report.json"

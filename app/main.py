@@ -13,7 +13,7 @@ Two modes, as claude-code has them:
   `--spec FILE`, the prompt argument or stdin, and nobody is asked anything. The analyst's
   checklist is approved; a clarifying question fails the session; the plan is worked through
   in one conversation and a permission 'ask' is denied. The exit code is 0 only when every
-  sub-requirement completed a Red-then-Green cycle.
+  sub-requirement completed its Red -> Green -> Refactor cycle.
 
 Either way the session is one LangGraph thread (`app/session/`): it checkpoints to
 `POSTGRES_URL` by default (`--checkpoint memory` opts out), and `--thread-id` continues a
@@ -322,7 +322,7 @@ def write_session_artifacts(workspace_dir: str, values: dict[str, Any]) -> str:
 
 def write_subreq_results(artifacts_dir: str, plan: TddPlan | None, terminal: Terminal | None) -> None:
     """
-    Each sub-requirement's outcome (Phase 11): done (its Red -> Green observed), the one the
+    Each sub-requirement's outcome (Phase 11): done (its Red -> Green -> Refactor observed), the one the
     session stopped on with the terminal reason, or not run.
     """
     if plan is None or not plan.items:

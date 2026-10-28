@@ -8,7 +8,7 @@ with its own system prompt, its own resolved tool pool and its own identity. Wha
 with its parent is decided exactly as upstream decides it:
 
 * **App state.** A synchronous worker writes through its parent's `set_app_state`
-  (`shareSetAppState: !isAsync`). That is what lets a tester's `RunTests` confirm RED on the
+  (`shareSetAppState: !isAsync`). That is what lets a tester's `RunTests` end RED on the
   coordinator's ledger — the ledger *is* app state. An asynchronous worker's writes are
   discarded except its task state, which reaches the root store (upstream's
   `setAppStateForTasks`), and it keeps its own denial tally.

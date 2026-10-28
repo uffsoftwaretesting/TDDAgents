@@ -20,7 +20,7 @@ def test_the_prompt_is_preamble_base_tdd_then_trailer():
     base_end = prompt.index("When you are using compact - please focus on test output and code changes.")
     tdd = prompt.index("## TDD state")
     assert base_end < tdd
-    for heading in ("Phase ledger", "Latest failing-test evidence", "Test files", "Sub-requirement"):
+    for heading in ("Phase ledger", "Latest RunTests evidence", "Test files", "Sub-requirement"):
         assert heading in prompt[tdd:]
     assert prompt.endswith(
         "\n\nREMINDER: Do NOT call any tools. Respond with plain text only — an <analysis> block followed "

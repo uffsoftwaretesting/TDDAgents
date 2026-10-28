@@ -7,7 +7,7 @@ A sub-requirement is `pending` until its own Red -> Green -> Refactor cycle has 
 order of the work. Two rules carry the TDD guarantee and are enforced here, not by callers:
 
 * **Nothing marks an item done except an observed cycle.** `complete_current` is the only
-  transition to `done`, and it refuses unless the phase ledger shows Red-then-Green. The
+  transition to `done`, and it refuses unless the phase ledger shows the whole cycle. The
   plan tool, `/plan` and the planner can add, reword, remove or reorder items; none of them
   can declare one finished.
 * **Changing a done item reopens it** (user decision 2026-10-27). Its new text needs a fresh

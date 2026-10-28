@@ -14,7 +14,7 @@ background task (`tasks/local_agent_task/local_agent_task.py`) and return at onc
 (upstream's `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`, read when the tool is built) removes the field
 and runs everything in the foreground. **TDD:** only agents without a `phase` may run in the
 background. An async worker's app-state writes are discarded upstream (`shareSetAppState:
-!isAsync`), so a background tester could never confirm RED; asking for a phase agent in the
+!isAsync`), so a background tester could never end RED; asking for a phase agent in the
 background is refused before anything runs, and coordinator mode's forced async applies to agents
 without a phase only — forcing it on the TDD agents would make the cycle uncompletable.
 

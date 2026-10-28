@@ -8,7 +8,7 @@ TDD rules for spawning a worker (TDDAgents' customization of `AgentTool.call`).
   path are the only callers, and both write the returned ledger as `spawn_ledger` (pinned by
   `test_run_tests_is_the_only_ledger_writer`).
 * **No background phase agent.** An async worker's app-state writes are discarded upstream
-  (`shareSetAppState: !isAsync`), so a background tester could never confirm RED: a phase
+  (`shareSetAppState: !isAsync`), so a background tester could never end RED: a phase
   agent asked to go async is refused.
 """
 

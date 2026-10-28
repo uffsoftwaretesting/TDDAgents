@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from app.tdd.coverage_gate import TDD_PROMPT_VARS
 from app.tdd.plan import TddPlan, render_plan
 from app.utils.frontmatter_parser import render_prompt
 
@@ -69,7 +70,8 @@ def development_start_prompt(specification: str, plan: TddPlan) -> str:
     """The first prompt of the development conversation (Phase 11): the spec, the plan, where to start."""
     return render_prompt(
         _read("development", "start.md"),
-        {"SPECIFICATION": specification.strip() or "(none)", "PLAN": render_plan(plan), "CURRENT": _current(plan)},
+        {"SPECIFICATION": specification.strip() or "(none)", "PLAN": render_plan(plan), "CURRENT": _current(plan),
+         **TDD_PROMPT_VARS},
     ).strip()
 
 
