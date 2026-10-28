@@ -12,6 +12,7 @@ the failure detail is the most valuable thing you will read.
 Updates the TDD phase ledger from what it observes: in RED, a run of the sub-requirement's
 new or changed tests (pass or fail) ends RED; in GREEN, a pass ends GREEN; in REFACTOR, a
 pass with enough coverage ends REFACTOR. A run with skipped tests is not a pass: every test must run in a plain RunTests run,
-never gated behind environment variables, markers or options. Only a pass (0)
+never gated behind environment variables, markers or options. Neither is a run in which pytest does not collect
+a test file (for example a name the project's `python_files` setting does not match): every test file must be collected. Only a pass (0)
 or failing tests (1) count;
 anything else (no tests collected, usage error, timeout) is reported as an error.

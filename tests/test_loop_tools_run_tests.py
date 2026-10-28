@@ -368,13 +368,15 @@ def test_workspace_command_is_quoted_and_time_limited():
     assert res.exit_code == 0 and "pytest output" in res.content
     assert ws.calls == [(pytest_command("tests/a b.py; rm -rf /"), 120.0)]
     assert ws.files == {COVERAGE_CONFIG_PATH: COVERAGE_CONFIG}
-    assert ws.deleted == [COVERAGE_REPORT_PATH, COVERAGE_REPORT_PATH]
+    junit = ".tddagents/coverage/junit.xml"
+    assert ws.deleted == [COVERAGE_REPORT_PATH, junit, COVERAGE_REPORT_PATH, junit]
     assert pytest_command("tests/a b.py; rm -rf /").startswith(
         "PYTHONPATH=. python -m pytest 'tests/a b.py; rm -rf /' -vv --tb=short -rs --rootdir=. ")
     assert pytest_command("tests/x.py") == (
         "PYTHONPATH=. python -m pytest tests/x.py -vv --tb=short -rs --rootdir=. "
         "--cov=. --cov-config=.tddagents/coverage/coveragerc --cov-report=term-missing "
         "--cov-report=json:.tddagents/coverage/report.json "
+        "--junitxml=.tddagents/coverage/junit.xml -o junit_family=xunit1 "
         "$([ -f pytest.ini ] || [ -f .pytest.ini ] || grep -qs '^\\[tool\\.pytest' pyproject.toml "
         "|| grep -qs '^\\[pytest\\]' tox.ini || grep -qs '^\\[tool:pytest\\]' setup.cfg "
         "|| printf %s '-c /dev/null')")

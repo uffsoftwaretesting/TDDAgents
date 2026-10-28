@@ -63,7 +63,7 @@ TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
 | `utils/hooks/`, `schemas/hooks.py`, `types/hooks.py` | `utils/hooks.ts`, `utils/hooks/`, `schemas/hooks.ts`, `types/hooks.ts` | `hooks.py` (`executeHooks`, matching, `execCommandHook`, every per-event executor), the config snapshot, async registry, prompt/agent/HTTP hooks, SSRF guard, `hook_dispatcher.py` (`build_hook_dispatcher`); the hook schema; `processHookJSONOutput` |
 | `utils/attachments.py` | `utils/attachments.ts` | `getAttachments` / `getAttachmentMessages` and every ported source (the TDD source is in `app/tdd/`) |
 | `utils/` (rest) | `utils/*.ts` | `messages.py`, `message_queue_manager.py`, `claudemd.py` (memory files), `session_storage.py` + `session_storage_portable.py` + `conversation_recovery.py` (transcripts, resume), `session_start.py`, `tokens.py`, `tool_result_storage.py`, `tool_errors.py`, `ripgrep.py`, `file.py`, `glob.py`, `file_state_cache.py`, `abort_controller.py`, `argument_substitution.py`, `frontmatter_parser.py`, `mcp_validation.py`, `shell_command.py`, `bash/commands.py`, `shell/read_only_command_validation.py`, `model/model.py` (model aliases) |
-| **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`); `plan.py` (`TddPlan`, the `tdd-plan.json` sidecar, `update_tdd_plan`), `plan_advance.py` (the ledger-driven advance), `tdd_plan_tool/` (`UpdatePlan`); `coverage_gate.py` (REFACTOR's coverage threshold and reading), `suite_fingerprint.py` (RED's evidence: the test files' fingerprint and the item baseline) |
+| **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`); `plan.py` (`TddPlan`, the `tdd-plan.json` sidecar, `update_tdd_plan`), `plan_advance.py` (the ledger-driven advance), `tdd_plan_tool/` (`UpdatePlan`); `coverage_gate.py` (REFACTOR's coverage threshold and reading), `collection_gate.py` (uncollected test files), `suite_fingerprint.py` (RED's evidence: the test files' fingerprint and the item baseline) |
 | `session/` | — (TDDAgents) | The LangGraph session shell: `analyst ⇄ analyst_review → engineer → planner` (ends `PLANNED`), checkpointing, resume, `rescope`; `driver.py` hands over to `develop_interactive` / `develop_headless`; `session/agents/` are its LLM seams |
 | `workspace/`, `sandbox/` | — (TDDAgents) | The `Workspace` protocol, `LocalWorkspace` (`workspaces_root()`, `for_run` → `<root>/<thread>/project`), `project.py` (`prepare_project`: git init, ignore file, seeded settings), `pyenv.py` (the project's `.venv`), `E2BWorkspace` over the E2B adapter |
 | `prompts/` | `constants/prompts.ts`, bundled agents and skills | System sections, the TDD agents (`AGENT.md` + `references/`), bundled skills, compact / permission / session prompts, specs. Tool prompts live beside their tools |
@@ -1293,6 +1293,28 @@ upstream's:
 
 *Limit, recorded:* `E2BWorkspace` exposes no host root, so the file tools refuse an absolute
 path there; its adapter maps the sandbox root itself.
+
+### An uncollected test file is not a pass (2026-10-28)
+
+The third interactive palindrome run completed 11/11 items, but its own `pytest.ini`
+(`python_files = tests/test_*.py`) never collected `tests/tests_trivial.py`. RED had passed on it,
+because RED's evidence was "the test files changed and RunTests ran". At the user's direction an
+uncollected test file is treated like a skip (`app/tdd/collection_gate.py`):
+
+- `pytest_command` writes a JUnit report (`xunit1`, which names each case's `file`) to
+  `.tddagents/coverage/junit.xml`. `run_suite` reads it back and deletes it, into
+  `SuiteExecutionResult.collected_files`. The report is independent of the project's verbosity.
+- The project's test modules are the `.py` files `is_test_path` classifies as tests that define a
+  pytest test (`def test…`, `class Test…`), without `__init__.py` and `conftest.py`, and within
+  the run's `test_path`.
+- A module pytest did not collect means RED gets no evidence from the run, and a GREEN or
+  REFACTOR pass does not count. The message names the files and the `python_files` / `testpaths`
+  way out. The final run reports it ("NOT passing … not collected: …"). An injected runner with
+  no report (`collected_files=None`) checks nothing.
+
+The same run also showed `events.jsonl` stamping `plan_index: 0` on every event: since Phase 11
+one session spans the plan, so the recorder now reads the current item from the plan at each
+event.
 
 ### The three things that changed most
 

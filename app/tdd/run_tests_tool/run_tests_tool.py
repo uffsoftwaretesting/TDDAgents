@@ -36,6 +36,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from app.tdd.collection_gate import (
+    JUNIT_REPORT_PATH,
+    collected_files,
+    junit_options,
+    uncollected_message,
+    uncollected_test_files,
+)
 from app.tdd.coverage_gate import (
     COVERAGE_CONFIG,
     COVERAGE_CONFIG_PATH,
@@ -62,6 +69,8 @@ class SuiteExecutionResult:
     coverage: CoverageReading = UNAVAILABLE
     #: Tests pytest skipped; `None` reads the count from the output (`skipped_count`).
     skipped: int | None = None
+    #: The files pytest collected (its JUnit report); `None` when unknown, which checks nothing.
+    collected_files: frozenset[str] | None = None
     __test__: bool = False
 
 
@@ -129,12 +138,13 @@ def pytest_command(test_path: str) -> str:
     generated project would run under TDDAgents' `pyproject.toml`. The rootdir is pinned to the
     workspace and, when it has no config, `-c /dev/null` stops the search (the same run locally
     and in a sandbox). Coverage is measured on every run (Phase 12): `term-missing` shows the
-    model the uncovered lines, and the JSON report is what REFACTOR is judged by.
+    model the uncovered lines, and the JSON report is what REFACTOR is judged by. The JUnit report
+    names the files pytest collected (`app/tdd/test_collection.py`).
     """
     return (
         f"PYTHONPATH=. python -m pytest {shlex.quote(test_path)} -vv --tb=short -rs --rootdir=. "
         f"--cov=. --cov-config={COVERAGE_CONFIG_PATH} --cov-report=term-missing "
-        f"--cov-report=json:{COVERAGE_REPORT_PATH} "
+        f"--cov-report=json:{COVERAGE_REPORT_PATH} {junit_options()} "
         f"$({PYTEST_CONFIG_PROBE} || printf %s '-c /dev/null')"
     )
 
@@ -182,6 +192,7 @@ def run_suite(ws: Any, test_path: str = ".") -> SuiteExecutionResult:
     try:
         ws.write_file(COVERAGE_CONFIG_PATH, COVERAGE_CONFIG)
         _discard(ws, COVERAGE_REPORT_PATH)
+        _discard(ws, JUNIT_REPORT_PATH)
         res = ws.execute(pytest_command(test_path), timeout=run_tests_timeout_seconds())
     except Exception as exc:
         raise RunTestsUnavailable(f"pytest could not be executed in the workspace: {exc}") from exc
@@ -190,8 +201,14 @@ def run_suite(ws: Any, test_path: str = ".") -> SuiteExecutionResult:
     except Exception:  # noqa: BLE001 - no report is a reading of its own (no code, or unavailable)
         report = None
     _discard(ws, COVERAGE_REPORT_PATH)
+    try:
+        junit: str | None = ws.read_file(JUNIT_REPORT_PATH)
+    except Exception:  # noqa: BLE001 - no report: the collected files are unknown
+        junit = None
+    _discard(ws, JUNIT_REPORT_PATH)
     coverage = read_coverage(report, f"{res.stdout}\n{res.stderr}")
-    return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr, coverage=coverage)
+    return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr, coverage=coverage,
+                                collected_files=collected_files(junit))
 
 
 def _discard(ws: Any, path: str) -> None:
@@ -291,7 +308,13 @@ def build_run_tests_tool(
         skipped = exec_result.skipped if exec_result.skipped is not None else skipped_count(
             f"{exec_result.stdout}\n{exec_result.stderr}")
         skips_block_a_pass = observed == 0 and skipped > 0 and before.phase_ledger.phase != TddPhase.RED
-        if skips_block_a_pass:
+        # A test file pytest did not collect checks nothing either, in every phase (user decision).
+        uncollected = await asyncio.to_thread(
+            uncollected_test_files, getattr(context, "workspace", None), test_path, exec_result.collected_files)
+        uncollected_block_a_pass = bool(uncollected) and observed == 0 and before.phase_ledger.phase != TddPhase.RED
+        if uncollected:
+            changed = False
+        if skips_block_a_pass or uncollected_block_a_pass:
             # A skipped test checks nothing, so the run is not a pass (Phase 13, user decision).
             observed = 1
         after = before.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage)
@@ -308,12 +331,16 @@ def build_run_tests_tool(
 
         if skips_block_a_pass:
             header = f"Tests ran without failures, but {SKIPPED_IS_NOT_PASSING.format(count=skipped)}"
+        elif uncollected_block_a_pass:
+            header = f"Tests ran without failures, but {uncollected_message(uncollected)}"
         elif code == 0:
             header = "All tests passed."
         elif code == 1:
             header = f"Tests failed (exit {code})."
         else:
             header = f"Tests failed (exit {code}: collection error — the code under test does not exist yet)."
+        if uncollected and not uncollected_block_a_pass:
+            header = f"{header}\n{uncollected_message(uncollected)}"
         header = f"{header}\n{ledger_status(before.phase_ledger, after, observed, coverage)}"
         # is_error stays False on failure: a failing test is normal data in TDD
         return ToolResult(content=format_output(exec_result, header), exit_code=code)

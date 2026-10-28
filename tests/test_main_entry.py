@@ -591,6 +591,11 @@ def test_the_final_test_run_is_the_projects_own_suite(python_workspace, tmp_path
                                 "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n")
     assert entry.write_final_test_run(str(tmp_path), python_workspace) == (
         "passed (exit 0, 0 skipped, coverage 100.0% (needs 90%))")
+    # A test file pytest does not collect never ran: not passing either.
+    python_workspace.write_file("pytest.ini", "[pytest]\npython_files = tests/test_*.py\n")
+    python_workspace.write_file("tests/tests_extra.py", "def test_extra():\n    assert False\n")
+    assert entry.write_final_test_run(str(tmp_path), python_workspace) == (
+        "NOT passing (exit 0, 0 skipped, coverage 100.0% (needs 90%)); not collected: tests/tests_extra.py")
 
 
 def test_main_output_and_log_file(fake_session: dict[str, Any], tmp_path: Path,

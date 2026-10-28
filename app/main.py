@@ -369,6 +369,7 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
     (Phase 13), and record it in `final_test_run.txt`. This is the result anyone re-running the
     project gets. Returns the one-line summary printed in the report.
     """
+    from app.tdd.collection_gate import uncollected_test_files
     from app.tdd.run_tests_tool.run_tests_tool import (
         RunTestsUnavailable,
         run_suite,
@@ -383,8 +384,11 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
         return summary
     output = f"{result.stdout}\n{result.stderr}".strip()
     skipped = skipped_count(output)
-    verdict = "passed" if result.exit_code == 0 and skipped == 0 else "NOT passing"
+    uncollected = uncollected_test_files(workspace, ".", result.collected_files)
+    verdict = "passed" if result.exit_code == 0 and skipped == 0 and not uncollected else "NOT passing"
     summary = f"{verdict} (exit {result.exit_code}, {skipped} skipped, {result.coverage.describe()})"
+    if uncollected:
+        summary += f"; not collected: {', '.join(uncollected)}"
     lines = [f"Project: {getattr(workspace, 'root', '?')}", f"Result: {summary}", "-" * 80, output]
     _write_text(os.path.join(artifacts_dir, "final_test_run.txt"), "FINAL TEST RUN", "\n".join(lines))
     return summary
