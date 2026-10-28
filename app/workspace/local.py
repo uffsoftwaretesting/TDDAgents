@@ -34,6 +34,10 @@ from app.workspace.base import (
 logger = logging.getLogger("TDDOrchestrator.LocalWorkspace")
 
 
+#: git stops its upward search for a repository at these directories.
+GIT_CEILING_ENV = "GIT_CEILING_DIRECTORIES"
+
+
 class LocalWorkspace:
     """A Workspace rooted at a single directory on the host."""
 
@@ -188,7 +192,9 @@ class LocalWorkspace:
         both sides. As in the sandbox, a non-zero exit code is returned, not raised.
         """
         limit = timeout if timeout is not None else Config.COMMAND_TIMEOUT
-        environment = {**os.environ, **self._env, **(env or {})}
+        # A local workspace sits inside TDDAgents' own repository: the ceiling (set last, so no
+        # caller lifts it) keeps git from walking up to it, while a repo of its own still works.
+        environment = {**os.environ, **self._env, **(env or {}), GIT_CEILING_ENV: str(self._root.parent)}
         started = time.monotonic()
 
         try:

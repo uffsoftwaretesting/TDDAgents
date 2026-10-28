@@ -1041,6 +1041,10 @@ the open choices decided by interview (recorded in the plan's Phase 11 outcome).
   up ours by pytest's upward search (`rootdir` = the repo). `pytest_command` now pins
   `--rootdir=.` and adds `-c /dev/null` when `PYTEST_CONFIG_PROBE` finds no workspace config
   (user decision). Real-pytest tests run under a poisoned parent `pyproject.toml`.
+- **Fixed: agents could run git on TDDAgents' own repository.** A local workspace sits inside
+  it, so the live CPF run's `git status` listed this repo. `LocalWorkspace.execute` now sets
+  `GIT_CEILING_DIRECTORIES` to the workspace's parent, last, so no caller lifts it (user
+  decision). A repository of the workspace's own still works.
 - **Planner and development prompts, from the live runs** (user decisions):
   - one behaviour per plan item, its tests and its implementation in the same item;
   - every item adds behaviour its tests can fail on (no TEST/DEV split, no

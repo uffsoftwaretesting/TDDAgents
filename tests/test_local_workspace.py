@@ -9,6 +9,9 @@ about the local implementation.
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from app.workspace.base import (
@@ -424,3 +427,25 @@ def test_execute_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     with pytest.raises(WorkspaceProviderError, match="Could not run local command 'some_cmd': Exec format error"):
         local_ws.execute("some_cmd")
+
+
+def test_git_never_reaches_a_repository_above_the_workspace(tmp_path):
+    # Run workspaces live inside TDDAgents' own repository (`.tddagents/runs/<thread>/workspace`):
+    # without a ceiling, an agent's `git status` / `git commit` acted on TDDAgents itself.
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    assert subprocess.run(["git", "init", "-q", str(outer)], check=False).returncode == 0
+    ws = LocalWorkspace(str(outer / ".tddagents" / "runs" / "t" / "workspace"))
+
+    res = ws.execute("git rev-parse --show-toplevel")
+    assert res.exit_code != 0 and "not a git repository" in res.stderr
+
+    # A repository of the workspace's own still works.
+    assert ws.execute("git init -q && git rev-parse --show-toplevel").stdout.strip() == str(
+        Path(ws.root).resolve())
+
+
+def test_the_git_ceiling_is_not_overridden_by_a_command_env(tmp_path):
+    ws = LocalWorkspace(str(tmp_path / "workspace"), env={"GIT_CEILING_DIRECTORIES": "/nowhere"})
+    res = ws.execute("printf %s \"$GIT_CEILING_DIRECTORIES\"", env={"GIT_CEILING_DIRECTORIES": "/elsewhere"})
+    assert res.stdout == str(Path(ws.root).resolve().parent)
