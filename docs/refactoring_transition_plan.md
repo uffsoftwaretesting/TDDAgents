@@ -433,6 +433,50 @@ architecture, while enforcing the TDD cycle"; MCP: "port the main MCP functional
 - The gate runs over the whole tree: flake8 and strict mypy on all of `app/` and `tests/`,
   mutmut on `app/` minus the seam modules. Details in `CLAUDE.md`.
 
+### Phase 11 — Interactive TDD REPL
+
+After Analyst → Engineer → Planner, the tool behaves like Claude Code. The user talks to the
+agents at any time and edits the plan or the requirements. Work continues until every
+sub-requirement has been observed Red → Green.
+
+*Phase 11 outcome (2026-10-27), per the interview:*
+- **One conversation after planning.** The shell keeps `analyst ⇄ analyst_review → engineer
+  → planner` and ends at `PLANNED`; the per-item `execute_plan_item → evaluator` iteration
+  and `PlanItemResult` are deleted. `app/cli/print.py` opens one `DevelopmentRun` per session
+  (`open_session_run`) and submits each user turn over its history (`REPL.tsx` `onQuery`).
+- **The plan is state** (`app/tdd/plan.py`): `TddPlan` on `AppState`, saved as
+  `tdd-plan.json` beside the transcript and restored on resume; the ledger is not.
+  - **Only the ledger marks an item done.** `plan_advance` runs first in the stop-hook
+    runner: a complete cycle marks the item done and blocks with the next item.
+  - **Any change of the current item restarts the ledger in RED** (`update_tdd_plan`).
+  - Editing a done item reopens it.
+- **The model edits through `UpdatePlan`**, whose permission check is an ask with the diff
+  (as `ExitPlanModeV2Tool`); main thread only. **The user edits through `/plan`.**
+- **The REPL** (`app/screens/repl.py`, `app/commands.py`):
+  - input typed mid-turn is queued at `next` (`handlePromptSubmit`);
+  - Esc / Ctrl-C aborts the turn (`useCancelRequest`);
+  - slash commands wait for the turn to end, except `/help`, `/plan`, `/pause` and `/exit`;
+  - `/pause` ends a turn `stop_hook_prevented`;
+  - `/requirements` re-runs analyst → engineer → planner; done items stay done, pending
+    ones are replaced.
+
+  `prompt_toolkit` is the terminal seam (`app/screens/terminal_io.py`).
+- **Permission asks are interactive** (`app/hooks/use_can_use_tool.py`,
+  `app/components/permissions/permission_options.py`). Choices are upstream's: yes, yes and
+  don't ask again (with the Bash/file rule suggestions), or no with feedback. The TDD tier is
+  still checked first. Workers and the agent-hook verifier keep the headless deny.
+- **Headless `-p`** runs the same engine with nobody to answer. Every ask is denied,
+  `UpdatePlan` included. A turn that ends before the current item is done stops the session;
+  the remaining items are NOT_RUN and the exit code is 1.
+- **Coordinator mode** keeps upstream's tool filter verbatim, so the coordinator has no
+  `UpdatePlan`. Upstream's filter likewise drops its own planning tools (`TodoWrite`,
+  `ExitPlanMode`). In coordinator mode the plan is edited by the user only.
+
+*Divergences:*
+- permission hooks run before the prompt instead of racing it;
+- there is no editable Bash prefix and no accept-with-feedback input;
+- `getDirectoryForPath` is not stat-based.
+
 ---
 
 ## 3. Verification

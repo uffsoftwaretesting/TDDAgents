@@ -20,7 +20,7 @@
 - [Overview](#overview)
 - [How It Works](#how-it-works)
   - [Phase 1 — Requirements Gathering](#phase-1--requirements-gathering)
-  - [Phase 2 — Autonomous TDD Cycle](#phase-2--autonomous-tdd-cycle)
+  - [Phase 2 — Red-Green Development, in One Conversation](#phase-2--red-green-development-in-one-conversation)
 - [Key Features](#key-features)
 - [The Agent Team](#the-agent-team)
 - [Project Structure](#project-structure)
@@ -29,6 +29,7 @@
   - [Installation](#installation)
 - [Usage](#usage)
   - [Run the main entry point](#run-the-main-entry-point)
+  - [The development session](#the-development-session)
 - [Execution Flags](#execution-flags)
 - [Output & Deliverables](#output--deliverables)
 - [Experiments](#experiments)
@@ -77,11 +78,11 @@ The Technical Specification is designed to be consumed by AI agents, not humans.
 
 ---
 
-### Phase 2 — Autonomous Red-Green Cycle
+### Phase 2 — Red-Green Development, in One Conversation
 
-The Technical Specification feeds into the **Planner Agent**, which decomposes it into an ordered list of atomic, testable sub-requirements (`tdd_plan`). The first item is always an environment setup step. Subsequent items represent incremental functional slices ordered by complexity.
+The Technical Specification feeds into the **Planner Agent**, which decomposes it into an ordered list of atomic, testable sub-requirements (the TDD plan). The first item is always an environment setup step. Subsequent items represent incremental functional slices ordered by complexity.
 
-Each sub-requirement is one run of the agent loop (`app/cli/print.py` → `app/query_engine.py` → `app/query/query.py`). The model works with file, Bash, `RunTests`, `TodoWrite`, skill and `Agent` tools, and can delegate to the TDD agents: **tester** (RED), **developer** (GREEN), **refactorer** (REFACTOR), plus the read-only **verification**, **Explore** and **Plan** agents.
+The whole plan is then developed in **one conversation** with the agent loop (`app/cli/print.py` → `app/query_engine.py` → `app/query/query.py`), driven from an interactive session at the terminal (`app/screens/repl.py`). You can talk to the agents at any time; see [The development session](#the-development-session). The plan advances by evidence only: when the current item's ledger shows Red → Green, it is marked done, the ledger restarts in RED and the agents are told the next item. The model works with file, Bash, `RunTests`, `TodoWrite`, skill and `Agent` tools, and can delegate to the TDD agents: **tester** (RED), **developer** (GREEN), **refactorer** (REFACTOR), plus the read-only **verification**, **Explore** and **Plan** agents.
 
 The Red → Green order is enforced by three independent barriers that no model output can reach (`app/tdd/`):
 
@@ -89,7 +90,7 @@ The Red → Green order is enforced by three independent barriers that no model 
 2. **Phase permissions.** In RED, writes to production code are denied (including through Bash redirections); spawning the developer requires a confirmed RED.
 3. **The stop hook.** The loop cannot end `completed` until the ledger shows Red-then-Green; until then the model is told what is missing and the turn continues.
 
-Each sub-requirement reports its terminal reason and its final ledger (`red_confirmed`, `green_passed`).
+The plan is saved beside the session transcript (`tdd-plan.json`), so a resumed session knows which items are done; the ledger is never saved, so the current item is observed Red → Green again.
 
 ---
 
@@ -267,6 +268,32 @@ Note: The Analyst can ask more questions. You can also ask more features or corr
 
 ---
 
+### The development session
+
+After the Planner, the terminal becomes a conversation with the agents, in the manner of Claude Code. The input line stays live while they work.
+
+- **Typing while they work** queues your message; the agents read it between tool calls.
+- **Esc** (or Ctrl-C) interrupts the current turn. A pending permission question is answered *No*.
+- **Permission questions** are numbered: type the number of your choice. After a *No* you may add what to do instead (`3 use the existing helper`). A *don't ask again* choice adds a rule for the session.
+- **The agents may propose plan changes** (the `UpdatePlan` tool). Each one is shown as a diff and asked; only a Red → Green run marks an item done.
+
+| Command | Effect |
+|---------|--------|
+| `/plan` | Show the TDD plan (`✔` done, `▶` current, `·` pending) |
+| `/plan add <text>` | Add a sub-requirement at the end |
+| `/plan edit <id> <text>` | Reword one; a done one is reopened |
+| `/plan remove <id>` | Remove one |
+| `/plan move <id> <position>` | Reorder |
+| `/pause` | Let the agents stop after the current turn |
+| `/resume` | Continue the plan |
+| `/requirements <request>` | Re-run the Analyst, Engineer and Planner; done items stay done, pending ones are replaced |
+| `/help` | List the commands |
+| `/exit`, `/quit` | Leave (continue later with `--thread-id`) |
+
+Slash commands typed while the agents work wait for the turn to end, except `/help`, `/plan`, `/pause` and `/exit`. Any change that moves the current item restarts its ledger in RED. The session stays open when the plan is done, so you can add more.
+
+---
+
 ## Execution Flags
 
 ### Resume Execution *(continue from checkpoint)*
@@ -275,7 +302,7 @@ Note: The Analyst can ask more questions. You can also ask more features or corr
 python -m app.main --thread-id "tdd-1a2b3c4d..."
 ```
 
-Resumes a previous session from the LangGraph checkpoint stored in PostgreSQL. Useful for recovering from crashes or manual interrupts. A sub-requirement that was interrupted resumes from its transcript.
+Resumes a previous session from the LangGraph checkpoint stored in PostgreSQL. Useful for recovering from crashes or manual interrupts. A session that had reached development resumes its conversation from the transcript, with the plan's done items kept.
 
 > **Thread IDs** are printed to the console at the start of every run. Save them to resume long-running sessions.
 
@@ -286,7 +313,7 @@ python -m app.main -p --spec app/prompts/specs/<file>.txt
 echo "Build a calculator" | python -m app.main -p
 ```
 
-The checklist is approved automatically; a clarifying question from the Analyst fails the session. The exit code is 0 only if every sub-requirement completed Red → Green.
+The checklist is approved automatically; a clarifying question from the Analyst fails the session. Development runs the same conversation with nobody to answer: every permission question is denied (plan changes included), and a turn that ends before the current item is done stops the session, with the remaining items reported NOT_RUN. The exit code is 0 only if every sub-requirement completed Red → Green.
 
 ### Other flags
 
@@ -316,7 +343,7 @@ workspace_output/
     ├── planner.txt                     # tdd_plan decomposition
     ├── execution_logs.txt              # Full agent trace
     ├── token_usage.txt                 # Token usage
-    ├── subreq_results.txt              # Each sub-requirement's status, terminal reason and final ledger
+    ├── subreq_results.txt              # Each sub-requirement: DONE, FAILED (with the terminal) or NOT_RUN
     └── user_analyst_dialogue.txt       # Full dialogue between the user and the Analyst Agent.
 
 ```

@@ -37,7 +37,10 @@ TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
 | Path (`app/`) | Upstream | Ships |
 |---|---|---|
 | `main.py` | `entrypoints/cli.tsx`, `main.tsx` | Argument parsing, interactive / headless (`-p`) session, report and artifacts |
-| `cli/print.py` | `cli/print.ts` → `runHeadless` | One plan item end to end (`tdd_loop_runner`): MCP connect, SessionStart / UserPromptSubmit, the `QueryEngine`, the background-task wait loop, item resume (`load_initial_messages`), SessionEnd |
+| `cli/print.py` | `cli/print.ts` → `runHeadless` | One development session (`open_session_run` → `DevelopmentRun`): MCP connect, SessionStart / UserPromptSubmit, one `QueryEngine` over the whole plan, `begin_session` / `submit_prompt` per turn, the background-task wait loop, resume (`load_initial_messages` + the plan sidecar), SessionEnd; `run_headless` |
+| `screens/repl.py`, `screens/terminal_io.py` | `screens/REPL.tsx` | The interactive session (`Repl`): queued input, Esc abort, permission questions, slash commands; `terminal_io.py` is the `prompt_toolkit` seam |
+| `commands.py` | `commands.ts` | The REPL's `local` slash commands: parser, `/plan` operations, help text |
+| `hooks/use_can_use_tool.py`, `components/permissions/permission_options.py` | `hooks/useCanUseTool.tsx`, `components/permissions/*/…Options` | The interactive `canUseTool` (`PermissionPrompt` → `PermissionAnswer`, persisting "don't ask again" rules); each tool's choices |
 | `query_engine.py` | `QueryEngine.ts` | `QueryEngine.submit`: transcript recorded before the loop, `ResultMessage` with usage, cost and `terminal_reason` |
 | `query/query.py` | `query.ts` | `run_loop` (async generator, yields `Terminated` last) and `drain`; every continue/terminal site; the pre-model pipeline (boundary → budget → microcompact → autocompact → blocking precheck) |
 | `query/state.py`, `query/transitions.py` | `query.ts` `State`, `query/transitions.ts` | `LoopState` (frozen, **no defaults**), `CompactionTracking`, `CompactionResult`; the `Continue` / `Terminal` vocabulary |
@@ -60,8 +63,8 @@ TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
 | `utils/hooks/`, `schemas/hooks.py`, `types/hooks.py` | `utils/hooks.ts`, `utils/hooks/`, `schemas/hooks.ts`, `types/hooks.ts` | `hooks.py` (`executeHooks`, matching, `execCommandHook`, every per-event executor), the config snapshot, async registry, prompt/agent/HTTP hooks, SSRF guard, `hook_dispatcher.py` (`build_hook_dispatcher`); the hook schema; `processHookJSONOutput` |
 | `utils/attachments.py` | `utils/attachments.ts` | `getAttachments` / `getAttachmentMessages` and every ported source (the TDD source is in `app/tdd/`) |
 | `utils/` (rest) | `utils/*.ts` | `messages.py`, `message_queue_manager.py`, `claudemd.py` (memory files), `session_storage.py` + `session_storage_portable.py` + `conversation_recovery.py` (transcripts, resume), `session_start.py`, `tokens.py`, `tool_result_storage.py`, `tool_errors.py`, `ripgrep.py`, `file.py`, `glob.py`, `file_state_cache.py`, `abort_controller.py`, `argument_substitution.py`, `frontmatter_parser.py`, `mcp_validation.py`, `shell_command.py`, `bash/commands.py`, `shell/read_only_command_validation.py`, `model/model.py` (model aliases) |
-| **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`) |
-| `session/` | — (TDDAgents) | The LangGraph session shell: `analyst ⇄ analyst_review → engineer → planner → execute_plan_item → evaluator ⟲`, checkpointing, resume; `session/agents/` are its LLM seams |
+| **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`); `plan.py` (`TddPlan`, the `tdd-plan.json` sidecar, `update_tdd_plan`), `plan_advance.py` (the ledger-driven advance), `tdd_plan_tool/` (`UpdatePlan`) |
+| `session/` | — (TDDAgents) | The LangGraph session shell: `analyst ⇄ analyst_review → engineer → planner` (ends `PLANNED`), checkpointing, resume, `rescope`; `driver.py` hands over to `develop_interactive` / `develop_headless`; `session/agents/` are its LLM seams |
 | `workspace/`, `sandbox/` | — (TDDAgents) | The `Workspace` protocol, `LocalWorkspace` (+ the per-session venv), `E2BWorkspace` over the E2B adapter |
 | `prompts/` | `constants/prompts.ts`, bundled agents and skills | System sections, the TDD agents (`AGENT.md` + `references/`), bundled skills, compact / permission / session prompts, specs. Tool prompts live beside their tools |
 
@@ -980,6 +983,68 @@ recorded above.
   - the `strip_html_comments` loop sentinel;
   - the TDD stop hook's unread `config` argument.
 
+### What Phase 11 changed (2026-10-27)
+
+The interactive TDD REPL: after the planner, the tool behaves like Claude Code. The user's
+direction: follow claude-code's source and architecture while enforcing the TDD cycle, with
+the open choices decided by interview (recorded in the plan's Phase 11 outcome).
+
+- **One conversation per session.** The shell ends at the planner (`PLANNED`).
+  `execute_plan_item`, `evaluator`, `PlanItemResult`, `tdd_loop_runner` and `item_run_id`
+  are deleted. `open_session_run` assembles the run once; every user turn is a
+  `QueryEngine.submit` over the same history (`REPL.tsx` `onQuery`). The session's run id
+  is derived from the thread (`session_run_id`).
+- **The plan is state, and only the ledger moves it.**
+  - `TddPlan` lives on `AppState` and is saved to `<session dir>/tdd-plan.json`. It is
+    restored on resume; the ledger is not.
+  - `plan_advance` runs **first** in `build_stop_hooks_runner`. A complete cycle marks the
+    item done and blocks the stop with the next item (`next_item_message`). All done →
+    `completed`. `/pause` → `stop_hook_prevented`.
+  - The TDD hook's `stop_hook_active` latch is per item.
+  - `update_tdd_plan` is the one place the plan changes. **Any change of the current item
+    resets the ledger and `last_test_run`**: reset-only, held by
+    `test_run_tests_is_the_only_ledger_writer`.
+  - Editing a done item reopens it. `/requirements` keeps done items and replaces the
+    pending ones (`replace_pending`).
+- **`UpdatePlan`** (`app/tdd/tdd_plan_tool/`) has no "done" operation. Its permission check
+  is an ask carrying the diff (`ExitPlanModeV2Tool`'s pattern). It is main thread only, and
+  denied headless.
+- **Interactive permissions** follow upstream's `useCanUseTool` → `PermissionRequest`.
+  - `PermissionResult.suggestions` come from upstream's Bash (exact command / prefix,
+    compound capped at `MAX_SUGGESTED_RULES_FOR_COMPOUND = 5`, none for a security ask) and
+    filesystem generators.
+  - `ToolContext.can_use_tool` is called on an ask. "Don't ask again" persists the
+    suggestions through `persist_permissions`, and a rejection sends upstream's
+    `REJECT_MESSAGE`.
+  - The TDD tier and deny rules are decided before any question.
+  - Workers and the agent-hook verifier have `can_use_tool=None` (headless deny).
+- **The REPL** (`app/screens/repl.py`):
+  - a line typed mid-turn is queued at `next` and reaches the model as `queued_command`;
+  - Esc cancels the turn's token, which `_submit` resets at the next turn, and answers a
+    pending question No;
+  - permission questions are answered by the next line;
+  - slash commands wait for the turn, except the `immediate` ones;
+  - a crashed turn is reported as `model_error` and the session goes on.
+- **Headless** (`develop_headless` → `run_headless`) is the same engine with nobody to ask.
+  A turn that ends before the plan is done stops the session; the rest is NOT_RUN and the
+  exit code is 1. `subreq_results.txt` lists DONE / FAILED (with the terminal) / NOT_RUN.
+- `prompt-toolkit==3.0.52` joins `requirements.txt`. `app/screens/terminal_io.py` is a
+  seam (`do_not_mutate`, static surface check `tests/test_terminal_io_surface.py`).
+- **Ruff 0.17.1** reported 122 findings on the pushed Phase 10 tree (newer default rules).
+  They are fixed, so ruff is back to 0. Every deliberate catch-all now carries
+  `# noqa: BLE001 - <reason>`.
+
+*Divergences, all recorded:*
+- PermissionRequest hooks run before the question instead of racing it;
+- no editable Bash prefix, and no accept-with-feedback input;
+- `getDirectoryForPath` is not stat-based (a path with a suffix is taken for a file);
+- coordinator mode keeps upstream's filter verbatim, so the coordinator has no `UpdatePlan`
+  (upstream drops its own `TodoWrite` and `ExitPlanMode` there too); in coordinator mode the
+  user edits the plan;
+- the REPL is line-based (`prompt_toolkit`), not Ink.
+
+<!-- PHASE11_GATE -->
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
@@ -1059,6 +1124,7 @@ an external service rather than something sitting behind one:
 | `app/sandbox/adapter.py` | the E2B SDK |
 | `app/utils/chat_model_factory.py` | the LLM provider |
 | `app/session/agents/*` | the LLM itself (the session shell's analyst, engineer and planner) |
+| `app/screens/terminal_io.py` | the terminal (`prompt_toolkit` reading a real TTY) |
 
 `app/utils/token_metrics.py` (the LangChain usage callback) and `app/config/` (environment
 constants) are also outside the mutation set. All of them are listed in `[tool.mutmut]
@@ -1391,7 +1457,7 @@ $P/mutmut run && $P/python scripts/mutmut_score.py      # mutation testing; see 
 
 The full procedure and its pass criteria are in [Quality gate](#quality-gate-mandatory).
 
-Without `-p`, `app.main` is interactive: it prints a menu built from `app/prompts/specs/*.txt` (unless a prompt, `--spec` or `--thread-id` is given), then answers the analyst's interrupts from stdin. Type `/yes` to approve a pending checklist and advance to the Engineer; anything else is feedback; `/exit` (or `/quit`) leaves with the session paused at its checkpoint. Because the menu resolves `Path("app/prompts/specs")` relatively, the CWD must be the repo root.
+Without `-p`, `app.main` is interactive: it prints a menu built from `app/prompts/specs/*.txt` (unless a prompt, `--spec` or `--thread-id` is given), then answers the analyst's interrupts from stdin. Type `/yes` to approve a pending checklist and advance to the Engineer; anything else is feedback; `/exit` (or `/quit`) leaves with the session paused at its checkpoint. After the planner the terminal becomes the development REPL (`app/screens/repl.py`): type to the agents at any time, Esc interrupts, `/help` lists `/plan`, `/pause`, `/resume`, `/requirements` and `/exit`. Because the menu resolves `Path("app/prompts/specs")` relatively, the CWD must be the repo root.
 
 ### Experiment tooling (post-hoc analysis of generated workspaces)
 
@@ -1487,24 +1553,27 @@ above; this section is the runtime path through it.
 
 `app/main.py` → `app/session/driver.py` (`build_session_shell`, `drive_session`) →
 `app/session/shell.py`: one checkpointed LangGraph thread, state `SessionState`:
-`analyst ⇄ analyst_review (interrupt) → engineer → planner → execute_plan_item → evaluator ⟲`.
-Each plan item is one `tdd_loop_runner` run (`app/cli/print.py`) on the thread's shared
-local workspace; `PlanItemResult` reports the item's terminal and its ledger, and
-`app/main.py` writes them to `metrics_and_logging/subreq_results.txt`. See
-[What Phase 9 changed](#what-phase-9-changed-2026-10-26).
+`analyst ⇄ analyst_review (interrupt) → engineer → planner`, ending `PLANNED`. The driver
+then hands the plan to `develop_interactive` (the REPL) or `develop_headless` (`-p`), and
+`app/main.py` writes each item's outcome to `metrics_and_logging/subreq_results.txt`. See
+[What Phase 11 changed](#what-phase-11-changed-2026-10-27).
 
-### One plan item
+### One development session
 
-`tdd_loop_runner` builds the run (`RunConfig`, permission context, hook dispatcher, MCP
-connections, skills, transcript store, cost tracker, a fresh `AppStateStore` whose ledger
-starts in RED), fires SessionStart and UserPromptSubmit, and hands the sub-requirement to
-`QueryEngine.submit`, which drives `run_loop` (`app/query/query.py`). Each iteration: the
+`open_session_run` (`app/cli/print.py`) builds the run once per session (`RunConfig`,
+permission context, hook dispatcher, MCP connections, skills, transcript store, cost
+tracker, an `AppStateStore` holding the `TddPlan` and a ledger in RED), fires SessionStart,
+and each turn (`begin_session`, `submit_prompt`) fires UserPromptSubmit and goes through
+`QueryEngine.submit` over the session's history, which drives `run_loop`
+(`app/query/query.py`). Each iteration: the
 pre-model pipeline, `stream_call_model`, the tool calls through `run_tools` /
 `StreamingToolExecutor` and `run_tool_use`, the turn's attachments, then either a continue
 reason or a terminal. The TDD cycle is held by three barriers that no model output can
 reach: the ledger (`app/tdd/ledger.py`, written only by `RunTests`), the phase permission
 tier in the gate (`app/tdd/phase_permissions.py`), and the stop hook
-(`app/tdd/stop_hook.py`) that refuses `completed` until the cycle is observed.
+(`app/tdd/stop_hook.py`) that refuses `completed` until the cycle is observed. Before it,
+`plan_advance` marks a cycle-complete item done and blocks with the next one, so the
+loop moves through the plan without a new turn.
 
 ### State and config
 
