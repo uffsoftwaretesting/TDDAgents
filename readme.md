@@ -82,15 +82,21 @@ The Technical Specification is designed to be consumed by AI agents, not humans.
 
 The Technical Specification feeds into the **Planner Agent**, which decomposes it into an ordered list of atomic, testable sub-requirements (the TDD plan). The first item is always an environment setup step. Subsequent items represent incremental functional slices ordered by complexity.
 
-The whole plan is then developed in **one conversation** with the agent loop (`app/cli/print.py` → `app/query_engine.py` → `app/query/query.py`), driven from an interactive session at the terminal (`app/screens/repl.py`). You can talk to the agents at any time; see [The development session](#the-development-session). The plan advances by evidence only: when the current item's ledger shows Red → Green, it is marked done, the ledger restarts in RED and the agents are told the next item. The model works with file, Bash, `RunTests`, `TodoWrite`, skill and `Agent` tools, and can delegate to the TDD agents: **tester** (RED), **developer** (GREEN), **refactorer** (REFACTOR), plus the read-only **verification**, **Explore** and **Plan** agents.
+The whole plan is then developed in **one conversation** with the agent loop (`app/cli/print.py` → `app/query_engine.py` → `app/query/query.py`), driven from an interactive session at the terminal (`app/screens/repl.py`). You can talk to the agents at any time; see [The development session](#the-development-session). The plan advances by evidence only: when the current item's ledger shows its whole Red → Green → Refactor cycle, it is marked done, the ledger restarts in RED and the agents are told the next item. The model works with file, Bash, `RunTests`, `TodoWrite`, skill and `Agent` tools, and can delegate to the TDD agents: **tester** (RED), **developer** (GREEN), **refactorer** (REFACTOR), plus the read-only **verification**, **Explore** and **Plan** agents.
 
-The Red → Green order is enforced by three independent barriers that no model output can reach (`app/tdd/`):
+Each sub-requirement goes through one cycle:
 
-1. **The phase ledger.** `RunTests` executes the suite and is the only writer of observations: a failing run in RED confirms RED, a passing run in GREEN confirms GREEN.
-2. **Phase permissions.** In RED, writes to production code are denied (including through Bash redirections); spawning the developer requires a confirmed RED.
-3. **The stop hook.** The loop cannot end `completed` until the ledger shows Red-then-Green; until then the model is told what is missing and the turn continues.
+- **RED:** robust unit tests covering the relevant scenarios and edge cases. They do not have to fail; a run of the item's new or changed tests ends RED.
+- **GREEN:** the code the tests describe, until every test passes. The tests are locked.
+- **REFACTOR (mandatory):** better code and stronger tests, until every test passes with at least 90% line + branch coverage of the production code. `RunTests` measures coverage on every run (pytest-cov) and lists the uncovered lines.
 
-The plan is saved beside the session transcript (`tdd-plan.json`), so a resumed session knows which items are done; the ledger is never saved, so the current item is observed Red → Green again.
+The order is enforced by three independent barriers that no model output can reach (`app/tdd/`):
+
+1. **The phase ledger.** `RunTests` executes the suite and is the only writer of observations. It records that RED's tests changed (it fingerprints the test files against the item's start), that GREEN passed, and that REFACTOR passed with enough coverage.
+2. **Phase permissions.** In RED, writes to production code are denied (including through Bash redirections), and in GREEN, writes to tests; REFACTOR may change both. Spawning the developer requires RED's tests, and the refactorer a passing GREEN.
+3. **The stop hook.** The loop cannot end `completed` until the ledger shows the whole cycle; until then the model is told what is missing and the turn continues.
+
+The plan is saved beside the session transcript (`tdd-plan.json`), so a resumed session knows which items are done; the ledger is never saved, so the current item's cycle is observed again from RED.
 
 ---
 
@@ -102,7 +108,7 @@ The plan is saved beside the session transcript (`tdd-plan.json`), so a resumed 
 | **Structurally Enforced TDD** | The ledger, the phase permission tier and the stop hook hold the cycle; the model cannot skip RED or declare success. |
 | **State Persistence & Resumability** | PostgreSQL checkpoints the session graph; resume with `--thread-id`. An unfinished sub-requirement resumes from its transcript (the ledger is never restored — RED must be observed again). |
 | **Self-Correction** | Failing test output goes back to the model as tool results; it fixes and re-runs until the cycle is observed. Model calls are retried with Claude Code's `withRetry` policy. |
-| **Headless Mode** | `python -m app.main -p` runs a spec end to end with no questions, exiting 0 only when every sub-requirement completed Red → Green. |
+| **Headless Mode** | `python -m app.main -p` runs a spec end to end with no questions, exiting 0 only when every sub-requirement completed its Red → Green → Refactor cycle. |
 | **Structured Output Delivery** | All generated source files and test suites are exported from the workspace to `./workspace_output_<thread_id>/`. |
 
 ---
@@ -122,11 +128,11 @@ The plan is saved beside the session transcript (`tdd-plan.json`), so a resumed 
   ║  Planner         ║  Architect     ║  Decomposes the spec into ordered, atomic vertical   ║
   ║                  ║                ║  slices. Produces the tdd_plan execution sequence.   ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
-  ║  tester          ║  RED           ║  Writes failing tests and confirms RED with RunTests.║
+  ║  tester          ║  RED           ║  Writes robust tests and runs them with RunTests.    ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
-  ║  developer       ║  GREEN         ║  Writes minimum production code; confirms GREEN.     ║
+  ║  developer       ║  GREEN         ║  Implements the code the tests describe.             ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
-  ║  refactorer      ║  REFACTOR      ║  Improves the code with the tests kept green.        ║
+  ║  refactorer      ║  REFACTOR      ║  Raises coverage and quality; tests kept green.      ║
   ╠══════════════════╬════════════════╬══════════════════════════════════════════════════════╣
   ║  verification,   ║  Read-only     ║  Review the result and explore or plan the codebase  ║
   ║  Explore, Plan   ║                ║  without writing.                                    ║
@@ -275,7 +281,7 @@ After the Planner, the terminal becomes a conversation with the agents, in the m
 - **Typing while they work** queues your message; the agents read it between tool calls.
 - **Esc** (or Ctrl-C) interrupts the current turn. A pending permission question is answered *No*.
 - **Permission questions** are numbered: type the number of your choice. After a *No* you may add what to do instead (`3 use the existing helper`). A *don't ask again* choice adds a rule for the session.
-- **The agents may propose plan changes** (the `UpdatePlan` tool). Each one is shown as a diff and asked; only a Red → Green run marks an item done.
+- **The agents may propose plan changes** (the `UpdatePlan` tool). Each one is shown as a diff and asked; only its observed Red → Green → Refactor cycle marks an item done.
 
 | Command | Effect |
 |---------|--------|
@@ -313,7 +319,7 @@ python -m app.main -p --spec app/prompts/specs/<file>.txt
 echo "Build a calculator" | python -m app.main -p
 ```
 
-The checklist is approved automatically; a clarifying question from the Analyst fails the session. Development runs the same conversation with nobody to answer: every permission question is denied (plan changes included), and a turn that ends before the current item is done stops the session, with the remaining items reported NOT_RUN. The exit code is 0 only if every sub-requirement completed Red → Green.
+The checklist is approved automatically; a clarifying question from the Analyst fails the session. Development runs the same conversation with nobody to answer: every permission question is denied (plan changes included), and a turn that ends before the current item is done stops the session, with the remaining items reported NOT_RUN. The exit code is 0 only if every sub-requirement completed its Red → Green → Refactor cycle.
 
 ### Other flags
 

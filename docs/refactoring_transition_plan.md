@@ -477,6 +477,24 @@ sub-requirement has been observed Red → Green.
 - there is no editable Bash prefix and no accept-with-feedback input;
 - `getDirectoryForPath` is not stat-based.
 
+### Phase 12 — Robust-tests RED, mandatory coverage REFACTOR
+
+*Phase 12 outcome (2026-10-28), per the interview:*
+- **RED** builds robust unit tests and need not fail. It ends with a RunTests run (pass or
+  fail) in which the item's test files changed since the item started. RunTests observes
+  that itself by fingerprinting the test files against a baseline taken when the item
+  starts (`app/tdd/suite_fingerprint.py`).
+- **GREEN** ends with a passing run. The tests are locked.
+- **REFACTOR is mandatory.** It ends with a passing run whose line + branch coverage of the
+  production code reaches 90% (`app/tdd/coverage_gate.py`, pytest-cov on every run). No
+  production code to measure counts as met.
+- **Write rules:** RED writes tests, GREEN writes code, and REFACTOR writes both.
+- **The planner is relaxed:** one behaviour per item, with no fail-first rule and no ban on
+  hardening items.
+- **The ledger fields are renamed** (`tests_written`, `green_passed`, `refactor_passed`,
+  `coverage`), and `events.jsonl` records them.
+- **The mutation gate counts timeouts once they are re-verified alone.**
+
 ---
 
 ## 3. Verification

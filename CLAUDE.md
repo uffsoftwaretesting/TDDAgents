@@ -63,7 +63,7 @@ TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
 | `utils/hooks/`, `schemas/hooks.py`, `types/hooks.py` | `utils/hooks.ts`, `utils/hooks/`, `schemas/hooks.ts`, `types/hooks.ts` | `hooks.py` (`executeHooks`, matching, `execCommandHook`, every per-event executor), the config snapshot, async registry, prompt/agent/HTTP hooks, SSRF guard, `hook_dispatcher.py` (`build_hook_dispatcher`); the hook schema; `processHookJSONOutput` |
 | `utils/attachments.py` | `utils/attachments.ts` | `getAttachments` / `getAttachmentMessages` and every ported source (the TDD source is in `app/tdd/`) |
 | `utils/` (rest) | `utils/*.ts` | `messages.py`, `message_queue_manager.py`, `claudemd.py` (memory files), `session_storage.py` + `session_storage_portable.py` + `conversation_recovery.py` (transcripts, resume), `session_start.py`, `tokens.py`, `tool_result_storage.py`, `tool_errors.py`, `ripgrep.py`, `file.py`, `glob.py`, `file_state_cache.py`, `abort_controller.py`, `argument_substitution.py`, `frontmatter_parser.py`, `mcp_validation.py`, `shell_command.py`, `bash/commands.py`, `shell/read_only_command_validation.py`, `model/model.py` (model aliases) |
-| **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`); `plan.py` (`TddPlan`, the `tdd-plan.json` sidecar, `update_tdd_plan`), `plan_advance.py` (the ledger-driven advance), `tdd_plan_tool/` (`UpdatePlan`) |
+| **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`); `plan.py` (`TddPlan`, the `tdd-plan.json` sidecar, `update_tdd_plan`), `plan_advance.py` (the ledger-driven advance), `tdd_plan_tool/` (`UpdatePlan`); `coverage_gate.py` (REFACTOR's coverage threshold and reading), `suite_fingerprint.py` (RED's evidence: the test files' fingerprint and the item baseline) |
 | `session/` | — (TDDAgents) | The LangGraph session shell: `analyst ⇄ analyst_review → engineer → planner` (ends `PLANNED`), checkpointing, resume, `rescope`; `driver.py` hands over to `develop_interactive` / `develop_headless`; `session/agents/` are its LLM seams |
 | `workspace/`, `sandbox/` | — (TDDAgents) | The `Workspace` protocol, `LocalWorkspace` (+ the per-session venv), `E2BWorkspace` over the E2B adapter |
 | `prompts/` | `constants/prompts.ts`, bundled agents and skills | System sections, the TDD agents (`AGENT.md` + `references/`), bundled skills, compact / permission / session prompts, specs. Tool prompts live beside their tools |
@@ -1075,15 +1075,68 @@ the open choices decided by interview (recorded in the plan's Phase 11 outcome).
 
 <!-- PHASE11_GATE -->
 
+### What Phase 12 changed (2026-10-28)
+
+The TDD cycle itself, at the user's direction (decisions recorded in the plan's Phase 12
+outcome): RED builds robust tests instead of tests that must fail, and REFACTOR becomes
+mandatory and coverage-checked. The three barriers stay; the rules they enforce change.
+
+- **The ledger** (`app/tdd/ledger.py`) is `phase, tests_written, green_passed,
+  refactor_passed, coverage`. The old `red_confirmed` is renamed, and `events.jsonl`
+  records the new fields, so old and new runs are distinguishable.
+  - **RED** ends with a RunTests run, pass or fail, in which the item's tests changed.
+  - **GREEN** ends with a passing run.
+  - **REFACTOR** ends with a passing run whose line + branch coverage of the production code
+    reaches `COVERAGE_THRESHOLD = 90.0` (`app/tdd/coverage_gate.py`). A failing run
+    un-passes it. No production code to measure counts as met.
+  - `is_cycle_complete` needs all three.
+- **RED's evidence is observed, not claimed** (`app/tdd/suite_fingerprint.py`).
+  - RunTests hashes the test files (as `is_test_path` classifies them, without caches and
+    `.tddagents/`) through the `Workspace` protocol.
+  - It compares that hash with `AppState.tdd_item_test_baseline`, taken when an item starts:
+    session start and resume, a plan change of the current item, or a tester re-spawned to
+    RED.
+  - Writes by any tool count. RunTests stays the only evidence writer, and the baseline
+    writers stay reset-only (`test_run_tests_is_the_only_ledger_writer`).
+- **Coverage on every run.** `pytest_command` adds pytest-cov with a config that omits the
+  test paths. The report goes to `term-missing`, so the model sees the uncovered lines, and
+  to JSON in the workspace's protected `.tddagents/coverage/`, which is read back and deleted.
+  - The session venv gains `pytest-cov==7.0.0` and `coverage==7.11.3`.
+  - Each RunTests result says what the run did to the ledger and what the phase needs next.
+- **Write rules:**
+  - RED: tests only;
+  - GREEN: production only, tests locked;
+  - **REFACTOR: both**. The deny rules, the runtime check, the Bash redirect check and the
+    pool's own copy of the rule (`assemble_tool_pool`) all changed.
+- **Prompts:** the contract, the session prompts, the planner (relaxed: one behaviour per
+  item, no fail-first rule, hardening items allowed), the agents and the refactoring
+  catalogue, the skills, the coordinator, the compaction sections, the classifier context
+  and the RunTests/UpdatePlan prompts.
+  - The threshold reaches prompts as `{{COVERAGE_THRESHOLD}}` (`TDD_PROMPT_VARS`), so the
+    figure is written in one place.
+  - `tests/test_tdd_phase12_prompts.py` scans every prompt for the old fail-first rule.
+- **The gate** counts timeouts: each is re-run alone, and one that still hangs counts as
+  detected (`scripts/mutmut_score.py --timeouts-reverified`). The integration tests' venv is
+  built once (`tests/conftest.py::shared_test_venv`).
+
+*Divergences and limits, recorded:*
+- the fingerprint reads every test file on each RED run (cheap for TDD-sized projects);
+- coverage measures what pytest-cov sees under `--cov=.`, so production code outside the
+  workspace root is not counted;
+- the TodoWrite example "Write the failing test" is kept as a sample task name.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
    continue reasons and ten terminal reasons, ported from `src/query.ts`. No more router
    functions comparing strings.
-2. **Red→Green is no longer enforced by graph topology.** It is a phase ledger plus
+2. **The TDD cycle is no longer enforced by graph topology.** It is a phase ledger plus
    phase-derived deny rules plus a Stop hook that refuses to let the loop terminate — three
    independent barriers, none reachable by a model decision. This is §3.3 of the plan and it
-   is the part a thesis reviewer will press on.
+   is the part a thesis reviewer will press on. **Since Phase 12 the guarantee is not
+   "observed failure first"**: it is that each sub-requirement's tests were written and run
+   before any production code (RED), passed with the tests locked (GREEN), and passed again
+   in a mandatory REFACTOR with line + branch coverage at the threshold.
 3. **Prompts are composed Markdown, not templates**, following claude-code's own
    file conventions.
 
@@ -1451,7 +1504,7 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
 
 ## What this is
 
-TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green phases of TDD. Agent-generated code is written and executed in a **local per-session workspace** (`.tddagents/runs/<thread_id>/workspace`) with its own Python virtualenv (`.tddagents/runs/<thread_id>/venv`, pytest pinned), not inside TDDAgents' environment. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL (`POSTGRES_URL`), with an in-memory fallback.
+TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green–Refactor phases of TDD (since Phase 12: robust tests, then code, then a mandatory coverage-checked refactor). Agent-generated code is written and executed in a **local per-session workspace** (`.tddagents/runs/<thread_id>/workspace`) with its own Python virtualenv (`.tddagents/runs/<thread_id>/venv`, pytest pinned), not inside TDDAgents' environment. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL (`POSTGRES_URL`), with an in-memory fallback.
 
 It is **claude-code's loop with a LangGraph session shell around it**: each plan item is one loop run, and LangGraph only checkpoints the session, asks the user (`interrupt()`) and iterates the plan. See [The architecture](#the-architecture--claude-codes-loop-laid-out-like-its-source).
 
