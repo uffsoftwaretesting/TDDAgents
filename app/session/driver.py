@@ -118,15 +118,18 @@ def development_run_options(shell: SessionShell, options: SessionOptions) -> dic
 
 def develop_headless(
     shell: SessionShell, thread_id: str, values: dict[str, Any], workspace: Any, options: SessionOptions,
-    **run_options: Any,
+    *, prompt: str | None = None, **run_options: Any,
 ) -> DevelopmentOutcome:
-    """A planned session's development with nobody to ask (`run_headless`), to its end."""
+    """
+    A planned session's development with nobody to ask (`run_headless`), to its end. `prompt`
+    continues a resumed conversation (the user's answer to the question it stopped on).
+    """
     from app.cli.print import run_headless
     from app.session.llm import run_sync
 
     return run_sync(run_headless(
         thread_id, str(values.get("specification") or ""), list(values.get("plan") or []),
-        workspace=workspace, **{**development_run_options(shell, options), **run_options},
+        workspace=workspace, prompt=prompt, **{**development_run_options(shell, options), **run_options},
     ))
 
 
@@ -202,21 +205,24 @@ def rescope_session(
 
 def develop_interactive(
     shell: SessionShell, thread_id: str, values: dict[str, Any], workspace: Any, options: SessionOptions,
-    *, io_factory: Callable[[Callable[[], None]], Any] | None = None, **run_options: Any,
+    *, io_factory: Callable[[Callable[[], None]], Any] | None = None, prompt: str | None = None,
+    **run_options: Any,
 ) -> DevelopmentOutcome:
     """
     A planned session's development at the terminal (`app/screens/repl.py`), until the user
-    leaves. Permission questions and `/requirements` (the analyst's questions included) are
-    answered on the same terminal.
+    leaves. Permission questions, the model's `AskUserQuestion` and `/requirements` (the
+    analyst's questions included) are answered on the same terminal. `prompt` continues a
+    resumed conversation.
     """
     from app.session.llm import run_sync
 
-    return run_sync(_develop_interactive(shell, thread_id, values, workspace, options, io_factory, run_options))
+    return run_sync(_develop_interactive(shell, thread_id, values, workspace, options, io_factory, prompt,
+                                         run_options))
 
 
 async def _develop_interactive(
     shell: SessionShell, thread_id: str, values: dict[str, Any], workspace: Any, options: SessionOptions,
-    io_factory: Callable[[Callable[[], None]], Any] | None, run_options: dict[str, Any],
+    io_factory: Callable[[Callable[[], None]], Any] | None, prompt: str | None, run_options: dict[str, Any],
 ) -> DevelopmentOutcome:
     import asyncio
 
@@ -239,11 +245,14 @@ async def _develop_interactive(
     async def ask(prompt: PermissionPrompt) -> PermissionAnswer:
         return await holder["repl"].ask_permission(prompt)
 
+    async def ask_questions(questions: tuple[dict[str, Any], ...]) -> dict[str, str] | None:
+        return await holder["repl"].ask_questions(questions)
+
     specification = str(values.get("specification") or "")
     plan = TddPlan.from_texts(list(values.get("plan") or []))
     opts = {**development_run_options(shell, options), **run_options}
     async with open_session_run(run_id=session_run_id(thread_id), plan=plan, workspace=workspace,
-                                can_use_tool=build_interactive_can_use_tool(ask), **opts) as run:
+                                can_use_tool=build_interactive_can_use_tool(ask, ask_questions), **opts) as run:
         io = io_factory(lambda: holder["repl"].interrupt())
         loop = asyncio.get_running_loop()
 
@@ -266,7 +275,7 @@ async def _develop_interactive(
         current = run.store.get().tdd_plan
         with io:
             terminal = await repl.run_session(
-                development_start_prompt(specification, current), development_resume_prompt(current)
+                development_start_prompt(specification, current), prompt or development_resume_prompt(current)
             )
         return DevelopmentOutcome(terminal=terminal, plan=run.store.get().tdd_plan)
 

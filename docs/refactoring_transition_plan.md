@@ -517,6 +517,10 @@ sub-requirement has been observed Red → Green.
 - **Reports:** they go beside the project; the `workspace_output_<thread>` copy is gone.
 - **The cycle:** unchanged. GREEN keeps failing runs, and goes back to RED only for a wrong
   test.
+- **Questions (follow-up, same day):** a live run looped on a question asked in plain text.
+  Upstream's `AskUserQuestion` is ported: the REPL asks it, and a run with nobody to ask denies
+  it and stops there, resumable with the answer (`--thread-id <id> "<answer>"`). The TDD stop
+  hook's refusal names the tool. See `CLAUDE.md`, "What the AskUserQuestion port changed".
 
 ---
 

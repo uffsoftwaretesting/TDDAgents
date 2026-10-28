@@ -281,6 +281,7 @@ After the Planner, the terminal becomes a conversation with the agents, in the m
 - **Typing while they work** queues your message; the agents read it between tool calls.
 - **Esc** (or Ctrl-C) interrupts the current turn. A pending permission question is answered *No*.
 - **Permission questions** are numbered: type the number of your choice. After a *No* you may add what to do instead (`3 use the existing helper`). A *don't ask again* choice adds a rule for the session.
+- **Questions from the agents** (`AskUserQuestion`) come one at a time with numbered options: type a number, several numbers (`1,3`) when more than one may be chosen, or your own answer. Esc declines and interrupts the turn.
 - **The agents may propose plan changes** (the `UpdatePlan` tool). Each one is shown as a diff and asked; only its observed Red → Green → Refactor cycle marks an item done.
 
 | Command | Effect |
@@ -319,7 +320,7 @@ python -m app.main -p --spec app/prompts/specs/<file>.txt
 echo "Build a calculator" | python -m app.main -p
 ```
 
-The checklist is approved automatically; a clarifying question from the Analyst fails the session. Development runs the same conversation with nobody to answer: every permission question is denied (plan changes included), and a turn that ends before the current item is done stops the session, with the remaining items reported NOT_RUN. The exit code is 0 only if every sub-requirement completed its Red → Green → Refactor cycle.
+The checklist is approved automatically; a clarifying question from the Analyst fails the session. Development runs the same conversation with nobody to answer: every permission question is denied (plan changes included), and a turn that ends before the current item is done stops the session, with the remaining items reported NOT_RUN. A question from the agents (`AskUserQuestion`) stops the session there and prints it; answer with `python -m app.main -p --thread-id <id> "<answer>"` (Postgres checkpointing only). The exit code is 0 only if every sub-requirement completed its Red → Green → Refactor cycle.
 
 ### Other flags
 

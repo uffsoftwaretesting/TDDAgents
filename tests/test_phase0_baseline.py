@@ -393,10 +393,11 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     assert [r.rule_content for r in perm.always_ask_rules] == ["from-policy"]
     assert perm.additional_working_directories == (str(tmp_path),)
     # Phase 7: the main thread also holds the Agent tool, as upstream's always does; Phase 8
-    # adds TaskOutput and TaskStop (SendMessage is off without agent teams), Phase 11 UpdatePlan.
+    # adds TaskOutput and TaskStop (SendMessage is off without agent teams), Phase 11 UpdatePlan,
+    # and AskUserQuestion is upstream's main-thread base tool.
     assert {t.name for t in ctx.tools} == {
         "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite", "Agent",
-        "TaskOutput", "TaskStop", "Skill", "UpdatePlan"}
+        "TaskOutput", "TaskStop", "Skill", "UpdatePlan", "AskUserQuestion"}
     assert seen[0].messages[0].content == "add two numbers"
     # Phase 5: the user-input attachments follow the prompt — since Phase 8 the skill listing,
     # then the initial TDD state (upstream's source order).

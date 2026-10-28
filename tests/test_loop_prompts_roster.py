@@ -33,8 +33,8 @@ def test_every_tool_directory_has_its_prompt() -> None:
     app_root = PROMPTS_ROOT.parent
     tool_dirs = sorted(d for d in (app_root / "tools").iterdir() if d.is_dir() and d.name.endswith("_tool"))
     assert [d.name for d in tool_dirs] == [
-        "agent_tool", "bash_tool", "file_edit_tool", "file_read_tool", "file_write_tool", "glob_tool",
-        "grep_tool", "list_mcp_resources_tool", "mcp_tool", "read_mcp_resource_tool", "send_message_tool",
+        "agent_tool", "ask_user_question_tool", "bash_tool", "file_edit_tool", "file_read_tool", "file_write_tool",
+        "glob_tool", "grep_tool", "list_mcp_resources_tool", "mcp_tool", "read_mcp_resource_tool", "send_message_tool",
         "skill_tool", "task_output_tool", "task_stop_tool", "todo_write_tool",
     ]
     with_markdown = [d for d in tool_dirs if d.name not in ("agent_tool", "mcp_tool")] + [

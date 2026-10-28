@@ -16,6 +16,10 @@ answer here can open a phase-forbidden write.
 4. "No" rejects with upstream's `REJECT_MESSAGE`; without feedback the turn is aborted, so
    control returns to the user; with feedback the model hears it and goes on.
 
+`AskUserQuestion` has its own question, as upstream's `PermissionRequest` routes it to
+`AskUserQuestionPermissionRequest`: the user answers each question (`ask_questions`) and the
+call is allowed with the answers in its input; declining aborts the turn (`onReject`).
+
 Divergences: the hooks run before the question, not in a race with it; an accept-with-feedback
 input, the classifier pre-check and the bridge/channel relays are not ported.
 """
@@ -29,6 +33,9 @@ from typing import Any
 from app.components.permissions.permission_options import (
     PermissionOption,
     permission_options,
+)
+from app.tools.ask_user_question_tool.ask_user_question_tool import (
+    ASK_USER_QUESTION_TOOL_NAME,
 )
 from app.types.permissions import PermissionBehavior, PermissionResult
 from app.utils.messages import REJECT_MESSAGE, REJECT_MESSAGE_WITH_REASON_PREFIX
@@ -60,6 +67,8 @@ class PermissionAnswer:
 
 
 AskUser = Callable[[PermissionPrompt], Awaitable[PermissionAnswer]]
+#: `AskUserQuestion`'s questions in, the answers out (question text -> answer); `None` declines.
+AskQuestions = Callable[[tuple[dict[str, Any], ...]], Awaitable[dict[str, str] | None]]
 #: `CanUseToolFn`: the gate's 'ask', resolved — (tool, input, ask, context, tool_use_id) -> decision.
 CanUseTool = Callable[[Any, dict[str, Any], PermissionResult, Any, str], Coroutine[Any, Any, PermissionResult]]
 
@@ -75,8 +84,8 @@ def _chosen(options: Sequence[PermissionOption], value: str) -> PermissionOption
     return next((o for o in options if o.value == value), PermissionOption(value, value, reject=True))
 
 
-def build_interactive_can_use_tool(ask_user: AskUser) -> CanUseTool:
-    """The REPL's `canUseTool`, asking through `ask_user`."""
+def build_interactive_can_use_tool(ask_user: AskUser, ask_questions: AskQuestions | None = None) -> CanUseTool:
+    """The REPL's `canUseTool`, asking through `ask_user` (and `ask_questions` for `AskUserQuestion`)."""
 
     async def can_use_tool(
         tool: Any, input_args: dict[str, Any], result: PermissionResult, context: Any, tool_use_id: str
@@ -89,6 +98,13 @@ def build_interactive_can_use_tool(ask_user: AskUser) -> CanUseTool:
         )
         if hooked is not None:
             return hooked
+        if tool.name == ASK_USER_QUESTION_TOOL_NAME and ask_questions is not None:
+            answers = await ask_questions(tuple(input_args.get("questions") or ()))
+            if answers is None:
+                context.cancel.cancel()
+                return rejection(None)
+            return PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input={**input_args, "answers": answers},
+                                    decision_reason={"type": "user", "option": "answered"})
         options = permission_options(tool.name, input_args, result.suggestions, perm, permission_cwd(context))
         answer = await ask_user(PermissionPrompt(
             tool_name=tool.name,

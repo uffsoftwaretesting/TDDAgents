@@ -27,10 +27,18 @@ from app.query.stop_hooks import StopHookResult
 from app.tdd.coverage_gate import COVERAGE_THRESHOLD
 from app.tdd.ledger import PhaseLedger
 from app.tdd.phase_permissions import BACK_TO_RED
+from app.tools.ask_user_question_tool.ask_user_question_tool import (
+    ASK_USER_QUESTION_TOOL_NAME,
+)
 
 if TYPE_CHECKING:
     from app.query.config import RunConfig
     from app.query.state import LoopState
+
+
+#: The way to a decision only the user can make (user decision 2026-10-28): a question asked in
+#: text is sent back here like any other early stop, so it is routed to `AskUserQuestion`.
+ASK_THE_USER = "If you need a decision from the user, call AskUserQuestion instead of asking in text."
 
 
 def incomplete_cycle_message(ledger: PhaseLedger) -> str:
@@ -55,7 +63,8 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
     block every stop): while the cycle is incomplete, every stop is blocked with what is still
     missing, naming the current sub-requirement when there is a plan. `stop_hook_active` is
     no latch here; a turn ends early only on `/pause`, a configured hook's `continue: false`,
-    an abort or an error. A complete cycle allows termination (COMPLETED).
+    an abort or an error. A complete cycle allows termination (COMPLETED). When the run's pool
+    holds `AskUserQuestion`, the message names it as the way to a decision only the user can make.
     """
     app_state = state.tool_context.get_app_state()
     ledger = app_state.phase_ledger
@@ -68,4 +77,6 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
     if current is not None:
         msg = f"Current sub-requirement {current.id}: {current.text}\n\n{msg}"
 
+    if any(getattr(tool, "name", None) == ASK_USER_QUESTION_TOOL_NAME for tool in state.tool_context.tools):
+        msg = f"{msg} {ASK_THE_USER}"
     return StopHookResult(blocking_errors=(HumanMessage(content=msg),))

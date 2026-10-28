@@ -12,8 +12,10 @@ Two modes, as claude-code has them:
 * **Headless** (`-p/--print`, upstream `claude -p` -> `runHeadless`): the request comes from
   `--spec FILE`, the prompt argument or stdin, and nobody is asked anything. The analyst's
   checklist is approved; a clarifying question fails the session; the plan is worked through
-  in one conversation and a permission 'ask' is denied. The exit code is 0 only when every
-  sub-requirement completed its Red -> Green -> Refactor cycle.
+  in one conversation and a permission 'ask' is denied. A question the agents ask
+  (`AskUserQuestion`) stops the session there, and `--thread-id <id> "<answer>"` continues it
+  with the answer as the next prompt, as upstream's `claude -p --resume <id> "<prompt>"`. The
+  exit code is 0 only when every sub-requirement completed its Red -> Green -> Refactor cycle.
 
 Either way the session is one LangGraph thread (`app/session/`): it checkpoints to
 `POSTGRES_URL` by default (`--checkpoint memory` opts out), and `--thread-id` continues a
@@ -28,6 +30,7 @@ import logging
 import os
 import sys
 import textwrap
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +43,7 @@ if __package__ in (None, ""):
 from dotenv import load_dotenv
 
 from app.query.transitions import Terminal
+from app.session.checkpointer import is_persistent_checkpointer
 from app.session.driver import (
     EXIT_COMMANDS,
     SessionOptions,
@@ -53,6 +57,7 @@ from app.session.driver import (
     fresh_thread_id,
 )
 from app.tdd.plan import ItemStatus, TddPlan
+from app.tools.ask_user_question_tool.ask_user_question_tool import render_questions
 from app.types.permissions import PERMISSION_MODES
 
 logging.basicConfig(
@@ -385,6 +390,17 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
     return summary
 
 
+def waiting_text(thread_id: str, question: Sequence[dict[str, Any]], headless: bool, persistent: bool) -> str:
+    """What the user is told when the agents stopped on a question nobody could answer."""
+    lines = ["\n❓ The agents are waiting for your answer:", render_questions(question)]
+    if persistent:
+        flag = "-p " if headless else ""
+        lines.append(f"\n   Answer with: python -m app.main {flag}--thread-id {thread_id} \"<your answer>\"")
+    else:
+        lines.append("\n   This session checkpointed in memory, so it cannot be resumed with the answer.")
+    return "\n".join(lines)
+
+
 def report(
     run: SessionRun, thread_id: str, workspace: Any, plan: TddPlan | None = None, terminal: Terminal | None = None
 ) -> None:
@@ -448,19 +464,24 @@ def main(argv: list[str] | None = None) -> int:
         print("\n" + "=" * 80)
         print("🚀  TDDAGENTS SESSION " + ("(HEADLESS)" if args.print else "(INTERACTIVE)"))
         print("=" * 80)
+        # On a session that already exists, the prompt is the user's next message (upstream's
+        # `--resume <id> "<prompt>"`): the answer to the question the agents stopped on.
+        resumed_prompt = initial_input if shell.has_session(thread_id) else None
         try:
             run = drive_session(shell, thread_id, initial_input, answer=None if args.print else interactive_answer)
             if not run.planned:
                 report(run, thread_id, workspace)
                 return 1
             develop = develop_headless if args.print else develop_interactive
-            outcome = develop(shell, thread_id, run.values, workspace, session_options(args))
+            outcome = develop(shell, thread_id, run.values, workspace, session_options(args), prompt=resumed_prompt)
         except KeyboardInterrupt:
             print(f"\n🛑 Interrupted. Continue later with --thread-id {thread_id}.")
             return 130
         # `/requirements` may have re-planned the thread: report it as it now stands.
         run = SessionRun(values=dict(shell.get_state(thread_id).values))
         report(run, thread_id, workspace, outcome.plan, outcome.terminal)
+        if outcome.question:
+            print(waiting_text(thread_id, outcome.question, args.print, is_persistent_checkpointer(shell.checkpointer)))
         return 0 if outcome.completed else 1
     finally:
         logging.getLogger().removeHandler(file_handler)

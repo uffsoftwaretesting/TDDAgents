@@ -18,7 +18,10 @@ have no equivalent here; the summary message and notifications are UI.
    `tdd_phase_incomplete_hook`. It has no latch (Phase 12, user decision, as upstream's Stop
    hooks): every stop of an incomplete cycle is sent back with what is missing, until RunTests
    observes the cycle, the user pauses or aborts, or an error ends the turn. A worker (an
-   `agent_id`) is not guarded by it; the coordinator is.
+   `agent_id`) is not guarded by it; the coordinator is. Before it, a question nobody could
+   answer (a denied `AskUserQuestion`, `awaiting_user_answer`) ends the turn as
+   `stop_hook_prevented`: the session waits for the user, as upstream's `-p` ends once the
+   model stops after that denial.
 2. **Configured hooks can add a block, never clear one.** Their blocking errors are added to
    the TDD hook's; a configured `continue: false` stops the run as `stop_hook_prevented`,
    which the runner records as a failed sub-requirement, not as `completed`. Nothing a
@@ -119,11 +122,18 @@ def build_stop_hooks_runner() -> StopHooks:
     # Imported here: the TDD modules return this module's `StopHookResult`.
     from app.tdd.plan_advance import advance_plan
     from app.tdd.stop_hook import tdd_phase_incomplete_hook
+    from app.tools.ask_user_question_tool.ask_user_question_tool import (
+        awaiting_user_answer,
+    )
 
     async def run_stop_hooks(state: LoopState, config: RunConfig) -> StopHookResult:
         is_worker = bool(getattr(state.tool_context, "agent_id", None))
         tdd = StopHookResult()
         if not is_worker:
+            if awaiting_user_answer(state.messages) is not None:
+                # The model asked the user and nobody could answer: the turn ends and waits,
+                # as upstream's `-p` ends when the model stops after the denial.
+                return StopHookResult(prevent_continuation=True)
             advanced = advance_plan(state)
             tdd = advanced if advanced is not None else await tdd_phase_incomplete_hook(state, config)
             if tdd.prevent_continuation:

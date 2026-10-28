@@ -13,6 +13,10 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
   returns to the prompt; a pending permission question is answered "No".
 * **Permission questions** (`components/permissions/`): `ask_permission` is the run's
   `canUseTool` prompt — the options are numbered and the next line typed answers them.
+* **The model's questions** (`AskUserQuestion`, upstream's `AskUserQuestionPermissionRequest`):
+  `ask_questions` shows one question at a time with its options and an "Other"; a number (or
+  several, for a multiSelect question) picks, any other text is the user's own answer, and Esc
+  declines.
 * **Slash commands** (`app/commands.py`): never run mid-turn, as upstream's queue processor;
   the immediate ones (`/help`, `/plan`, `/pause`, `/exit`) do.
 
@@ -26,8 +30,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
-from dataclasses import replace
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
+from dataclasses import dataclass, replace
+from functools import partial
 from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
@@ -123,6 +128,57 @@ def parse_permission_answer(options: Sequence[PermissionOption], line: str) -> P
     return PermissionAnswer(no.value if no is not None else "no", text)
 
 
+def _options(question: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return list(question.get("options") or [])
+
+
+def render_question(question: Mapping[str, Any], number: int, total: int) -> str:
+    """One of the model's questions, its options numbered and "Other" last."""
+    options = _options(question)
+    lines = [f"? [{question.get('header', '')}] {question.get('question', '')}"
+             + (f" ({number}/{total})" if total > 1 else "")]
+    lines += [f"  {i}. {o.get('label', '')} — {o.get('description', '')}" for i, o in enumerate(options, start=1)]
+    lines.append(f"  {len(options) + 1}. Other — type your own answer")
+    if question.get("multiSelect"):
+        lines.append(f"Choose one or more of 1-{len(options)} (e.g. \"1,3\"), or type your own answer.")
+    else:
+        lines.append(f"Choose 1-{len(options)}, or type your own answer.")
+    return "\n".join(lines)
+
+
+def parse_question_answer(question: Mapping[str, Any], line: str) -> str | None:
+    """
+    The answer a line gives: an option's label, several labels joined by ", " for a
+    multiSelect question, or the text itself ("Other"). `None` asks again (an empty line, a
+    number out of range, or "Other" picked without its text).
+    """
+    text = line.strip()
+    if not text:
+        return None
+    labels = [str(o.get("label", "")) for o in _options(question)]
+    other = len(labels) + 1
+    head, _, rest = text.partition(" ")
+    if head.isdigit() and int(head) == other:
+        return rest.strip() or None
+    tokens = text.replace(",", " ").split() if question.get("multiSelect") else [text]
+    if not all(token.isdigit() for token in tokens):
+        return text
+    picks = [int(token) for token in tokens]
+    if not all(1 <= pick <= len(labels) for pick in picks):
+        return None
+    return ", ".join(labels[pick - 1] for pick in dict.fromkeys(picks))
+
+
+@dataclass(frozen=True, slots=True)
+class PendingAnswer:
+    """A question waiting for the next line: how to read it, what to say when it reads nothing, and Esc's answer."""
+
+    parse: Callable[[str], Any]
+    future: asyncio.Future[Any]
+    retry: str
+    cancelled: Any
+
+
 def turn_end_text(terminal: Terminal, plan: TddPlan, paused: bool) -> str:
     """What the user is told when a turn ends."""
     if terminal in (Terminal.ABORTED_STREAMING, Terminal.ABORTED_TOOLS):
@@ -147,7 +203,7 @@ class Repl:
         self.rescope = rescope
         self.turn: asyncio.Task[None] | None = None
         self.deferred: list[SlashCommand] = []
-        self.pending: tuple[PermissionPrompt, asyncio.Future[PermissionAnswer]] | None = None
+        self.pending: PendingAnswer | None = None
         self.last_terminal: Terminal | None = None
         self.exiting = False
         run.on_message = self._show
@@ -168,15 +224,36 @@ class Repl:
 
     # ── permissions ────────────────────────────────────────────────────────
 
-    async def ask_permission(self, prompt: PermissionPrompt) -> PermissionAnswer:
-        """The run's `canUseTool` prompt: shown now, answered by the next line typed."""
-        future: asyncio.Future[PermissionAnswer] = asyncio.get_running_loop().create_future()
-        self.pending = (prompt, future)
-        self.io.write(render_permission_prompt(prompt))
+    async def _wait_for_answer(self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any) -> Any:
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        self.pending = PendingAnswer(parse=parse, future=future, retry=retry, cancelled=cancelled)
+        self.io.write(text)
         try:
             return await future
         finally:
             self.pending = None
+
+    async def ask_permission(self, prompt: PermissionPrompt) -> PermissionAnswer:
+        """The run's `canUseTool` prompt: shown now, answered by the next line typed."""
+        answer: PermissionAnswer = await self._wait_for_answer(
+            render_permission_prompt(prompt), lambda line: parse_permission_answer(prompt.options, line),
+            f"Choose 1-{len(prompt.options)}.", PermissionAnswer("no"),
+        )
+        return answer
+
+    async def ask_questions(self, questions: Sequence[Mapping[str, Any]]) -> dict[str, str] | None:
+        """`AskUserQuestion`'s questions, one at a time: question text -> answer, or `None` on Esc."""
+        answers: dict[str, str] = {}
+        for number, question in enumerate(questions, start=1):
+            parse: Callable[[str], str | None] = partial(parse_question_answer, question)
+            answer = await self._wait_for_answer(
+                render_question(question, number, len(questions)), parse,
+                f"Choose 1-{len(_options(question)) + 1}, or type your own answer.", None,
+            )
+            if answer is None:
+                return None
+            answers[str(question.get("question", ""))] = answer
+        return answers
 
     # ── turns ──────────────────────────────────────────────────────────────
 
@@ -198,8 +275,8 @@ class Repl:
 
     def interrupt(self) -> None:
         """Esc: a pending question is answered No, and the turn is aborted (upstream `onReject` + abort)."""
-        if self.pending is not None and not self.pending[1].done():
-            self.pending[1].set_result(PermissionAnswer("no"))
+        if self.pending is not None and not self.pending.future.done():
+            self.pending.future.set_result(self.pending.cancelled)
         if self.busy:
             self.run.ctx.cancel.cancel()
 
@@ -214,12 +291,12 @@ class Repl:
     async def handle_line(self, line: str) -> None:
         """One line from the user: an answer, a command, or a message to the agents."""
         if self.pending is not None:
-            prompt, future = self.pending
-            answer = parse_permission_answer(prompt.options, line)
+            pending = self.pending
+            answer = pending.parse(line)
             if answer is None:
-                self.io.write(f"Choose 1-{len(prompt.options)}.")
-            elif not future.done():
-                future.set_result(answer)
+                self.io.write(pending.retry)
+            elif not pending.future.done():
+                pending.future.set_result(answer)
             return
         command = parse_slash_command(line)
         if command is not None:

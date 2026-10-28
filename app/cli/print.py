@@ -140,7 +140,9 @@ def main_thread_tools(
     SendMessage, which disables itself unless agent teams are on). Workers draw from the
     built-ins alone (upstream's `assembleToolPool` for the worker), and `resolveAgentTools`
     keeps Agent and the task tools out of every worker. `UpdatePlan` (Phase 11) is the main
-    thread's alone: the session's plan is changed by the thread the user talks to. The Skill tool, given the run's
+    thread's alone: the session's plan is changed by the thread the user talks to. So is
+    `AskUserQuestion`, which upstream's `ALL_AGENT_DISALLOWED_TOOLS` keeps from every worker.
+    The Skill tool, given the run's
     `skill_registry`, joins both rosters, as upstream's base tools hold it. The run's
     `mcp_tools` join the workers' roster here; the main thread's arrive through
     `assemble_tool_pool(mcp_tools=…)`. In coordinator mode the main thread keeps only the
@@ -150,6 +152,9 @@ def main_thread_tools(
     from app.tools.agent_tool.agent_tool import build_agent_tool
     from app.tools.agent_tool.load_agents_dir import (
         get_agent_definitions_with_overrides,
+    )
+    from app.tools.ask_user_question_tool.ask_user_question_tool import (
+        build_ask_user_question_tool,
     )
     from app.tools.send_message_tool.send_message_tool import build_send_message_tool
     from app.tools.task_output_tool.task_output_tool import build_task_output_tool
@@ -171,7 +176,7 @@ def main_thread_tools(
     )
     tools: list[Tool] = [
         *built_ins, agent_tool, build_task_output_tool(), build_task_stop_tool(), send_message,
-        build_update_plan_tool(),
+        build_update_plan_tool(), build_ask_user_question_tool(),
     ]
     return apply_coordinator_tool_filter(tools) if coordinator else tools
 
@@ -647,6 +652,8 @@ class DevelopmentOutcome:
 
     terminal: Terminal | None
     plan: TddPlan
+    #: The questions the session stopped on, with nobody to answer them (`awaiting_user_answer`).
+    question: tuple[dict[str, Any], ...] | None = None
 
     @property
     def completed(self) -> bool:
@@ -655,22 +662,30 @@ class DevelopmentOutcome:
 
 
 async def run_headless(
-    session_id: str, specification: str, plan_texts: Sequence[str], *, workspace: Any, **run_options: Any
+    session_id: str, specification: str, plan_texts: Sequence[str], *, workspace: Any, prompt: str | None = None,
+    **run_options: Any,
 ) -> DevelopmentOutcome:
     """
     `runHeadless` for the development phase (Phase 11): one conversation over the whole plan
     with nobody to ask, so a permission 'ask' (a plan change among them) is denied and the
     session ends at the first turn that ends without the plan done (user decision 2026-10-27).
+    A question the model asks (`AskUserQuestion`) is denied too, and the session stops there
+    with it (`DevelopmentOutcome.question`). `prompt` continues a resumed conversation — the
+    user's answer — as upstream's `claude -p --resume <id> "<prompt>"`.
     """
     from app.session.prompts import development_resume_prompt, development_start_prompt
+    from app.tools.ask_user_question_tool.ask_user_question_tool import (
+        awaiting_user_answer,
+    )
 
     async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan.from_texts(list(plan_texts)),
                                 workspace=workspace, **run_options) as run:
         plan = run.store.get().tdd_plan
         reason = await begin_session(
-            run, development_start_prompt(specification, plan), development_resume_prompt(plan)
+            run, development_start_prompt(specification, plan), prompt or development_resume_prompt(plan)
         )
-        return DevelopmentOutcome(terminal=reason, plan=run.store.get().tdd_plan)
+        return DevelopmentOutcome(terminal=reason, plan=run.store.get().tdd_plan,
+                                  question=awaiting_user_answer(run.engine.mutable_messages))
 
 
 __all__ = [

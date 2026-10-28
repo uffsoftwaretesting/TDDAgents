@@ -47,7 +47,7 @@ TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
 | `query/config.py`, `query/deps.py` | `query/config.ts`, `query/deps.ts` | `RunConfig` + `Gates` (snapshotted at entry); `LoopDeps` (the DI seam) and the production deps |
 | `query/stop_hooks.py`, `query/withhold.py` | `query/stopHooks.ts`, `query.ts` | `StopHookResult`, `build_stop_hooks_runner` (**TDD hook first**); withhold-then-decide recovery predicates |
 | `tool.py`, `tools/tools.py` | `Tool.ts`, `tools.ts` / `utils/toolPool.ts` | `Tool`, `build_tool` (fail-closed defaults), `ToolResult`, `ToolContext` (`ToolUseContext`); `assemble_tool_pool` with phase-derived deny rules |
-| `tools/<name>_tool/` | `tools/<Name>Tool/` | One directory per tool, its `prompt.md` beside it: `bash_tool` (+ `bash_permissions`, `bash_security`, `path_validation`, `read_only_validation`, `sed_validation`), `file_read_tool`, `file_write_tool`, `file_edit_tool` (+ `utils`, `constants`), `glob_tool`, `grep_tool`, `todo_write_tool`, `agent_tool` (`agent_tool`, `run_agent`, `load_agents_dir`, `agent_tool_utils`, `resume_agent`, `agent_memory`, `prompt`), `skill_tool`, `send_message_tool`, `task_output_tool`, `task_stop_tool`, `mcp_tool`, `list_mcp_resources_tool`, `read_mcp_resource_tool`. `tools/utils.py` holds what the five file tools share |
+| `tools/<name>_tool/` | `tools/<Name>Tool/` | One directory per tool, its `prompt.md` beside it: `bash_tool` (+ `bash_permissions`, `bash_security`, `path_validation`, `read_only_validation`, `sed_validation`), `file_read_tool`, `file_write_tool`, `file_edit_tool` (+ `utils`, `constants`), `glob_tool`, `grep_tool`, `todo_write_tool`, `ask_user_question_tool`, `agent_tool` (`agent_tool`, `run_agent`, `load_agents_dir`, `agent_tool_utils`, `resume_agent`, `agent_memory`, `prompt`), `skill_tool`, `send_message_tool`, `task_output_tool`, `task_stop_tool`, `mcp_tool`, `list_mcp_resources_tool`, `read_mcp_resource_tool`. `tools/utils.py` holds what the five file tools share |
 | `services/api/` | `services/api/claude.ts`, `withRetry.ts` | `claude.py`: `stream_call_model`, one message per content block, prompt-cache breakpoints; `with_retry.py`: the one ceiling, `DEFAULT_MAX_RETRIES = 10` |
 | `services/tools/` | `services/tools/` | `tool_execution.py` (`runToolUse`: validation → `validate_input` → PreToolUse → gate → call → governance → PostToolUse), `tool_orchestration.py`, `streaming_tool_executor.py`, `tool_hooks.py` (+ `resolveHookPermissionDecision`) |
 | `services/compact/` | `services/compact/` | `compactConversation`, `autoCompactIfNeeded`, microcompact, the compact prompt + **TDD sections**, post-compact cleanup, the summarizer seam |
@@ -1191,8 +1191,8 @@ in the plan's Phase 13 outcome.
   options, and to size an expensive check so it runs normally. A live run looped on a
   `RUN_PERF=1`-gated performance test.
 - **A question from the model is normal behaviour** (user decision). A headless run has nobody
-  to answer it, and the stop hook keeps sending the model back. When this happens in a
-  supervised live run, the question is brought to the user; there is no code path for it.
+  to answer it, and the stop hook keeps sending the model back. *(Superseded the same day by
+  `AskUserQuestion`, below: a question now has its own path.)*
 - **The final run is the project's own suite.** `run_suite` (RunTests' own runner) runs once
   more at the end, in the project's venv, into `metrics_and_logging/final_test_run.txt`. A
   skip reads "NOT passing". This answers the live run that "passed" while a flake8 test
@@ -1230,6 +1230,46 @@ in the plan's Phase 13 outcome.
   command-injection check. The PR section is not ported (no `gh` workflow here);
 - the login shell (`bash -l`) stands in for upstream's shell snapshot;
 - sessions created before Phase 13 under `.tddagents/runs/` are not migrated.
+
+### What the AskUserQuestion port changed (2026-10-28)
+
+A live run looped because the model asked the user in plain text, with nobody to answer, and the
+TDD stop hook sent every stop back. The user's direction: follow claude-code's source, where a
+question is a tool call. TDDAgents is mostly interactive (user decision), so the REPL is the main
+path and headless keeps upstream's `-p` behaviour.
+
+- **`AskUserQuestion`** (`app/tools/ask_user_question_tool/`) is upstream's tool, ported whole:
+  - the schema (1–4 questions, 2–4 options, `multiSelect`, `answers`, `annotations`, `metadata`)
+    and the uniqueness refine;
+  - `checkPermissions` always asks, and `requiresUserInteraction` keeps that ask in every mode;
+  - the result is `mapToolResultToToolResultBlockParam`'s text.
+
+  It sits on the main thread beside `UpdatePlan`. Workers never get it
+  (`ALL_AGENT_DISALLOWED_TOOLS`), and neither does the coordinator (upstream's filter).
+- **In the REPL** the question is its own prompt, as upstream's `AskUserQuestionPermissionRequest`.
+  `build_interactive_can_use_tool(ask, ask_questions)` hands the questions to
+  `Repl.ask_questions`, which asks one at a time. A number picks an option, several numbers pick
+  for a multiSelect question, and any other text is the user's own answer ("Other"). The call is
+  allowed with the answers in its input. Esc declines and aborts the turn (`onReject`).
+- **With nobody to ask** (headless, `dontAsk`) the call is denied with upstream's
+  `AUTO_REJECT_MESSAGE`, as `-p` denies it. Upstream's `-p` then ends when the model stops; here
+  `awaiting_user_answer` (a denied `AskUserQuestion` since the user last spoke) makes the stop
+  hooks end the turn `stop_hook_prevented` before the TDD hook can send it back. The outcome
+  carries the questions (`DevelopmentOutcome.question`) and `app/main.py` prints them with the
+  resume command. `--thread-id <id> "<answer>"` continues the conversation with the answer as
+  its next prompt (upstream's `--resume <id> "<prompt>"`), in the REPL or headless. A memory
+  checkpoint cannot be resumed, and the report says so.
+- **The TDD stop hook's refusal** ends with `ASK_THE_USER` when the pool holds the tool (user
+  decision): "If you need a decision from the user, call AskUserQuestion instead of asking in
+  text."
+
+*Divergences, recorded:* the prompt has no preview guidance (upstream adds it only for an SDK
+caller with a preview format) and no plan-mode note (no plan mode here), so the HTML preview
+check is not ported; the uniqueness check runs in `validate_input`; the REPL is line-based and
+takes no per-option notes; the headless stop on a denied question is TDDAgents' stand-in for
+upstream's `-p` ending at the model's stop, which the TDD stop hook would otherwise refuse. The
+headless analyst's clarifying question still fails the session (user decision: TDDAgents is
+mostly interactive).
 
 ### The three things that changed most
 

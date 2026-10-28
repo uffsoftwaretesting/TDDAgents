@@ -36,7 +36,7 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     # setenv first so teardown restores the variable `--coordinator` writes to os.environ.
     monkeypatch.setenv("TDDAGENTS_COORDINATOR_MODE", "")
     monkeypatch.delenv("TDDAGENTS_COORDINATOR_MODE")
-    holder: dict[str, Any] = {"outcome": DONE, "options": [], "threads": [], "developed": []}
+    holder: dict[str, Any] = {"outcome": DONE, "options": [], "threads": [], "developed": [], "prompts": []}
 
     class Workspace:
         root = tmp_path / "session" / "project"
@@ -54,8 +54,10 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
             engineer_fn=lambda r, h: "# Spec", planner_fn=lambda s, c: ["Item A"],
         )
 
-    def fake_develop(shell: Any, thread_id: str, values: Any, workspace: Any, options: Any) -> DevelopmentOutcome:
+    def fake_develop(shell: Any, thread_id: str, values: Any, workspace: Any, options: Any,
+                     prompt: str | None = None) -> DevelopmentOutcome:
         holder["developed"].append((thread_id, values["plan"], options))
+        holder["prompts"].append(prompt)
         outcome: DevelopmentOutcome = holder["outcome"]
         return outcome
 
