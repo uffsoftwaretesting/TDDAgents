@@ -16,7 +16,7 @@ HOW TO BUILD THE PLAN (YOUR OUTPUT):
 
 You will return your response using ALWAYS the provided structured output tool (a list of strings called `tdd_plan`).
 
-Each item in the list (each "Sub-requirement") must be a descriptive, technical, and actionable instruction.
+Each item in the list (each "Sub-requirement") must be a descriptive, technical, and actionable instruction. One step is one list item: never join several steps or phases into one string, because each item is completed, and marked done, by its own Red -> Green cycle.
 
 Examples of how to write a plan item:
 - "PHASE 0 - SETUP: Install base dependencies (e.g. pytest, fastapi, uvicorn) defined in the specification and create the main module, with a test that imports it (failing until the module exists)."
