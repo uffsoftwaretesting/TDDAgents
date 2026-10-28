@@ -60,10 +60,10 @@ def _run(workspace, tmp_path, scripts: dict[str | None, list[list[AIMessage]]], 
 
 
 def store_ledger_fields(events: Any) -> tuple[bool, bool, bool, float | None]:
-    # The last turn's transition: the `completed` one after it comes once the done item has
-    # restarted the ledger for the next.
-    last = events.get_transitions()[-2]
-    return (last.tests_written, last.green_passed, last.refactor_passed, last.coverage)
+    # The done item's `plan_item` event: the plan advance restarts the ledger at once, so the
+    # transitions after it no longer show the cycle.
+    (done,) = [e for e in events if str(e.event_type) == "plan_item"]
+    return (done.tests_written, done.green_passed, done.refactor_passed, done.coverage)
 
 
 def test_the_coordinator_drives_the_whole_cycle_through_workers(python_workspace, tmp_path, monkeypatch):
@@ -120,8 +120,10 @@ def test_the_coordinator_drives_the_whole_cycle_through_workers(python_workspace
     assert [e.transition_reason for e in events.get_transitions()] == [
         "next_turn", "next_turn", "next_turn", "completed"]
     assert store_ledger_fields(events) == (True, True, True, 100.0)
-    # The run's one-item plan: item 0 while it is worked on, then 1 (all done) at the terminal.
-    assert [e.payload["plan_index"] for e in events] == [0, 0, 0, 1]
+    # The refactorer's batch completed item 0, which the tool boundary records at once: its
+    # `plan_item` event, then the transitions name 1 (all done).
+    assert [(str(e.event_type), e.payload["plan_index"]) for e in events] == [
+        ("transition", 0), ("transition", 0), ("plan_item", 0), ("transition", 1), ("transition", 1)]
 
 
 def test_a_developer_before_red_is_refused_and_the_coordinator_is_told(python_workspace, tmp_path, monkeypatch):

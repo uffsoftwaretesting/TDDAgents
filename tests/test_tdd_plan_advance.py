@@ -294,3 +294,97 @@ def test_a_second_item_whose_tests_did_not_change_cannot_complete_the_plan():
     assert terminal == Terminated(reason=Terminal.ABORTED_STREAMING)
     assert store.get().tdd_plan.done_count == 1
     assert store.get().phase_ledger == PhaseLedger()
+
+
+# ── advance_between_tools: the plan moves at the tool boundary (2026-10-28) ─────
+
+def test_a_completed_cycle_advances_at_the_tool_boundary():
+    from app.tdd.plan_advance import advance_between_tools
+
+    store = store_with(TddPlan.from_texts(["A", "B"]), CYCLE)
+    message = advance_between_tools(tool_context_for(store))
+    assert message is not None and message.additional_kwargs == {"is_meta": True}
+    plan = store.get().tdd_plan
+    assert message.content == next_item_message(plan.items[0], plan)
+    assert [i.status for i in plan.items] == [ItemStatus.DONE, ItemStatus.PENDING]
+    assert plan.items[0].completed_by == CYCLE
+    assert store.get().phase_ledger == PhaseLedger()
+
+
+@pytest.mark.parametrize("plan, ledger, kw", [
+    (TddPlan(), CYCLE, {}),  # no plan
+    (TddPlan.from_texts(["A"]), PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True), {}),
+    (TddPlan.from_texts(["A"]).complete_current(CYCLE), CYCLE, {}),  # every item already done
+])
+def test_nothing_advances_without_a_completed_cycle_on_an_open_item(plan: TddPlan, ledger: PhaseLedger, kw: Any):
+    from app.tdd.plan_advance import advance_between_tools
+
+    store = store_with(plan, ledger, **kw)
+    assert advance_between_tools(tool_context_for(store)) is None
+    assert store.get().tdd_plan == plan and store.get().phase_ledger == ledger
+
+
+@pytest.mark.parametrize("texts, paused", [(["A"], False), (["A", "B"], True)])
+def test_the_last_item_or_a_pause_records_it_without_an_announcement(texts: list[str], paused: bool):
+    from app.tdd.plan_advance import advance_between_tools
+
+    store = store_with(TddPlan.from_texts(texts), CYCLE, tdd_paused=paused)
+    assert advance_between_tools(tool_context_for(store)) is None
+    assert store.get().tdd_plan.done_count == 1
+
+
+def test_a_model_that_never_stops_still_moves_through_the_plan():
+    """
+    The live coordinator never stopped between items. At stops only, item A's cycle was erased
+    by the next RED; at the tool boundary A is recorded done the moment its cycle completes.
+    """
+    store = store_with(TddPlan.from_texts(["A", "B"]))
+    model = Scripted([
+        [run_tests_call(1)], [run_tests_call(2)], [run_tests_call(3)],
+        [run_tests_call(4)], [run_tests_call(5)], [run_tests_call(6)], [AIMessage(content="both done")],
+    ])
+    terminal, events = drive(store, model, [*cycle(), *cycle()])
+    assert terminal == Terminated(reason=Terminal.COMPLETED)
+    assert store.get().tdd_plan.is_complete
+    # No stop was needed between the items, and the announcement reached the model.
+    assert Transition(reason=Continue.STOP_HOOK_BLOCKING) not in events
+    announced = [m for m in model.seen[3] if isinstance(m, HumanMessage) and "Next sub-requirement" in str(m.content)]
+    assert announced and announced[0].additional_kwargs == {"is_meta": True}
+
+
+def test_a_worker_batch_does_not_advance_the_plan():
+    from app.query.query import run_loop as loop
+
+    store = store_with(TddPlan.from_texts(["A", "B"]), CYCLE)
+    model = Scripted([[run_tests_call(1)]])
+
+    async def tools_impl(calls: Any, assistant: Any, state: Any, config: Any) -> AsyncIterator[Any]:
+        from langchain_core.messages import ToolMessage
+
+        yield ToolMessage(content="ok", tool_call_id="t1")
+
+    async def no_compact(s: Any, c: Any) -> CompactionResult:
+        return CompactionResult(compacted=False, messages=s.messages)
+
+    async def no_stop(s: Any, c: Any) -> StopHookResult:
+        return StopHookResult()
+
+    deps = LoopDeps(call_model=model, compact=no_compact, uuid=lambda: "u", now=lambda: 1.0,
+                    run_tools=tools_impl, stop_hooks=no_stop, emit_event=lambda e: None)
+
+    async def go() -> None:
+        ctx = tool_context_for(store, agent_id="agent_1")
+        async for _ in loop(initial_loop_state((HumanMessage(content="w"),), ctx), CONFIG, deps):
+            pass
+
+    asyncio.run(go())
+    assert store.get().tdd_plan.done_count == 0 and store.get().phase_ledger == CYCLE
+
+
+def test_the_completing_ledger_is_not_saved_in_the_sidecar(tmp_path: Path):
+    from app.tdd.plan import save_plan
+
+    plan = TddPlan.from_texts(["A"]).complete_current(CYCLE)
+    save_plan(tmp_path / PLAN_FILE_NAME, plan)
+    loaded = load_plan(tmp_path / PLAN_FILE_NAME)
+    assert loaded == plan and loaded is not None and loaded.items[0].completed_by is None

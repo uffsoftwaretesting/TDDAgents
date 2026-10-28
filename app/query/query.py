@@ -502,6 +502,17 @@ async def run_loop(
             yield term
             return
 
+        # TDD: the plan advances at the tool boundary on the main thread, so the item a batch
+        # completed is recorded before the next turn (`advance_between_tools`). A worker's batch
+        # never advances it: the main thread does once the worker's Agent call returns.
+        if not getattr(state.tool_context, "agent_id", None):
+            from app.tdd.plan_advance import advance_between_tools
+
+            announcement = advance_between_tools(state.tool_context)
+            if announcement is not None:
+                yield announcement
+                tool_results.append(announcement)
+
         # `getAttachmentMessages` after the turn's tools: what changed (the TDD state, queued
         # notifications, finished background hooks, files edited outside the agent, ...),
         # persisted into the history the next turn starts from.

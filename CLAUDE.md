@@ -1363,6 +1363,28 @@ by the user:
     executes code to cover it.
   - This supersedes the Phase 12 coverage threshold described above.
 
+### The plan advances at the tool boundary (2026-10-28)
+
+A coordinator-mode live run confirmed agent memory works: the tester, developer and refactorer
+each wrote `<thread>/.tddagents/run-memory/<run>/<agent>/MEMORY.md`, and nothing landed in the
+project. It also showed a flaw in how the plan advances.
+- The plan advanced only at a **stop**, but the coordinator never stops between items: it spawned
+  the next phase's tester in the same turn.
+- Phase-on-spawn then restarted RED on the still-current item and erased its completed cycle, so
+  after 11 spawns no item was done.
+
+At the user's direction, the advance now also happens where upstream delivers attachments, between
+tool rounds:
+- After every tool batch on the main thread, `advance_between_tools` (`app/tdd/plan_advance.py`,
+  called from `run_loop`) records a completed item through `update_tdd_plan` and restarts the
+  ledger. The next item's announcement is added as a meta message.
+- A worker's batch never advances the plan: the main thread does once the worker's Agent call
+  returns.
+- The stop-time advance stays, for a cycle completed by the turn's last call.
+- A done item keeps its completing ledger in memory (`PlanItem.completed_by`; not in the
+  sidecar), and the event recorder writes one `plan_item` event for it. That event is the cycle's
+  record in `events.jsonl`, since the transitions after an advance show the restarted ledger.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

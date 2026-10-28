@@ -46,6 +46,8 @@ class TransitionEventRecorder:
         self.plan_index = plan_index
         self.log = EventLog(session_id=session_id)
         self._turn = 1
+        # Items already done when the run opened (a resumed session) were logged by their own run.
+        self._logged_done = {item.id for item in store.get().tdd_plan.items if item.completed_by is not None}
 
     def _plan_index(self, plan: Any) -> int:
         """
@@ -58,10 +60,34 @@ class TransitionEventRecorder:
         current = plan.current
         return len(plan.items) if current is None else plan.items.index(current)
 
+    def _log_completed_items(self, plan: Any) -> None:
+        """
+        A `plan_item` event for each item newly done, with the ledger that completed it. The plan
+        advance restarts the ledger in RED at once (at the tool boundary or at a stop), so the
+        transition after it no longer shows the cycle; this entry is its record.
+        """
+        for index, item in enumerate(plan.items):
+            ledger = item.completed_by
+            if ledger is None or item.id in self._logged_done:
+                continue
+            self._logged_done.add(item.id)
+            self._write(self.log.record(
+                EventType.PLAN_ITEM,
+                turn_count=self._turn,
+                phase=str(ledger.phase),
+                transition_reason="completed",
+                tests_written=ledger.tests_written,
+                green_passed=ledger.green_passed,
+                refactor_passed=ledger.refactor_passed,
+                coverage=ledger.coverage,
+                payload={"plan_index": index, "item_id": item.id},
+            ))
+
     def __call__(self, event: Any) -> None:
         if not isinstance(event, (Transition, Terminated)):
             return
         app_state = self.store.get()
+        self._log_completed_items(app_state.tdd_plan)
         ledger = app_state.phase_ledger
         run = app_state.last_test_run
         entry = self.log.record_transition(
@@ -81,6 +107,9 @@ class TransitionEventRecorder:
         )
         if event.reason == Continue.NEXT_TURN:
             self._turn += 1
+        self._write(entry)
+
+    def _write(self, entry: Any) -> None:
         if self.path is None:
             return
         try:

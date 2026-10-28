@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -51,6 +51,9 @@ class PlanItem:
     id: str
     text: str
     status: ItemStatus = ItemStatus.PENDING
+    #: The ledger that completed it (`complete_current`): the observed cycle, for the events log.
+    #: In memory only; the sidecar keeps id, text and status.
+    completed_by: PhaseLedger | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +141,7 @@ class TddPlan:
             raise PlanError(f"Sub-requirement {current.id} has no completed Red -> Green -> Refactor cycle.")
         index = self._index(current.id)
         items = list(self.items)
-        items[index] = replace(current, status=ItemStatus.DONE)
+        items[index] = replace(current, status=ItemStatus.DONE, completed_by=ledger)
         return replace(self, items=tuple(items))
 
     def to_dict(self) -> dict[str, Any]:

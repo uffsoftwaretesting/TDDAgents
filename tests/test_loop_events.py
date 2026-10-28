@@ -140,3 +140,42 @@ def test_the_plan_index_follows_the_plan_through_the_session(tmp_path):
                                                      for i in plan.items))
     assert rec._plan_index(all_done) == 3
     assert rec._plan_index(TddPlan()) == 0
+
+
+def test_a_completed_item_is_logged_once_with_the_ledger_that_completed_it(tmp_path):
+    """The advance restarts the ledger at once, so a `plan_item` event records the cycle."""
+    import json
+
+    from app.query.transitions import Continue, Transition
+    from app.tdd.ledger import PhaseLedger, TddPhase
+    from app.tdd.plan import TddPlan
+
+    cycle = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True,
+                        coverage=95.0)
+    store = AppStateStore(AppState(tdd_plan=TddPlan.from_texts(["a", "b"])))
+    path = tmp_path / "events.jsonl"
+    rec = TransitionEventRecorder(store, path, session_id="s", plan_index=0)
+    rec(Transition(reason=Continue.NEXT_TURN))
+    store.update(lambda s: dataclasses.replace(s, tdd_plan=s.tdd_plan.complete_current(cycle)))
+    rec(Transition(reason=Continue.NEXT_TURN))
+    rec(Transition(reason=Continue.NEXT_TURN))
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [(r["event_type"], r["payload"]["plan_index"]) for r in rows] == [
+        ("transition", 0), ("plan_item", 0), ("transition", 1), ("transition", 1)]
+    done = rows[1]
+    assert (done["transition_reason"], done["phase"], done["tests_written"], done["green_passed"],
+            done["refactor_passed"], done["coverage"], done["turn_count"]) == (
+        "completed", "REFACTOR", True, True, True, 95.0, 2)
+    assert done["payload"] == {"plan_index": 0, "item_id": "1"}
+
+
+def test_items_done_before_the_run_opened_are_not_logged_again(tmp_path):
+    from app.query.transitions import Continue, Transition
+    from app.tdd.ledger import PhaseLedger, TddPhase
+    from app.tdd.plan import TddPlan
+
+    cycle = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
+    store = AppStateStore(AppState(tdd_plan=TddPlan.from_texts(["a", "b"]).complete_current(cycle)))
+    rec = TransitionEventRecorder(store, None, session_id="s", plan_index=0)
+    rec(Transition(reason=Continue.NEXT_TURN))
+    assert [str(e.event_type) for e in rec.log] == ["transition"]

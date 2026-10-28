@@ -12,6 +12,13 @@ model stops without asking for tools. The advance is ledger-driven (user decisio
 * the user paused (`/pause`) → the turn ends `stop_hook_prevented`, never `completed`;
 * otherwise the TDD hook decides, against the current item.
 
+`advance_between_tools` makes the same advance at the loop's tool boundary (user decision
+2026-10-28), where upstream delivers attachments between tool rounds: a live coordinator run never
+stopped between items, so its next tester spawn restarted RED on an item whose cycle was already
+complete and erased it. The main thread checks after every tool batch; a complete cycle is
+recorded at once and the next item is announced as a meta message. The stop-time advance stays for
+a cycle completed by the turn's last call.
+
 The ledger restart is `update_tdd_plan`'s (`app/tdd/plan.py`): like phase-on-spawn it can only
 erase evidence, and the next item's observations are made by `RunTests` alone
 (`test_run_tests_is_the_only_ledger_writer` pins the shape).
@@ -41,6 +48,24 @@ def next_item_message(done: PlanItem, plan: TddPlan) -> str:
         "relevant scenario and edge case, and run RunTests before implementing it.\n\n"
         f"Plan:\n{render_plan(plan)}"
     )
+
+
+def advance_between_tools(context: Any) -> HumanMessage | None:
+    """
+    The plan's advance after a tool batch: the next item's announcement when the current item's
+    cycle just completed, else `None`. Nothing is announced once every item is done, or while the
+    user has paused (the stop then ends the turn).
+    """
+    app_state = context.get_app_state()
+    plan = app_state.tdd_plan
+    done = plan.current
+    if done is None or not app_state.phase_ledger.is_cycle_complete:
+        return None
+    ledger = app_state.phase_ledger
+    plan = update_tdd_plan(context, lambda p: p.complete_current(ledger))
+    if plan.is_complete or app_state.tdd_paused:
+        return None
+    return HumanMessage(content=next_item_message(done, plan), additional_kwargs={"is_meta": True})
 
 
 def advance_plan(state: LoopState) -> StopHookResult | None:
