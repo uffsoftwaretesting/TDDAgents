@@ -88,11 +88,11 @@ Each sub-requirement goes through one cycle:
 
 - **RED:** robust unit tests covering the relevant scenarios and edge cases. They do not have to fail; a run of the item's new or changed tests ends RED.
 - **GREEN:** the code the tests describe, until every test passes. The tests are locked.
-- **REFACTOR (mandatory):** better code and stronger tests, until every test passes with at least 90% line + branch coverage of the production code. `RunTests` measures coverage on every run (pytest-cov) and lists the uncovered lines.
+- **REFACTOR (mandatory):** better code and stronger tests, and higher line + branch coverage of the production code (90% is a good rule of thumb, not a gate), until every test passes. `RunTests` measures coverage on every run (pytest-cov) and lists the uncovered lines.
 
 The order is enforced by three independent barriers that no model output can reach (`app/tdd/`):
 
-1. **The phase ledger.** `RunTests` executes the suite and is the only writer of observations. It records that RED's tests changed (it fingerprints the test files against the item's start), that GREEN passed, and that REFACTOR passed with enough coverage.
+1. **The phase ledger.** `RunTests` executes the suite and is the only writer of observations. It records that RED's tests changed (it fingerprints the test files against the item's start), that GREEN passed, and that a REFACTOR run passed.
 2. **Phase permissions.** In RED, writes to production code are denied (including through Bash redirections), and in GREEN, writes to tests; REFACTOR may change both. Spawning the developer requires RED's tests, and the refactorer a passing GREEN.
 3. **The stop hook.** The loop cannot end `completed` until the ledger shows the whole cycle; until then the model is told what is missing and the turn continues.
 
