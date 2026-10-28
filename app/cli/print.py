@@ -99,7 +99,8 @@ RUN_ID_NAMESPACE = uuid.UUID("7d1f9c52-5b0e-4f4e-9a59-2f3c0a8f6b11")
 
 def build_builtin_tools() -> list[Tool]:
     """
-    The Phase 0 roster: the file primitives, Bash and RunTests.
+    The Phase 0 roster: the file primitives, Bash and RunTests, TodoWrite, and WebFetch (2026-10-28,
+    upstream's base tool, which its verification agent relies on).
 
     No per-run template vars, as in claude-code: a tool's prompt is static, and what varies per
     run (the workspace, the phase) reaches the tool through `ToolContext` at call time.
@@ -112,6 +113,7 @@ def build_builtin_tools() -> list[Tool]:
     from app.tools.glob_tool.glob_tool import build_glob_tool
     from app.tools.grep_tool.grep_tool import build_grep_tool
     from app.tools.todo_write_tool.todo_write_tool import build_todo_write_tool
+    from app.tools.web_fetch_tool.web_fetch_tool import build_web_fetch_tool
 
     return [
         build_read_file_tool(),
@@ -122,6 +124,7 @@ def build_builtin_tools() -> list[Tool]:
         build_bash_tool(),
         build_run_tests_tool(),
         build_todo_write_tool(),
+        build_web_fetch_tool(),
     ]
 
 

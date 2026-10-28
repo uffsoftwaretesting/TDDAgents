@@ -36,7 +36,7 @@ def test_every_tool_directory_has_its_prompt() -> None:
     assert [d.name for d in tool_dirs] == [
         "agent_tool", "ask_user_question_tool", "bash_tool", "file_edit_tool", "file_read_tool", "file_write_tool",
         "glob_tool", "grep_tool", "list_mcp_resources_tool", "mcp_tool", "read_mcp_resource_tool", "send_message_tool",
-        "skill_tool", "task_output_tool", "task_stop_tool", "todo_write_tool",
+        "skill_tool", "task_output_tool", "task_stop_tool", "todo_write_tool", "web_fetch_tool",
     ]
     with_markdown = [d for d in tool_dirs if d.name not in ("agent_tool", "mcp_tool")] + [
         app_root / "tdd" / "run_tests_tool"

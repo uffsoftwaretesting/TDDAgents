@@ -500,6 +500,7 @@ AUTO_CLASSIFIER_INPUTS: dict[str, Any] = {
     "TaskStop": _task_stop_input,
     "Skill": lambda i: i.get("skill") or "",
     "TaskOutput": lambda i: i.get("task_id"),
+    "WebFetch": lambda i: f"{i.get('url')}: {i.get('prompt')}" if i.get("prompt") else i.get("url"),
     "AskUserQuestion": lambda i: " | ".join(str(q.get("question")) for q in i.get("questions") or []),
     "SendMessage": lambda i: f"to {i.get('to')}: {i.get('message')}",
     "ListMcpResourcesTool": lambda i: i.get("server") or "",
