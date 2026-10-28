@@ -45,9 +45,13 @@ from app.utils.messages import Message
 #: `context.ts` -> `MAX_STATUS_CHARS`.
 MAX_STATUS_CHARS = 2000
 
-#: `getSystemPrompt` static order; the file for each upstream section, then ours. `doing-tasks.md`
-#: is `getSimpleDoingTasksSection` verbatim (2026-10-28): the external build's items, without the
-#: `/help` and feedback bullets (this build has neither); the other sections are adaptations.
+#: `getSystemPrompt` static order; the file for each upstream section, then ours. Since 2026-10-28
+#: every upstream section but the intro is its function's external-build text verbatim, with this
+#: build's tool names (`tests/test_system_prompt_sections.py` compares them with `prompts.ts`):
+#: `getSimpleSystemSection`, `getSimpleDoingTasksSection` (without the `/help` and feedback
+#: bullets: this build has neither), `getActionsSection`, `getUsingYourToolsSection` (TodoWrite as
+#: the task tool, the dedicated search tools present), `getSimpleToneAndStyleSection` and
+#: `getOutputEfficiencySection`. `identity.md` stays TDDAgents' own intro.
 STATIC_SECTION_FILES: tuple[tuple[str, str], ...] = (
     ("intro", "identity.md"),
     ("system", "system.md"),
@@ -55,6 +59,7 @@ STATIC_SECTION_FILES: tuple[tuple[str, str], ...] = (
     ("actions", "actions-with-care.md"),
     ("using_your_tools", "tools.md"),
     ("tone_and_style", "tone.md"),
+    ("output_efficiency", "output-efficiency.md"),
     ("tdd_contract", "tdd-contract.md"),
 )
 

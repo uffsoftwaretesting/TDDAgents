@@ -218,17 +218,11 @@ def test_metadata(monkeypatch):
     assert "injection" in tool.prompt
 
 
-def test_prompt_fallback_when_file_missing(monkeypatch, tmp_path):
-    import importlib
-
-    monkeypatch.setattr(bash_mod, "PROMPT_PATH", tmp_path / "missing.md")
-    src = bash_mod.PROMPT_PATH
-    assert not src.exists()
-    reloaded = importlib.reload(bash_mod)
-    try:
-        assert reloaded.BASH_PROMPT.startswith("Runs a command")
-    finally:
-        importlib.reload(bash_mod)
+def test_the_prompt_fills_upstreams_timeouts():
+    prompt = bash_mod.get_bash_prompt()
+    assert "{{" not in prompt
+    assert (" - You may specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). By default, "
+            "your command will timeout after 120000ms (2 minutes).") in prompt
 
 
 # ── check_permissions → the security gates ───────────────────────────────────

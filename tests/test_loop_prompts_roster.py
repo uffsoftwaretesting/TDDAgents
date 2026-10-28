@@ -21,6 +21,7 @@ def test_system_prompt_files_exist_and_load() -> None:
         "tools.md",
         "actions-with-care.md",
         "tone.md",
+        "output-efficiency.md",
     ]
     for filename in expected_files:
         p = system_dir / filename

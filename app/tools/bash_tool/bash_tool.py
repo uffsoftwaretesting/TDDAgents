@@ -32,16 +32,11 @@ from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build
 from app.tools.bash_tool.bash_permissions import bash_tool_has_permission
 from app.tools.bash_tool.read_only_validation import is_bash_read_only
 from app.types.permissions import PermissionResult
-from app.utils.frontmatter_parser import parse_markdown_frontmatter
+from app.utils.frontmatter_parser import parse_markdown_frontmatter, render_prompt
 from app.utils.permissions.filesystem import permission_cwd
 from app.utils.permissions.permissions import extract_permission_context
 
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
-BASH_PROMPT = (
-    parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
-    if PROMPT_PATH.exists()
-    else "Runs a command in a bash shell."
-)
 
 #: `BashTool.tsx` -> `maxResultSizeChars`. Lower than the global clamp, so it is the one
 #: that bites: shell output is the most likely thing to flood a context window.
@@ -75,6 +70,19 @@ def get_max_bash_timeout_ms(env: Mapping[str, str] | None = None) -> int:
     if override is not None:
         return max(override, default)
     return max(MAX_TIMEOUT_MS, default)
+
+
+def get_bash_prompt() -> str:
+    """
+    `BashTool/prompt.ts` -> `getSimplePrompt` (external build): `prompt.md`, with the timeouts
+    filled in from `src/utils/timeouts.ts`, as upstream interpolates them.
+    """
+    text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
+    max_ms, default_ms = get_max_bash_timeout_ms(), get_default_bash_timeout_ms()
+    return render_prompt(text, {
+        "MAX_TIMEOUT_MS": max_ms, "MAX_TIMEOUT_MIN": f"{max_ms / 60000:g}",
+        "DEFAULT_TIMEOUT_MS": default_ms, "DEFAULT_TIMEOUT_MIN": f"{default_ms / 60000:g}",
+    }, strip_comments=False)
 
 
 def validate_bash_input(args: dict[str, Any], context: ToolContext) -> ValidationResult:
@@ -142,7 +150,7 @@ def build_bash_tool() -> BuiltTool:
 
     return build_tool(
         name="Bash",
-        prompt=BASH_PROMPT,
+        prompt=get_bash_prompt(),
         input_schema={
             "type": "object",
             "properties": {

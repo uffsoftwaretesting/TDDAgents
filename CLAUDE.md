@@ -1385,6 +1385,37 @@ tool rounds:
   sidecar), and the event recorder writes one `plan_item` event for it. That event is the cycle's
   record in `events.jsonl`, since the transitions after an advance show the restarted ledger.
 
+### Every static system section and the Bash prompt are upstream's (2026-10-28)
+
+A live CPF run's agent assumed Docker was not available and planned a skipped smoke test. Later it
+wrote a 30-line, newline-separated verification script with `|| true` after most steps, calling
+`docker-compose` (v1) where the machine has `docker compose`. Upstream has no "detect versions"
+mechanism: it tells the model its platform and shell (our env info already matches), and its
+prompts make the model check before acting and never hide a failure. Ours were paraphrases. At
+the user's direction they are now upstream's text verbatim (external build, our tool names):
+
+- `app/tools/bash_tool/prompt.md` is `getSimplePrompt`:
+  - the dedicated-tool preferences;
+  - `# Instructions`: `ls` before creating, quoting, absolute paths, the timeouts, chaining with
+    `&&`, "DO NOT use newlines to separate commands", the git items, and the sleep items ("Do not
+    retry failing commands in a sleep loop — diagnose the root cause").
+
+  The timeouts are filled in code (`get_bash_prompt`, upstream's interpolation). Our
+  command-injection note and the commit section stay.
+- `system.md` (`getSimpleSystemSection` with `getHooksSection`), `actions-with-care.md`
+  (`getActionsSection`), `tools.md` (`getUsingYourToolsSection`, with TodoWrite as the task tool)
+  and `tone.md` (`getSimpleToneAndStyleSection`) are upstream's.
+- `output-efficiency.md` (`getOutputEfficiencySection`) joins the static order before the TDD
+  contract.
+- `tests/test_system_prompt_sections.py` parses `prompts.ts` and `BashTool/prompt.ts` and
+  compares every section when the reference snapshot is present.
+
+*Divergences, recorded:*
+- The Bash prompt has no `run_in_background` note or background sleep items, because our Bash
+  has no such parameter. Its sandbox section is empty, as upstream's is without a sandbox.
+- `RunTests` and `Agent` guidance left `tools.md`. The TDD contract covers `RunTests`, and
+  upstream puts the Agent guidance in a session-specific section, outside this one.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

@@ -81,7 +81,8 @@ def test_static_sections_follow_upstream_order_and_include_tdd_contract():
     assert STATIC_SECTION_FILES == (
         ("intro", "identity.md"), ("system", "system.md"), ("doing_tasks", "doing-tasks.md"),
         ("actions", "actions-with-care.md"), ("using_your_tools", "tools.md"),
-        ("tone_and_style", "tone.md"), ("tdd_contract", "tdd-contract.md"),
+        ("tone_and_style", "tone.md"), ("output_efficiency", "output-efficiency.md"),
+        ("tdd_contract", "tdd-contract.md"),
     )
     for _, filename in STATIC_SECTION_FILES:
         assert a.read_system_prompt_file(filename).strip(), filename
@@ -93,14 +94,14 @@ def test_get_system_prompt_structure():
     assert names == [n for n, _ in STATIC_SECTION_FILES] + [
         SYSTEM_PROMPT_DYNAMIC_BOUNDARY.name, "env_info_simple", "mcp_instructions"]
     static, dynamic = split_system_prompt_sections(sections)
-    assert len(static) == 7 and [s.name for s in dynamic] == ["env_info_simple", "mcp_instructions"]
+    assert len(static) == 8 and [s.name for s in dynamic] == ["env_info_simple", "mcp_instructions"]
     rendered = resolve_system_prompt_sections(sections)
     assert rendered[0] == a.read_system_prompt_file("identity.md").strip()
     # The contract names the coverage rule of thumb as a placeholder; the code fills it.
     contract = a.read_system_prompt_file("tdd-contract.md")
     assert "{{COVERAGE_RULE_OF_THUMB}}" in contract
-    assert rendered[6] == contract.replace("{{COVERAGE_RULE_OF_THUMB}}", "90").strip()
-    assert "90% is a good rule of thumb, not a gate" in rendered[6]
+    assert rendered[7] == contract.replace("{{COVERAGE_RULE_OF_THUMB}}", "90").strip()
+    assert "90% is a good rule of thumb, not a gate" in rendered[7]
     assert rendered[-1].startswith("# Environment")
 
 
