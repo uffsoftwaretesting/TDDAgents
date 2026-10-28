@@ -93,7 +93,10 @@ def test_the_tool_is_upstreams():
         "- Users will always be able to select \"Other\" to provide custom text input\n"
         "- Use multiSelect: true to allow multiple answers to be selected for a question\n"
         "- If you recommend a specific option, make that the first option in the list and add "
-        "\"(Recommended)\" at the end of the label"
+        "\"(Recommended)\" at the end of the label\n\n"
+        "TDD plan note: Do NOT use this tool to ask \"Should I proceed?\" or whether to start the next "
+        "sub-requirement — the plan advances on its own once a cycle is complete. Use it only for decisions "
+        "the plan, the specification and the code cannot answer."
     )
     assert tool.is_read_only({}) is True and tool.is_concurrency_safe({}) is True
     assert tool.requires_user_interaction() is True

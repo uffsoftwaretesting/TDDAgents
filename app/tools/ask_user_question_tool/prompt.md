@@ -12,3 +12,5 @@ Usage notes:
 - Users will always be able to select "Other" to provide custom text input
 - Use multiSelect: true to allow multiple answers to be selected for a question
 - If you recommend a specific option, make that the first option in the list and add "(Recommended)" at the end of the label
+
+TDD plan note: Do NOT use this tool to ask "Should I proceed?" or whether to start the next sub-requirement — the plan advances on its own once a cycle is complete. Use it only for decisions the plan, the specification and the code cannot answer.

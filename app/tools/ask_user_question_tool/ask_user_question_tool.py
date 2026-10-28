@@ -13,7 +13,8 @@ stops, and the user's answer is the resumed session's next prompt.
 
 Divergences: no `preview` guidance in the prompt (upstream adds it only for an SDK caller that
 set a preview format, which this build has none of), so the HTML preview check is not ported;
-the prompt's "Plan mode note" is dropped (no plan mode here); the uniqueness check runs in
+the prompt's "Plan mode note" becomes a TDD plan note (user decision: no "Should I proceed?" between
+sub-requirements, as upstream's note forbids it before a plan's approval); the uniqueness check runs in
 `validate_input`, since the schema is JSON Schema, not zod.
 """
 

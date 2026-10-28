@@ -1264,7 +1264,8 @@ path and headless keeps upstream's `-p` behaviour.
   text."
 
 *Divergences, recorded:* the prompt has no preview guidance (upstream adds it only for an SDK
-caller with a preview format) and no plan-mode note (no plan mode here), so the HTML preview
+caller with a preview format), and its plan-mode note becomes a TDD plan note (user decision, after a
+live REPL run asked "Proceed?" twice): no "Should I proceed?" between sub-requirements, so the HTML preview
 check is not ported; the uniqueness check runs in `validate_input`; the REPL is line-based and
 takes no per-option notes; the headless stop on a denied question is TDDAgents' stand-in for
 upstream's `-p` ending at the model's stop, which the TDD stop hook would otherwise refuse. The
