@@ -5,6 +5,8 @@ Tests for RunTests loop tool and phase ledger updates (Part D2).
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -325,8 +327,47 @@ def test_workspace_command_is_quoted_and_time_limited():
     ctx = tool_context_for(AppStateStore(), workspace=ws)
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests/a b.py; rm -rf /"}, ctx))
     assert res.exit_code == 0 and "pytest output" in res.content
-    assert ws.calls == [("PYTHONPATH=. python -m pytest 'tests/a b.py; rm -rf /' -vv --tb=short", 120.0)]
-    assert pytest_command("tests/x.py") == "PYTHONPATH=. python -m pytest tests/x.py -vv --tb=short"
+    assert ws.calls == [(pytest_command("tests/a b.py; rm -rf /"), 120.0)]
+    assert pytest_command("tests/a b.py; rm -rf /").startswith(
+        "PYTHONPATH=. python -m pytest 'tests/a b.py; rm -rf /' -vv --tb=short --rootdir=. ")
+    assert pytest_command("tests/x.py") == (
+        "PYTHONPATH=. python -m pytest tests/x.py -vv --tb=short --rootdir=. "
+        "$([ -f pytest.ini ] || [ -f .pytest.ini ] || grep -qs '^\\[tool\\.pytest' pyproject.toml "
+        "|| grep -qs '^\\[pytest\\]' tox.ini || grep -qs '^\\[tool:pytest\\]' setup.cfg "
+        "|| printf %s '-c /dev/null')")
+
+
+POISONED_PARENT = '[tool.pytest.ini_options]\naddopts = "--no-such-flag"\n'
+
+
+def _isolated_run(python_workspace: Any, tmp_path: Path, files: dict[str, str]) -> Any:
+    # The workspace sits under a directory whose pyproject.toml would break any pytest run that
+    # loads it, as TDDAgents' own does for `.tddagents/runs/<thread>/workspace`.
+    (tmp_path / "pyproject.toml").write_text(POISONED_PARENT)
+    for name, text in files.items():
+        python_workspace.write_file(name, text)
+    ctx = tool_context_for(AppStateStore(), workspace=python_workspace)
+    return asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, ctx))
+
+
+def test_a_workspace_without_pytest_config_ignores_its_parents_config(python_workspace, tmp_path):
+    res = _isolated_run(python_workspace, tmp_path, {"tests/test_a.py": "def test_a():\n    assert True\n"})
+    assert res.exit_code == 0, res.content
+    assert "rootdir: " + str(Path(python_workspace.root).resolve()) in res.content
+
+
+@pytest.mark.parametrize("config_name, config_text", [
+    ("pytest.ini", "[pytest]\npython_files = check_*.py\n"),
+    (".pytest.ini", "[pytest]\npython_files = check_*.py\n"),
+    ("pyproject.toml", "[tool.pytest.ini_options]\npython_files = ['check_*.py']\n"),
+    ("tox.ini", "[pytest]\npython_files = check_*.py\n"),
+    ("setup.cfg", "[tool:pytest]\npython_files = check_*.py\n"),
+])
+def test_the_workspaces_own_pytest_config_is_honoured(python_workspace, tmp_path, config_name, config_text):
+    res = _isolated_run(python_workspace, tmp_path, {
+        config_name: config_text, "tests/check_a.py": "def test_a():\n    assert False\n"})
+    assert res.exit_code == 1, res.content
+    assert "configfile: " + config_name in res.content
 
 
 def test_timeout_follows_the_bash_default(monkeypatch):

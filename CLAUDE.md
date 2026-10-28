@@ -1036,6 +1036,16 @@ the open choices decided by interview (recorded in the plan's Phase 11 outcome).
   `.claude/worktrees/` carve-out is ported as `STRUCTURAL_SUBDIRECTORIES` with
   `(".tddagents", "runs")` (user decision). A config directory inside a workspace is still
   protected, and a test pins `Config.LOCAL_WORKSPACE_ROOT`.
+- **Fixed: RunTests ran generated projects under TDDAgents' own `pyproject.toml`.** A local
+  workspace sits inside this repository, so a project with no pytest config of its own picked
+  up ours by pytest's upward search (`rootdir` = the repo). `pytest_command` now pins
+  `--rootdir=.` and adds `-c /dev/null` when `PYTEST_CONFIG_PROBE` finds no workspace config
+  (user decision). Real-pytest tests run under a poisoned parent `pyproject.toml`.
+- **Planner and development prompts, from the live runs** (user decisions):
+  - one behaviour per plan item, its tests and its implementation in the same item;
+  - every item adds behaviour its tests can fail on (no TEST/DEV split, no
+    verification-only hardening items);
+  - the model implements only what the current item's tests demand.
 - **The default model is `gpt-5-mini`** (user decision): OpenAI answers 404 for `o4-mini`.
 - **Ruff 0.17.1** reported 122 findings on the pushed Phase 10 tree (newer default rules).
   They are fixed, so ruff is back to 0. Every deliberate catch-all now carries

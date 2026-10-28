@@ -103,8 +103,26 @@ class RunTestsUnavailable(Exception):
     """RunTests could not run the suite at all (no workspace, runner failure, timeout)."""
 
 
+#: True (exit 0) when the workspace has a pytest config file of its own, in pytest's own terms:
+#: `pytest.ini` / `.pytest.ini` always, the others only with their pytest section.
+PYTEST_CONFIG_PROBE = (
+    "[ -f pytest.ini ] || [ -f .pytest.ini ] || grep -qs '^\\[tool\\.pytest' pyproject.toml "
+    "|| grep -qs '^\\[pytest\\]' tox.ini || grep -qs '^\\[tool:pytest\\]' setup.cfg"
+)
+
+
 def pytest_command(test_path: str) -> str:
-    return f"PYTHONPATH=. python -m pytest {shlex.quote(test_path)} -vv --tb=short"
+    """
+    The suite's command. pytest looks for its config upward from the workspace, and a local
+    workspace sits inside TDDAgents' own repository, so without a config of its own the
+    generated project would run under TDDAgents' `pyproject.toml`. The rootdir is pinned to the
+    workspace and, when it has no config, `-c /dev/null` stops the search (the same run locally
+    and in a sandbox).
+    """
+    return (
+        f"PYTHONPATH=. python -m pytest {shlex.quote(test_path)} -vv --tb=short --rootdir=. "
+        f"$({PYTEST_CONFIG_PROBE} || printf %s '-c /dev/null')"
+    )
 
 
 def run_tests_timeout_seconds() -> float:
