@@ -121,3 +121,22 @@ def test_non_ascii_is_written_as_is(tmp_path):
     rec = _recorder(tmp_path, store)
     rec(Transition(reason=Continue.NEXT_TURN))
     assert "test_ação.py" in (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+
+
+def test_the_plan_index_follows_the_plan_through_the_session(tmp_path):
+    """One session spans the plan (Phase 11): each event names the item the work is on."""
+    import dataclasses
+
+    from app.tdd.plan import ItemStatus, TddPlan
+
+    plan = TddPlan.from_texts(["a", "b", "c"])
+    store = AppStateStore(AppState(tdd_plan=plan))
+    rec = TransitionEventRecorder(store, None, session_id="s", plan_index=0)
+    assert rec._plan_index(plan) == 0
+    first_done = dataclasses.replace(plan, items=(dataclasses.replace(plan.items[0], status=ItemStatus.DONE),
+                                                  *plan.items[1:]))
+    assert rec._plan_index(first_done) == 1
+    all_done = dataclasses.replace(plan, items=tuple(dataclasses.replace(i, status=ItemStatus.DONE)
+                                                     for i in plan.items))
+    assert rec._plan_index(all_done) == 3
+    assert rec._plan_index(TddPlan()) == 0

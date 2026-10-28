@@ -120,7 +120,8 @@ def test_the_coordinator_drives_the_whole_cycle_through_workers(python_workspace
     assert [e.transition_reason for e in events.get_transitions()] == [
         "next_turn", "next_turn", "next_turn", "completed"]
     assert store_ledger_fields(events) == (True, True, True, 100.0)
-    assert {e.payload["plan_index"] for e in events} == {2}
+    # The run's one-item plan: item 0 while it is worked on, then 1 (all done) at the terminal.
+    assert [e.payload["plan_index"] for e in events] == [0, 0, 0, 1]
 
 
 def test_a_developer_before_red_is_refused_and_the_coordinator_is_told(python_workspace, tmp_path, monkeypatch):

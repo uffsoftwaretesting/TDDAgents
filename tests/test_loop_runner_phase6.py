@@ -50,14 +50,15 @@ def test_the_transcript_is_a_chain_starting_with_the_spec(make_fake_workspace, t
     assert all("attachment" not in e["message"]["data"]["additional_kwargs"] for e in entries)
 
 
-def test_events_carry_the_plan_index_and_end_with_the_terminal(make_fake_workspace, tmp_path):
+def test_events_carry_the_plan_position_and_end_with_the_terminal(make_fake_workspace, tmp_path):
     async def model(state, config):
         yield AIMessage(content="done")
 
     ws, result = _run(make_fake_workspace, model, tmp_path)
     _, events = _session_files(ws)
     transitions = events.get_transitions()
-    assert {e.payload["plan_index"] for e in transitions} == {4}
+    # The run's one-item plan is never done here, so every event names its item 0.
+    assert {e.payload["plan_index"] for e in transitions} == {0}
     assert transitions[-1].payload["terminal"] is True
     assert transitions[-1].transition_reason == result.terminal_reason
     # Barrier 3 refused the unobserved cycle once before the latch ended the run.

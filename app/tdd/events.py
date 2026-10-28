@@ -47,6 +47,17 @@ class TransitionEventRecorder:
         self.log = EventLog(session_id=session_id)
         self._turn = 1
 
+    def _plan_index(self, plan: Any) -> int:
+        """
+        The 0-based position of the item the work is on (the number of items when all are
+        done). One session spans the whole plan since Phase 11, so it is read at each event;
+        a run with no plan keeps the index it was opened with.
+        """
+        if not plan.items:
+            return self.plan_index
+        current = plan.current
+        return len(plan.items) if current is None else plan.items.index(current)
+
     def __call__(self, event: Any) -> None:
         if not isinstance(event, (Transition, Terminated)):
             return
@@ -62,7 +73,7 @@ class TransitionEventRecorder:
             refactor_passed=ledger.refactor_passed,
             coverage=ledger.coverage,
             payload={
-                "plan_index": self.plan_index,
+                "plan_index": self._plan_index(app_state.tdd_plan),
                 "terminal": isinstance(event, Terminated),
                 "test_exit_code": run.exit_code if run is not None else None,
                 "test_path": run.test_path if run is not None else None,
