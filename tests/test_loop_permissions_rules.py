@@ -97,7 +97,7 @@ class TestCheckRuleBasedPermissions:
             perm_ctx = ToolPermissionContext(always_deny_rules=(deny_rule,))
 
             ctx = tool_context_for(AppStateStore())
-            setattr(ctx, "permission_context", perm_ctx)
+            ctx.permission_context = perm_ctx
 
             res = await check_rule_based_permissions(tool, {}, ctx)
             assert res is not None
@@ -114,7 +114,7 @@ class TestCheckRuleBasedPermissions:
             perm_ctx = ToolPermissionContext(always_ask_rules=(ask_rule,))
 
             ctx = tool_context_for(AppStateStore())
-            setattr(ctx, "permission_context", perm_ctx)
+            ctx.permission_context = perm_ctx
 
             res = await check_rule_based_permissions(tool, {}, ctx)
             assert res is not None

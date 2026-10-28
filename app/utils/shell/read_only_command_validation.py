@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Literal
 
 FlagArgType = Literal["none", "number", "string", "char", "{}", "EOF"]
 DangerCallback = Callable[[str, list[str]], bool]
@@ -56,9 +57,7 @@ def _cb_git_reflog(_raw: str, args: list[str]) -> bool:
     for token in args:
         if not token or token.startswith("-"):
             continue
-        if token in ("expire", "delete", "exists"):
-            return True
-        return False
+        return token in ("expire", "delete", "exists")
     return False
 
 
@@ -91,9 +90,9 @@ def _cb_git_tag(_raw: str, args: list[str]) -> bool:
             i += 1
             continue
         if not seen_dash_dash and token.startswith("-"):
-            if token in ("--list", "-l"):
-                seen_list = True
-            elif token[0] == "-" and token[1:2] != "-" and len(token) > 2 and "=" not in token and "l" in token[1:]:
+            if token in ("--list", "-l") or (
+                token[0] == "-" and token[1:2] != "-" and len(token) > 2 and "=" not in token and "l" in token[1:]
+            ):
                 seen_list = True
             if "=" in token:
                 i += 1
@@ -127,9 +126,9 @@ def _cb_git_branch(_raw: str, args: list[str]) -> bool:
             i += 1
             continue
         if not seen_dash_dash and token.startswith("-"):
-            if token in ("--list", "-l"):
-                seen_list = True
-            elif token[0] == "-" and token[1:2] != "-" and len(token) > 2 and "=" not in token and "l" in token[1:]:
+            if token in ("--list", "-l") or (
+                token[0] == "-" and token[1:2] != "-" and len(token) > 2 and "=" not in token and "l" in token[1:]
+            ):
                 seen_list = True
             if "=" in token:
                 last_flag = token.split("=")[0] or ""
@@ -2295,12 +2294,12 @@ def validate_flags(
             if command_name in ("grep", "rg") and not flag.startswith("--") and len(flag) > 2:
                 potential_flag, potential_value = flag[:2], flag[2:]
                 attached_type = config.safe_flags.get(potential_flag)
-                if attached_type and re.fullmatch(r"[0-9]+", potential_value):
-                    if attached_type in ("number", "string"):
-                        if validate_flag_argument(potential_value, attached_type):
-                            i += 1
-                            continue
-                        return False  # pragma: no cover - a digit run is always a valid number/string
+                if (attached_type in ("number", "string")
+                        and re.fullmatch(r"[0-9]+", potential_value)):
+                    if validate_flag_argument(potential_value, attached_type):
+                        i += 1
+                        continue
+                    return False  # pragma: no cover - a digit run is always a valid number/string
             if not flag.startswith("--") and len(flag) > 2:
                 for ch in flag[1:]:
                     bundled = config.safe_flags.get("-" + ch)
@@ -2337,10 +2336,10 @@ def validate_flags(
 __all__ = [
     "ANT_ONLY_COMMAND_ALLOWLIST",
     "COMMAND_ALLOWLIST",
-    "CommandConfig",
     "EXTERNAL_READONLY_COMMANDS",
     "FLAG_PATTERN",
     "SAFE_TARGET_COMMANDS_FOR_XARGS",
+    "CommandConfig",
     "contains_vulnerable_unc_path",
     "get_command_allowlist",
     "gh_is_dangerous_callback",

@@ -247,7 +247,7 @@ def test_include_depth_limit():
 
 
 def test_external_includes_only_for_user_memory(dirs, tmp_path):
-    home, managed, ws_root = dirs
+    home, _managed, ws_root = dirs
     write(tmp_path / "outside.md", "outside")
     write(ws_root / "TDDAGENTS.md", f"project @{tmp_path}/outside.md @../escape.md")
     write(home / ".tddagents/TDDAGENTS.md", f"user @{tmp_path}/outside.md")

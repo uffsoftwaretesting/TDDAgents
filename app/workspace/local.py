@@ -51,7 +51,7 @@ class LocalWorkspace:
         return self._root.parent
 
     @classmethod
-    def for_run(cls, thread_id: str, env: dict[str, str] | None = None) -> "LocalWorkspace":
+    def for_run(cls, thread_id: str, env: dict[str, str] | None = None) -> LocalWorkspace:
         """
         The local side of a run, at
         `<Config.LOCAL_WORKSPACE_ROOT>/<thread_id>/workspace`.
@@ -192,7 +192,7 @@ class LocalWorkspace:
         started = time.monotonic()
 
         try:
-            completed = subprocess.run(
+            completed = subprocess.run(  # noqa: PLW1510 - a failing command is a result, not an error
                 ["/bin/bash", "-l", "-c", cmd],
                 cwd=str(self._root),
                 env=environment,

@@ -410,14 +410,14 @@ def test_check_read_only_constraints(tmp_path, monkeypatch):
         "passthrough", "Compound commands with cd and git require permission checks for enhanced security")
     assert msg("mkdir -p hooks && git status") == (
         "passthrough",
-        "Compound commands that create git internal files and run git require permission checks for enhanced "
-        "security")
+        ("Compound commands that create git internal files and run git require permission checks for enhanced "
+         "security"))
     assert msg("rm x") == ("passthrough", ro.NOT_READ_ONLY)
     (tmp_path / "HEAD").write_text("x")
     assert msg("git status") == (
         "passthrough",
-        "Git commands in directories with bare repository structure require permission checks for enhanced "
-        "security")
+        ("Git commands in directories with bare repository structure require permission checks for enhanced "
+         "security"))
     assert msg("ls") == ("allow", "")
     monkeypatch.setattr(ro, "contains_vulnerable_unc_path", lambda s: True)
     assert msg("ls") == ("ask", "Command contains Windows UNC path that could be vulnerable to WebDAV attacks")

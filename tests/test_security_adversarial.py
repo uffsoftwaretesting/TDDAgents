@@ -233,7 +233,7 @@ def test_tdd_phase_rule_strictly_denies_implementation_writers_in_red() -> None:
     assert ok1 is False
     assert "denies implementation-writing" in reason1
 
-    ok2, reason2 = check_tdd_phase_permission(tool_edit_impl, {}, ledger_red)
+    ok2, _reason2 = check_tdd_phase_permission(tool_edit_impl, {}, ledger_red)
     assert ok2 is False
 
     # Test writers and RunTests must be permitted in RED

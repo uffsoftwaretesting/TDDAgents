@@ -41,8 +41,8 @@ from __future__ import annotations
 import os
 import re
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Union
 
 from app.types.permissions import PermissionBehavior, PermissionResult
 
@@ -129,7 +129,7 @@ _SAFE_HEREDOC_PATTERN = re.compile(
 
 # ── shell-quote `parse` (v1.10.0) ─────────────────────────────────────────────
 
-ParseEntry = Union[str, dict[str, str]]
+ParseEntry = str | dict[str, str]
 
 _CONTROL = r"(?:\|\||\&\&|;;|\|\&|\<\(|\<\<\<|>>|>\&|<\&|[&;()|<>])"
 _CONTROL_RE = re.compile("^" + _CONTROL + r"\Z")
@@ -178,7 +178,7 @@ def shell_quote_parse(string: str, env: ShellEnv | None = None) -> list[ParseEnt
         i = 0
         result: list[ParseEntry] | None = None
 
-        def parse_env_var() -> str:
+        def parse_env_var(s: str) -> str:
             nonlocal i
             i += 1
             char = s[i] if i < len(s) else ""
@@ -234,7 +234,7 @@ def shell_quote_parse(string: str, env: ShellEnv | None = None) -> list[ParseEnt
                     else:
                         out += "\\" + c
                 elif c == "$":
-                    out += parse_env_var()
+                    out += parse_env_var(s)
                 else:
                     out += c
             elif c in ('"', "'"):
@@ -250,7 +250,7 @@ def shell_quote_parse(string: str, env: ShellEnv | None = None) -> list[ParseEnt
             elif c == "\\":
                 esc = True
             elif c == "$":
-                out += parse_env_var()
+                out += parse_env_var(s)
             else:
                 out += c
             i += 1
@@ -276,7 +276,7 @@ def try_parse_shell_command(cmd: str, env: ShellEnv | None = None) -> ShellParse
     """`shellQuote.ts` -> `tryParseShellCommand`."""
     try:
         return ShellParseResult(success=True, tokens=shell_quote_parse(cmd, env))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - upstream's catch: any parse failure is a failed parse
         return ShellParseResult(success=False, error=str(exc) or "Unknown parse error")
 
 
@@ -527,10 +527,10 @@ def extract_heredocs_with_map(command: str, *, quoted_only: bool = False) -> tup
             if check == delimiter:
                 closing = idx
                 break
-            if len(check) > len(delimiter) and check.startswith(delimiter):
-                if check[len(delimiter)] in _HEREDOC_EOF_TOKENS:
-                    closing = -1
-                    break
+            if (len(check) > len(delimiter) and check.startswith(delimiter)
+                    and check[len(delimiter)] in _HEREDOC_EOF_TOKENS):
+                closing = -1
+                break
 
         if quoted_only and not is_quoted_or_escaped:
             if closing == -1:
@@ -1224,9 +1224,8 @@ def validate_brace_expansion(ctx: ValidationContext) -> PermissionResult:
                 inner += 1
             elif ck == "}" and not is_escaped_at_position(content, k):
                 inner -= 1
-            elif inner == 0:
-                if ck == "," or (ck == "." and k + 1 < matching and content[k + 1] == "."):
-                    return _ask("Command contains brace expansion that could alter command parsing")
+            elif inner == 0 and (ck == "," or (ck == "." and k + 1 < matching and content[k + 1] == ".")):
+                return _ask("Command contains brace expansion that could alter command parsing")
     return _passthrough("No brace expansion detected")
 
 
@@ -1456,11 +1455,11 @@ __all__ = [
     "CONTROL_CHAR_RE",
     "EARLY_VALIDATORS",
     "NON_MISPARSING_VALIDATORS",
+    "VALIDATORS",
+    "ZSH_DANGEROUS_COMMANDS",
     "ShellParseError",
     "ShellParseResult",
-    "VALIDATORS",
     "ValidationContext",
-    "ZSH_DANGEROUS_COMMANDS",
     "bash_command_is_safe",
     "build_validation_context",
     "extract_heredocs",

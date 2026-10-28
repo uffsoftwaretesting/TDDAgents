@@ -407,9 +407,9 @@ def prepare_cached_request(
 
 
 __all__ = [
+    "TEXT_BLOCK",
     "BlockAccumulator",
     "BlockKey",
-    "TEXT_BLOCK",
     "frame_content_blocks",
     "split_chunk_into_blocks",
 ]

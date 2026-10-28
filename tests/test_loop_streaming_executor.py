@@ -332,7 +332,7 @@ def test_sibling_abort_cascades_on_bash_error_only() -> None:
         assert executor.has_errored is True
 
         assert len(results) == 2
-        read_res = [r for r in results if r.tool_call_id == "read_1"][0]
+        read_res = next(r for r in results if r.tool_call_id == "read_1")
         assert "Cancelled: parallel tool call" in str(read_res.content)
         assert read_res.status == "error"
         assert read_res.additional_kwargs == {"is_error": True}
@@ -386,7 +386,7 @@ def test_non_bash_error_does_not_abort_siblings() -> None:
 
         assert executor.sibling_abort_controller.signal.aborted is False
         assert len(results) == 2
-        grep_res = [r for r in results if r.tool_call_id == "grep_1"][0]
+        grep_res = next(r for r in results if r.tool_call_id == "grep_1")
         assert "grep matched lines" in str(grep_res.content)
         assert grep_res.status == "success"
 

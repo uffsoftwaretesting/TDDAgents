@@ -56,7 +56,7 @@ class RipgrepUnavailableError(Exception):
     """rg could not be started or provisioned (upstream rejects with ENOENT/EACCES/EPERM)."""
 
 
-_status: "weakref.WeakKeyDictionary[Any, bool]" = weakref.WeakKeyDictionary()
+_status: weakref.WeakKeyDictionary[Any, bool] = weakref.WeakKeyDictionary()
 
 
 def is_env_defined_falsy(value: str | None) -> bool:
@@ -81,7 +81,7 @@ def ripgrep_command(ws: Any) -> str:
 def _probe(ws: Any, command: str) -> bool:
     try:
         res = ws.execute(shlex.join([command, "--version"]), timeout=VERSION_PROBE_TIMEOUT_SECONDS)
-    except Exception:
+    except Exception:  # noqa: BLE001 - any probe failure means no usable ripgrep
         return False
     return bool(res.exit_code == 0 and res.stdout.startswith("ripgrep "))
 

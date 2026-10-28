@@ -9,7 +9,7 @@ Ported from:
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from app.tool import CancelToken
 
@@ -23,7 +23,7 @@ class AbortSignal:
     Carries the aborted state, reason, and listener callbacks for cooperative cancellation.
     """
 
-    __slots__ = ("_aborted", "_reason", "_listeners")
+    __slots__ = ("_aborted", "_listeners", "_reason")
 
     def __init__(self) -> None:
         self._aborted: bool = False
@@ -46,7 +46,7 @@ class AbortSignal:
         if self._aborted:
             try:
                 listener(self._reason)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - a listener's failure must not stop the abort
                 logger.warning("Error in immediately invoked abort listener: %s", exc)
             return
 
@@ -71,7 +71,7 @@ class AbortSignal:
         for listener in listeners_copy:
             try:
                 listener(reason)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - a listener's failure must not stop the other listeners
                 logger.warning("Error in abort listener callback: %s", exc)
 
 

@@ -35,8 +35,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from app.types.permissions import (
     EXTERNAL_PERMISSION_MODES,
@@ -382,14 +383,14 @@ def settings_locations_for(context: ToolPermissionContext) -> SettingsLocations 
 __all__ = [
     "DIRECTORY_UPDATE_TYPES",
     "PERSISTABLE_DESTINATIONS",
-    "PermissionUpdate",
     "RULE_UPDATE_TYPES",
     "UPDATE_DESTINATIONS",
     "UPDATE_TYPES",
+    "PermissionUpdate",
     "add_permission_rules_to_settings",
-    "create_read_rule_suggestion",
     "apply_permission_update",
     "apply_permission_updates",
+    "create_read_rule_suggestion",
     "parse_permission_update",
     "parse_permission_updates",
     "persist_permission_update",

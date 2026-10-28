@@ -22,7 +22,7 @@ class E2BWorkspace:
         self._adapter = adapter
 
     @classmethod
-    def for_sandbox(cls, sandbox_id: str) -> "E2BWorkspace":
+    def for_sandbox(cls, sandbox_id: str) -> E2BWorkspace:
         """Convenience constructor for callers holding only an id."""
         return cls(E2BAdapter.connect(sandbox_id))
 

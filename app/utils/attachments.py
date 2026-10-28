@@ -1078,7 +1078,7 @@ def token_count_from_last_api_response(messages: Sequence[Message]) -> int:
 
 def effective_context_window(model: str) -> int:
     """`getEffectiveContextWindowSize`, from the token module (Phase 5, F1)."""
-    import app.utils.tokens as tokens
+    from app.utils import tokens
 
     size: int = tokens.get_effective_context_window_size(model)
     return size
@@ -1100,15 +1100,15 @@ __all__ = [
     "AUTO_MODE_ATTACHMENT_CONFIG",
     "AUTO_MODE_FULL_INSTRUCTIONS",
     "AUTO_MODE_SPARSE_INSTRUCTIONS",
-    "Attachment",
     "DIFF_SNIPPET_MAX_BYTES",
     "MCP_INSTR_DELTA_ENV",
-    "NestedMemoryState",
     "OVERRIDE_DATE_ENV",
     "TDD_STATE_HEADER",
     "TODO_REMINDER_CONFIG",
     "TODO_REMINDER_TEXT",
     "TOKEN_USAGE_ENV",
+    "Attachment",
+    "NestedMemoryState",
     "agent_definitions_for",
     "attachment_of",
     "count_auto_mode_attachments_since_last_exit",

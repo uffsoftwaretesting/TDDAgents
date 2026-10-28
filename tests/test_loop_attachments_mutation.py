@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.tdd.tdd_state_attachment as tdd_state_attachment
 import app.utils.attachments as dates_mod
 import app.utils.attachments as pipeline
 from app.state.app_state_store import AppState, AppStateStore
+from app.tdd import tdd_state_attachment
 from app.tdd.ledger import PhaseLedger, TestRunRecord
 from app.tdd.tdd_state_attachment import create_tdd_state_attachment_message
 from app.tool import tool_context_for
@@ -493,8 +493,8 @@ def test_last_api_response_tolerates_bare_objects():
 
 
 def test_effective_context_window_is_the_token_modules():
-    import app.utils.tokens as tokens
     from app.config.config import Config
+    from app.utils import tokens
 
     assert effective_context_window(Config.MODEL) == tokens.get_effective_context_window_size(Config.MODEL)
 

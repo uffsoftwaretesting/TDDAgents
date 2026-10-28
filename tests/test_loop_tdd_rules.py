@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
@@ -113,7 +113,7 @@ def test_tool_classification_helpers():
     class RaisingTool:
         name: str = "RaisingTool"
         prompt: str = ""
-        input_schema: dict[str, Any] = {}
+        input_schema: ClassVar[dict[str, Any]] = {}
         aliases: tuple[str, ...] = ()
         is_mcp: bool = False
 
@@ -157,7 +157,7 @@ def test_tool_classification_helpers():
     class NoAttrTool:
         name: str = "NoAttrTool"
         prompt: str = ""
-        input_schema: dict[str, Any] = {}
+        input_schema: ClassVar[dict[str, Any]] = {}
         aliases: tuple[str, ...] = ()
         is_mcp: bool = False
 

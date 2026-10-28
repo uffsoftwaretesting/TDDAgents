@@ -24,13 +24,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-import app.workspace.pyenv as pyenv
 from app.query.state import initial_loop_state
 from app.session.export import EXPORT_EXCLUDES, export_run_workspace
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tool import tool_context_for
 from app.types.permissions import PermissionMode
+from app.workspace import pyenv
 from app.workspace.local import LocalWorkspace
 from app.workspace.pyenv import (
     REQUIRED_PACKAGES,
@@ -482,7 +482,7 @@ def test_runner_reports_failure_without_inventing_progress(python_workspace):
 
 
 def test_runner_crash_is_a_model_error(python_workspace, monkeypatch):
-    import app.query_engine as query_engine
+    from app import query_engine
     from tests.session_run_helpers import run_item
 
     def boom(*a: Any, **k: Any) -> Any:

@@ -331,8 +331,8 @@ def test_command_has_any_cd():
 
 def test_check_command_operator_permissions(cwd):
     unsafe = check_command_operator_permissions("(rm x)", ctx(), cwd)
-    assert (unsafe.behavior, unsafe.message) == ("ask", "This command uses shell operators that require approval "
-                                                        "for safety")
+    assert (unsafe.behavior, unsafe.message) == ("ask", ("This command uses shell operators that require approval "
+                                                         "for safety"))
     nopipe = check_command_operator_permissions("ls", ctx(), cwd)
     assert (nopipe.behavior, nopipe.message) == ("passthrough", "No pipes found in command")
     allowed = check_command_operator_permissions("ls | wc -l", ctx(), cwd)

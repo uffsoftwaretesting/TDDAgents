@@ -220,13 +220,11 @@ def is_command_read_only(command: str) -> bool:
         return True
     for regex in READONLY_COMMAND_REGEXES:
         if regex.search(test):
-            if "git" in test and (
+            return not ("git" in test and (
                 re.search(_S + "-c[" + JS_WS + "=]", test)
                 or re.search(_S + "--exec-path[" + JS_WS + "=]", test)
                 or re.search(_S + "--config-env[" + JS_WS + "=]", test)
-            ):
-                return False
-            return True
+            ))
     return False
 
 

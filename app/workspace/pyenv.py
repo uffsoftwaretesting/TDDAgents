@@ -21,9 +21,10 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 #: Directory, under a session's run dir, that holds its virtualenv.
 SESSION_VENV_DIRNAME = "venv"

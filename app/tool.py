@@ -40,7 +40,6 @@ import inspect
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import (
-    TYPE_CHECKING,
     Any,
     Protocol,
     runtime_checkable,
@@ -54,9 +53,6 @@ from app.utils.file_state_cache import FileState
 from app.utils.messages import Message
 from app.utils.permissions.denial_tracking import DenialTrackingState
 from app.utils.tool_result_storage import MAX_TOOL_RESULT_BYTES
-
-if TYPE_CHECKING:
-    pass
 
 
 def default_map_result(result: ToolResult, tool_use_id: str) -> ToolMessage:
@@ -332,10 +328,6 @@ def find_tool_by_name(tools: Sequence[Tool], name: str) -> Tool | None:
         if name in getattr(tool, "aliases", ()):
             return tool
     return None
-
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass(frozen=True, slots=True)

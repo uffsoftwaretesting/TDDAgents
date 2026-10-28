@@ -162,7 +162,7 @@ def test_probe_requires_ripgrep_banner_and_survives_exceptions():
 
 def test_ensure_works_for_unhashable_weakref_targets():
     class Slotted:
-        __slots__ = ("kind", "calls")
+        __slots__ = ("calls", "kind")
 
         def __init__(self):
             self.kind = "local"

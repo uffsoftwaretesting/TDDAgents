@@ -1368,6 +1368,7 @@ def _is_async_line(line: str) -> bool:
 
 
 __all__ = [
+    "PROJECT_DIR_ENV",
     "AgentHookExecutor",
     "CommandHookResult",
     "HookDispatcher",
@@ -1375,7 +1376,6 @@ __all__ = [
     "HttpHookExecutor",
     "IfConditionMatcher",
     "MatchedHook",
-    "PROJECT_DIR_ENV",
     "PreCompactHookResult",
     "PromptHookExecutor",
     "dispatcher_of",

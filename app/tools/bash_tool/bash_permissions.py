@@ -33,8 +33,9 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 from app.tools.bash_tool.bash_security import (
     bash_command_is_safe,
@@ -781,9 +782,9 @@ def compound_suggestions(results: Mapping[str, PermissionResult]) -> tuple[Any, 
 
 __all__ = [
     "ACCEPT_EDITS_ALLOWED_COMMANDS",
-    "MAX_DIRS_TO_LIST",
     "ANT_ONLY_SAFE_ENV_VARS",
     "BASH_TOOL_NAME",
+    "MAX_DIRS_TO_LIST",
     "SAFE_ENV_VARS",
     "bash_tool_check_exact_match_permission",
     "bash_tool_check_permission",

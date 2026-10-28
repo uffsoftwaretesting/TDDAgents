@@ -28,8 +28,9 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Literal
 
 from app.tools.bash_tool.bash_security import try_parse_shell_command
 from app.types.permissions import PermissionBehavior, PermissionResult

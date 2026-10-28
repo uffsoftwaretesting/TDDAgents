@@ -24,9 +24,10 @@ visible to the agent as ordinary content and indistinguishable from a file the p
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
 from app.utils.frontmatter_parser import parse_markdown_frontmatter

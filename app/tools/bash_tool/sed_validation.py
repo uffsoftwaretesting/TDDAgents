@@ -166,7 +166,7 @@ def has_file_args(command: str) -> bool:
             has_e = True
             i += 2
             continue
-        if arg.startswith("--expression=") or arg.startswith("-e="):
+        if arg.startswith(("--expression=", "-e=")):
             has_e = True
             i += 1
             continue

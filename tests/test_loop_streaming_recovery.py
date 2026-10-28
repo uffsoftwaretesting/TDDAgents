@@ -5,8 +5,9 @@ Unit tests for withhold-then-decide, recovery continue sites, and stream abortio
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
-from typing import Any, AsyncIterator
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -303,7 +304,7 @@ def test_exhausted_413_surfaces_withheld_error() -> None:
 
         # When recovery cannot run, withheld error surfaces
         assert ptl_msg in emitted_events
-        term = [e for e in emitted_events if isinstance(e, Terminated)][0]
+        term = next(e for e in emitted_events if isinstance(e, Terminated))
         assert term.reason is Terminal.PROMPT_TOO_LONG
 
     asyncio.run(_run())
@@ -330,7 +331,7 @@ def test_withheld_max_output_tokens_recovers() -> None:
         # Truncated message is withheld during turn 1
         assert truncated_msg not in emitted_events
         assert resumed_msg in emitted_events
-        term = [e for e in emitted_events if isinstance(e, Terminated)][0]
+        term = next(e for e in emitted_events if isinstance(e, Terminated))
         assert term.reason is Terminal.COMPLETED
 
     asyncio.run(_run())

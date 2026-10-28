@@ -69,9 +69,6 @@ from app.utils.permissions.permissions import (
 )
 from app.utils.shell_command import is_aborted
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger("TDDOrchestrator.Hooks")
 
 
@@ -409,8 +406,8 @@ async def resolve_hook_permission_decision(
 
 
 __all__ = [
-    "HookPermissionVerdict",
     "PERMISSION_DENIED_RETRY_MESSAGE",
+    "HookPermissionVerdict",
     "PostToolHooksOutcome",
     "PreToolHooksOutcome",
     "ResolvedPermission",

@@ -35,7 +35,7 @@ class WithholdGateSnapshot:
 
 
 def take_withhold_gate_snapshot(
-    state: "LoopState", config: "RunConfig"
+    state: LoopState, config: RunConfig
 ) -> WithholdGateSnapshot:
     """
     Latch the recovery gate values into an immutable record before streaming starts.
@@ -84,14 +84,11 @@ def is_prompt_too_long(message: Message) -> bool:
         return True
 
     content = getattr(message, "content", None)
-    if isinstance(content, str) and (
+    return isinstance(content, str) and (
         "prompt is too long" in content.lower()
         or "maximum context length" in content.lower()
         or "exceeds token limit" in content.lower()
-    ):
-        return True
-
-    return False
+    )
 
 
 def is_max_output_tokens(message: Message) -> bool:
@@ -126,10 +123,7 @@ def is_media_size_error(message: Message) -> bool:
         return True
 
     content = getattr(message, "content", None)
-    if isinstance(content, str) and "image exceeds" in content.lower():
-        return True
-
-    return False
+    return isinstance(content, str) and "image exceeds" in content.lower()
 
 
 def is_withheld_error(message: Message, gate: WithholdGateSnapshot) -> bool:

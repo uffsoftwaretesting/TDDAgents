@@ -2,6 +2,8 @@
 Tests for Part E1: Token counting substrate (app/utils/tokens.py).
 """
 
+from typing import Any, ClassVar
+
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.utils.tokens import (
@@ -195,12 +197,12 @@ def test_token_counter_class() -> None:
 
 
 def test_estimate_message_tokens_edge_cases() -> None:
-    from typing import Any, cast
+    from typing import cast
 
     # Tool call missing name via duck typing
     class DuckNoName:
         content = ""
-        tool_calls = [{"id": "call_1", "args": {}}]
+        tool_calls: ClassVar[list[dict[str, Any]]] = [{"id": "call_1", "args": {}}]
 
     # 4 (envelope) + 0 (name) + 1 (args={}) = 5
     assert estimate_message_tokens(cast(Any, DuckNoName())) == 5
@@ -212,7 +214,7 @@ def test_estimate_message_tokens_edge_cases() -> None:
     # Tool call with non-serializable args object fallback to str()
     class DuckCustomArgs:
         content = ""
-        tool_calls = [{"id": "call_1", "name": "Run", "args": object()}]
+        tool_calls: ClassVar[list[dict[str, Any]]] = [{"id": "call_1", "name": "Run", "args": object()}]
 
     assert estimate_message_tokens(cast(Any, DuckCustomArgs())) > 6
 

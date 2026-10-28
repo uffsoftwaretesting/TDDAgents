@@ -12,7 +12,7 @@ These two tests represent the thesis's structural claim in executable form
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage

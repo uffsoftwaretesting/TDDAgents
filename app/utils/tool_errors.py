@@ -21,7 +21,8 @@ Two details from upstream that are easy to lose and worth keeping:
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from jsonschema import Draft7Validator
 from jsonschema import ValidationError as SchemaValidationError
@@ -126,7 +127,7 @@ def validate_against_schema(
     try:
         validator = Draft7Validator(dict(schema))
         errors = sorted(validator.iter_errors(args), key=lambda e: list(e.absolute_path))
-    except Exception:
+    except Exception:  # noqa: BLE001 - an invalid schema is not the model's error; validation is skipped
         return None
     if not errors:
         return None

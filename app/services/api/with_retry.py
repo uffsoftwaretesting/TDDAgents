@@ -28,8 +28,9 @@ from __future__ import annotations
 import logging
 import random
 import re
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Awaitable, Callable, Mapping, TypeVar
+from typing import TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ def _header(error: BaseException, name: str) -> str | None:
         if callable(getter):
             try:
                 found = getter(name)
-            except Exception:  # pragma: no cover - a header bag that raises is not a retry signal
+            except Exception:  # noqa: BLE001  # pragma: no cover - a header bag that raises is not a retry signal
                 found = None
             if found is not None:
                 return str(found)
@@ -364,14 +365,14 @@ async def with_retry(
 __all__ = [
     "BASE_DELAY_MS",
     "CONTEXT_OVERFLOW_SAFETY_BUFFER",
-    "CannotRetryError",
     "DEFAULT_MAX_DELAY_MS",
     "DEFAULT_MAX_RETRIES",
     "FLOOR_OUTPUT_TOKENS",
-    "FallbackTriggeredError",
     "JITTER_FACTOR",
     "MAX_529_RETRIES",
     "OVERLOADED_ERROR_MARKER",
+    "CannotRetryError",
+    "FallbackTriggeredError",
     "RetryContext",
     "RetryNotice",
     "RetryOptions",

@@ -26,13 +26,14 @@ Three lifecycle defects are fixed here rather than at the call sites:
 
 from __future__ import annotations
 
+import builtins
 import logging
 import posixpath
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import Any
 
 from e2b import (
     AuthenticationException,
@@ -170,7 +171,7 @@ class E2BAdapter:
     # ── Construction ─────────────────────────────────────────────────────────
 
     @classmethod
-    def create(cls, timeout: int | None = None) -> "E2BAdapter":
+    def create(cls, timeout: int | None = None) -> E2BAdapter:
         """Provisions a new sandbox with an explicit lifetime."""
         require_e2b_api_key()
         lifetime = timeout if timeout is not None else Config.SANDBOX_TIMEOUT
@@ -187,12 +188,12 @@ class E2BAdapter:
 
         try:
             provision_sandbox_ripgrep(adapter)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - ripgrep is optional; Grep falls back without it
             logger.warning("ripgrep provisioning failed for sandbox %s: %s", sandbox.sandbox_id, exc)
         return adapter
 
     @classmethod
-    def connect(cls, sandbox_id: str) -> "E2BAdapter":
+    def connect(cls, sandbox_id: str) -> E2BAdapter:
         """Connects to an existing sandbox. Raises WorkspaceNotFound if it is gone."""
         require_e2b_api_key()
         try:
@@ -203,7 +204,7 @@ class E2BAdapter:
         return cls(sandbox)
 
     @classmethod
-    def reuse_or_create(cls, sandbox_id: str | None) -> "E2BAdapter":
+    def reuse_or_create(cls, sandbox_id: str | None) -> E2BAdapter:
         """
         Returns an adapter for `sandbox_id` when that sandbox is still alive, and a
         freshly provisioned one otherwise.
@@ -450,7 +451,7 @@ class E2BAdapter:
 
     # ── Background commands ──────────────────────────────────────────────────
 
-    def start_background(self, cmd: str, cwd: str | None = None) -> "BackgroundCommand":
+    def start_background(self, cmd: str, cwd: str | None = None) -> BackgroundCommand:
         """
         Starts a command without waiting for it, and returns a handle to poll.
 
@@ -482,10 +483,10 @@ class E2BAdapter:
         logger.info("▶️  Background command %s started (pid %s).", command.id, command.pid)
         return command
 
-    def get_background(self, command_id: str) -> "BackgroundCommand | None":
+    def get_background(self, command_id: str) -> BackgroundCommand | None:
         return self._background.get(command_id)
 
-    def list_background(self) -> List["BackgroundCommand"]:
+    def list_background(self) -> builtins.list[BackgroundCommand]:
         return list(self._background.values())
 
     def kill_command(self, command_id: str) -> bool:
@@ -502,7 +503,7 @@ class E2BAdapter:
         try:
             if command.handle is not None:
                 command.handle.kill()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - killing a finished command may raise anything; best effort
             logger.debug("Killing %s reported: %s", command_id, exc)
 
         command.finished = True

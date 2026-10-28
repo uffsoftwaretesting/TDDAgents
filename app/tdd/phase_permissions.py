@@ -58,7 +58,7 @@ def is_implementation_writing_tool(tool: Tool) -> bool:
     if callable(fn):
         try:
             return bool(fn())
-        except Exception:
+        except Exception:  # noqa: BLE001 - a tool's own classifier hook must not crash the gate
             return False
     return False
 
@@ -74,7 +74,7 @@ def is_test_writing_tool(tool: Tool) -> bool:
     if callable(fn):
         try:
             return bool(fn())
-        except Exception:
+        except Exception:  # noqa: BLE001 - a tool's own classifier hook must not crash the gate
             return False
     return False
 
@@ -91,9 +91,7 @@ def is_test_path(path: str) -> bool:
     if any(p in ("tests", "test") for p in parts[:-1]):
         return True
     basename = parts[-1]
-    if basename.startswith("test_") or basename.endswith("_test.py"):
-        return True
-    return False
+    return basename.startswith("test_") or basename.endswith("_test.py")
 
 
 def get_phase_deny_rules(ledger: PhaseLedger) -> tuple[PermissionRule, ...]:
@@ -178,8 +176,8 @@ def check_tdd_phase_permission(
         if is_implementation_writing_tool(tool):
             return (
                 False,
-                f"TDD phase RED denies implementation-writing tool '{tool.name}' "
-                "before a failing test is confirmed.",
+                (f"TDD phase RED denies implementation-writing tool '{tool.name}' "
+                 "before a failing test is confirmed."),
             )
         if tool.name in GENERIC_WRITER_TOOL_NAMES:
             raw_path = input_args.get("path") or input_args.get("file_path")
@@ -188,8 +186,8 @@ def check_tdd_phase_permission(
                 if not is_test_path(path):
                     return (
                         False,
-                        f"TDD phase RED denies writing to production file '{path}'. "
-                        "Only test files may be written in RED phase.",
+                        (f"TDD phase RED denies writing to production file '{path}'. "
+                         "Only test files may be written in RED phase."),
                     )
     elif ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR):
         if is_test_writing_tool(tool):

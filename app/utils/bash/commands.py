@@ -63,8 +63,7 @@ def is_static_redirect_target(target: str) -> bool:
     if target.startswith("#"):
         return False
     return not (
-        target.startswith("!")
-        or target.startswith("=")
+        target.startswith(("!", "=", "&"))
         or "$" in target
         or "`" in target
         or "*" in target
@@ -74,7 +73,6 @@ def is_static_redirect_target(target: str) -> bool:
         or "~" in target
         or "(" in target
         or "<" in target
-        or target.startswith("&")
     )
 
 
@@ -119,10 +117,9 @@ def split_command_with_operators(command: str) -> list[str]:
                 else:
                     parts[-1] = parts[-1] + " " + part
                 continue
-        elif part.get("op") == "glob":
-            if parts and isinstance(parts[-1], str):
-                parts[-1] = parts[-1] + " " + part["pattern"]
-                continue
+        elif part.get("op") == "glob" and parts and isinstance(parts[-1], str):
+            parts[-1] = parts[-1] + " " + part["pattern"]
+            continue
         parts.append(part)
 
     string_parts: list[str] = []
@@ -200,9 +197,7 @@ def split_command(command: str) -> list[str]:
             and next_part.startswith("&")
             and len(next_part) > 1
             and next_part[1:] in ALLOWED_FILE_DESCRIPTORS
-        ):
-            should_strip = True
-        elif part in (">", ">>") and is_static_redirect_target(effective_next):
+        ) or (part in (">", ">>") and is_static_redirect_target(effective_next)):
             should_strip = True
 
         if should_strip:
@@ -282,9 +277,7 @@ def is_simple_target(target: ParseEntry | None) -> bool:
     if not isinstance(target, str) or not target:
         return False
     return not (
-        target.startswith("!")
-        or target.startswith("=")
-        or target.startswith("~")
+        target.startswith(("!", "=", "~"))
         or "$" in target
         or "`" in target
         or "*" in target
@@ -308,9 +301,7 @@ def has_dangerous_expansion(target: ParseEntry | None) -> bool:
         or "?" in target
         or "[" in target
         or "{" in target
-        or target.startswith("!")
-        or target.startswith("=")
-        or target.startswith("~")
+        or target.startswith(("!", "=", "~"))
     )
 
 
@@ -681,13 +672,12 @@ def reconstruct_command(kept: list[ParseEntry], original_cmd: str) -> str:
         if op == "(":
             if _detect_command_substitution(prev, kept, i) or cmd_sub_depth > 0:
                 cmd_sub_depth += 1
-                if result.endswith(" "):
-                    result = result[:-1]
+                result = result.removesuffix(" ")
                 result += "("
             elif result.endswith("$"):
                 result = _add_token(result, "(")
             else:
-                result = _add_token(result, "(", result.endswith("<(") or result.endswith("("))
+                result = _add_token(result, "(", result.endswith(("<(", "(")))
             i += 1
             continue
         if op == ")":
@@ -719,7 +709,7 @@ def get_pipe_segments(command: str) -> list[str]:
     """`getPipeSegments`: the command split on `|`, each segment re-joined with spaces."""
     try:
         parts = split_command_with_operators(command)
-    except Exception:
+    except Exception:  # noqa: BLE001 - an unparseable command is one segment, as upstream
         return [command]
     segments: list[str] = []
     current: list[str] = []

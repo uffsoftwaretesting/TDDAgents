@@ -410,7 +410,7 @@ def extract_permission_context(context: ToolContext) -> ToolPermissionContext:
                 app_state.tool_permission_context, ToolPermissionContext
             ):
                 return app_state.tool_permission_context
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - an unreadable app state falls back to the default context
             pass
 
     return ToolPermissionContext()
@@ -912,12 +912,12 @@ def create_permission_request_message(
 
 
 __all__ = [
-    "AutoModeAbortError",
     "DENIAL_LIMIT_ABORT",
     "PERMISSION_REQUEST_EVENT",
     "SAFETY_CHECK_HEADLESS_REASON",
     "TRANSCRIPT_TOO_LONG_ABORT",
     "TRANSCRIPT_TOO_LONG_REASON",
+    "AutoModeAbortError",
     "apply_hook_permission_updates",
     "auto_mode_decision",
     "create_permission_request_message",

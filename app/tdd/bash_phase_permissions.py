@@ -70,32 +70,32 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger) -> tuple[bool, str]:
         if dangerous:
             return (
                 False,
-                "TDD phase RED cannot verify where this command writes: its redirection "
-                "target uses shell expansion or could not be parsed. Write the test file "
-                "with WriteFile instead.",
+                ("TDD phase RED cannot verify where this command writes: its redirection "
+                 "target uses shell expansion or could not be parsed. Write the test file "
+                 "with WriteFile instead."),
             )
         for target in targets:
             if not is_test_path(target):
                 return (
                     False,
-                    f"TDD phase RED denies writing to production file '{target}' through a "
-                    "shell redirection. Only test files may be written before a failing "
-                    "test is confirmed.",
+                    (f"TDD phase RED denies writing to production file '{target}' through a "
+                     "shell redirection. Only test files may be written before a failing "
+                     "test is confirmed."),
                 )
     elif ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR):
         if dangerous:
             return (
                 False,
-                f"TDD phase {ledger.phase} cannot verify where this command writes: its "
-                "redirection target uses shell expansion or could not be parsed.",
+                (f"TDD phase {ledger.phase} cannot verify where this command writes: its "
+                 "redirection target uses shell expansion or could not be parsed."),
             )
         for target in targets:
             if is_test_path(target):
                 return (
                     False,
-                    f"TDD phase {ledger.phase} denies modifying test file '{target}' through "
-                    "a shell redirection. The test is what pins the behaviour being "
-                    "implemented.",
+                    (f"TDD phase {ledger.phase} denies modifying test file '{target}' through "
+                     "a shell redirection. The test is what pins the behaviour being "
+                     "implemented."),
                 )
 
     return True, ""
