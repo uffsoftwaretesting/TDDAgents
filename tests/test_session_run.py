@@ -26,6 +26,7 @@ from app.cli.print import (
 from app.query.transitions import Terminal
 from app.session.prompts import development_resume_prompt, development_start_prompt
 from app.tdd.plan import ItemStatus, TddPlan, load_plan, plan_path, save_plan
+from app.tdd.suite_fingerprint import fingerprint_test_files
 from app.types.permissions import PermissionMode, ToolPermissionContext
 
 CALC_TEST = "import calculator\n\ndef test_add():\n    assert calculator.add(2, 3) == 5\n"
@@ -52,11 +53,13 @@ def scripted(turns: list[list[AIMessage]], seen: list[Any]) -> Any:
 
 
 def cycle(test_file: str, test: str, impl: str, n: int) -> list[list[AIMessage]]:
+    """RED (write and run the tests), GREEN (implement, pass), REFACTOR (pass with full coverage)."""
     return [
         [call("WriteFile", f"w{n}", file_path=test_file, content=test)],
         [call("RunTests", f"r{n}", test_path="tests")],
         [call("WriteFile", f"i{n}", file_path="calculator.py", content=impl)],
         [call("RunTests", f"g{n}", test_path="tests")],
+        [call("RunTests", f"f{n}", test_path="tests")],  # REFACTOR: passing, fully covered
     ]
 
 
@@ -136,6 +139,7 @@ def test_a_resumed_session_keeps_its_saved_plan_and_restarts_the_ledger(python_w
     done_first = dataclasses.replace(done_first, items=(
         dataclasses.replace(done_first.items[0], status=ItemStatus.DONE), done_first.items[1]))
     save_plan(plan_path(run_id, str(python_workspace.root)), done_first)
+    python_workspace.write_file("tests/test_add.py", "def test_add():\n    pass\n")
     seen: list[Any] = []
     turns = [[AIMessage(content="stop")], [AIMessage(content="stop")]]
 
@@ -143,7 +147,9 @@ def test_a_resumed_session_keeps_its_saved_plan_and_restarts_the_ledger(python_w
         async with open_session_run(run_id=run_id, plan=TddPlan.from_texts(["add", "sub"]),
                                     workspace=python_workspace, **options(tmp_path, scripted(turns, seen))) as run:
             assert run.store.get().tdd_plan == done_first
-            assert run.store.get().phase_ledger.red_confirmed is False
+            assert run.store.get().phase_ledger.tests_written is False
+            # The resumed item's existing tests are its RED baseline: they must change again.
+            assert run.store.get().tdd_item_test_baseline == fingerprint_test_files(python_workspace)
             assert run.ctx.tdd_plan_path == str(plan_path(run_id, str(python_workspace.root)))
             return await begin_session(run, "fresh", "resumed")
 

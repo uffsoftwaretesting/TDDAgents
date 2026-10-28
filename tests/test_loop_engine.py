@@ -302,7 +302,7 @@ class TestTheNextTurnSite:
         assert self.two_turns(stop_hook_active=True).seen[1].stop_hook_active is True
 
     def test_the_phase_ledger_is_preserved(self):
-        ledger = PhaseLedger(phase="GREEN", red_confirmed=True)
+        ledger = PhaseLedger(phase="GREEN", tests_written=True)
         assert self.two_turns(phase_ledger=ledger).seen[1].phase_ledger == ledger
 
     def test_compaction_tracking_advances_its_turn_counter(self):
@@ -622,7 +622,7 @@ class TestResetPreserveMatrix:
             has_attempted_reactive_compact=True,
             stop_hook_active=True,
             turn_count=1,
-            phase_ledger=PhaseLedger(phase="GREEN", red_confirmed=True),
+            phase_ledger=PhaseLedger(phase="GREEN", tests_written=True),
             compaction_tracking=CompactionTracking(compacted=True, turn_id="t0", turn_counter=1),
         )
         model = FakeModel([[asks_for("RunTests", "c1")], [AIMessage(content="done")]])
@@ -645,7 +645,7 @@ class TestResetPreserveMatrix:
             has_attempted_reactive_compact=True,
             stop_hook_active=None,
             turn_count=3,
-            phase_ledger=PhaseLedger(phase="RED", red_confirmed=False),
+            phase_ledger=PhaseLedger(phase="RED", tests_written=False),
             compaction_tracking=CompactionTracking(compacted=False, turn_id="t1", turn_counter=0),
         )
         block_msg = HumanMessage(content="Test never failed in RED phase")
@@ -669,7 +669,7 @@ class TestResetPreserveMatrix:
             has_attempted_reactive_compact=False,
             stop_hook_active=True,
             turn_count=2,
-            phase_ledger=PhaseLedger(phase="REFACTOR", red_confirmed=True, green_passed=True),
+            phase_ledger=PhaseLedger(phase="REFACTOR", tests_written=True, green_passed=True),
             compaction_tracking=None,
         )
         new_tracking = CompactionTracking(compacted=True, turn_id="c-turn", turn_counter=1)
@@ -696,7 +696,7 @@ class TestResetPreserveMatrix:
             has_attempted_reactive_compact=False,
             stop_hook_active=True,
             turn_count=2,
-            phase_ledger=PhaseLedger(phase="GREEN", red_confirmed=True),
+            phase_ledger=PhaseLedger(phase="GREEN", tests_written=True),
             compaction_tracking=old_tracking,
         )
         compacted_msg = HumanMessage(content="compacted summary")
@@ -718,7 +718,7 @@ class TestResetPreserveMatrix:
             has_attempted_reactive_compact=True,
             stop_hook_active=True,
             turn_count=4,
-            phase_ledger=PhaseLedger(phase="GREEN", red_confirmed=True),
+            phase_ledger=PhaseLedger(phase="GREEN", tests_written=True),
             compaction_tracking=CompactionTracking(compacted=True, turn_id="t-prev", turn_counter=2),
         )
         truncated = AIMessage(content="def foo():\n    return", additional_kwargs={"api_error": "max_output_tokens"})

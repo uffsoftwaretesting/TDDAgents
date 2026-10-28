@@ -1,7 +1,7 @@
 """
 TDD Stop Hook: tdd_phase_incomplete (Part D5).
 
-Refuses turn exit when the Red->Green cycle is incomplete while remaining terminable
+Refuses turn exit when the Red -> Green -> Refactor cycle is incomplete while remaining terminable
 via the `stop_hook_active` contract (§3.3 of `docs/transition_elaboration_plan.md`).
 
 **This module holds the Stop hook and nothing else.** Phase 2 deleted the PreToolUse and
@@ -25,10 +25,26 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage
 
 from app.query.stop_hooks import StopHookResult
+from app.tdd.coverage_gate import COVERAGE_THRESHOLD
+from app.tdd.ledger import PhaseLedger
 
 if TYPE_CHECKING:
     from app.query.config import RunConfig
     from app.query.state import LoopState
+
+
+def incomplete_cycle_message(ledger: PhaseLedger) -> str:
+    """What the cycle still needs (Phase 12): RED's tests, GREEN's pass, or REFACTOR's coverage."""
+    if not ledger.tests_written:
+        return ("TDD cycle incomplete: RED is not done (tests_written=False). Write robust tests for this "
+                "sub-requirement, covering every relevant scenario and edge case, and run RunTests.")
+    if not ledger.green_passed:
+        return ("TDD cycle incomplete: GREEN is not done (green_passed=False). Implement the code the tests "
+                "describe and run RunTests until every test passes.")
+    figure = "not measured yet" if ledger.coverage is None else f"{ledger.coverage:.1f}%"
+    return ("TDD cycle incomplete: REFACTOR is not done (refactor_passed=False). It is mandatory: improve the "
+            "code and the tests, then run RunTests until every test passes with line + branch coverage of at "
+            f"least {COVERAGE_THRESHOLD:.0f}% (last measured: {figure}).")
 
 
 async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> StopHookResult:
@@ -59,23 +75,7 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
     state.tool_context.set_app_state(lambda s: replace(s, tdd_blocked_item=item_id))
 
     # First block: build explanation of why turn cannot exit
-    if not ledger.red_confirmed:
-        if ledger.green_passed:
-            # F2 "green in red" case
-            msg = (
-                "TDD cycle incomplete: tests passed on first run without prior failure "
-                "(red_confirmed=False). A failing test must be observed (RED phase) before implementation."
-            )
-        else:
-            msg = (
-                "TDD cycle incomplete: no failing test observed yet in RED phase "
-                "(red_confirmed=False). You must write a failing test and run RunTests."
-            )
-    else:
-        msg = (
-            "TDD cycle incomplete: tests are not passing yet in GREEN phase "
-            "(green_passed=False). You must implement code and run RunTests until tests pass."
-        )
+    msg = incomplete_cycle_message(ledger)
     if current is not None:
         msg = f"Current sub-requirement {current.id}: {current.text}\n\n{msg}"
 

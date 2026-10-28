@@ -439,19 +439,19 @@ class TestForkPhaseOnSpawn:
         assert store.get().phase_ledger == PhaseLedger()
 
     def test_a_developer_after_red_moves_the_ledger_to_green(self):
-        model, store, tool, ctx = self._run(DEVELOPER, PhaseLedger(red_confirmed=True))
+        model, store, tool, ctx = self._run(DEVELOPER, PhaseLedger(tests_written=True))
         _call(tool, {"skill": "design"}, ctx)
-        assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+        assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
         assert model.seen[0].tool_context.get_app_state().phase_ledger.phase == TddPhase.GREEN
 
     def test_a_tester_restarts_the_cycle(self):
-        done = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+        done = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True, refactor_passed=True)
         _, store, tool, ctx = self._run(TESTER, done)
         _call(tool, {"skill": "design"}, ctx)
         assert store.get().phase_ledger == PhaseLedger()
 
     def test_a_no_phase_agent_leaves_the_ledger_untouched(self):
-        ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+        ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
         _, store, tool, ctx = self._run(EXPLORE, ledger)
         _call(tool, {"skill": "design"}, ctx)
         assert store.get().phase_ledger is ledger

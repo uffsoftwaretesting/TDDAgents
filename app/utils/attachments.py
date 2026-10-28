@@ -388,13 +388,19 @@ def _async_hook_response(data: Mapping[str, Any]) -> list[str]:
 TDD_STATE_HEADER = "TDD phase ledger (written only by RunTests from observed test runs):"
 
 
+def _coverage_text(coverage: Any) -> str:
+    return "not measured" if coverage is None else f"{coverage:.1f}%"
+
+
 def tdd_state_lines(data: Mapping[str, Any]) -> list[str]:
     """The ledger part of a TDD-state attachment, with the plan's position when there is one."""
     lines = [
         TDD_STATE_HEADER,
         f"Current Phase: {data.get('phase')}",
-        f"Red Confirmed: {data.get('red_confirmed')}",
+        f"Tests Written: {data.get('tests_written')}",
         f"Green Passed: {data.get('green_passed')}",
+        f"Refactor Passed: {data.get('refactor_passed')}",
+        f"Coverage: {_coverage_text(data.get('coverage'))}",
     ]
     if "plan_progress" in data:
         lines.append(f"Current Sub-requirement: {data.get('sub_requirement') or '(all done)'}")

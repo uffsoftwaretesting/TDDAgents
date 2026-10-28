@@ -397,6 +397,6 @@ def test_permission_option_defaults():
 
 def test_ledger_phases_are_unaffected_by_an_answer(tmp_path: Path):
     asker = Asker(PermissionAnswer("yes-apply-suggestions"))
-    ctx = interactive_context(tmp_path, asker, ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True))
+    ctx = interactive_context(tmp_path, asker, ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
     call(build_bash_tool(), {"command": "make build"}, ctx)
-    assert ctx.get_app_state().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    assert ctx.get_app_state().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)

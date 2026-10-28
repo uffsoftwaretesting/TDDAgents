@@ -2,7 +2,7 @@
 The session's TDD plan: the sub-requirements the Planner produced, as state the user and the
 model can change while the work goes on (Phase 11).
 
-A sub-requirement is `pending` until its own Red -> Green cycle has been observed, then
+A sub-requirement is `pending` until its own Red -> Green -> Refactor cycle has been observed, then
 `done`. The current item is the first one that is not done, so the order of the list *is* the
 order of the work. Two rules carry the TDD guarantee and are enforced here, not by callers:
 
@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.suite_fingerprint import fingerprint_test_files
 from app.utils.session_storage_portable import get_project_dir
 
 logger = logging.getLogger("TDDOrchestrator.Plan")
@@ -129,12 +130,12 @@ class TddPlan:
         return plan
 
     def complete_current(self, ledger: PhaseLedger) -> TddPlan:
-        """Mark the current item done; only an observed Red -> Green cycle allows it."""
+        """Mark the current item done; only an observed Red -> Green -> Refactor cycle allows it."""
         current = self.current
         if current is None:
             raise PlanError("Every sub-requirement is already done.")
         if not ledger.is_cycle_complete:
-            raise PlanError(f"Sub-requirement {current.id} has no observed Red -> Green cycle.")
+            raise PlanError(f"Sub-requirement {current.id} has no completed Red -> Green -> Refactor cycle.")
         index = self._index(current.id)
         items = list(self.items)
         items[index] = replace(current, status=ItemStatus.DONE)
@@ -213,14 +214,17 @@ def update_tdd_plan(context: Any, change: Callable[[TddPlan], TddPlan]) -> TddPl
     leaves both the state and the file untouched. When the change moves the work to another
     sub-requirement — the current one done, removed, moved, reworded or replaced — the TDD
     ledger restarts in RED: what it observed belonged to the old item, and each item is done
-    only by its own Red -> Green cycle. Like phase-on-spawn, the restart can only erase evidence.
+    only by its own Red -> Green -> Refactor cycle. The new item's tests are fingerprinted as
+    its baseline (Phase 12). Like phase-on-spawn, the restart can only erase evidence.
     """
     app_state = context.get_app_state()
     updated = change(app_state.tdd_plan)
     if updated.current != app_state.tdd_plan.current:
         ledger = app_state.phase_ledger
         reset_ledger = ledger.transition_to(TddPhase.RED)
-        context.set_app_state(lambda s: replace(s, tdd_plan=updated, phase_ledger=reset_ledger, last_test_run=None))
+        baseline = fingerprint_test_files(getattr(context, "workspace", None))
+        context.set_app_state(lambda s: replace(s, tdd_plan=updated, phase_ledger=reset_ledger, last_test_run=None,
+                                                tdd_item_test_baseline=baseline))
     else:
         context.set_app_state(lambda state: replace(state, tdd_plan=updated))
     if context.tdd_plan_path:

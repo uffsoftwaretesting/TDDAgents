@@ -44,7 +44,7 @@ def test_live_runner_completes_a_red_green_cycle(real_openai_key: str, python_wo
     result = asyncio.run(run_item(SPEC, 0, {"session_id": "live"}, workspace=python_workspace))
 
     assert result.terminal_reason == "completed", result.error_message
-    assert result.red_confirmed is True
+    assert result.tests_written is True
     assert result.green_passed is True
     assert python_workspace.exists("tests/test_calculator.py")
     assert python_workspace.exists("calculator.py")

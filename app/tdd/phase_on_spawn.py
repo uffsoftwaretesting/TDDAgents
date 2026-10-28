@@ -2,10 +2,10 @@
 TDD rules for spawning a worker (TDDAgents' customization of `AgentTool.call`).
 
 * **Phase-on-spawn.** Before a phase agent (one with a TDD `phase`) starts, the shared ledger
-  moves to that phase through `PhaseLedger.transition_to`: GREEN needs `red_confirmed`,
-  REFACTOR a completed cycle, and RED restarts the cycle. A refused move raises before any
-  worker runs. The Agent tool and the Skill tool's forked path are the only callers, and both
-  write the returned ledger as `spawn_ledger` (pinned by
+  moves to that phase through `PhaseLedger.transition_to`: GREEN needs written tests,
+  REFACTOR a passing GREEN, and RED restarts the cycle (with a new test baseline, Phase 12).
+  A refused move raises before any worker runs. The Agent tool and the Skill tool's forked
+  path are the only callers, and both write the returned ledger as `spawn_ledger` (pinned by
   `test_run_tests_is_the_only_ledger_writer`).
 * **No background phase agent.** An async worker's app-state writes are discarded upstream
   (`shareSetAppState: !isAsync`), so a background tester could never confirm RED: a phase

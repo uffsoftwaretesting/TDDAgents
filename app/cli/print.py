@@ -72,6 +72,7 @@ from app.query_engine import QueryEngine
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
+from app.tdd.suite_fingerprint import fingerprint_test_files
 from app.tool import CancelToken, Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.tools.tools import assemble_tool_pool
@@ -412,6 +413,10 @@ async def open_session_run(
             store.update(lambda s: replace(s, tdd_plan=saved))
         else:
             save_plan(saved_plan_path, plan)
+        # The current sub-requirement starts here (or restarts, on resume: the ledger is never
+        # restored), so its tests are fingerprinted as RED's baseline (Phase 12).
+        baseline = fingerprint_test_files(workspace)
+        store.update(lambda s: replace(s, tdd_item_test_baseline=baseline))
         recorder = TransitionEventRecorder(store, events_path(run_id, cwd), session_id=run_id, plan_index=plan_index)
         engine = QueryEngine(
             config, replace(deps, emit_event=_both(recorder, deps.emit_event)), transcript=transcript,

@@ -77,7 +77,8 @@ def test_a_sync_worker_shares_the_parents_ledger():
     store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
 
     async def run_tests(args, ctx):
-        ctx.set_app_state(lambda s: dataclasses.replace(s, phase_ledger=s.phase_ledger.with_test_result(1)))
+        ctx.set_app_state(lambda s: dataclasses.replace(
+            s, phase_ledger=s.phase_ledger.with_test_result(1, tests_changed=True)))
         return ToolResult(content="1 failed")
 
     from app.services.tools.tool_orchestration import run_tools
@@ -85,7 +86,7 @@ def test_a_sync_worker_shares_the_parents_ledger():
     model = FakeModel([[asks_for("RunTests", "c1")], [AIMessage(content="red")]])
     deps = dataclasses.replace(make_fake_deps(model), run_tools=run_tools)
     _run(model=model, deps=deps, tools=(_tool("RunTests", call=run_tests),), parent=_parent(store))
-    assert store.get().phase_ledger.red_confirmed is True
+    assert store.get().phase_ledger.tests_written is True
 
 
 def test_an_async_worker_cannot_write_the_parents_state():
@@ -132,7 +133,7 @@ def test_the_worker_pool_follows_the_phase_between_turns():
     refresh = model.seen[0].tool_context.refresh_tools
     before = refresh()
     assert refresh() is before
-    store.update(lambda s: dataclasses.replace(s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)))
+    store.update(lambda s: dataclasses.replace(s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     after = refresh()
     assert after is not before and "SrcWriter" in [t.name for t in after]
 
@@ -362,7 +363,7 @@ def test_an_async_worker_writes_task_state_through_to_the_root():
     model, _ = _run(parent=_parent(store), is_async=True)
     ctx = model.seen[0].tool_context
     ctx.set_app_state(lambda s: dataclasses.replace(
-        s, tasks={"a9": "task"}, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)))
+        s, tasks={"a9": "task"}, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     assert store.get().tasks == {"a9": "task"}
     assert store.get().phase_ledger == PhaseLedger()
     before = store.get()

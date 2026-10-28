@@ -59,7 +59,14 @@ def _run(workspace, tmp_path, scripts: dict[str | None, list[list[AIMessage]]], 
         project_root=_settings(tmp_path, workspace.root), home=tmp_path / "home", managed_dir=tmp_path / "etc"))
 
 
-def test_the_coordinator_drives_a_red_green_cycle_through_workers(python_workspace, tmp_path, monkeypatch):
+def store_ledger_fields(events: Any) -> tuple[bool, bool, bool, float | None]:
+    # The last turn's transition: the `completed` one after it comes once the done item has
+    # restarted the ledger for the next.
+    last = events.get_transitions()[-2]
+    return (last.tests_written, last.green_passed, last.refactor_passed, last.coverage)
+
+
+def test_the_coordinator_drives_the_whole_cycle_through_workers(python_workspace, tmp_path, monkeypatch):
     monkeypatch.setenv(COORDINATOR_MODE_ENV, "1")
     scripts: dict[str | None, list[list[AIMessage]]] = {
         None: [
@@ -67,7 +74,9 @@ def test_the_coordinator_drives_a_red_green_cycle_through_workers(python_workspa
                    prompt="Write tests/test_calc.py testing calculator.add(2, 3) == 5 and run it.")],
             [_call("Agent", "a2", description="green", subagent_type="developer",
                    prompt="Create calculator.py with add(a, b) so tests/test_calc.py passes.")],
-            [AIMessage(content="Red then green observed.")],
+            [_call("Agent", "a3", description="refactor", subagent_type="refactorer",
+                   prompt="Improve calculator.py and its tests; keep every test green and coverage up.")],
+            [AIMessage(content="Red, green and refactor observed.")],
         ],
         "tester": [
             [_call("WriteFile", "t1", file_path="tests/test_calc.py", content=CALC_TEST)],
@@ -79,12 +88,16 @@ def test_the_coordinator_drives_a_red_green_cycle_through_workers(python_workspa
             [_call("RunTests", "d2", test_path="tests")],
             [AIMessage(content="All tests pass.")],
         ],
+        "refactorer": [
+            [_call("RunTests", "r1", test_path="tests")],
+            [AIMessage(content="Every test passes with full coverage.")],
+        ],
     }
     seen: list[Any] = []
     result = _run(python_workspace, tmp_path, scripts, seen)
 
     assert (result.status, result.terminal_reason) == ("success", "completed")
-    assert (result.red_confirmed, result.green_passed) == (True, True)
+    assert (result.tests_written, result.green_passed) == (True, True)
     assert python_workspace.read_file("calculator.py") == CALC_IMPL
     # The coordinator holds only the orchestration tools and the coordinator prompt.
     coordinator = seen[0][1].tool_context
@@ -93,7 +106,7 @@ def test_the_coordinator_drives_a_red_green_cycle_through_workers(python_workspa
     assert "workerToolsContext" in coordinator.extra_user_context
     # The developer only ran once the tester's RunTests had confirmed RED on the shared ledger.
     first_developer = next(state for kind, state in seen if kind == "developer")
-    assert first_developer.phase_ledger.red_confirmed is True
+    assert first_developer.phase_ledger.tests_written is True
     # The tester's report reached the coordinator as the Agent tool result.
     second_coordinator_turn = [state for kind, state in seen if kind is None][1]
     assert "The test fails: no module named calculator." in _tool_results(second_coordinator_turn)
@@ -101,10 +114,12 @@ def test_the_coordinator_drives_a_red_green_cycle_through_workers(python_workspa
     project = get_project_dir(str(python_workspace.root))
     (transcript,) = project.glob("loop-*.jsonl")
     sidechains = sorted((project / transcript.stem / "subagents").glob("agent-*.jsonl"))
-    assert len(sidechains) == 2
+    assert len(sidechains) == 3
     events = EventLog.load_jsonl(project / transcript.stem / "events.jsonl")
     # Only the coordinator's transitions are the sub-requirement's flow.
-    assert [e.transition_reason for e in events.get_transitions()] == ["next_turn", "next_turn", "completed"]
+    assert [e.transition_reason for e in events.get_transitions()] == [
+        "next_turn", "next_turn", "next_turn", "completed"]
+    assert store_ledger_fields(events) == (True, True, True, 100.0)
     assert {e.payload["plan_index"] for e in events} == {2}
 
 

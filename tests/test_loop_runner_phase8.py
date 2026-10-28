@@ -357,7 +357,8 @@ def test_a_follow_up_turn_carries_its_attachments(python_workspace, tmp_path):
         seen.append(state)
         if len(seen) == 1:
             ctx = state.tool_context
-            ctx.set_app_state(lambda s: dataclasses.replace(s, phase_ledger=s.phase_ledger.with_test_result(1)))
+            ctx.set_app_state(lambda s: dataclasses.replace(
+                s, phase_ledger=s.phase_ledger.with_test_result(1, tests_changed=True)))
             ctx.command_queue.enqueue_pending_notification(QueuedCommand(value="note", mode="task-notification"))
         yield AIMessage(content="done")
 
@@ -434,7 +435,7 @@ def test_the_mcp_tools_survive_a_phase_move(python_workspace, tmp_path, monkeypa
     async def model(state: Any, config: Any):
         ctx = state.tool_context
         ctx.set_app_state(lambda s: dataclasses.replace(
-            s, phase_ledger=dataclasses.replace(s.phase_ledger, phase=TddPhase.GREEN, red_confirmed=True)))
+            s, phase_ledger=dataclasses.replace(s.phase_ledger, phase=TddPhase.GREEN, tests_written=True)))
         refreshed.append([t.name for t in ctx.refresh_tools()])
         yield AIMessage(content="done")
 

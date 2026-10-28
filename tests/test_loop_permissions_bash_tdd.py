@@ -15,8 +15,8 @@ from app.tdd.bash_phase_permissions import check_bash_tdd_phase, redirect_target
 from app.tdd.ledger import PhaseLedger, TddPhase
 
 RED = PhaseLedger()
-GREEN = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
-REFACTOR = PhaseLedger(phase=TddPhase.REFACTOR, red_confirmed=True, green_passed=True)
+GREEN = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
+REFACTOR = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)
 
 
 def allowed(command: str, ledger: PhaseLedger) -> bool:
@@ -91,11 +91,19 @@ def test_the_refusal_names_the_file_and_the_alternative():
 
 # ── GREEN and REFACTOR ──────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("ledger", [GREEN, REFACTOR])
-def test_the_implementing_phases_deny_rewriting_the_test(ledger):
-    permitted, reason = check_bash_tdd_phase("echo 'assert True' > tests/test_calc.py", ledger)
+def test_green_denies_rewriting_the_tests():
+    permitted, reason = check_bash_tdd_phase("echo 'assert True' > tests/test_calc.py", GREEN)
     assert permitted is False
     assert "denies modifying test file" in reason
+
+
+@pytest.mark.parametrize("command", [
+    "echo 'assert True' > tests/test_calc.py", "echo x >> tests/test_calc.py", "echo x > $TARGET",
+    "echo 'def add(a,b): return a+b' > calculator.py",
+])
+def test_refactor_may_write_tests_and_code_alike(command):
+    """REFACTOR is mandatory and improves both (Phase 12): nothing is refused there."""
+    assert check_bash_tdd_phase(command, REFACTOR) == (True, "")
 
 
 @pytest.mark.parametrize("ledger", [GREEN, REFACTOR])
@@ -103,9 +111,8 @@ def test_the_implementing_phases_allow_writing_production_code(ledger):
     assert allowed("echo 'def add(a,b): return a+b' > calculator.py", ledger) is True
 
 
-@pytest.mark.parametrize("ledger", [GREEN, REFACTOR])
-def test_the_implementing_phases_also_refuse_an_unverifiable_target(ledger):
-    permitted, reason = check_bash_tdd_phase("echo x > $TARGET", ledger)
+def test_green_also_refuses_an_unverifiable_target():
+    permitted, reason = check_bash_tdd_phase("echo x > $TARGET", GREEN)
     assert permitted is False
     assert "cannot verify where this command writes" in reason
 
@@ -141,7 +148,8 @@ def test_run_tests_is_never_denied_even_though_it_is_not_bash():
 
 RED_PRODUCTION = (
     "TDD phase RED denies writing to production file 'calculator.py' through a shell "
-    "redirection. Only test files may be written before a failing test is confirmed."
+    "redirection. Only test files may be written before this sub-requirement's tests are "
+    "written and run."
 )
 RED_UNVERIFIABLE = (
     "TDD phase RED cannot verify where this command writes: its redirection target uses "
@@ -149,7 +157,8 @@ RED_UNVERIFIABLE = (
 )
 GREEN_TEST_FILE = (
     "TDD phase GREEN denies modifying test file 'tests/test_calc.py' through a shell "
-    "redirection. The test is what pins the behaviour being implemented."
+    "redirection. The tests are what pins the behaviour being implemented; they can be "
+    "improved in REFACTOR."
 )
 GREEN_UNVERIFIABLE = (
     "TDD phase GREEN cannot verify where this command writes: its redirection target uses "
@@ -171,12 +180,6 @@ def test_the_green_test_file_refusal_reads_exactly_this():
 
 def test_the_green_unverifiable_refusal_reads_exactly_this():
     assert check_bash_tdd_phase("echo x > $OUT", GREEN) == (False, GREEN_UNVERIFIABLE)
-
-
-def test_the_refactor_phase_names_itself_in_its_refusal():
-    permitted, reason = check_bash_tdd_phase("echo x > tests/test_calc.py", REFACTOR)
-    assert permitted is False
-    assert reason.startswith("TDD phase REFACTOR denies modifying test file")
 
 
 def test_a_permitted_command_returns_an_empty_reason():

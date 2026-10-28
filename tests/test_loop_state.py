@@ -122,7 +122,7 @@ class TestInitialState:
 
     def test_the_ledger_starts_with_nothing_observed(self):
         ledger = initial_loop_state((), tool_context_for(AppStateStore())).phase_ledger
-        assert ledger == PhaseLedger(phase="RED", red_confirmed=False, green_passed=False)
+        assert ledger == PhaseLedger(phase="RED", tests_written=False, green_passed=False)
 
     def test_messages_and_context_are_the_ones_handed_in(self):
         messages = (HumanMessage(content="spec"),)

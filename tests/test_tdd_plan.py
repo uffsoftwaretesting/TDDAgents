@@ -42,7 +42,7 @@ from app.types.permissions import (
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
 
-CYCLE = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 
 
 def plan(*texts: str) -> TddPlan:
@@ -69,9 +69,10 @@ def test_an_empty_plan_has_nothing_left_to_do():
 
 def test_only_an_observed_cycle_completes_the_current_item():
     p = plan("A", "B")
-    for ledger in (PhaseLedger(), PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True),
-                   PhaseLedger(green_passed=True)):
-        with pytest.raises(PlanError, match="Sub-requirement 1 has no observed Red -> Green cycle."):
+    for ledger in (PhaseLedger(), PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
+                   PhaseLedger(green_passed=True),
+                   PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, coverage=99.0)):
+        with pytest.raises(PlanError, match=r"^Sub-requirement 1 has no completed Red -> Green -> Refactor cycle\.$"):
             p.complete_current(ledger)
     after = p.complete_current(CYCLE)
     assert after.items[0].status == ItemStatus.DONE
@@ -338,7 +339,7 @@ def test_moving_the_work_to_another_item_restarts_the_ledger(tmp_path: Path):
     from app.tdd.ledger import TestRunRecord
 
     record = TestRunRecord(test_path="t", exit_code=1)
-    red = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    red = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     for change in (lambda p: p.remove("1"), lambda p: p.move("2", 1), lambda p: p.edit("1", "A2"),
                    lambda p: p.replace_pending(["X"])):
         store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), phase_ledger=red, last_test_run=record))
@@ -347,8 +348,28 @@ def test_moving_the_work_to_another_item_restarts_the_ledger(tmp_path: Path):
         assert store.get().last_test_run is None
 
 
+def test_a_new_current_item_fingerprints_its_tests_as_red_baseline():
+    from app.tdd.suite_fingerprint import fingerprint_test_files
+    from tests.conftest import FakeWorkspace
+
+    ws = FakeWorkspace(files={"tests/test_a.py": "A"})
+    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old"))
+    update_tdd_plan(tool_context_for(store, workspace=ws), lambda p: p.remove("1"))
+    assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws)
+    # Without a workspace no baseline can be taken.
+    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old"))
+    update_tdd_plan(tool_context_for(store), lambda p: p.remove("1"))
+    assert store.get().tdd_item_test_baseline is None
+
+
+def test_a_change_that_keeps_the_current_item_keeps_the_baseline_too():
+    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="kept"))
+    update_tdd_plan(tool_context_for(store), lambda p: p.add("C"))
+    assert store.get().tdd_item_test_baseline == "kept"
+
+
 def test_a_change_that_keeps_the_current_item_keeps_the_ledger():
-    red = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    red = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     for change in (lambda p: p.add("C"), lambda p: p.edit("2", "B2"), lambda p: p.move("2", 3)):
         store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), phase_ledger=red))
         update_tdd_plan(tool_context_for(store), change)

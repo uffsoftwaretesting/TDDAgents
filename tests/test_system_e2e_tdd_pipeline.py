@@ -100,13 +100,12 @@ class ScriptedModel:
 # ============================================================================
 
 @pytest.mark.anyio
-async def test_e2e_full_tdd_red_green_refactor_lifecycle(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
-    workspace = LocalWorkspace(workspace_dir)
+async def test_e2e_full_tdd_red_green_refactor_lifecycle(python_workspace: LocalWorkspace) -> None:
+    workspace = python_workspace
 
-    # Prepare tools
+    # Prepare tools: the production RunTests, so REFACTOR is judged by real pytest-cov coverage
     write_tool = _make_write_file_tool(workspace)
-    run_tests_tool = build_run_tests_tool(_make_workspace_test_runner(workspace))
+    run_tests_tool = build_run_tests_tool(None)
     tools = (write_tool, run_tests_tool)
 
     store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
@@ -142,7 +141,7 @@ async def test_e2e_full_tdd_red_green_refactor_lifecycle(tmp_path: Path) -> None
                 }],
             )
         ],
-        # Turn 2: Run tests (expect failure -> RED confirmed -> advances to GREEN)
+        # Turn 2: Run the new tests (any outcome ends RED -> advances to GREEN)
         [
             AIMessage(
                 content="Running tests to confirm failure.",
@@ -164,7 +163,7 @@ async def test_e2e_full_tdd_red_green_refactor_lifecycle(tmp_path: Path) -> None
                 }],
             )
         ],
-        # Turn 4: Run tests (expect pass -> GREEN confirmed)
+        # Turn 4: Run tests (a pass ends GREEN -> the mandatory REFACTOR)
         [
             AIMessage(
                 content="Running tests to verify green phase.",
@@ -186,7 +185,7 @@ async def test_e2e_full_tdd_red_green_refactor_lifecycle(tmp_path: Path) -> None
                 }],
             )
         ],
-        # Turn 6: Run tests after refactoring
+        # Turn 6: Run tests after refactoring (a pass with full coverage ends REFACTOR)
         [
             AIMessage(
                 content="Running tests after refactoring.",
@@ -234,8 +233,8 @@ async def test_e2e_full_tdd_red_green_refactor_lifecycle(tmp_path: Path) -> None
 
     # Verify final authoritative ledger
     final_ledger = store.get().phase_ledger
-    assert final_ledger.red_confirmed is True
-    assert final_ledger.green_passed is True
+    assert final_ledger == PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True,
+                                       refactor_passed=True, coverage=100.0)
 
 
 # ============================================================================
@@ -245,7 +244,7 @@ async def test_e2e_full_tdd_red_green_refactor_lifecycle(tmp_path: Path) -> None
 @pytest.mark.anyio
 async def test_e2e_stop_hook_blocks_premature_exit_and_prevents_infinite_loop(tmp_path: Path) -> None:
     workspace = LocalWorkspace(tmp_path / "workspace")
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, red_confirmed=False)))
+    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, tests_written=False)))
     tool_ctx = tool_context_for(store, workspace=workspace)
     state = initial_loop_state((HumanMessage(content="Task"),), tool_ctx)
     config = build_run_config("premature-run", postgres_checkpointing=False)

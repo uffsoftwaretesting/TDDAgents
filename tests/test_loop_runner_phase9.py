@@ -121,7 +121,7 @@ def test_a_rerun_item_resumes_its_conversation(make_fake_workspace, tmp_path) ->
     assert "done" in texts
     assert texts.index("done") < len(texts) - 1
     # The ledger is never restored: the resumed run still has no observed cycle.
-    assert result.red_confirmed is False and result.green_passed is False
+    assert result.tests_written is False and result.green_passed is False
 
     # One transcript, one chain: the second run continued the first's tip.
     path = get_project_dir(str(tmp_path)) / f"{item_run_id('s', 2)}.jsonl"

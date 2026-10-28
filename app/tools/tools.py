@@ -56,7 +56,7 @@ def assemble_tool_pool(
     1. Separate into built-in tools and MCP tools.
     2. Filter out disabled tools, phase-denied tools, and tools matching deny rules.
        - In RED: implementation writers are stripped.
-       - In GREEN/REFACTOR: test writers are stripped.
+       - In GREEN: test writers are stripped (REFACTOR may write tests, Phase 12).
        - RunTests is NEVER stripped by phase deny rules.
     3. Sort built-in tools alphabetically by name.
     4. Sort MCP tools alphabetically by name.
@@ -94,7 +94,7 @@ def assemble_tool_pool(
             if phase_ledger is not None:
                 if phase_ledger.phase == TddPhase.RED and is_implementation_writing_tool(tool):
                     continue
-                if phase_ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR) and is_test_writing_tool(tool):
+                if phase_ledger.phase == TddPhase.GREEN and is_test_writing_tool(tool):
                     continue
         else:
             # If explicitly in user-provided deny_rules (non-phase), still check

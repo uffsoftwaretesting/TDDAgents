@@ -79,10 +79,11 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger) -> tuple[bool, str]:
                 return (
                     False,
                     (f"TDD phase RED denies writing to production file '{target}' through a "
-                     "shell redirection. Only test files may be written before a failing "
-                     "test is confirmed."),
+                     "shell redirection. Only test files may be written before this "
+                     "sub-requirement's tests are written and run."),
                 )
-    elif ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR):
+    elif ledger.phase == TddPhase.GREEN:
+        # REFACTOR may write both code and tests (Phase 12), so only GREEN guards the tests.
         if dangerous:
             return (
                 False,
@@ -94,8 +95,8 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger) -> tuple[bool, str]:
                 return (
                     False,
                     (f"TDD phase {ledger.phase} denies modifying test file '{target}' through "
-                     "a shell redirection. The test is what pins the behaviour being "
-                     "implemented."),
+                     "a shell redirection. The tests are what pins the behaviour being "
+                     "implemented; they can be improved in REFACTOR."),
                 )
 
     return True, ""

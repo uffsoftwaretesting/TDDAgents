@@ -387,7 +387,7 @@ def test_verifier_reads_parent_ledger_live():
     get_state = hook_agent_app_state(parent.get_app_state, "/t")
     assert get_state().phase_ledger.phase == TddPhase.RED
     store.update(lambda s: __import__("dataclasses").replace(
-        s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)))
+        s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     assert get_state().phase_ledger.phase == TddPhase.GREEN
 
 
@@ -451,4 +451,4 @@ def test_verifier_run_tests_never_moves_parent_ledger():
     assert result.outcome == "success"
     assert runs, "the verifier's RunTests must actually have run"
     assert store.get().phase_ledger == before
-    assert store.get().phase_ledger.red_confirmed is False
+    assert store.get().phase_ledger.tests_written is False

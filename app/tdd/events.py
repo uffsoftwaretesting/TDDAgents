@@ -57,8 +57,10 @@ class TransitionEventRecorder:
             turn_count=self._turn,
             phase=str(ledger.phase),
             reason=str(event.reason),
-            red_confirmed=ledger.red_confirmed,
+            tests_written=ledger.tests_written,
             green_passed=ledger.green_passed,
+            refactor_passed=ledger.refactor_passed,
+            coverage=ledger.coverage,
             payload={
                 "plan_index": self.plan_index,
                 "terminal": isinstance(event, Terminated),

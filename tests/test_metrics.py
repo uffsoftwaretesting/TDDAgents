@@ -39,7 +39,7 @@ class TestEventEntryAndLog:
             turn_count=2,
             phase="red",
             transition_reason=str(Continue.NEXT_TURN),
-            red_confirmed=True,
+            tests_written=True,
             green_passed=False,
             payload={"tool": "WriteFile"},
         )
@@ -48,7 +48,7 @@ class TestEventEntryAndLog:
         assert entry.turn_count == 2
         assert entry.phase == "red"
         assert entry.transition_reason == str(Continue.NEXT_TURN)
-        assert entry.red_confirmed is True
+        assert entry.tests_written is True
         assert entry.green_passed is False
         assert entry.payload == {"tool": "WriteFile"}
         assert len(entry.event_id) >= 10
@@ -58,7 +58,7 @@ class TestEventEntryAndLog:
         assert d["event_type"] == "transition"
         assert d["session_id"] == "sess-100"
         assert d["turn_count"] == 2
-        assert d["red_confirmed"] is True
+        assert d["tests_written"] is True
         assert d["payload"] == {"tool": "WriteFile"}
 
     def test_event_entry_from_dict(self) -> None:
@@ -68,7 +68,7 @@ class TestEventEntryAndLog:
             "turn_count": 5,
             "phase": "green",
             "transition_reason": None,
-            "red_confirmed": True,
+            "tests_written": True,
             "green_passed": True,
             "payload": {"duration": 1.2},
             "event_id": "custom-uuid-42",
@@ -79,7 +79,7 @@ class TestEventEntryAndLog:
         assert entry.session_id == "sess-200"
         assert entry.event_id == "custom-uuid-42"
         assert entry.timestamp == 1234567.89
-        assert entry.red_confirmed is True
+        assert entry.tests_written is True
         assert entry.green_passed is True
 
     def test_event_log_collection_and_queries(self) -> None:
@@ -91,7 +91,7 @@ class TestEventEntryAndLog:
             turn_count=1,
             phase="red",
             reason=str(Continue.NEXT_TURN),
-            red_confirmed=True,
+            tests_written=True,
             green_passed=False,
             payload={"turn": 1},
         )
@@ -129,14 +129,14 @@ class TestEventEntryAndLog:
             turn_count=1,
             phase="red",
             reason=str(Continue.NEXT_TURN),
-            red_confirmed=True,
+            tests_written=True,
             green_passed=False,
         )
         log.record_transition(
             turn_count=2,
             phase="green",
             reason=str(Terminal.COMPLETED),
-            red_confirmed=True,
+            tests_written=True,
             green_passed=True,
         )
 
@@ -150,7 +150,7 @@ class TestEventEntryAndLog:
         assert loaded.session_id == "export-sess"
         t0 = loaded.get_transitions()[0]
         assert t0.phase == "red"
-        assert t0.red_confirmed is True
+        assert t0.tests_written is True
         t1 = loaded.get_transitions()[1]
         assert t1.phase == "green"
         assert t1.green_passed is True
@@ -228,7 +228,7 @@ class TestMetricsBooster:
         sig = inspect.signature(EventLog.record)
         assert sig.parameters["turn_count"].default == 0
         assert sig.parameters["phase"].default == ""
-        assert sig.parameters["red_confirmed"].default is False
+        assert sig.parameters["tests_written"].default is False
         assert sig.parameters["green_passed"].default is False
         assert sig.parameters["session_id"].default == ""
 
@@ -245,7 +245,7 @@ class TestMetricsBooster:
         assert ev.turn_count == 0
         assert ev.phase == ""
         assert ev.transition_reason is None
-        assert ev.red_confirmed is False
+        assert ev.tests_written is False
         assert ev.green_passed is False
         assert ev.payload == {}
         assert ev.session_id == "def-sess"
@@ -261,14 +261,14 @@ class TestMetricsBooster:
             turn_count=3,
             phase="green",
             reason=str(Terminal.COMPLETED),
-            red_confirmed=True,
+            tests_written=True,
             green_passed=True,
             payload={"custom_k": "custom_v"},
         )
         assert ev.turn_count == 3
         assert ev.phase == "green"
         assert ev.transition_reason == str(Terminal.COMPLETED)
-        assert ev.red_confirmed is True
+        assert ev.tests_written is True
         assert ev.green_passed is True
         assert ev.payload == {"custom_k": "custom_v"}
         assert ev.session_id == "trans-sess"

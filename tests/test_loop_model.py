@@ -140,7 +140,7 @@ def test_request_shape(config):
     history = (HumanMessage(content="hi"),)
     todos = (TodoItem(content="t1", status="pending", active_form="doing t1"),)
     msgs = build_request_messages(
-        _state(ws, history, PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True), todos=todos), config)
+        _state(ws, history, PhaseLedger(phase=TddPhase.GREEN, tests_written=True), todos=todos), config)
 
     system, user_ctx, *rest = msgs
     assert isinstance(system, SystemMessage)

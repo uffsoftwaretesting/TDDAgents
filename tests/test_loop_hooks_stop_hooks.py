@@ -44,11 +44,11 @@ from tests.hook_doubles import ScriptedDispatcher
 
 CONFIG = build_run_config("stop-test", postgres_checkpointing=False)
 RED = PhaseLedger(phase=TddPhase.RED)
-DONE = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+DONE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 BLOCK = HookBlockingError(blocking_error="lint first", command="lint.sh")
 TDD_RED_MESSAGE = (
-    "TDD cycle incomplete: no failing test observed yet in RED phase "
-    "(red_confirmed=False). You must write a failing test and run RunTests."
+    "TDD cycle incomplete: RED is not done (tests_written=False). Write robust tests for this "
+    "sub-requirement, covering every relevant scenario and edge case, and run RunTests."
 )
 
 

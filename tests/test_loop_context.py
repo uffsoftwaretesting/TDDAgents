@@ -20,7 +20,7 @@ from app.tool import CancelToken, ToolContext, tool_context_for
 
 
 def confirm_red(state: AppState) -> AppState:
-    return replace(state, phase_ledger=replace(state.phase_ledger, red_confirmed=True))
+    return replace(state, phase_ledger=replace(state.phase_ledger, tests_written=True))
 
 
 class TestCancelToken:
@@ -55,7 +55,7 @@ class TestAppStateStore:
     def test_an_update_replaces_what_get_returns(self):
         store = AppStateStore()
         store.update(confirm_red)
-        assert store.get().phase_ledger.red_confirmed is True
+        assert store.get().phase_ledger.tests_written is True
 
     def test_the_updater_is_handed_the_current_state(self):
         store = AppStateStore(state=AppState(phase_ledger=PhaseLedger(phase="GREEN")))
@@ -72,13 +72,13 @@ class TestAppStateStore:
         store = AppStateStore()
         store.update(confirm_red)
         store.update(lambda s: replace(s, phase_ledger=replace(s.phase_ledger, green_passed=True)))
-        assert store.get().phase_ledger == PhaseLedger(red_confirmed=True, green_passed=True)
+        assert store.get().phase_ledger == PhaseLedger(tests_written=True, green_passed=True)
 
     def test_two_stores_do_not_see_each_other(self):
         """Per run, not per process — two runs in one interpreter must not share state."""
         first, second = AppStateStore(), AppStateStore()
         first.update(confirm_red)
-        assert second.get().phase_ledger.red_confirmed is False
+        assert second.get().phase_ledger.tests_written is False
 
 
 class TestIsolation:
@@ -90,7 +90,7 @@ class TestIsolation:
             set_app_state=discard_app_state_update,
         )
         worker.set_app_state(confirm_red)
-        assert store.get().phase_ledger.red_confirmed is False
+        assert store.get().phase_ledger.tests_written is False
 
     def test_a_discarded_write_does_not_raise(self):
         """Isolation fails quietly. An agent that crashed on every write is a different design."""
@@ -102,12 +102,12 @@ class TestToolContextWiring:
         store = AppStateStore()
         context = tool_context_for(store)
         store.update(confirm_red)
-        assert context.get_app_state().phase_ledger.red_confirmed is True
+        assert context.get_app_state().phase_ledger.tests_written is True
 
     def test_set_app_state_writes_through_to_the_store(self):
         store = AppStateStore()
         tool_context_for(store).set_app_state(confirm_red)
-        assert store.get().phase_ledger.red_confirmed is True
+        assert store.get().phase_ledger.tests_written is True
 
     def test_messages_are_the_ones_handed_in(self):
         messages = (HumanMessage(content="spec"),)

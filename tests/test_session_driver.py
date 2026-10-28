@@ -242,7 +242,7 @@ def test_rescope_session_can_pause_at_the_review() -> None:
 def test_a_headless_session_end_to_end_through_development(python_workspace: Any, tmp_path: Any) -> None:
     """
     Driver -> shell -> `run_headless` with a scripted model on a real workspace: the session
-    is complete only because the item's ledger observed Red then Green.
+    is complete only because the item's ledger observed Red, Green and a covered Refactor.
     """
     from langchain_core.messages import AIMessage
 
@@ -253,7 +253,8 @@ def test_a_headless_session_end_to_end_through_development(python_workspace: Any
         [_call("RunTests", "c2", test_path="tests")],
         [_call("WriteFile", "c3", file_path="calculator.py", content=CALC_IMPL)],
         [_call("RunTests", "c4", test_path="tests")],
-        [AIMessage(content="Red then green observed.")],
+        [_call("RunTests", "c5", test_path="tests")],
+        [AIMessage(content="Red, green and refactor observed.")],
     ]
     options = SessionOptions(headless=True, checkpoint=MEMORY_CHECKPOINT, permission_mode="acceptEdits")
     shell, _ = build_session_shell(

@@ -57,7 +57,7 @@ from tests.hook_doubles import ScriptedDispatcher
 
 CONFIG = build_run_config("mutation-a", postgres_checkpointing=False)
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-COMPLETE = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+COMPLETE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 
 
 class Recorder(ScriptedDispatcher):

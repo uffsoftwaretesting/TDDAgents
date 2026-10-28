@@ -532,7 +532,8 @@ def test_post_compaction_text_is_exact_and_tails_by_bytes():
     tail = full[-PREVIEW_SIZE_BYTES:].decode("utf-8", errors="ignore")
     assert msg.content == (
         "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
-        "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n\n"
+        "Current Phase: RED\nTests Written: False\nGreen Passed: False\nRefactor Passed: False\n"
+        "Coverage: not measured\n\n"
         "Last RunTests run (recorded by RunTests, not by the model): t.py exited 1\n"
         f"{tail}\n</system-reminder>"
     )
@@ -543,7 +544,8 @@ def test_post_compaction_without_a_run_is_exact():
     msg = create_tdd_state_attachment_message(PhaseLedger(), None, after_compaction=True)
     assert msg.content == (
         "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
-        "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n\n"
+        "Current Phase: RED\nTests Written: False\nGreen Passed: False\nRefactor Passed: False\n"
+        "Coverage: not measured\n\n"
         "No RunTests run has been observed yet.\n</system-reminder>"
     )
 

@@ -62,6 +62,10 @@ class AppState:
     #: The sub-requirement the TDD stop hook last blocked for (`None` without a plan). Its latch
     #: is per item: after the plan advances, the next item may be blocked once more.
     tdd_blocked_item: str | None = None
+    #: The fingerprint of the workspace's test files when the current sub-requirement started
+    #: (Phase 12, `app/tdd/suite_fingerprint.py`): RunTests ends RED only once they changed.
+    #: `None` when it could not be taken.
+    tdd_item_test_baseline: str | None = None
 
 
 @dataclass(slots=True)

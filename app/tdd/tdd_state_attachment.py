@@ -28,13 +28,15 @@ from app.utils.attachments import Attachment, attachment_of, tdd_state_lines
 from app.utils.messages import ATTACHMENT_KEY, Message, wrap_in_system_reminder
 from app.utils.tool_result_storage import PREVIEW_SIZE_BYTES
 
-_LEDGER_FIELDS = ("phase", "red_confirmed", "green_passed", "sub_requirement", "plan_progress")
+_LEDGER_FIELDS = ("phase", "tests_written", "green_passed", "refactor_passed", "coverage", "sub_requirement",
+                  "plan_progress")
 
 
 def tdd_state_data(ledger: PhaseLedger, plan: TddPlan | None = None) -> dict[str, Any]:
     """The ledger, and with a plan (Phase 11) the current sub-requirement and the progress."""
     data: dict[str, Any] = {
-        "phase": str(ledger.phase), "red_confirmed": ledger.red_confirmed, "green_passed": ledger.green_passed,
+        "phase": str(ledger.phase), "tests_written": ledger.tests_written, "green_passed": ledger.green_passed,
+        "refactor_passed": ledger.refactor_passed, "coverage": ledger.coverage,
     }
     if plan is not None and plan.items:
         current = plan.current

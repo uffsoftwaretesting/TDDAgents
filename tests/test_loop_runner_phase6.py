@@ -62,7 +62,7 @@ def test_events_carry_the_plan_index_and_end_with_the_terminal(make_fake_workspa
     assert transitions[-1].transition_reason == result.terminal_reason
     # Barrier 3 refused the unobserved cycle once before the latch ended the run.
     assert "stop_hook_blocking" in [e.transition_reason for e in transitions]
-    assert all(e.red_confirmed is False for e in transitions)
+    assert all(e.tests_written is False for e in transitions)
 
 
 def test_the_run_tracks_cost_on_its_tool_context(make_fake_workspace, tmp_path):

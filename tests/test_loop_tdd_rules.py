@@ -231,7 +231,7 @@ def test_get_phase_deny_rules_exact_generation():
     assert "RunTests" not in {r.tool_name for r in red_rules}
 
     # GREEN phase rules
-    green_ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    green_ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     green_rules = get_phase_deny_rules(green_ledger)
 
     expected_green_rules = []
@@ -257,17 +257,15 @@ def test_get_phase_deny_rules_exact_generation():
     assert green_rules == tuple(expected_green_rules)
     assert "RunTests" not in {r.tool_name for r in green_rules}
 
-    # REFACTOR phase rules
-    refactor_ledger = PhaseLedger(phase=TddPhase.REFACTOR, red_confirmed=True, green_passed=True)
-    refactor_rules = get_phase_deny_rules(refactor_ledger)
-    assert refactor_rules == tuple(expected_green_rules)
-    assert "RunTests" not in {r.tool_name for r in refactor_rules}
+    # REFACTOR denies nothing: it improves both the code and the tests (Phase 12)
+    refactor_ledger = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)
+    assert get_phase_deny_rules(refactor_ledger) == ()
 
 
 def test_check_tdd_phase_permission_comprehensive():
     red_ledger = PhaseLedger(phase=TddPhase.RED)
-    green_ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
-    refactor_ledger = PhaseLedger(phase=TddPhase.REFACTOR, red_confirmed=True, green_passed=True)
+    green_ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
+    refactor_ledger = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)
 
     # RunTests is always allowed in all phases (even if flagged as writer)
     custom_run_tests = build_tool(
@@ -294,7 +292,8 @@ def test_check_tdd_phase_permission_comprehensive():
     assert allowed is False
     assert (
         reason
-        == "TDD phase RED denies implementation-writing tool 'WriteImplementation' before a failing test is confirmed."
+        == "TDD phase RED denies implementation-writing tool 'WriteImplementation': write and run this "
+        "sub-requirement's tests first."
     )
 
     # Generic writer with path targeting production
@@ -333,8 +332,13 @@ def test_check_tdd_phase_permission_comprehensive():
     assert allowed is True
     assert reason == ""
 
-    # In GREEN & REFACTOR:
-    for g_ledger in (green_ledger, refactor_ledger):
+    # In REFACTOR every writer may touch tests and code alike (Phase 12)
+    for tool_name in ("WriteTest", *GENERIC_WRITER_TOOL_NAMES):
+        for path in ("tests/test_core.py", "src/core.py"):
+            assert check_tdd_phase_permission(make_dummy_tool(tool_name), {"path": path}, refactor_ledger) == (True, "")
+
+    # In GREEN:
+    for g_ledger in (green_ledger,):
         # Dedicated test tool denied
         test_tool = make_dummy_tool("WriteTest")
         allowed, reason = check_tdd_phase_permission(test_tool, {}, g_ledger)
@@ -346,12 +350,14 @@ def test_check_tdd_phase_permission_comprehensive():
             gen_tool = make_dummy_tool(gen_name)
             allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "tests/test_core.py"}, g_ledger)
             assert allowed is False
-            assert reason == f"TDD phase {g_ledger.phase} denies modifying test file 'tests/test_core.py'."
+            assert reason == (f"TDD phase {g_ledger.phase} denies modifying test file 'tests/test_core.py': GREEN "
+                              "implements what the tests describe. Tests can be improved in REFACTOR.")
 
             # with file_path argument
             allowed, reason = check_tdd_phase_permission(gen_tool, {"file_path": "tests/test_core.py"}, g_ledger)
             assert allowed is False
-            assert reason == f"TDD phase {g_ledger.phase} denies modifying test file 'tests/test_core.py'."
+            assert reason == (f"TDD phase {g_ledger.phase} denies modifying test file 'tests/test_core.py': GREEN "
+                              "implements what the tests describe. Tests can be improved in REFACTOR.")
 
             # with production path allowed in GREEN
             allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "src/core.py"}, g_ledger)
@@ -408,7 +414,7 @@ class TestPoolAssemblyPhaseRules:
             RunTests,
         ]
 
-        ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+        ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
         pool = assemble_tool_pool(tools, phase_ledger=ledger)
         pool_names = {t.name for t in pool}
 
@@ -418,7 +424,7 @@ class TestPoolAssemblyPhaseRules:
         assert "ReadFile" in pool_names
         assert "RunTests" in pool_names
 
-    def test_refactor_phase_strips_test_writers(self):
+    def test_refactor_phase_keeps_every_writer(self):
         tools: list[Tool] = [
             make_dummy_tool("WriteImplementation"),
             make_dummy_tool("WriteTest"),
@@ -426,11 +432,11 @@ class TestPoolAssemblyPhaseRules:
             RunTests,
         ]
 
-        ledger = PhaseLedger(phase=TddPhase.REFACTOR, red_confirmed=True, green_passed=True)
+        ledger = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)
         pool = assemble_tool_pool(tools, phase_ledger=ledger)
         pool_names = {t.name for t in pool}
 
-        assert "WriteTest" not in pool_names
+        assert "WriteTest" in pool_names
         assert "WriteImplementation" in pool_names
         assert "ReadFile" in pool_names
         assert "RunTests" in pool_names
@@ -471,7 +477,7 @@ class TestRuntimePermissionGatePhaseRules:
     def test_green_phase_denies_test_writer_even_in_bypass_mode(self):
         async def go():
             store = AppStateStore(
-                AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True))
+                AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
             )
             perm_ctx = ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS)
             ctx = tool_context_for(store, permission_context=perm_ctx)
@@ -486,7 +492,7 @@ class TestRuntimePermissionGatePhaseRules:
     def test_green_phase_denies_generic_writer_targeting_test_file(self):
         async def go():
             store = AppStateStore(
-                AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True))
+                AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
             )
             ctx = tool_context_for(store)
 

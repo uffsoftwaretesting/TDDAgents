@@ -1,10 +1,11 @@
 """
 TDD phase-derived permission rules and tool classification (Parts D3 & D4).
 
-Phase deny rules (§3.3 of `docs/transition_elaboration_plan.md`):
-- RED: denies implementation writers (model cannot write production code before a failing test exists)
-- GREEN: denies test writers (model cannot edit the test to make it pass)
-- REFACTOR: denies test writers (behaviour is pinned while structure changes)
+Phase deny rules (§3.3 of `docs/transition_elaboration_plan.md`; Phase 12 cycle):
+- RED: denies implementation writers (the tests come first: only test files may be written)
+- GREEN: denies test writers (the model cannot edit the tests to make them pass)
+- REFACTOR: denies nothing; it is mandatory and improves both the code and the tests
+  (user decision, 2026-10-28), while every RunTests run must stay green
 - RunTests is NEVER denied.
 """
 
@@ -127,7 +128,7 @@ def get_phase_deny_rules(ledger: PhaseLedger) -> tuple[PermissionRule, ...]:
                     source=PermissionRuleSource.POLICY_SETTINGS,
                 )
             )
-    elif ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR):
+    elif ledger.phase == TddPhase.GREEN:
         for name in sorted(TEST_WRITER_TOOL_NAMES):
             rules.append(
                 PermissionRule(
@@ -176,8 +177,8 @@ def check_tdd_phase_permission(
         if is_implementation_writing_tool(tool):
             return (
                 False,
-                (f"TDD phase RED denies implementation-writing tool '{tool.name}' "
-                 "before a failing test is confirmed."),
+                (f"TDD phase RED denies implementation-writing tool '{tool.name}': "
+                 "write and run this sub-requirement's tests first."),
             )
         if tool.name in GENERIC_WRITER_TOOL_NAMES:
             raw_path = input_args.get("path") or input_args.get("file_path")
@@ -189,7 +190,7 @@ def check_tdd_phase_permission(
                         (f"TDD phase RED denies writing to production file '{path}'. "
                          "Only test files may be written in RED phase."),
                     )
-    elif ledger.phase in (TddPhase.GREEN, TddPhase.REFACTOR):
+    elif ledger.phase == TddPhase.GREEN:
         if is_test_writing_tool(tool):
             return (
                 False,
@@ -202,7 +203,8 @@ def check_tdd_phase_permission(
                 if is_test_path(path):
                     return (
                         False,
-                        f"TDD phase {ledger.phase} denies modifying test file '{path}'.",
+                        (f"TDD phase {ledger.phase} denies modifying test file '{path}': GREEN implements "
+                         "what the tests describe. Tests can be improved in REFACTOR."),
                     )
 
     return True, ""

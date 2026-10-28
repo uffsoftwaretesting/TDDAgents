@@ -41,8 +41,10 @@ class EventEntry:
     turn_count: int = 0
     phase: str = ""
     transition_reason: str | None = None
-    red_confirmed: bool = False
+    tests_written: bool = False
     green_passed: bool = False
+    refactor_passed: bool = False
+    coverage: float | None = None
     payload: dict[str, Any] = field(default_factory=dict)
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     timestamp: float = field(default_factory=time.time)
@@ -88,8 +90,10 @@ class EventLog:
         turn_count: int = 0,
         phase: str = "",
         transition_reason: str | None = None,
-        red_confirmed: bool = False,
+        tests_written: bool = False,
         green_passed: bool = False,
+        refactor_passed: bool = False,
+        coverage: float | None = None,
         payload: dict[str, Any] | None = None,
         session_id: str = "",
     ) -> EventEntry:
@@ -100,8 +104,10 @@ class EventLog:
             turn_count=turn_count,
             phase=phase,
             transition_reason=transition_reason,
-            red_confirmed=red_confirmed,
+            tests_written=tests_written,
             green_passed=green_passed,
+            refactor_passed=refactor_passed,
+            coverage=coverage,
             payload=dict(payload or {}),
         )
         self.append(entry)
@@ -113,8 +119,10 @@ class EventLog:
         turn_count: int,
         phase: str,
         reason: str,
-        red_confirmed: bool,
+        tests_written: bool,
         green_passed: bool,
+        refactor_passed: bool = False,
+        coverage: float | None = None,
         payload: dict[str, Any] | None = None,
     ) -> EventEntry:
         """Convenience method to record a loop transition."""
@@ -123,8 +131,10 @@ class EventLog:
             turn_count=turn_count,
             phase=phase,
             transition_reason=reason,
-            red_confirmed=red_confirmed,
+            tests_written=tests_written,
             green_passed=green_passed,
+            refactor_passed=refactor_passed,
+            coverage=coverage,
             payload=payload,
         )
 

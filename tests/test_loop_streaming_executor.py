@@ -770,7 +770,7 @@ def test_context_modifiers_applied_for_non_concurrent_tools() -> None:
 
         context = make_context()
         initial_ledger = context.get_app_state().phase_ledger
-        new_ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+        new_ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
         def mod_fn(ctx: ToolContext) -> ToolContext:
             ctx.set_app_state(lambda prev: AppState(phase_ledger=new_ledger))

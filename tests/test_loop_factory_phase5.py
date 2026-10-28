@@ -26,12 +26,12 @@ def _state(**app: Any):
 
 
 def test_post_compact_attachments_reattach_the_tdd_state_from_the_ledger():
-    ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     run = TestRunRecord(test_path="tests/test_calc.py", exit_code=1, stdout="E   assert add(1, 2) == 3")
     state = _state(phase_ledger=ledger, last_test_run=run)
     (message,) = factory.post_compact_attachments(state.tool_context)
     attachment = message.additional_kwargs["attachment"]
-    assert (attachment["type"], attachment["phase"], attachment["red_confirmed"]) == ("tdd_state", "GREEN", True)
+    assert (attachment["type"], attachment["phase"], attachment["tests_written"]) == ("tdd_state", "GREEN", True)
     assert "E   assert add(1, 2) == 3" in str(message.content)
     assert "tests/test_calc.py" in str(message.content)
 

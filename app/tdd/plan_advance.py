@@ -4,7 +4,7 @@ Moving the session from one sub-requirement to the next (Phase 11, TDDAgents).
 Runs inside the stop-hook runner (`app/query/stop_hooks.py`), before the TDD hook, whenever the
 model stops without asking for tools. The advance is ledger-driven (user decision 2026-10-27):
 
-* the current item's ledger shows Red -> Green → the item is recorded done
+* the current item's ledger shows a complete Red -> Green -> Refactor cycle → the item is recorded done
   (`TddPlan.complete_current`, which refuses anything less), the ledger restarts in RED for
   the next item, and the next item is announced as a stop-hook block, so the loop keeps
   working in the same conversation (upstream's `stop_hook_blocking` continue);
@@ -34,10 +34,11 @@ def next_item_message(done: PlanItem, plan: TddPlan) -> str:
     current = plan.current
     assert current is not None
     return (
-        f"Sub-requirement {done.id} is done: RunTests observed its failing test and then the passing one.\n\n"
+        f"Sub-requirement {done.id} is done: RunTests observed its tests written, passing, and passing again "
+        "after REFACTOR with enough coverage.\n\n"
         f"Next sub-requirement ({plan.done_count + 1} of {len(plan.items)}): {current.id}. {current.text}\n\n"
-        "The TDD ledger is back in RED for it: write a failing test for this sub-requirement and run "
-        "RunTests before implementing it, and implement only what its tests demand.\n\n"
+        "The TDD ledger is back in RED for it: write robust tests for this sub-requirement, covering every "
+        "relevant scenario and edge case, and run RunTests before implementing it.\n\n"
         f"Plan:\n{render_plan(plan)}"
     )
 

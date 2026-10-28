@@ -29,10 +29,10 @@ class TestTheSetIsClosed:
 
     def test_a_legacy_status_literal_is_not_a_reason(self):
         """
-        `green_passed`, `red_confirmed` and friends were flow *status* strings. They are
+        `green_passed`, `tests_written` and friends were flow *status* strings. They are
         ledger facts now, not routing decisions, and must not reappear as reasons.
         """
-        for legacy in ("green_passed", "red_confirmed", "tests_written", "next_req"):
+        for legacy in ("green_passed", "tests_written", "tests_written", "next_req"):
             with pytest.raises(ValueError):
                 Continue(legacy)
             with pytest.raises(ValueError):

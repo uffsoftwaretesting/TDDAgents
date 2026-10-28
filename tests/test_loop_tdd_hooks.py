@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.query.config import build_run_config
@@ -33,7 +34,8 @@ class FakeModel:
 def test_hook_allows_exit_when_cycle_complete():
     async def go():
         store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True))
+            AppState(phase_ledger=PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True,
+                                              refactor_passed=True))
         )
         ctx = tool_context_for(store)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
@@ -46,65 +48,33 @@ def test_hook_allows_exit_when_cycle_complete():
     asyncio.run(go())
 
 
-def test_hook_blocks_when_cycle_incomplete_in_red():
+RED_MSG = ("TDD cycle incomplete: RED is not done (tests_written=False). Write robust tests for this "
+           "sub-requirement, covering every relevant scenario and edge case, and run RunTests.")
+GREEN_MSG = ("TDD cycle incomplete: GREEN is not done (green_passed=False). Implement the code the tests "
+             "describe and run RunTests until every test passes.")
+
+
+def refactor_msg(figure: str) -> str:
+    return ("TDD cycle incomplete: REFACTOR is not done (refactor_passed=False). It is mandatory: improve the "
+            "code and the tests, then run RunTests until every test passes with line + branch coverage of at "
+            f"least 90% (last measured: {figure}).")
+
+
+@pytest.mark.parametrize("ledger, message", [
+    (PhaseLedger(), RED_MSG),
+    (PhaseLedger(green_passed=True, refactor_passed=True), RED_MSG),
+    (PhaseLedger(phase=TddPhase.GREEN, tests_written=True), GREEN_MSG),
+    (PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True), refactor_msg("not measured yet")),
+    (PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, coverage=84.25),
+     refactor_msg("84.2%")),
+])
+def test_the_hook_names_what_the_cycle_still_needs(ledger, message):
     async def go():
-        store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False))
-        )
-        ctx = tool_context_for(store)
+        ctx = tool_context_for(AppStateStore(AppState(phase_ledger=ledger)))
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
-        config = build_run_config("test-run", postgres_checkpointing=False)
-
-        result = await tdd_phase_incomplete_hook(state, config)
+        result = await tdd_phase_incomplete_hook(state, build_run_config("test-run", postgres_checkpointing=False))
         assert result.prevent_continuation is False
-        assert len(result.blocking_errors) == 1
-        assert (
-            result.blocking_errors[0].content
-            == "TDD cycle incomplete: no failing test observed yet in RED phase "
-            "(red_confirmed=False). You must write a failing test and run RunTests."
-        )
-
-    asyncio.run(go())
-
-
-def test_hook_blocks_when_f2_green_in_red_case():
-    async def go():
-        store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=True))
-        )
-        ctx = tool_context_for(store)
-        state = initial_loop_state((HumanMessage(content="task"),), ctx)
-        config = build_run_config("test-run", postgres_checkpointing=False)
-
-        result = await tdd_phase_incomplete_hook(state, config)
-        assert result.prevent_continuation is False
-        assert len(result.blocking_errors) == 1
-        assert (
-            result.blocking_errors[0].content
-            == "TDD cycle incomplete: tests passed on first run without prior failure "
-            "(red_confirmed=False). A failing test must be observed (RED phase) before implementation."
-        )
-
-    asyncio.run(go())
-
-
-def test_hook_blocks_when_tests_still_failing_in_green():
-    async def go():
-        store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=False))
-        )
-        ctx = tool_context_for(store)
-        state = initial_loop_state((HumanMessage(content="task"),), ctx)
-        config = build_run_config("test-run", postgres_checkpointing=False)
-
-        result = await tdd_phase_incomplete_hook(state, config)
-        assert result.prevent_continuation is False
-        assert len(result.blocking_errors) == 1
-        assert (
-            result.blocking_errors[0].content
-            == "TDD cycle incomplete: tests are not passing yet in GREEN phase "
-            "(green_passed=False). You must implement code and run RunTests until tests pass."
-        )
+        assert [m.content for m in result.blocking_errors] == [message]
 
     asyncio.run(go())
 
@@ -113,7 +83,7 @@ def test_hook_honours_stop_hook_active_contract():
 
     async def go():
         store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False))
+            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False))
         )
         ctx = tool_context_for(store)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
@@ -141,7 +111,7 @@ def test_hook_honours_stop_hook_active_contract():
 def test_stop_hook_in_full_loop_terminates_without_infinite_loop():
     async def go():
         store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False))
+            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False))
         )
         ctx = tool_context_for(store)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)

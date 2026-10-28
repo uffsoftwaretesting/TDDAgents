@@ -29,8 +29,9 @@ from typing import Any
 #: Directory, under a session's run dir, that holds its virtualenv.
 SESSION_VENV_DIRNAME = "venv"
 
-#: What the session venv must contain. Keep in step with requirements.txt.
-REQUIRED_PACKAGES: tuple[str, ...] = ("pytest==9.0.1",)
+#: What the session venv must contain. Keep in step with requirements.txt. pytest-cov measures
+#: the coverage REFACTOR is judged by (Phase 12, `app/tdd/coverage_gate.py`).
+REQUIRED_PACKAGES: tuple[str, ...] = ("pytest==9.0.1", "pytest-cov==7.0.0", "coverage==7.11.3")
 
 Runner = Callable[..., Any]
 
@@ -68,7 +69,7 @@ def _run(runner: Runner, argv: Sequence[str], what: str) -> None:
 
 
 def has_packages(python: Path, runner: Runner) -> bool:
-    probe = runner([str(python), "-c", "import pytest"], capture_output=True, text=True)
+    probe = runner([str(python), "-c", "import pytest, pytest_cov"], capture_output=True, text=True)
     return bool(probe.returncode == 0)
 
 
@@ -89,7 +90,8 @@ def ensure_session_python(
             "install the test toolchain into the session venv",
         )
         if not has_packages(session.python, runner):
-            raise SessionPythonError("pytest is still not importable in the session venv after installing it")
+            raise SessionPythonError(
+                "pytest and pytest-cov are still not importable in the session venv after installing them")
     return session
 
 

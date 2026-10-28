@@ -1,24 +1,23 @@
 """
-RunTests — the Red/Green measurement, exposed as a loop tool (Part D2).
+RunTests — the TDD cycle's measurement, exposed as a loop tool (Part D2).
 
 This is the only component that observes ground truth:
 "Tools already receive set_app_state, so the ledger is updated by the only component
 that can observe ground truth: the test runner. No agent asserts its own progress."
 (§3.3 of `docs/transition_elaboration_plan.md`)
 
-When tests fail (exit code != 0):
-- In RED: red_confirmed becomes True, and phase advances to GREEN.
-- In GREEN/REFACTOR: green_passed is marked False.
-
-When tests pass (exit code == 0):
-- If red_confirmed was True: green_passed becomes True.
-- If red_confirmed was False (the F2 "green in red" case): green_passed becomes True,
-  red_confirmed stays False, and phase stays RED.
+What a run proves depends on the phase (Phase 12, `PhaseLedger.with_test_result`):
+- RED ends with a run, pass or fail, in which the sub-requirement's test files changed since
+  it started. RunTests observes that itself, by fingerprinting the test files
+  (`app/tdd/suite_fingerprint.py`) against the item's baseline.
+- GREEN ends with a passing run.
+- REFACTOR ends with a passing run whose line + branch coverage of the production code meets
+  the threshold. Every run measures coverage with pytest-cov (`app/tdd/coverage_gate.py`).
 
 Only pytest's exit codes 0 (passed) and 1 (tests failed) are observations about the code
 under test — plus one form of exit 2: a collection error raised because the code under test
 does not exist yet (`ModuleNotFoundError`, `ImportError`, `AttributeError` while importing a
-test), which is the classic first RED and counts as failing tests. Every other outcome —
+test), which counts as failing tests. Every other outcome —
 2 interrupted, 3 internal error, 4 usage error, 5 no tests collected, a timeout, a missing
 workspace, a crashed runner — says nothing about Red or Green, so it is reported as an
 error and the ledger is left untouched. In particular "no tests collected" can never confirm
@@ -37,7 +36,16 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from app.tdd.ledger import TestRunRecord
+from app.tdd.coverage_gate import (
+    COVERAGE_CONFIG,
+    COVERAGE_CONFIG_PATH,
+    COVERAGE_REPORT_PATH,
+    UNAVAILABLE,
+    CoverageReading,
+    read_coverage,
+)
+from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
+from app.tdd.suite_fingerprint import fingerprint_test_files, have_tests_changed
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
@@ -51,6 +59,7 @@ class SuiteExecutionResult:
     exit_code: int
     stdout: str = ""
     stderr: str = ""
+    coverage: CoverageReading = UNAVAILABLE
     __test__: bool = False
 
 
@@ -117,10 +126,13 @@ def pytest_command(test_path: str) -> str:
     workspace sits inside TDDAgents' own repository, so without a config of its own the
     generated project would run under TDDAgents' `pyproject.toml`. The rootdir is pinned to the
     workspace and, when it has no config, `-c /dev/null` stops the search (the same run locally
-    and in a sandbox).
+    and in a sandbox). Coverage is measured on every run (Phase 12): `term-missing` shows the
+    model the uncovered lines, and the JSON report is what REFACTOR is judged by.
     """
     return (
         f"PYTHONPATH=. python -m pytest {shlex.quote(test_path)} -vv --tb=short --rootdir=. "
+        f"--cov=. --cov-config={COVERAGE_CONFIG_PATH} --cov-report=term-missing "
+        f"--cov-report=json:{COVERAGE_REPORT_PATH} "
         f"$({PYTEST_CONFIG_PROBE} || printf %s '-c /dev/null')"
     )
 
@@ -158,12 +170,48 @@ async def _default_test_runner(test_path: str, context: ToolContext) -> SuiteExe
     if ws is None or not hasattr(ws, "execute"):
         raise RunTestsUnavailable("no workspace is available to run the tests in")
     try:
+        await asyncio.to_thread(ws.write_file, COVERAGE_CONFIG_PATH, COVERAGE_CONFIG)
+        _discard(ws, COVERAGE_REPORT_PATH)
         res = await asyncio.to_thread(
             ws.execute, pytest_command(test_path), timeout=run_tests_timeout_seconds()
         )
     except Exception as exc:
         raise RunTestsUnavailable(f"pytest could not be executed in the workspace: {exc}") from exc
-    return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr)
+    try:
+        report: str | None = ws.read_file(COVERAGE_REPORT_PATH)
+    except Exception:  # noqa: BLE001 - no report is a reading of its own (no code, or unavailable)
+        report = None
+    _discard(ws, COVERAGE_REPORT_PATH)
+    coverage = read_coverage(report, f"{res.stdout}\n{res.stderr}")
+    return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr, coverage=coverage)
+
+
+def _discard(ws: Any, path: str) -> None:
+    try:
+        ws.delete_file(path)
+    except Exception:  # noqa: BLE001, S110 - a report that is not there is already discarded
+        pass
+
+
+def ledger_status(before: PhaseLedger, after: PhaseLedger, exit_code: int, coverage: CoverageReading) -> str:
+    """What the run did to the TDD ledger, and what the phase now needs."""
+    if before.phase == TddPhase.RED:
+        if after.phase == TddPhase.RED:
+            return ("No test file changed since this sub-requirement started, so the phase stays RED: write or "
+                    "extend its tests (robust, covering every relevant scenario and edge case), then run RunTests.")
+        return ("RED is done: this sub-requirement's tests were written and run. The phase is GREEN: implement "
+                "the code they describe and run RunTests until every test passes.")
+    if before.phase == TddPhase.GREEN:
+        if exit_code != 0:
+            return "The phase stays GREEN: every test must pass."
+        return ("GREEN is done. The phase is REFACTOR, which is mandatory: improve the code and the tests, raise "
+                f"coverage, and run RunTests until every test passes with enough coverage ({coverage.describe()}).")
+    if exit_code != 0:
+        return "REFACTOR is not done: every test must pass."
+    if after.refactor_passed:
+        return f"REFACTOR is done ({coverage.describe()}): this sub-requirement's cycle is complete."
+    return (f"REFACTOR is not done: {coverage.describe()}. Add tests for the uncovered code, or improve it, "
+            "and run RunTests again.")
 
 
 def format_output(exec_result: SuiteExecutionResult, header: str) -> str:
@@ -206,12 +254,22 @@ def build_run_tests_tool(
             header = f"Tests could not be evaluated (exit {code}: {reason}). The TDD ledger was not changed."
             return ToolResult(content=format_output(exec_result, header), is_error=True, exit_code=code)
 
+        before = context.get_app_state()
+        changed = False
+        if before.phase_ledger.phase == TddPhase.RED:
+            current = await asyncio.to_thread(fingerprint_test_files, getattr(context, "workspace", None))
+            changed = have_tests_changed(current, before.tdd_item_test_baseline)
+        coverage = exec_result.coverage
+        after = before.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage)
+
         # Update the authoritative AppState phase_ledger: the only writer (Part D2)
         record = TestRunRecord(
             test_path=test_path, exit_code=code, stdout=exec_result.stdout, stderr=exec_result.stderr
         )
         context.set_app_state(
-            lambda s: replace(s, phase_ledger=s.phase_ledger.with_test_result(observed), last_test_run=record)
+            lambda s: replace(
+                s, phase_ledger=s.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage),
+                last_test_run=record)
         )
 
         if code == 0:
@@ -220,7 +278,8 @@ def build_run_tests_tool(
             header = f"Tests failed (exit {code})."
         else:
             header = f"Tests failed (exit {code}: collection error — the code under test does not exist yet)."
-        # is_error stays False on failure: red tests are normal data in TDD
+        header = f"{header}\n{ledger_status(before.phase_ledger, after, observed, coverage)}"
+        # is_error stays False on failure: a failing test is normal data in TDD
         return ToolResult(content=format_output(exec_result, header), exit_code=code)
 
     prompt_text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]

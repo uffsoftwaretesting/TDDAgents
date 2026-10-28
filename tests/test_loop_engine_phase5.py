@@ -119,7 +119,7 @@ def test_after_tools_the_changed_tdd_state_is_persisted_as_an_attachment():
 
     async def tools(calls, assistant, state, config) -> AsyncIterator[Any]:
         store.update(lambda s: dataclasses.replace(s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN,
-                                                                               red_confirmed=True)))
+                                                                               tests_written=True)))
         yield ToolMessage(content="1 failed", tool_call_id="c1")
 
     model = FakeModel([[asks_for("RunTests", "c1")], [AIMessage(content="done")]])
@@ -198,6 +198,6 @@ def test_a_lying_summary_cannot_complete_an_unobserved_cycle(tmp_path, monkeypat
 
     after_boundary = list(model.seen[0].messages)
     tdd = [m for m in after_boundary if (m.additional_kwargs.get("attachment") or {}).get("type") == "tdd_state"]
-    assert tdd and tdd[-1].additional_kwargs["attachment"]["red_confirmed"] is False
+    assert tdd and tdd[-1].additional_kwargs["attachment"]["tests_written"] is False
     assert events[-1] != Terminated(reason=Terminal.COMPLETED)
     assert events[-1] == Terminated(reason=Terminal.STOP_HOOK_PREVENTED)

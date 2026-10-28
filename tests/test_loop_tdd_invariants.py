@@ -6,13 +6,16 @@ These two tests represent the thesis's structural claim in executable form
 
 1. No reachable tool pool in RED contains an implementation-writing tool,
    for any ledger state the loop can produce.
-2. No sequence of model outputs reaches `completed` without the ledger showing Red-then-Green.
+2. No sequence of model outputs reaches `completed` without the ledger showing the whole cycle
+   (Phase 12): RED's tests written and run, GREEN passing, and the mandatory REFACTOR passing
+   with enough line + branch coverage.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -24,6 +27,7 @@ from app.query.state import initial_loop_state
 from app.query.transitions import Terminal, Terminated
 from app.services.tools.tool_orchestration import run_tools
 from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.coverage_gate import CoverageReading, CoverageStatus
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_permissions import (
     IMPLEMENTATION_WRITER_TOOL_NAMES,
@@ -42,13 +46,19 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
+from tests.conftest import FakeWorkspace
 
 
 def make_test_tool(name: str, *, is_impl: bool = False, is_test: bool = False) -> BuiltTool:
+    def call(args: dict, ctx: Any) -> ToolResult:
+        if is_test and ctx.workspace is not None:  # a test writer really writes a test file
+            ctx.workspace.files[f"tests/test_{len(ctx.workspace.files)}.py"] = "def test_x():\n    pass\n"
+        return ToolResult(content=f"{name} executed")
+
     return build_tool(
         name=name,
         prompt=f"Tool {name}",
-        call=lambda args, ctx: ToolResult(content=f"{name} executed"),
+        call=call,
         is_implementation_writer=is_impl,
         is_test_writer=is_test,
     )
@@ -109,11 +119,11 @@ class TestInvariant1NoImplementationWriterInRedPool:
         """All reachable ledger states in RED produced by loop operations."""
         return [
             # Initial state
-            PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False),
+            PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False),
             # F2 green in red: test passed on first run without prior failure
-            PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=True),
+            PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=True),
             # Red state with string phase
-            PhaseLedger(phase="RED", red_confirmed=False, green_passed=False),
+            PhaseLedger(phase="RED", tests_written=False, green_passed=False),
         ]
 
     def test_property_1_pool_assembly_contains_no_implementation_writer(
@@ -171,18 +181,25 @@ class TestInvariant1NoImplementationWriterInRedPool:
 # ==============================================================================
 
 
-class TestInvariant2NoCompletionWithoutRedThenGreen:
+MET = CoverageReading(CoverageStatus.MEASURED, 95.0)
+UNDER = CoverageReading(CoverageStatus.MEASURED, 60.0)
+
+
+def call(name: str, cid: str) -> dict:
+    return {"id": cid, "type": "tool_call", "name": name, "args": {"test_path": "tests"} if name == "RunTests" else {}}
+
+
+class TestInvariant2NoCompletionWithoutTheWholeCycle:
     """
-    Property 2: No sequence of model outputs reaches `completed` without the ledger
-    showing Red-then-Green (red_confirmed=True and green_passed=True).
+    Property 2: No sequence of model outputs reaches `completed` without the ledger showing
+    the whole cycle (tests_written, green_passed and refactor_passed).
     """
 
-    def _build_test_deps(self, model: ScriptedModel, test_exit_codes: list[int], events: list) -> LoopDeps:
-        exit_codes = list(test_exit_codes)
+    def _build_test_deps(self, model: ScriptedModel, results: list[SuiteExecutionResult], events: list) -> LoopDeps:
+        pending = list(results)
 
         def runner(test_path: str):
-            code = exit_codes.pop(0) if exit_codes else 0
-            return SuiteExecutionResult(exit_code=code, stdout=f"exit {code}")
+            return pending.pop(0) if pending else SuiteExecutionResult(exit_code=0)
 
         run_tests_tool = build_run_tests_tool(runner)
         tools = [
@@ -208,6 +225,18 @@ class TestInvariant2NoCompletionWithoutRedThenGreen:
             stop_hooks=tdd_phase_incomplete_hook,
             emit_event=events.append,
         )
+
+    async def _run(self, model: ScriptedModel, results: list[SuiteExecutionResult]) -> tuple[Terminated, AppStateStore]:
+        deps = self._build_test_deps(model, results, [])
+        store = AppStateStore()
+        ctx = tool_context_for(store, workspace=FakeWorkspace())
+        state = initial_loop_state((HumanMessage(content="task"),), ctx)
+        terminated: Terminated | None = None
+        async for ev in run_loop(state, build_run_config("test-p2", postgres_checkpointing=False), deps):
+            if isinstance(ev, Terminated):
+                terminated = ev
+        assert terminated is not None
+        return terminated, store
 
     def test_property_2_pure_text_stops_without_tools_cannot_reach_completed(self):
         """Model immediately outputs text claiming done: blocks and aborts via stop hook."""
@@ -236,99 +265,51 @@ class TestInvariant2NoCompletionWithoutRedThenGreen:
 
         asyncio.run(go())
 
-    def test_property_2_f2_green_in_red_cannot_reach_completed(self):
-        """Model runs tests which pass on first run (F2): red_confirmed is False, cannot complete."""
-        async def go():
-            tool_call_run_tests = {
-                "id": "c1",
-                "type": "tool_call",
-                "name": "RunTests",
-                "args": {"test_path": "tests/test_x.py"},
-            }
-            model = ScriptedModel([
-                # Turn 1: model runs tests immediately
-                [AIMessage(content="", tool_calls=[tool_call_run_tests])],
-                # Turn 2: tests passed (exit 0) without red confirmed. Model claims done.
-                [AIMessage(content="Tests passed on first run! I am done.")],
-                # Turn 3: hook blocked, model claims done again.
-                [AIMessage(content="I insist I am done.")],
-            ])
-            events: list = []
-            # Test passes on first run: exit 0
-            deps = self._build_test_deps(model, [0], events)
-            store = AppStateStore()
-            ctx = tool_context_for(store)
-            state = initial_loop_state((HumanMessage(content="task"),), ctx)
-            config = build_run_config("test-p2-f2", postgres_checkpointing=False)
+    def test_property_2_running_tests_without_writing_any_cannot_reach_completed(self):
+        """Passing tests the item did not write are not RED's evidence."""
+        model = ScriptedModel([
+            [AIMessage(content="", tool_calls=[call("RunTests", "c1")])],
+            [AIMessage(content="Tests passed on first run! I am done.")],
+            [AIMessage(content="I insist I am done.")],
+        ])
+        terminated, store = asyncio.run(self._run(model, [SuiteExecutionResult(exit_code=0, coverage=MET)]))
+        assert terminated.reason == Terminal.STOP_HOOK_PREVENTED
+        assert store.get().phase_ledger == PhaseLedger()
 
-            terminated: Terminated | None = None
-            async for ev in run_loop(state, config, deps):
-                if isinstance(ev, Terminated):
-                    terminated = ev
+    @pytest.mark.parametrize("results, ledger_phase", [
+        # GREEN never passes
+        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=1)], TddPhase.GREEN),
+        # REFACTOR never run
+        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, coverage=MET)], TddPhase.REFACTOR),
+        # REFACTOR under the coverage threshold
+        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, coverage=UNDER),
+          SuiteExecutionResult(exit_code=0, coverage=UNDER)], TddPhase.REFACTOR),
+        # REFACTOR breaks a test
+        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, coverage=MET),
+          SuiteExecutionResult(exit_code=1, coverage=MET)], TddPhase.REFACTOR),
+    ])
+    def test_property_2_an_unfinished_cycle_cannot_reach_completed(self, results, ledger_phase):
+        turns = [[AIMessage(content="", tool_calls=[call("WriteTest", "w")])]]
+        turns += [[AIMessage(content="", tool_calls=[call("RunTests", f"r{n}")])] for n in range(len(results))]
+        turns += [[AIMessage(content="done")], [AIMessage(content="really done")]]
+        terminated, store = asyncio.run(self._run(ScriptedModel(turns), results))
+        assert terminated.reason == Terminal.STOP_HOOK_PREVENTED
+        assert store.get().phase_ledger.phase == ledger_phase
+        assert not store.get().phase_ledger.is_cycle_complete
 
-            assert terminated is not None
-            # Must NOT reach COMPLETED
-            assert terminated.reason != Terminal.COMPLETED
-            assert terminated.reason == Terminal.STOP_HOOK_PREVENTED
-            # Ledger shows green passed but red never confirmed
-            ledger = store.get().phase_ledger
-            assert ledger.red_confirmed is False
-            assert ledger.green_passed is True
-            assert not ledger.is_cycle_complete
-
-        asyncio.run(go())
-
-    def test_property_2_red_then_green_successfully_reaches_completed(self):
-        """Model executes full Red-then-Green cycle: reaches COMPLETED."""
-        async def go():
-            call_run_tests_red = {
-                "id": "c1",
-                "type": "tool_call",
-                "name": "RunTests",
-                "args": {"test_path": "tests/test_x.py"},
-            }
-            call_impl = {
-                "id": "c2",
-                "type": "tool_call",
-                "name": "WriteImplementation",
-                "args": {},
-            }
-            call_run_tests_green = {
-                "id": "c3",
-                "type": "tool_call",
-                "name": "RunTests",
-                "args": {"test_path": "tests/test_x.py"},
-            }
-            model = ScriptedModel([
-                # Turn 1: run tests, fails (RED confirmed)
-                [AIMessage(content="Running tests to confirm RED.", tool_calls=[call_run_tests_red])],
-                # Turn 2: in GREEN, writes implementation
-                [AIMessage(content="Now implementing.", tool_calls=[call_impl])],
-                # Turn 3: runs tests again, passes (GREEN passed)
-                [AIMessage(content="Verifying GREEN.", tool_calls=[call_run_tests_green])],
-                # Turn 4: claims done now that cycle is complete!
-                [AIMessage(content="Cycle complete! All tests pass.")],
-            ])
-            events: list = []
-            # First test run exit 1 (fail), second test run exit 0 (pass)
-            deps = self._build_test_deps(model, [1, 0], events)
-            store = AppStateStore()
-            ctx = tool_context_for(store)
-            state = initial_loop_state((HumanMessage(content="task"),), ctx)
-            config = build_run_config("test-p2-success", postgres_checkpointing=False)
-
-            terminated: Terminated | None = None
-            async for ev in run_loop(state, config, deps):
-                if isinstance(ev, Terminated):
-                    terminated = ev
-
-            assert terminated is not None
-            # Must reach COMPLETED
-            assert terminated.reason == Terminal.COMPLETED
-            # Ledger is Red-then-Green
-            ledger = store.get().phase_ledger
-            assert ledger.red_confirmed is True
-            assert ledger.green_passed is True
-            assert ledger.is_cycle_complete is True
-
-        asyncio.run(go())
+    def test_property_2_the_whole_cycle_reaches_completed(self):
+        """Tests written and run, implementation passing, REFACTOR passing with enough coverage."""
+        model = ScriptedModel([
+            [AIMessage(content="Writing robust tests.", tool_calls=[call("WriteTest", "c0")])],
+            [AIMessage(content="Running them.", tool_calls=[call("RunTests", "c1")])],
+            [AIMessage(content="Now implementing.", tool_calls=[call("WriteImplementation", "c2")])],
+            [AIMessage(content="Verifying GREEN.", tool_calls=[call("RunTests", "c3")])],
+            [AIMessage(content="Refactoring, then measuring.", tool_calls=[call("RunTests", "c4")])],
+            [AIMessage(content="Cycle complete! All tests pass.")],
+        ])
+        terminated, store = asyncio.run(self._run(model, [
+            SuiteExecutionResult(exit_code=0), SuiteExecutionResult(exit_code=0, coverage=MET),
+            SuiteExecutionResult(exit_code=0, coverage=MET)]))
+        assert terminated.reason == Terminal.COMPLETED
+        assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True,
+                                                       refactor_passed=True, coverage=95.0)

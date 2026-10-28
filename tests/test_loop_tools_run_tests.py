@@ -11,6 +11,14 @@ from typing import Any
 import pytest
 
 from app.state.app_state_store import AppState, AppStateStore
+from app.tdd.coverage_gate import (
+    COVERAGE_CONFIG,
+    COVERAGE_CONFIG_PATH,
+    COVERAGE_REPORT_PATH,
+    UNAVAILABLE,
+    CoverageReading,
+    CoverageStatus,
+)
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.tdd.run_tests_tool.run_tests_tool import (
     LEDGER_EXIT_CODES,
@@ -22,93 +30,106 @@ from app.tdd.run_tests_tool.run_tests_tool import (
     pytest_command,
     run_tests_timeout_seconds,
 )
+from app.tdd.suite_fingerprint import fingerprint_test_files
 from app.tool import tool_context_for
-from app.workspace.base import WorkspaceTimeout
+from app.workspace.base import CommandResult, WorkspaceTimeout
+from tests.conftest import FakeWorkspace
+
+MET = CoverageReading(CoverageStatus.MEASURED, 95.0)
+UNDER = CoverageReading(CoverageStatus.MEASURED, 70.0)
+TESTED = {"tests/test_foo.py": "def test_foo():\n    pass\n"}
 
 
-def test_run_tests_in_red_failing_test_advances_to_green():
-    async def go():
-        store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
-        ctx = tool_context_for(store)
-
-        def failing_runner(path):
-            return SuiteExecutionResult(exit_code=1, stdout="Failing test", stderr="Err")
-
-        tool = build_run_tests_tool(failing_runner)
-
-        res = await tool.call({"test_path": "tests/test_foo.py"}, ctx)
-
-        assert res.is_error is False
-        assert res.exit_code == 1
-        assert "Tests failed (exit 1)" in res.content
-        assert "Failing test" in res.content
-        assert "Err" in res.content
-
-        # Ground truth updated in AppState!
-        current_ledger = store.get().phase_ledger
-        assert current_ledger.phase == TddPhase.GREEN
-        assert current_ledger.red_confirmed is True
-        assert current_ledger.green_passed is False
-
-    asyncio.run(go())
+def ws_ctx(store: AppStateStore, files: dict[str, str] | None = None) -> Any:
+    """A context whose workspace holds test files the item's baseline has not seen."""
+    return tool_context_for(store, workspace=FakeWorkspace(files=dict(TESTED if files is None else files)))
 
 
-def test_run_tests_in_green_passing_test_marks_green_passed():
-    async def go():
-        store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=False))
-        )
-        ctx = tool_context_for(store)
-
-        def passing_runner(path):
-            return SuiteExecutionResult(exit_code=0, stdout="All tests passed.")
-
-        tool = build_run_tests_tool(passing_runner)
-
-        res = await tool.call({}, ctx)
-
-        assert res.is_error is False
-        assert res.exit_code == 0
-        assert "All tests passed." in res.content
-
-        current_ledger = store.get().phase_ledger
-        assert current_ledger.phase == TddPhase.GREEN
-        assert current_ledger.red_confirmed is True
-        assert current_ledger.green_passed is True
-        assert current_ledger.is_cycle_complete is True
-
-    asyncio.run(go())
+@pytest.mark.parametrize("exit_code, header", [(1, "Tests failed (exit 1)."), (0, "All tests passed.")])
+def test_a_run_of_new_tests_ends_red_whatever_its_outcome(exit_code, header):
+    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+    tool = build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=exit_code, stdout="out", stderr="Err"))
+    res = asyncio.run(tool.call({"test_path": "tests/test_foo.py"}, ws_ctx(store)))
+    assert (res.is_error, res.exit_code) == (False, exit_code)
+    assert res.content == (
+        f"{header}\nRED is done: this sub-requirement's tests were written and run. The phase is GREEN: "
+        "implement the code they describe and run RunTests until every test passes.\n\n--- STDOUT ---\nout"
+        "\n--- STDERR ---\nErr")
+    assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
-def test_run_tests_green_in_red_f2_case():
-    async def go():
-        store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False))
-        )
-        ctx = tool_context_for(store)
+def test_unchanged_tests_keep_red():
+    files = dict(TESTED)
+    baseline = fingerprint_test_files(FakeWorkspace(files=files))
+    store = AppStateStore(AppState(tdd_item_test_baseline=baseline))
+    tool = build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=1, stdout="out"))
+    res = asyncio.run(tool.call({}, ws_ctx(store, files)))
+    assert res.content.startswith(
+        "Tests failed (exit 1).\nNo test file changed since this sub-requirement started, so the phase stays RED: "
+        "write or extend its tests (robust, covering every relevant scenario and edge case), then run RunTests.")
+    assert store.get().phase_ledger == PhaseLedger()
+    assert store.get().last_test_run is not None
 
-        def passing_runner(path):
-            return SuiteExecutionResult(exit_code=0, stdout="1 passed.")
 
-        tool = build_run_tests_tool(passing_runner)
+def test_red_without_a_workspace_has_no_evidence_of_new_tests():
+    store = AppStateStore()
+    asyncio.run(build_run_tests_tool(lambda p: SuiteExecutionResult(exit_code=0)).call({}, tool_context_for(store)))
+    assert store.get().phase_ledger == PhaseLedger()
 
-        res = await tool.call({"test_path": "."}, ctx)
 
-        assert res.is_error is False
-        assert res.exit_code == 0
+def test_the_fingerprint_is_compared_only_in_red():
+    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
+    ctx = ws_ctx(store)
+    asyncio.run(build_run_tests_tool(lambda p: SuiteExecutionResult(exit_code=0, coverage=MET)).call({}, ctx))
+    assert ctx.workspace.command_log == []
+    assert store.get().phase_ledger.phase == TddPhase.REFACTOR
 
-        current_ledger = store.get().phase_ledger
-        assert current_ledger.phase == TddPhase.RED
-        assert current_ledger.red_confirmed is False
-        assert current_ledger.green_passed is True
-        assert current_ledger.is_cycle_complete is False
 
-    asyncio.run(go())
+def test_a_pass_in_green_moves_to_the_mandatory_refactor():
+    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
+    res = asyncio.run(build_run_tests_tool(
+        lambda path: SuiteExecutionResult(exit_code=0, stdout="ok", coverage=UNDER)).call({}, ws_ctx(store)))
+    assert res.content.startswith(
+        "All tests passed.\nGREEN is done. The phase is REFACTOR, which is mandatory: improve the code and the tests, "
+        "raise coverage, and run RunTests until every test passes with enough coverage (coverage 70.0% "
+        "(needs 90%)).")
+    assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True,
+                                                   coverage=70.0)
+
+
+def test_a_failure_in_green_stays_in_green():
+    ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
+    store = AppStateStore(AppState(phase_ledger=ledger))
+    res = asyncio.run(build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=1)).call({}, ws_ctx(store)))
+    assert res.content.startswith("Tests failed (exit 1).\nThe phase stays GREEN: every test must pass.")
+    assert store.get().phase_ledger == ledger
+
+
+REFACTORING = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)
+
+
+@pytest.mark.parametrize("result, status, passed", [
+    (SuiteExecutionResult(exit_code=0, coverage=MET),
+     "REFACTOR is done (coverage 95.0% (needs 90%)): this sub-requirement's cycle is complete.", True),
+    (SuiteExecutionResult(exit_code=0, coverage=UNDER),
+     ("REFACTOR is not done: coverage 70.0% (needs 90%). Add tests for the uncovered code, or improve it, and run "
+      "RunTests again."), False),
+    (SuiteExecutionResult(exit_code=0),
+     ("REFACTOR is not done: coverage could not be measured. Add tests for the uncovered code, or improve it, and "
+      "run RunTests again."), False),
+    (SuiteExecutionResult(exit_code=1, coverage=MET), "REFACTOR is not done: every test must pass.", False),
+])
+def test_refactor_is_judged_by_a_passing_run_with_enough_coverage(result, status, passed):
+    store = AppStateStore(AppState(phase_ledger=REFACTORING))
+    res = asyncio.run(build_run_tests_tool(lambda path: result).call({}, ws_ctx(store)))
+    assert res.content.splitlines()[1] == status
+    assert store.get().phase_ledger.refactor_passed is passed
+    assert store.get().phase_ledger.is_cycle_complete is passed
 
 
 def test_exit_2_is_not_an_observation_and_leaves_the_ledger():
     async def go():
-        ledger = PhaseLedger(phase=TddPhase.RED, red_confirmed=False, green_passed=False)
+        ledger = PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False)
         store = AppStateStore(AppState(phase_ledger=ledger))
         ctx = tool_context_for(store)
 
@@ -138,7 +159,7 @@ def test_exit_2_is_not_an_observation_and_leaves_the_ledger():
 @pytest.mark.parametrize("phase", list(TddPhase))
 def test_non_observation_codes_never_move_the_ledger(code, reason, phase):
     """'No tests collected' can never confirm RED; nothing but 0/1 is evidence."""
-    ledger = PhaseLedger(phase=phase, red_confirmed=phase != TddPhase.RED,
+    ledger = PhaseLedger(phase=phase, tests_written=phase != TddPhase.RED,
                          green_passed=phase == TddPhase.REFACTOR)
     store = AppStateStore(AppState(phase_ledger=ledger))
     tool = build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=code, stdout="o"))
@@ -202,7 +223,7 @@ def test_fails_closed_without_a_workspace():
 
 def test_suite_execution_result_defaults():
     res = SuiteExecutionResult(exit_code=0)
-    assert (res.exit_code, res.stdout, res.stderr, res.__test__) == (0, "", "", False)
+    assert (res.exit_code, res.stdout, res.stderr, res.coverage, res.__test__) == (0, "", "", UNAVAILABLE, False)
 
 
 class _Wrap:
@@ -273,6 +294,10 @@ def test_non_callable_context_runner_falls_through_to_workspace_rule():
         asyncio.run(_default_test_runner("t.py", NotCallable(tool_context_for(AppStateStore()))))  # type: ignore
 
 
+STAYS_RED = ("No test file changed since this sub-requirement started, so the phase stays RED: write or extend "
+             "its tests (robust, covering every relevant scenario and edge case), then run RunTests.")
+
+
 def test_call_argument_handling_and_formatting():
     async def go():
         store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
@@ -285,7 +310,7 @@ def test_call_argument_handling_and_formatting():
 
         tool = build_run_tests_tool(recording)
         assert (await tool.call({"test_path": "tests/x.py"}, ctx)).content == (
-            "All tests passed.\n\n--- STDOUT ---\nRan tests/x.py")
+            f"All tests passed.\n{STAYS_RED}\n\n--- STDOUT ---\nRan tests/x.py")
         for args in ({"test_path": ""}, {"test_path": None}, {}):
             await tool.call(args, ctx)
             assert seen[-1] == "."
@@ -293,7 +318,7 @@ def test_call_argument_handling_and_formatting():
         fail = build_run_tests_tool(lambda p: SuiteExecutionResult(exit_code=1, stdout="F", stderr="E"))
         res = await fail.call({}, ctx)
         assert (res.is_error, res.exit_code) == (False, 1)
-        assert res.content == "Tests failed (exit 1).\n\n--- STDOUT ---\nF\n--- STDERR ---\nE"
+        assert res.content == f"Tests failed (exit 1).\n{STAYS_RED}\n\n--- STDOUT ---\nF\n--- STDERR ---\nE"
 
         two = build_run_tests_tool(lambda p, c: SuiteExecutionResult(exit_code=0, stdout=f"2 {p} {c is ctx}"))
         assert (await two.call({"test_path": "a"}, ctx)).content.endswith("2 a True")
@@ -309,9 +334,23 @@ def test_call_argument_handling_and_formatting():
 
 
 class _RecordingWorkspace:
-    def __init__(self, exit_code=0, exc=None):
+    def __init__(self, exit_code=0, exc=None, report=None):
         self.calls = []
         self.exit_code, self.exc = exit_code, exc
+        self.files: dict[str, str] = {}
+        self.report = report
+        self.deleted: list[str] = []
+
+    def write_file(self, path, content):
+        self.files[path] = content
+
+    def read_file(self, path):
+        if path == COVERAGE_REPORT_PATH and self.report is not None:
+            return self.report
+        raise FileNotFoundError(path)
+
+    def delete_file(self, path):
+        self.deleted.append(path)
 
     def execute(self, cmd, timeout=None, env=None):
         self.calls.append((cmd, timeout))
@@ -328,10 +367,14 @@ def test_workspace_command_is_quoted_and_time_limited():
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests/a b.py; rm -rf /"}, ctx))
     assert res.exit_code == 0 and "pytest output" in res.content
     assert ws.calls == [(pytest_command("tests/a b.py; rm -rf /"), 120.0)]
+    assert ws.files == {COVERAGE_CONFIG_PATH: COVERAGE_CONFIG}
+    assert ws.deleted == [COVERAGE_REPORT_PATH, COVERAGE_REPORT_PATH]
     assert pytest_command("tests/a b.py; rm -rf /").startswith(
         "PYTHONPATH=. python -m pytest 'tests/a b.py; rm -rf /' -vv --tb=short --rootdir=. ")
     assert pytest_command("tests/x.py") == (
         "PYTHONPATH=. python -m pytest tests/x.py -vv --tb=short --rootdir=. "
+        "--cov=. --cov-config=.tddagents/coverage/coveragerc --cov-report=term-missing "
+        "--cov-report=json:.tddagents/coverage/report.json "
         "$([ -f pytest.ini ] || [ -f .pytest.ini ] || grep -qs '^\\[tool\\.pytest' pyproject.toml "
         "|| grep -qs '^\\[pytest\\]' tox.ini || grep -qs '^\\[tool:pytest\\]' setup.cfg "
         "|| printf %s '-c /dev/null')")
@@ -398,7 +441,7 @@ def test_workspace_without_execute_is_unavailable():
 
 # ── integration: real pytest in a real LocalWorkspace ────────────────────────
 
-def test_real_pytest_red_then_green_in_a_local_workspace(python_workspace):
+def test_real_pytest_red_green_and_a_measured_refactor_in_a_local_workspace(python_workspace):
     ws = python_workspace
     store = AppStateStore()
     ctx = tool_context_for(store, workspace=ws)
@@ -408,11 +451,34 @@ def test_real_pytest_red_then_green_in_a_local_workspace(python_workspace):
     ws.write_file("add.py", "def add(a, b):\n    return 0\n")
     red = asyncio.run(tool.call({"test_path": "tests"}, ctx))
     assert red.exit_code == 1 and red.is_error is False
-    assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=False)
+    assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=False)
 
-    ws.write_file("add.py", "def add(a, b):\n    return a + b\n")
+    # Half of `sign` is never run: GREEN passes, REFACTOR is not done until it is covered.
+    ws.write_file("add.py", "def add(a, b):\n    return a + b\n\n\ndef sign(x):\n    if x < 0:\n        return -1\n"
+                            "    return 1\n")
     green = asyncio.run(tool.call({"test_path": "tests"}, ctx))
-    assert green.exit_code == 0
+    assert green.exit_code == 0 and store.get().phase_ledger.phase == TddPhase.REFACTOR
+    assert "add.py" in green.content and "Missing" in green.content  # term-missing for the model
+    under = asyncio.run(tool.call({"test_path": "tests"}, ctx))
+    ledger = store.get().phase_ledger
+    assert ledger.refactor_passed is False and ledger.coverage is not None and ledger.coverage < 90
+    assert "REFACTOR is not done: coverage" in under.content
+
+    ws.write_file("tests/test_add.py", "from add import add, sign\n\ndef test_add():\n    assert add(2, 3) == 5\n\n"
+                                       "def test_sign():\n    assert sign(-2) == -1\n    assert sign(2) == 1\n")
+    done = asyncio.run(tool.call({"test_path": "tests"}, ctx))
+    assert done.exit_code == 0, done.content
+    assert store.get().phase_ledger.is_cycle_complete
+    assert store.get().phase_ledger.coverage == 100.0
+    assert not ws.exists(COVERAGE_REPORT_PATH)
+
+
+def test_real_pytest_with_no_production_code_counts_as_covered(python_workspace):
+    ws = python_workspace
+    store = AppStateStore(AppState(phase_ledger=REFACTORING))
+    ws.write_file("tests/test_t.py", "def test_t():\n    assert True\n")
+    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
+    assert "coverage: no production code to measure (counts as met)" in res.content
     assert store.get().phase_ledger.is_cycle_complete
 
 
@@ -446,11 +512,11 @@ def test_missing_code_collection_errors_are_failing_tests(error_line):
     assert is_missing_code_collection_error(res) is True
     assert ledger_exit_code(res) == 1
     store = AppStateStore()
-    out = asyncio.run(build_run_tests_tool(lambda p: res).call({}, tool_context_for(store)))
+    out = asyncio.run(build_run_tests_tool(lambda p: res).call({}, ws_ctx(store)))
     assert out.is_error is False and out.exit_code == 2
     assert out.content.startswith(
         "Tests failed (exit 2: collection error — the code under test does not exist yet).")
-    assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
 @pytest.mark.parametrize("stdout, stderr", [
@@ -495,7 +561,7 @@ def test_real_pytest_missing_module_confirms_red(python_workspace):
     ws.write_file("tests/test_calc.py", "import calculator\n\ndef test_add():\n    assert calculator.add(2, 3) == 5\n")
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
     assert res.exit_code == 2 and res.is_error is False
-    assert store.get().phase_ledger.red_confirmed is True
+    assert store.get().phase_ledger.tests_written is True
 
 
 def test_real_pytest_syntax_error_in_test_is_not_red(python_workspace):
@@ -511,7 +577,7 @@ def test_real_pytest_syntax_error_in_test_is_not_red(python_workspace):
 
 def _record_run(result: SuiteExecutionResult, test_path: str = "tests/test_calc.py") -> AppStateStore:
     store = AppStateStore(AppState())
-    ctx = tool_context_for(store)
+    ctx = ws_ctx(store)
     tool = build_run_tests_tool(lambda path: result)
     asyncio.run(tool.call({"test_path": test_path}, ctx))
     return store
@@ -522,7 +588,7 @@ def test_an_observed_run_is_recorded_beside_the_ledger():
     run = store.get().last_test_run
     assert run == TestRunRecord(test_path="tests/test_calc.py", exit_code=1, stdout="E   assert 1 == 2\n1 failed",
                                 stderr="warn")
-    assert store.get().phase_ledger.red_confirmed is True
+    assert store.get().phase_ledger.tests_written is True
 
 
 def test_a_run_that_is_not_an_observation_is_not_recorded():
@@ -538,3 +604,18 @@ def test_a_later_run_replaces_the_record():
     asyncio.run(tool.call({"test_path": "a"}, ctx))
     asyncio.run(tool.call({"test_path": "b"}, ctx))
     assert store.get().last_test_run == TestRunRecord(test_path="b", exit_code=0, stdout="ok", stderr="")
+
+
+@pytest.mark.parametrize("report, output, reading", [
+    ('{"totals": {"percent_covered": 92.5, "num_statements": 8}}', "", CoverageReading(CoverageStatus.MEASURED, 92.5)),
+    (None, "WARNING: Failed to generate report: No data to report.", CoverageReading(CoverageStatus.NO_CODE)),
+    (None, "pytest output", UNAVAILABLE),
+])
+def test_the_default_runner_reads_the_coverage_report_back(report, output, reading):
+    from app.tdd.run_tests_tool.run_tests_tool import _default_test_runner
+
+    ws = _RecordingWorkspace(report=report)
+    ws.execute = lambda cmd, timeout=None, env=None: CommandResult(  # type: ignore[method-assign]
+        stdout=output, stderr="", exit_code=0, duration=0.1, workspace="local")
+    result = asyncio.run(_default_test_runner(".", tool_context_for(AppStateStore(), workspace=ws)))
+    assert result.coverage == reading

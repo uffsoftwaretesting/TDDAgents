@@ -45,7 +45,7 @@ from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.plan import ItemStatus, PlanError, TddPlan
 from app.types.permissions import PermissionMode, ToolPermissionContext
 
-CYCLE = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 CALC_TEST = "import calculator\n\ndef test_add():\n    assert calculator.add(2, 3) == 5\n"
 CALC_IMPL = "def add(a, b):\n    return a + b\n"
 
@@ -200,6 +200,7 @@ def cycle_turns(n: int = 1) -> list[Any]:
         [call("RunTests", f"r{n}", test_path="tests")],
         [call("WriteFile", f"i{n}", file_path="calculator.py", content=CALC_IMPL)],
         [call("RunTests", f"g{n}", test_path="tests")],
+        [call("RunTests", f"f{n}", test_path="tests")],
         [AIMessage(content="done")],
     ]
 

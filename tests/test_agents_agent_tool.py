@@ -108,16 +108,16 @@ class TestSelection:
 
 class TestPhaseOnSpawn:
     def test_an_agent_without_a_phase_leaves_the_ledger(self):
-        ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+        ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
         assert phase_on_spawn(ledger, EXPLORE) is ledger
 
     def test_the_same_phase_leaves_the_ledger(self):
-        ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+        ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
         assert phase_on_spawn(ledger, DEVELOPER) is ledger
         assert phase_on_spawn(PhaseLedger(), TESTER) == PhaseLedger()
 
     def test_a_tester_after_red_restarts_the_cycle(self):
-        ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+        ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True)
         assert phase_on_spawn(ledger, TESTER) == PhaseLedger()
 
     def test_a_developer_needs_a_confirmed_red(self):
@@ -125,10 +125,10 @@ class TestPhaseOnSpawn:
             phase_on_spawn(PhaseLedger(), DEVELOPER)
 
     def test_a_refactorer_needs_a_completed_cycle(self):
-        done = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+        done = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True, refactor_passed=True)
         assert phase_on_spawn(done, REFACTORER).phase == TddPhase.REFACTOR
         with pytest.raises(ValueError, match="^Agent 'refactorer' cannot start"):
-            phase_on_spawn(PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True), REFACTORER)
+            phase_on_spawn(PhaseLedger(phase=TddPhase.GREEN, tests_written=True), REFACTORER)
 
     def test_the_call_writes_the_spawn_phase_before_the_worker_runs(self):
         seen: list[Any] = []
@@ -139,10 +139,22 @@ class TestPhaseOnSpawn:
                 async for m in super().__call__(state, config):
                     yield m
 
-        store, ctx = _ctx(PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True))
+        store, ctx = _ctx(PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True))
         _call(_tool(Model([[AIMessage(content="ok")]])), {**ARGS, "subagent_type": "refactorer"}, ctx)
         assert seen[0].phase == TddPhase.REFACTOR
         assert store.get().phase_ledger.phase == TddPhase.REFACTOR
+
+    def test_a_tester_spawned_after_red_restarts_the_items_test_baseline(self):
+        from app.tdd.suite_fingerprint import fingerprint_test_files
+        from tests.conftest import FakeWorkspace
+
+        ws = FakeWorkspace(files={"tests/test_a.py": "A"})
+        store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
+                                       tdd_item_test_baseline="old"))
+        ctx = tool_context_for(store, messages=(HumanMessage(content="coordinate"),), workspace=ws)
+        _call(_tool(FakeModel([[AIMessage(content="ok")]])), ARGS, ctx)
+        assert store.get().phase_ledger == PhaseLedger()
+        assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws)
 
     def test_a_refused_spawn_runs_no_worker_and_keeps_the_ledger(self):
         model = FakeModel([])
@@ -359,7 +371,7 @@ def test_a_phase_agent_never_runs_in_the_background(definition_background):
     defs = {"tester": dataclasses.replace(TESTER, background=definition_background or None)}
     args = {**ARGS, "run_in_background": not definition_background}
     model = FakeModel([])
-    store, ctx = _ctx(PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True))
+    store, ctx = _ctx(PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
     with pytest.raises(ValueError, match="^Agent 'tester' declares TDD phase RED and cannot run in the background"):
         _call(_tool(model, definitions=defs), args, ctx)
     assert model.seen == []

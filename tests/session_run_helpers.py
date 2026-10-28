@@ -32,7 +32,7 @@ class ItemOutcome:
     sub_requirement: str
     status: str  # "success" | "failed"
     terminal_reason: str
-    red_confirmed: bool
+    tests_written: bool
     green_passed: bool
     error_message: str | None = None
 
@@ -61,7 +61,7 @@ async def run_item(sub_req: str, idx: int, state: Any, *, workspace: Any = None,
         status="success" if succeeded else "failed",
         terminal_reason=str(reason),
         # A done item's ledger has already restarted in RED; its cycle was observed.
-        red_confirmed=done or final.red_confirmed,
+        tests_written=done or final.tests_written,
         green_passed=done or final.green_passed,
         error_message=None if succeeded else stopped or f"Terminated early: {reason}",
     )

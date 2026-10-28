@@ -18,7 +18,7 @@ from app.session.state import SessionStatus
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.plan import TddPlan
 
-CYCLE = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True, green_passed=True)
+CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 PLAN = TddPlan.from_texts(["Item A"])
 DONE = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=PLAN.complete_current(CYCLE))
 STOPPED = DevelopmentOutcome(terminal=Terminal.STOP_HOOK_PREVENTED, plan=PLAN)

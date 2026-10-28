@@ -50,7 +50,8 @@ def initial_tdd_state(sub_requirement: str) -> str:
     """The first TDD-state announcement of a one-item plan (Phase 11 adds the item)."""
     return (
         "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
-        "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n"
+        "Current Phase: RED\nTests Written: False\nGreen Passed: False\nRefactor Passed: False\n"
+        "Coverage: not measured\n"
         f"Current Sub-requirement: 1. {sub_requirement}\nSub-requirements Done: 0/1\n</system-reminder>"
     )
 
@@ -82,7 +83,7 @@ class FakeRunner:
 
 def test_required_packages_pin_matches_requirements():
     reqs = (REPO / "requirements.txt").read_text().split()
-    assert REQUIRED_PACKAGES == ("pytest==9.0.1",)
+    assert REQUIRED_PACKAGES == ("pytest==9.0.1", "pytest-cov==7.0.0", "coverage==7.11.3")
     assert all(pkg in reqs for pkg in REQUIRED_PACKAGES)
     assert SESSION_VENV_DIRNAME == "venv"
 
@@ -102,14 +103,14 @@ def test_session_python_env_defaults_to_process_path(monkeypatch, tmp_path):
 
 def test_ensure_creates_then_provisions(tmp_path):
     # import probe fails once (before install), then succeeds
-    runner = FakeRunner([("import pytest", (1, 2, 0))])
+    runner = FakeRunner([("import pytest, pytest_cov", (1, 2, 0))])
     sp = ensure_session_python(tmp_path / "run", creator="/py", runner=runner)
     assert sp.venv_dir == tmp_path / "run" / "venv"
     assert runner.calls[0] == ["/py", "-m", "venv", "--without-pip", str(sp.venv_dir)]
-    assert runner.calls[1] == [str(sp.python), "-c", "import pytest"]
+    assert runner.calls[1] == [str(sp.python), "-c", "import pytest, pytest_cov"]
     assert runner.calls[2] == ["/py", "-m", "pip", "--python", str(sp.python), "install", "--quiet",
                                *REQUIRED_PACKAGES]
-    assert runner.calls[3] == [str(sp.python), "-c", "import pytest"]
+    assert runner.calls[3] == [str(sp.python), "-c", "import pytest, pytest_cov"]
 
 
 def test_ensure_is_idempotent(tmp_path):
@@ -117,7 +118,7 @@ def test_ensure_is_idempotent(tmp_path):
     (tmp_path / "venv" / "bin" / "python").write_text("")
     runner = FakeRunner([])
     ensure_session_python(tmp_path, creator="/py", runner=runner)
-    assert runner.calls == [[str(tmp_path / "venv" / "bin" / "python"), "-c", "import pytest"]]
+    assert runner.calls == [[str(tmp_path / "venv" / "bin" / "python"), "-c", "import pytest, pytest_cov"]]
 
 
 @pytest.mark.parametrize("failing, message", [
@@ -125,13 +126,13 @@ def test_ensure_is_idempotent(tmp_path):
     ("install", "could not install the test toolchain into the session venv: boom"),
 ])
 def test_ensure_reports_provisioning_failures(tmp_path, failing, message):
-    runner = FakeRunner([(failing, 1), ("import pytest", 1)], create_python=failing != "--without-pip")
+    runner = FakeRunner([(failing, 1), ("import pytest, pytest_cov", 1)], create_python=failing != "--without-pip")
     with pytest.raises(SessionPythonError, match=f"^{message}$"):
         ensure_session_python(tmp_path, creator="/py", runner=runner)
 
 
 def test_ensure_fails_when_install_does_not_take(tmp_path):
-    runner = FakeRunner([("import pytest", 1)])
+    runner = FakeRunner([("import pytest, pytest_cov", 1)])
     with pytest.raises(SessionPythonError, match="still not importable"):
         ensure_session_python(tmp_path, creator="/py", runner=runner)
 
@@ -145,8 +146,9 @@ def test_failure_without_output_reports_exit_code(tmp_path):
 
 
 def test_session_python_is_real_and_isolated(session_python):
-    out = subprocess.run([str(session_python.python), "-c", ("import pytest, sys; print(pytest.__version__);"
-                          "print(sys.prefix)")], capture_output=True, text=True, check=True).stdout.split()
+    script = "import pytest, pytest_cov, sys; print(pytest.__version__);print(sys.prefix)"
+    out = subprocess.run([str(session_python.python), "-c", script],
+                         capture_output=True, text=True, check=True).stdout.split()
     assert out[0] == "9.0.1"
     assert out[1] == str(session_python.venv_dir)
     # TDDAgents' own dependencies are not visible to generated code
@@ -313,11 +315,11 @@ def test_run_tests_is_the_only_ledger_writer():
 
 def test_initial_state_reads_the_store_and_never_writes_it():
     writes: list[Any] = []
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)))
+    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     ctx = tool_context_for(store)
     ctx = dataclasses.replace(ctx, set_app_state=writes.append)
     state = initial_loop_state((), ctx)
-    assert state.phase_ledger == PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    assert state.phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     assert writes == []
 
 
@@ -331,7 +333,7 @@ def test_engine_does_not_write_a_stale_state_ledger_back():
 
     store = AppStateStore()
     state = dataclasses.replace(initial_loop_state((), tool_context_for(store)),
-                                phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True,
+                                phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True,
                                                          green_passed=True))
 
     async def model(s: Any, c: Any) -> AsyncIterator[Any]:
@@ -397,7 +399,8 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
         [_call("RunTests", "c2", test_path="tests")],
         [_call("WriteFile", "c3", file_path="calculator.py", content=CALC_IMPL)],
         [_call("RunTests", "c4", test_path="tests")],
-        [AIMessage(content="Red then green observed.")],
+        [_call("RunTests", "c4b", test_path="tests")],
+        [AIMessage(content="Red, green and refactor observed.")],
     ]
     seen: list[Any] = []
     result = asyncio.run(run_item("add two numbers", 0, {"session_id": "s"},
@@ -405,7 +408,7 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
                                   project_root=project, home=tmp_path / "home",
                                   managed_dir=tmp_path / "etc"))
     assert (result.status, result.terminal_reason) == ("success", "completed")
-    assert (result.red_confirmed, result.green_passed) == (True, True)
+    assert (result.tests_written, result.green_passed) == (True, True)
     assert result.error_message is None and result.sub_requirement == "add two numbers"
     assert python_workspace.read_file("calculator.py") == CALC_IMPL
     ctx = seen[0].tool_context
@@ -462,7 +465,7 @@ def test_runner_blocks_production_writes_in_red(python_workspace):
     assert not python_workspace.exists("calculator.py")
     refusal = next(m for m in seen[1].messages if getattr(m, "tool_call_id", None) == "c1")
     assert "TDD phase RED denies" in str(refusal.content)
-    assert (result.index, result.red_confirmed, result.green_passed) == (3, False, False)
+    assert (result.index, result.tests_written, result.green_passed) == (3, False, False)
 
 
 def test_runner_reports_failure_without_inventing_progress(python_workspace):
@@ -478,7 +481,7 @@ def test_runner_reports_failure_without_inventing_progress(python_workspace):
     result = asyncio.run(run_item("x", 1, {"session_id": "s"}, workspace=python_workspace, deps=deps))
     assert (result.status, result.terminal_reason) == ("failed", "model_error")
     assert result.error_message == "Terminated early: model_error"
-    assert (result.red_confirmed, result.green_passed) == (False, False)
+    assert (result.tests_written, result.green_passed) == (False, False)
 
 
 def test_runner_crash_is_a_model_error(python_workspace, monkeypatch):
@@ -552,7 +555,7 @@ def test_runner_defaults_to_the_production_deps(monkeypatch, python_workspace):
     # Phase 4: the production stop hooks enforce barrier 3. A model that stops without an
     # observed Red->Green is refused once, then the latch ends the run — never `completed`.
     assert len(seen) == 2
-    assert "red_confirmed=False" in str(seen[1][0].messages[-1].content)
+    assert "tests_written=False" in str(seen[1][0].messages[-1].content)
     assert result.terminal_reason == "stop_hook_prevented"
     assert result.status == "failed"
 
@@ -611,7 +614,7 @@ def test_production_stop_hooks_enforce_barrier_three():
     result: StopHookResult = asyncio.run(_as_coroutine(pending))
     assert result.prevent_continuation is False
     assert len(result.blocking_errors) == 1
-    assert "red_confirmed=False" in str(result.blocking_errors[0].content)
+    assert "tests_written=False" in str(result.blocking_errors[0].content)
 
 
 def test_export_creates_missing_destination_parents(tmp_path):
@@ -632,13 +635,14 @@ def test_provisioning_failure_reports_stdout_when_stderr_is_empty(tmp_path):
 
 def test_install_that_does_not_take_names_the_cause_exactly(tmp_path):
     def runner(argv: list[str], **kw: Any) -> Any:
-        code = 1 if argv[1:3] == ["-c", "import pytest"] else 0
+        code = 1 if argv[1:3] == ["-c", "import pytest, pytest_cov"] else 0
         return subprocess.CompletedProcess(argv, code, stdout="", stderr="")
 
     (tmp_path / "venv" / "bin").mkdir(parents=True)
     (tmp_path / "venv" / "bin" / "python").write_text("")
     with pytest.raises(SessionPythonError,
-                       match="^pytest is still not importable in the session venv after installing it$"):
+                       match=("^pytest and pytest-cov are still not importable in the session venv after "
+                              "installing them$")):
         ensure_session_python(tmp_path, runner=runner)
 
 
@@ -721,5 +725,6 @@ def test_the_shared_test_venv_is_built_once_and_reused(tmp_path):
     marker = first / "built-once"
     marker.write_text("")
     assert shared_test_venv(tmp_path) == first and marker.exists()
-    assert subprocess.run([str(first / "bin" / "python"), "-c", "import pytest"], check=False).returncode == 0
+    probe = subprocess.run([str(first / "bin" / "python"), "-c", "import pytest, pytest_cov"], check=False)
+    assert probe.returncode == 0
     assert not [p for p in tmp_path.iterdir() if "-building-" in p.name]

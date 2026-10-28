@@ -40,7 +40,8 @@ def initial_tdd_state(sub_requirement: str) -> str:
     """The first TDD-state announcement of a one-item plan (Phase 11 adds the item)."""
     return (
         "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
-        "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False\n"
+        "Current Phase: RED\nTests Written: False\nGreen Passed: False\nRefactor Passed: False\n"
+        "Coverage: not measured\n"
         f"Current Sub-requirement: 1. {sub_requirement}\nSub-requirements Done: 0/1\n</system-reminder>"
     )
 
@@ -399,7 +400,7 @@ def test_a_blocked_prompt_never_reaches_the_model(monkeypatch, tmp_path):
     assert (result.status, result.terminal_reason) == ("failed", "hook_stopped")
     assert result.error_message == (
         "UserPromptSubmit operation blocked by hook:\nnope\n\nOriginal prompt: build it")
-    assert (result.red_confirmed, result.green_passed) == (False, False)
+    assert (result.tests_written, result.green_passed) == (False, False)
     assert d.payload("SessionEnd")["reason"] == "other"
     assert finalized == [True]
 

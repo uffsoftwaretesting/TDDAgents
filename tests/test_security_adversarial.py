@@ -221,7 +221,7 @@ def test_command_hook_with_a_missing_binary_fails_without_crashing(tmp_path: Pat
 
 def test_tdd_phase_rule_strictly_denies_implementation_writers_in_red() -> None:
     # In RED phase:
-    ledger_red = PhaseLedger(phase=TddPhase.RED, red_confirmed=False)
+    ledger_red = PhaseLedger(phase=TddPhase.RED, tests_written=False)
 
     tool_write_impl = build_tool(name="WriteImplementation", prompt="", call=_dummy_call)
     tool_edit_impl = build_tool(name="EditCode", prompt="", call=_dummy_call)
@@ -248,7 +248,7 @@ def test_tdd_phase_rule_strictly_denies_implementation_writers_in_red() -> None:
 
 
 def test_tdd_phase_rule_generic_writer_target_path_classification() -> None:
-    ledger_red = PhaseLedger(phase=TddPhase.RED, red_confirmed=False)
+    ledger_red = PhaseLedger(phase=TddPhase.RED, tests_written=False)
     tool_generic_write = build_tool(name="WriteFile", prompt="", call=_dummy_call)
 
     # Writing to a test file in RED is allowed

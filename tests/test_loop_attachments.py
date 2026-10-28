@@ -503,31 +503,35 @@ def test_mcp_instructions_delta(monkeypatch):
 def test_tdd_state_is_announced_once_until_the_ledger_moves():
     ctx = ctx_for()
     (att,) = [a for a in run(get_attachments(ctx, [])) if a.type == "tdd_state"]
-    assert att.data == {"phase": "RED", "red_confirmed": False, "green_passed": False}
+    assert att.data == {"phase": "RED", "tests_written": False, "green_passed": False, "refactor_passed": False,
+                        "coverage": None}
     history = create_attachment_messages(att)
     assert history[0].content == wrap_in_system_reminder(
         "TDD phase ledger (written only by RunTests from observed test runs):\n"
-        "Current Phase: RED\nRed Confirmed: False\nGreen Passed: False"
+        "Current Phase: RED\nTests Written: False\nGreen Passed: False\nRefactor Passed: False\nCoverage: not measured"
     )
     assert [a for a in run(get_attachments(ctx, history)) if a.type == "tdd_state"] == []
-    moved = ctx_for(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)))
+    moved = ctx_for(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     (again,) = [a for a in run(get_attachments(moved, history)) if a.type == "tdd_state"]
-    assert again.data == {"phase": "GREEN", "red_confirmed": True, "green_passed": False}
+    assert again.data == {"phase": "GREEN", "tests_written": True, "green_passed": False, "refactor_passed": False,
+                          "coverage": None}
 
 
 def test_post_compaction_tdd_state_carries_the_runtests_evidence():
-    ledger = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+    ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     record = TestRunRecord(test_path="tests/test_calc.py", exit_code=1, stdout="x" * 3000 + "\nE   assert 1 == 2",
                            stderr="")
     msg = create_tdd_state_attachment_message(ledger, record, after_compaction=True)
     text = str(msg.content)
     assert text.startswith("<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs)")
-    assert "Current Phase: GREEN\nRed Confirmed: True\nGreen Passed: False" in text
+    assert ("Current Phase: GREEN\nTests Written: True\nGreen Passed: False\nRefactor Passed: False\n"
+            "Coverage: not measured") in text
     assert "Last RunTests run (recorded by RunTests, not by the model): tests/test_calc.py exited 1" in text
     assert text.removesuffix("\n</system-reminder>").endswith("E   assert 1 == 2")
     assert "x" * 2001 not in text  # the tail, bounded by the preview size
-    assert attachment_of(msg) == {"type": "tdd_state", "phase": "GREEN", "red_confirmed": True,
-                                  "green_passed": False, "afterCompaction": True}
+    assert attachment_of(msg) == {"type": "tdd_state", "phase": "GREEN", "tests_written": True,
+                                  "green_passed": False, "refactor_passed": False, "coverage": None,
+                                  "afterCompaction": True}
 
 
 def test_a_post_compaction_announcement_counts_for_dedup():

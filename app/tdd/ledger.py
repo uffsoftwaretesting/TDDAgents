@@ -1,34 +1,28 @@
 """
 The TDD phase ledger.
 
-This is the record the Red->Green invariant is enforced against (§3.3 of
-`docs/transition_elaboration_plan.md`). Three facts, and the crucial property is *who is
-allowed to write them*: nothing here is an agent's claim about its own progress. Part D2
-makes `RunTests` the only writer, because the test runner is the only component that
-observes ground truth.
+This is the record the TDD cycle is enforced against (§3.3 of
+`docs/transition_elaboration_plan.md`). Its facts are observations, and the crucial property
+is *who is allowed to write them*: nothing here is an agent's claim about its own progress.
+`RunTests` is the only writer of evidence (Part D2), because the test runner is the only
+component that observes ground truth. Phase-on-spawn and a plan change may only move the
+phase or erase evidence (`transition_to`).
 
-Part A1 ships the shape and nothing else. The ledger is carried by `LoopState` and
-mirrored into `AppState` (`app/state/app_state_store.py`) so that a tool can update it, but in this
-part no component writes it and no rule reads it. That is deliberate: the reset/preserve
-matrix of A7 has to cover every field of `LoopState` from the start, and a field added
-later is a field whose continue-site behaviour was never asserted.
+The cycle, since Phase 12 (user decision, 2026-10-28):
 
-Later parts give it teeth:
-
-* D1 moves the authoritative copy into app state and settles the direction of the mirror.
-* D2 has `RunTests` write it.
-* D3/D4 derive deny rules from `phase`, at pool assembly and again at the runtime gate.
-* D5 has the Stop hook refuse the exit while the cycle is incomplete.
-
-The "green in red" case (F2 in the paper) needs no special representation: a test that
-passes on its first run leaves `red_confirmed` false with `green_passed` true, which is a
-ledger state, not an edge.
+* **RED** writes robust tests; they need not fail. It ends with a RunTests run (pass or fail)
+  in which the item's test files changed since it started (`tests_written`).
+* **GREEN** implements; it ends with a passing run (`green_passed`).
+* **REFACTOR** is mandatory: it ends with a passing run whose line + branch coverage of the
+  production code reaches `COVERAGE_THRESHOLD` (`refactor_passed`, `coverage`).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
+
+from app.tdd.coverage_gate import UNAVAILABLE, CoverageReading
 
 
 class TddPhase(StrEnum):
@@ -47,19 +41,22 @@ class TddPhase(StrEnum):
 @dataclass(frozen=True, slots=True)
 class PhaseLedger:
     """
-    Where the run stands in the Red->Green->Refactor cycle.
+    Where the run stands in the Red -> Green -> Refactor cycle.
 
     `phase` is typed `TddPhase` and validates against the explicit list of phases,
     failing loudly on any unexpected string value.
 
-    `red_confirmed` and `green_passed` are observations, not intentions: each records that
-    a test run was seen to fail, and that the same test was later seen to pass. They are
-    monotonic within one cycle and are updated by `RunTests` (Part D2), the only writer.
+    `tests_written`, `green_passed` and `refactor_passed` are observations, not intentions:
+    a RED run saw changed tests, a GREEN run passed, and a REFACTOR run passed with enough
+    coverage. `coverage` is the last measured figure (`None` before one, or when there was no
+    production code to measure).
     """
 
     phase: TddPhase | str = TddPhase.RED
-    red_confirmed: bool = False
+    tests_written: bool = False
     green_passed: bool = False
+    refactor_passed: bool = False
+    coverage: float | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.phase, str) and not isinstance(self.phase, TddPhase):
@@ -71,57 +68,51 @@ class PhaseLedger:
                     f"{', '.join(p.value for p in TddPhase)}"
                 )
 
-    def with_test_result(self, exit_code: int) -> PhaseLedger:
+    def with_test_result(
+        self, exit_code: int, *, tests_changed: bool = False, coverage: CoverageReading = UNAVAILABLE,
+    ) -> PhaseLedger:
         """
-        Derive the successor ledger state after RunTests observes an exit code (Part D2).
+        The ledger after RunTests observes a run: exit 0 passed, anything else failed (Part D2).
 
-        Exit code == 0: tests passed.
-        Exit code != 0: tests failed.
+        RED moves to GREEN only when the item's tests changed, whatever the outcome. GREEN moves
+        to REFACTOR on a pass. REFACTOR records the coverage of every passing run, and is passed
+        only when that coverage meets the threshold; a failing run un-passes it.
         """
+        if self.phase == TddPhase.RED:
+            if not tests_changed:
+                return self
+            return replace(self, phase=TddPhase.GREEN, tests_written=True, green_passed=False)
+        if self.phase == TddPhase.GREEN:
+            if exit_code != 0:
+                return replace(self, green_passed=False)
+            return replace(self, phase=TddPhase.REFACTOR, green_passed=True, refactor_passed=False,
+                           coverage=coverage.percent)
         if exit_code != 0:
-            if self.phase == TddPhase.RED:
-                # Failing test observed in RED: red_confirmed becomes True and phase advances to GREEN
-                return replace(self, phase=TddPhase.GREEN, red_confirmed=True, green_passed=False)
-            elif self.phase == TddPhase.GREEN:
-                # Tests still failing in GREEN
-                return replace(self, green_passed=False)
-            else:
-                # REFACTOR phase: behaviour was broken by refactor!
-                return replace(self, green_passed=False)
-
-        # exit_code == 0
-        if self.red_confirmed:
-            # Previously confirmed red test is now passing
-            return replace(self, green_passed=True)
-
-        # F2 "green in red" case: test passed on first run without prior failure.
-        # red_confirmed stays False, green_passed becomes True, phase stays RED.
-        return replace(self, green_passed=True, red_confirmed=False, phase=TddPhase.RED)
+            return replace(self, refactor_passed=False)
+        return replace(self, refactor_passed=coverage.met, coverage=coverage.percent)
 
     def transition_to(self, new_phase: TddPhase | str) -> PhaseLedger:
         """
         Explicitly transition to a new phase: the Agent tool's phase-on-spawn (Phase 7).
 
         The guards are the cycle's order, so a spawn can never skip an observation: GREEN
-        needs a confirmed RED and REFACTOR a completed cycle. Going back to RED (a tester
-        re-spawned to rewrite the test, user decision 2026-10-22) restarts the cycle: the
-        observations belonged to a test that is about to change, so none of them survive.
+        needs written tests and REFACTOR a passing GREEN. Going back to RED (a tester
+        re-spawned to rewrite the tests, user decision 2026-10-22) restarts the cycle: the
+        observations belonged to tests that are about to change, so none of them survive.
         """
         target = TddPhase(new_phase) if isinstance(new_phase, str) else new_phase
         if target == TddPhase.RED:
             return PhaseLedger()
-        if target == TddPhase.GREEN and not self.red_confirmed:
-            raise ValueError("Cannot transition to GREEN before a failing test was observed (RED).")
-        if target == TddPhase.REFACTOR and not self.is_cycle_complete:
-            raise ValueError("Cannot transition to REFACTOR before cycle has passed GREEN (red-then-green).")
+        if target == TddPhase.GREEN and not self.tests_written:
+            raise ValueError("Cannot transition to GREEN before RED's tests were written and run.")
+        if target == TddPhase.REFACTOR and not self.green_passed:
+            raise ValueError("Cannot transition to REFACTOR before GREEN's tests passed.")
         return replace(self, phase=target)
 
     @property
     def is_cycle_complete(self) -> bool:
-        """
-        True when a failing test has been confirmed and the test suite has subsequently passed.
-        """
-        return self.red_confirmed and self.green_passed
+        """True when RED wrote tests, GREEN passed them and REFACTOR passed with enough coverage."""
+        return self.tests_written and self.green_passed and self.refactor_passed
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +120,7 @@ class TestRunRecord:
     """
     The last `RunTests` run the ledger observed (exit 0, or a failing run), kept beside the
     ledger by the same single writer. It is the evidence the TDD state is re-attached from
-    after a compaction (Phase 5): the failing assertion, not a model's summary of it.
+    after a compaction (Phase 5): the run's own output, not a model's summary of it.
     """
 
     test_path: str

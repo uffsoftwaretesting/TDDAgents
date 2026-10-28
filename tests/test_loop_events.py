@@ -19,7 +19,7 @@ def _recorder(tmp_path, store, **kw):
 
 def test_a_transition_is_recorded_with_the_ledger_and_the_last_test_run(tmp_path):
     store = AppStateStore(AppState(
-        phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True),
+        phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
         last_test_run=TestRunRecord(test_path="tests/test_a.py", exit_code=1),
     ))
     rec = _recorder(tmp_path, store)
@@ -28,7 +28,7 @@ def test_a_transition_is_recorded_with_the_ledger_and_the_last_test_run(tmp_path
     assert entry.event_type == EventType.TRANSITION
     assert (entry.session_id, entry.turn_count, entry.phase) == ("s1", 1, "GREEN")
     assert entry.transition_reason == "next_turn"
-    assert (entry.red_confirmed, entry.green_passed) == (True, False)
+    assert (entry.tests_written, entry.green_passed) == (True, False)
     assert entry.payload == {"plan_index": 3, "terminal": False, "test_exit_code": 1, "test_path": "tests/test_a.py"}
 
 
@@ -45,12 +45,12 @@ def test_the_snapshot_is_taken_when_the_event_fires(tmp_path):
     rec = _recorder(tmp_path, store)
     rec(Transition(reason=Continue.NEXT_TURN))
     store.update(lambda s: dataclasses.replace(
-        s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True),
+        s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
         last_test_run=TestRunRecord(test_path="t.py", exit_code=1)))
     rec(Transition(reason=Continue.STOP_HOOK_BLOCKING))
     first, second = rec.log.all_events()
-    assert (first.red_confirmed, first.payload["test_exit_code"]) == (False, None)
-    assert (second.red_confirmed, second.payload["test_exit_code"]) == (True, 1)
+    assert (first.tests_written, first.payload["test_exit_code"]) == (False, None)
+    assert (second.tests_written, second.payload["test_exit_code"]) == (True, 1)
 
 
 def test_turns_advance_only_on_next_turn(tmp_path):

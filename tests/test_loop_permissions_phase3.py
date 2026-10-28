@@ -570,7 +570,7 @@ def _gate_call(tool_name, args, perm, ledger, ws, dispatcher=None):
 
 
 RED = PhaseLedger(phase=TddPhase.RED)
-GREEN = PhaseLedger(phase=TddPhase.GREEN, red_confirmed=True)
+GREEN = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
 def test_shipped_settings_lose_their_interpreter_allows(tmp_path):
