@@ -28,7 +28,9 @@ anchor there (`ToolPermissionContext.settings_roots` carries the exceptions, use
 **TDDAgents' config directory is protected too.** `.tddagents` and `.tddagents.json` join
 upstream's dangerous lists (the product rename of `.claude` / `.claude.json`, which stay,
 since a workspace may also be opened with Claude Code). Writing there could plant settings
-or memory the next run would load.
+or memory the next run would load. As upstream skips `.claude/worktrees/`, `.tddagents/runs/`
+is skipped: the session workspaces live there, and a config directory inside one is still
+protected.
 
 Not ported, because no equivalent exists in this loop: the editable internal paths (plan
 files, scratchpad, step 1.5), the `.claude/**` session-allow carve-out (step 1.6, which
@@ -88,6 +90,10 @@ DANGEROUS_FILES: tuple[str, ...] = (
     ".tddagents.json",
 )
 
+#: A dangerous directory followed by one of these is structure, not configuration: upstream's
+#: `.claude/worktrees/` and TDDAgents' session workspaces under `.tddagents/runs/`.
+STRUCTURAL_SUBDIRECTORIES: frozenset[tuple[str, str]] = frozenset({(".claude", "worktrees"), (".tddagents", "runs")})
+
 DANGEROUS_DIRECTORIES: tuple[str, ...] = (
     ".git",
     ".vscode",
@@ -146,12 +152,10 @@ def is_dangerous_file_path_to_auto_edit(path: str) -> bool:
         normalized = normalize_case_for_comparison(segment)
         if normalized not in DANGEROUS_DIRECTORIES:
             continue
-        # `.claude/worktrees/` is structural, not user configuration.
-        if (
-            normalized == ".claude"
-            and index + 1 < len(segments)
-            and normalize_case_for_comparison(segments[index + 1]) == "worktrees"
-        ):
+        # `.claude/worktrees/` is structural, not user configuration; so is `.tddagents/runs/`,
+        # where the session workspaces live (TDDAgents' equivalent of upstream's worktrees).
+        following = normalize_case_for_comparison(segments[index + 1]) if index + 1 < len(segments) else None
+        if (normalized, following) in STRUCTURAL_SUBDIRECTORIES:
             continue
         return True
     file_name = segments[-1]

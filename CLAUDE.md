@@ -1030,6 +1030,13 @@ the open choices decided by interview (recorded in the plan's Phase 11 outcome).
   exit code is 1. `subreq_results.txt` lists DONE / FAILED (with the terminal) / NOT_RUN.
 - `prompt-toolkit==3.0.52` joins `requirements.txt`. `app/screens/terminal_io.py` is a
   seam (`do_not_mutate`, static surface check `tests/test_terminal_io_surface.py`).
+- **Fixed: the session workspace was unwritable.** Its path, `.tddagents/runs/<thread>/workspace/`,
+  holds the protected `.tddagents` directory (Phase 3), so every write was a safety ask, and
+  a headless run denied it. The first live run could not create a test file. Upstream's
+  `.claude/worktrees/` carve-out is ported as `STRUCTURAL_SUBDIRECTORIES` with
+  `(".tddagents", "runs")` (user decision). A config directory inside a workspace is still
+  protected, and a test pins `Config.LOCAL_WORKSPACE_ROOT`.
+- **The default model is `gpt-5-mini`** (user decision): OpenAI answers 404 for `o4-mini`.
 - **Ruff 0.17.1** reported 122 findings on the pushed Phase 10 tree (newer default rules).
   They are fixed, so ruff is back to 0. Every deliberate catch-all now carries
   `# noqa: BLE001 - <reason>`.
