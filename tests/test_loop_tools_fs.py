@@ -234,7 +234,7 @@ def test_prompt_frontmatter_is_stripped(builder):
 
 def test_get_prompt():
     assert get_prompt(Path("does-not-exist.md"), "fallback text") == "fallback text"
-    assert get_prompt(glob_tool.PROMPT_PATH, "x").startswith("Fast file pattern matching")
+    assert get_prompt(glob_tool.PROMPT_PATH, "x").startswith("- Fast file pattern matching tool")
 
 
 def test_read_only_tools_are_read_only_and_concurrency_safe():

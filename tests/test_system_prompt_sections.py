@@ -125,3 +125,103 @@ def test_the_tdd_additions_stay():
     prompt = get_bash_prompt()
     assert "deterministic command-injection check" in prompt
     assert "# Committing changes with git" in prompt
+
+
+# ── the intro, the file tools and the read-only agents (stage 1) ──────────────
+
+TOOLS = SRC / "tools"
+#: The user's product substitutions (2026-10-28).
+PRODUCT = (
+    ("for Claude Code, Anthropic's official CLI for Claude",
+     "for TDDAgents, UFF Software Testing Team's official CLI tool for TDDAgents"),
+    ("for Claude Code.", "for TDDAgents."),
+)
+
+
+def _template(text: str) -> str:
+    return text.split("return `", 1)[1].rsplit("`", 1)[0]
+
+
+def _tool_prompt(directory: str) -> str:
+    from app.tools.utils import get_prompt
+
+    return get_prompt(REPO / "app" / "tools" / directory / "prompt.md", "")
+
+
+@needs_reference
+def test_the_intro_is_upstreams_without_an_output_style():
+    source = PROMPTS_TS.read_text()
+    body = _template(_function(source, "getSimpleIntroSection")).strip("\n")
+    body = re.sub(r"\$\{outputStyleConfig !== null \? '[^']*' : '([^']*)'\}", r"\1", body)
+    cyber_source = (SRC / "constants" / "cyberRiskInstruction.ts").read_text()
+    found = re.search(r"CYBER_RISK_INSTRUCTION = `([^`]*)`", cyber_source)
+    assert found is not None
+    cyber = found.group(1)
+    assert _section("identity.md") == body.replace("${CYBER_RISK_INSTRUCTION}", cyber)
+
+
+@needs_reference
+def test_write_is_upstreams():
+    source = (TOOLS / "FileWriteTool" / "prompt.ts").read_text()
+    pre = _template(_function(source, "getPreReadInstruction")).replace("\\n", "\n")
+    body = _template(_function(source, "getWriteToolDescription")).replace("${getPreReadInstruction()}", pre)
+    body = body.replace("${FILE_READ_TOOL_NAME}", "ReadFile").replace("\\u2014", "—")
+    assert _tool_prompt("file_write_tool") == body
+
+
+@needs_reference
+def test_edit_is_upstreams_external_build():
+    source = (TOOLS / "FileEditTool" / "prompt.ts").read_text()
+    pre = _template(_function(source, "getPreReadInstruction")).replace("\\n", "\n")
+    body = _template(_function(source, "getDefaultEditDescription"))
+    body = (body.replace("${getPreReadInstruction()}", pre).replace("${prefixFormat}", "line number + tab")
+            .replace("${minimalUniquenessHint}", "").replace("${FILE_READ_TOOL_NAME}", "ReadFile")
+            .replace("from Read tool output", "from ReadFile tool output").replace("\\`", "`"))
+    assert _tool_prompt("file_edit_tool") == body
+
+
+@needs_reference
+def test_glob_is_upstreams():
+    source = (TOOLS / "GlobTool" / "prompt.ts").read_text()
+    found = re.search(r"export const DESCRIPTION = `([^`]*)`", source)
+    assert found is not None and _tool_prompt("glob_tool") == found.group(1)
+
+
+@needs_reference
+def test_grep_is_upstreams():
+    source = (TOOLS / "GrepTool" / "prompt.ts").read_text()
+    body = _template(_function(source, "getDescription"))
+    body = (body.replace("${GREP_TOOL_NAME}", "Grep").replace("${BASH_TOOL_NAME}", "Bash")
+            .replace("${AGENT_TOOL_NAME}", "Agent").replace("\\`", "`").replace("\\\\", "\\"))
+    assert _tool_prompt("grep_tool") == body.strip()  # the loader strips the body's trailing newline
+
+
+def _agent(name: str) -> object:
+    from app.tools.agent_tool.load_agents_dir import load_agent_definition_from_path
+
+    return load_agent_definition_from_path(REPO / "app" / "prompts" / "agents" / name / "AGENT.md")
+
+
+def _agent_template(source: str, function: str) -> str:
+    text = _template(_function(source, function))
+    text = (text.replace("${globGuidance}", "- Use Glob for broad file pattern matching")
+            .replace("${grepGuidance}", "- Use Grep for searching file contents with regex")
+            .replace("${searchToolsHint}", "Glob, Grep, and ReadFile")
+            .replace("${FILE_READ_TOOL_NAME}", "ReadFile").replace("${BASH_TOOL_NAME}", "Bash")
+            .replace("(no Write, touch", "(no WriteFile, touch"))
+    text = re.sub(r"\$\{(embedded|hasEmbeddedSearchTools\(\)) \? ', grep' : ''\}", "", text)
+    for upstream, ours in PRODUCT:
+        text = text.replace(upstream, ours)
+    return text
+
+
+@needs_reference
+@pytest.mark.parametrize("name, source, function", [
+    ("explore", "exploreAgent.ts", "getExploreSystemPrompt"),
+    ("plan", "planAgent.ts", "getPlanV2SystemPrompt"),
+])
+def test_the_read_only_agents_are_upstreams(name: str, source: str, function: str):
+    text = (TOOLS / "AgentTool" / "built-in" / source).read_text()
+    agent = _agent(name)
+    assert agent.prompt == _agent_template(text, function)  # type: ignore[attr-defined]
+    assert "Claude" not in agent.prompt  # type: ignore[attr-defined]

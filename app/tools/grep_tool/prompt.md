@@ -2,12 +2,13 @@
 name: Grep
 description: Searches file contents across the workspace using regular expressions.
 ---
-A content search tool.
+A powerful search tool built on ripgrep
 
-Usage:
-- ALWAYS use `Grep` for search tasks. NEVER invoke `grep` or `rg` as a `Bash` command.
-- Supports regular expression syntax (e.g. `log.*Error`, `def\s+\w+`).
-- Filter files with `glob` (e.g. `*.py`, `*.{ts,tsx}`) and narrow the search with `path`.
-- Output modes: `files_with_matches` (default) shows only file paths, `content` shows matching lines, `count` shows match counts per file.
-- `-i` makes the search case insensitive; `-n` toggles line numbers in content mode.
-- Results are paginated: `head_limit` caps entries (0 for unlimited) and `offset` skips entries. A pagination note appears when results were truncated.
+  Usage:
+  - ALWAYS use Grep for search tasks. NEVER invoke `grep` or `rg` as a Bash command. The Grep tool has been optimized for correct permissions and access.
+  - Supports full regex syntax (e.g., "log.*Error", "function\s+\w+")
+  - Filter files with glob parameter (e.g., "*.js", "**/*.tsx") or type parameter (e.g., "js", "py", "rust")
+  - Output modes: "content" shows matching lines, "files_with_matches" shows only file paths (default), "count" shows match counts
+  - Use Agent tool for open-ended searches requiring multiple rounds
+  - Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use `interface\{\}` to find `interface{}` in Go code)
+  - Multiline matching: By default patterns match within single lines only. For cross-line patterns like `struct \{[\s\S]*?field`, use `multiline: true`
