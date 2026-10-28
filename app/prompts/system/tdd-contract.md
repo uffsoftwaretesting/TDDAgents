@@ -14,8 +14,8 @@ The loop enforces a structural Red -> Green -> Refactor cycle for every sub-requ
 3. **REFACTOR Phase (Mandatory)**:
    - REFACTOR is required for every sub-requirement. Use it to raise test coverage, improve code quality, and strengthen the test suite's effectiveness and robustness.
    - Both the production code and the tests may change: remove duplication, clarify names and structure, add tests for uncovered lines and branches, and sharpen weak assertions.
-   - `RunTests` measures line and branch coverage of the production code on every run and lists the uncovered lines. REFACTOR is done when a run passes with at least {{COVERAGE_THRESHOLD}}% coverage.
+   - `RunTests` measures line and branch coverage of the production code on every run and lists the uncovered lines. Raise it as part of the work: {{COVERAGE_RULE_OF_THUMB}}% is a good rule of thumb, not a gate, and a test must assert behaviour, never only execute code to cover it. REFACTOR is done when a run passes.
    - Every test must keep passing; a failing run means REFACTOR is not done.
 
 **Termination Rule**:
-The loop will refuse completion until the phase ledger shows the whole cycle for the current sub-requirement: tests written and run, every test passing, and a passing REFACTOR run with enough coverage.
+The loop will refuse completion until the phase ledger shows the whole cycle for the current sub-requirement: tests written and run, every test passing, and a passing REFACTOR run.

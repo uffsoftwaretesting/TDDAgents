@@ -13,7 +13,7 @@ from app.tdd.coverage_gate import (
     COVERAGE_CONFIG_PATH,
     COVERAGE_DIR,
     COVERAGE_REPORT_PATH,
-    COVERAGE_THRESHOLD,
+    COVERAGE_RULE_OF_THUMB,
     CoverageReading,
     CoverageStatus,
     read_coverage,
@@ -24,8 +24,8 @@ def report(percent: float, statements: int = 10) -> str:
     return json.dumps({"totals": {"percent_covered": percent, "num_statements": statements}})
 
 
-def test_the_threshold_is_the_users_ninety_percent():
-    assert COVERAGE_THRESHOLD == 90.0
+def test_the_rule_of_thumb_is_the_users_ninety_percent():
+    assert COVERAGE_RULE_OF_THUMB == 90.0
 
 
 def test_the_files_live_in_the_workspaces_protected_tddagents_directory():
@@ -54,23 +54,19 @@ def test_the_config_measures_branches_and_leaves_the_tests_out():
     )
 
 
-@pytest.mark.parametrize("percent, met", [(90.0, True), (100.0, True), (89.99, False), (0.0, False)])
-def test_a_measured_figure_meets_the_threshold_at_ninety(percent, met):
-    reading = read_coverage(report(percent), output="")
-    assert reading == CoverageReading(CoverageStatus.MEASURED, percent)
-    assert reading.met is met
+@pytest.mark.parametrize("percent", [90.0, 100.0, 89.99, 0.0])
+def test_a_measured_figure_is_read(percent):
+    assert read_coverage(report(percent), output="") == CoverageReading(CoverageStatus.MEASURED, percent)
 
 
 def test_no_production_code_counts_as_met():
     reading = read_coverage(None, output="...\nWARNING: Failed to generate report: No data to report.\n")
     assert reading == CoverageReading(CoverageStatus.NO_CODE, None)
-    assert reading.met is True
 
 
 def test_a_missing_report_without_the_no_data_notice_is_unavailable():
     reading = read_coverage(None, output="some other output")
     assert reading == CoverageReading(CoverageStatus.UNAVAILABLE, None)
-    assert reading.met is False
 
 
 @pytest.mark.parametrize("text", ["not json", "[]", '{"totals": {}}', '{"totals": {"percent_covered": "x"}}',
@@ -84,9 +80,9 @@ def test_a_report_with_no_statements_is_no_code():
 
 
 @pytest.mark.parametrize("reading, text", [
-    (CoverageReading(CoverageStatus.MEASURED, 84.25), "coverage 84.2% (needs 90%)"),
-    (CoverageReading(CoverageStatus.MEASURED, 90.0), "coverage 90.0% (needs 90%)"),
-    (CoverageReading(CoverageStatus.NO_CODE, None), "coverage: no production code to measure (counts as met)"),
+    (CoverageReading(CoverageStatus.MEASURED, 84.25), "coverage 84.2% (rule of thumb: 90%)"),
+    (CoverageReading(CoverageStatus.MEASURED, 90.0), "coverage 90.0% (rule of thumb: 90%)"),
+    (CoverageReading(CoverageStatus.NO_CODE, None), "coverage: no production code to measure"),
     (CoverageReading(CoverageStatus.UNAVAILABLE, None), "coverage could not be measured"),
 ])
 def test_the_reading_describes_itself(reading, text):

@@ -1,15 +1,17 @@
 """
-The coverage REFACTOR is judged by (Phase 12).
+The coverage every RunTests run measures and reports (Phase 12).
 
-REFACTOR is mandatory: a sub-requirement is done only when a RunTests run in REFACTOR passes
-and line + branch coverage of the production code reaches `COVERAGE_THRESHOLD` (user decision,
-2026-10-28). `RunTests` measures it with pytest-cov on every run: the config below omits the
-test files, the JSON report is read back through the workspace, and both live in the
-workspace's `.tddagents/` directory, which the agents' file tools protect and the export skips.
+`RunTests` measures line + branch coverage of the production code with pytest-cov on every run:
+the config below omits the test files, the JSON report is read back through the workspace, and
+both live in the workspace's protected `.tddagents/` directory.
 
-A run with no production code to measure counts as met (user decision): coverage.py then
-writes no report and says "No data to report", or reports zero statements. Any other missing
-or unreadable report is `UNAVAILABLE`, which never meets the threshold.
+Coverage is guidance, not a gate (user decision, 2026-10-28): REFACTOR, still mandatory, ends on
+a passing run, and raising coverage is part of its work, with `COVERAGE_RULE_OF_THUMB` as a good
+rule of thumb. Until then REFACTOR had to reach 90%, which made a live run write a test that
+called the code only to cover a branch the specification said must not be tested.
+
+With no production code, coverage.py writes no report and says "No data to report", or reports
+zero statements (`NO_CODE`). Any other missing or unreadable report is `UNAVAILABLE`.
 """
 
 from __future__ import annotations
@@ -19,11 +21,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-#: Line + branch coverage of the production code a REFACTOR run must reach (user decision).
-COVERAGE_THRESHOLD = 90.0
+#: Line + branch coverage of the production code that is a good rule of thumb (user decision).
+COVERAGE_RULE_OF_THUMB = 90.0
 
 #: The values prompts name as placeholders (no values in prose, §4 of the plan).
-TDD_PROMPT_VARS: dict[str, str] = {"COVERAGE_THRESHOLD": f"{COVERAGE_THRESHOLD:.0f}"}
+TDD_PROMPT_VARS: dict[str, str] = {"COVERAGE_RULE_OF_THUMB": f"{COVERAGE_RULE_OF_THUMB:.0f}"}
 
 COVERAGE_DIR = ".tddagents/coverage"
 COVERAGE_CONFIG_PATH = f"{COVERAGE_DIR}/coveragerc"
@@ -63,18 +65,11 @@ class CoverageReading:
     status: CoverageStatus
     percent: float | None = None
 
-    @property
-    def met(self) -> bool:
-        if self.status == CoverageStatus.NO_CODE:
-            return True
-        return self.status == CoverageStatus.MEASURED and self.percent is not None \
-            and self.percent >= COVERAGE_THRESHOLD
-
     def describe(self) -> str:
         if self.status == CoverageStatus.MEASURED:
-            return f"coverage {self.percent:.1f}% (needs {COVERAGE_THRESHOLD:.0f}%)"
+            return f"coverage {self.percent:.1f}% (rule of thumb: {COVERAGE_RULE_OF_THUMB:.0f}%)"
         if self.status == CoverageStatus.NO_CODE:
-            return "coverage: no production code to measure (counts as met)"
+            return "coverage: no production code to measure"
         return "coverage could not be measured"
 
 

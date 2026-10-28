@@ -1334,6 +1334,35 @@ specification said documentation must not be implemented. At the user's directio
   the ported "no feature flags" rule and RunTests' "never gated behind environment variables".
   There is no heuristic scanner (user decision).
 
+### Agent memory reachable; coverage is a rule of thumb (2026-10-28)
+
+The fourth interactive palindrome run (9/9 items, 36 tests, 100% coverage, the collection gate
+firing on `tests/tests_basic.py` until it was renamed) found two more problems. Each was decided
+by the user:
+
+- **Agent memory never worked.** The run-scoped store lives outside the project (I5) and the
+  file tools are bounded to it, so the tester's `MEMORY.md` read was an ask (denied headless), its
+  write was refused, and it wrote the notes into the project root.
+  - Upstream's carve-out is ported: `AgentMemoryStore.is_memory_path` (`isAgentMemoryPath`:
+    this run's `run-memory/<run>/` and the session, local, project and user roots, never another
+    run's) and `agent_memory_target(context, path)`.
+  - `check_write_permission_for_tool` allows it right after the deny rules (upstream's step 1.5,
+    `checkEditableInternalPath`), and `check_readable_internal_path` allows reads.
+  - The TDD phase tier lets a file tool write it in every phase: it is neither a test nor
+    production code.
+  - The file tools read and write it on the host (`host_path`, `write_text`), as they already
+    read a persisted tool result.
+  - The same review fixed `workspace_absolute_path`: like `normalize_path`, it now keeps an
+    absolute path (upstream `expandPath`) instead of re-rooting it in the project.
+- **REFACTOR's coverage gate is dropped.** With "no TypeError tests" and a 90% gate, the agents
+  wrote a test that only called `is_palindrome(42)` to cover the raise branch.
+  - REFACTOR is still mandatory, but it now ends on a passing run (`PhaseLedger.with_test_result`).
+  - Every run still measures and reports coverage. `COVERAGE_RULE_OF_THUMB = 90` reaches the
+    prompts as `{{COVERAGE_RULE_OF_THUMB}}`, described as a good rule of thumb, not a gate.
+  - The refactorer, the contract and the skill say a test asserts behaviour and never only
+    executes code to cover it.
+  - This supersedes the Phase 12 coverage threshold described above.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

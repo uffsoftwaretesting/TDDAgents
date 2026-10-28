@@ -7,7 +7,7 @@ argument-hint: "[target-source-file]"
 
 # TDD Clean Refactoring Skill
 
-You are performing the mandatory REFACTOR phase after achieving a GREEN test suite. It is done when a `RunTests` run passes with line and branch coverage at the threshold `RunTests` reports.
+You are performing the mandatory REFACTOR phase after achieving a GREEN test suite. It is done when a `RunTests` run passes. Raising line and branch coverage is part of the work: `RunTests` reports it with a good rule of thumb.
 
 ## Invariants
 

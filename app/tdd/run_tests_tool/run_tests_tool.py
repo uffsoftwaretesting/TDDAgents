@@ -11,8 +11,8 @@ What a run proves depends on the phase (Phase 12, `PhaseLedger.with_test_result`
   it started. RunTests observes that itself, by fingerprinting the test files
   (`app/tdd/suite_fingerprint.py`) against the item's baseline.
 - GREEN ends with a passing run.
-- REFACTOR ends with a passing run whose line + branch coverage of the production code meets
-  the threshold. Every run measures coverage with pytest-cov (`app/tdd/coverage_gate.py`).
+- REFACTOR ends with a passing run. Every run measures line + branch coverage with pytest-cov
+  (`app/tdd/coverage_gate.py`) and reports it as guidance, not a gate (user decision, 2026-10-28).
 
 Only pytest's exit codes 0 (passed) and 1 (tests failed) are observations about the code
 under test — plus one form of exit 2: a collection error raised because the code under test
@@ -249,14 +249,11 @@ def ledger_status(before: PhaseLedger, after: PhaseLedger, exit_code: int, cover
     if before.phase == TddPhase.GREEN:
         if exit_code != 0:
             return "The phase stays GREEN: every test must pass."
-        return ("GREEN is done. The phase is REFACTOR, which is mandatory: improve the code and the tests, raise "
-                f"coverage, and run RunTests until every test passes with enough coverage ({coverage.describe()}).")
+        return ("GREEN is done. The phase is REFACTOR, which is mandatory: improve the code and the tests and "
+                f"raise coverage ({coverage.describe()}), then run RunTests until every test passes.")
     if exit_code != 0:
         return "REFACTOR is not done: every test must pass."
-    if after.refactor_passed:
-        return f"REFACTOR is done ({coverage.describe()}): this sub-requirement's cycle is complete."
-    return (f"REFACTOR is not done: {coverage.describe()}. Add tests for the uncovered code, or improve it, "
-            "and run RunTests again.")
+    return f"REFACTOR is done ({coverage.describe()}): this sub-requirement's cycle is complete."
 
 
 def format_output(exec_result: SuiteExecutionResult, header: str) -> str:

@@ -88,7 +88,7 @@ def test_the_next_item_message_names_it_and_its_position():
     plan = TddPlan.from_texts(["A", "B", "C"]).complete_current(CYCLE)
     assert next_item_message(plan.items[0], plan) == (
         "Sub-requirement 1 is done: RunTests observed its tests written, passing, and passing again after "
-        "REFACTOR with enough coverage.\n\n"
+        "REFACTOR.\n\n"
         "Next sub-requirement (2 of 3): 2. B\n\n"
         "The TDD ledger is back in RED for it: write robust tests for this sub-requirement, covering every "
         "relevant scenario and edge case, and run RunTests before implementing it.\n\n"
@@ -274,17 +274,14 @@ def test_one_conversation_works_through_every_item_and_only_then_completes():
     assert announced and "(2 of 2): 2. B" in announced[0].content
 
 
-def test_an_item_whose_refactor_never_reaches_the_coverage_cannot_complete():
+def test_an_item_completes_on_a_passing_refactor_whatever_its_coverage():
+    """Coverage is a rule of thumb, not a gate (user decision, 2026-10-28)."""
     store = store_with(TddPlan.from_texts(["A"]))
     under = CoverageReading(CoverageStatus.MEASURED, 50.0)
-    model = Scripted([
-        [run_tests_call(1)], [run_tests_call(2)], [run_tests_call(3)], [AIMessage(content="done")],
-        [AIMessage(content="really done")],
-    ])
+    model = Scripted([[run_tests_call(1)], [run_tests_call(2)], [run_tests_call(3)], [AIMessage(content="done")]])
     terminal, _ = drive(store, model, [(1, UNAVAILABLE, True), (0, under, False), (0, under, False)])
-    assert terminal == Terminated(reason=Terminal.ABORTED_STREAMING)
-    assert store.get().tdd_plan.done_count == 0
-    assert store.get().phase_ledger.coverage == 50.0
+    assert terminal == Terminated(reason=Terminal.COMPLETED)
+    assert store.get().tdd_plan.done_count == 1
 
 
 def test_a_second_item_whose_tests_did_not_change_cannot_complete_the_plan():

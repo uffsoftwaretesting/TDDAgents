@@ -18,9 +18,9 @@ from app.tools.utils import (
     activate_conditional_skills,
     file_path_permission_matcher,
     get_prompt,
+    host_path,
     invalid,
     is_non_negative_int,
-    is_persisted_result_path,
     read_state_key,
     read_text,
 )
@@ -67,7 +67,7 @@ def build_read_file_tool() -> BuiltTool:
             return NO_WORKSPACE
 
         try:
-            content = read_text(ws, file_path)
+            content = read_text(ws, file_path, context)
         except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Error reading file: {e}", is_error=True)
         if content is None:
@@ -83,7 +83,7 @@ def build_read_file_tool() -> BuiltTool:
             limit=limit if partial else None,
         )
         # `FileReadTool`: the file's directories may hold nested memory to attach next turn.
-        if not is_persisted_result_path(file_path):
+        if host_path(context, file_path) is None:
             context.nested_memory_attachment_triggers.add(workspace_path(context.workspace, file_path))
         activate_conditional_skills(context, file_path)
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -386,7 +387,10 @@ def test_write_rules_check_the_resolved_path(tmp_path):
 
 def test_workspace_absolute_path_and_tool_input():
     assert workspace_absolute_path("a/b.py", "/ws") == "/ws/a/b.py"
-    assert workspace_absolute_path("/a.py", "/ws") == "/ws/a.py"
+    # Upstream's `expandPath`: an absolute path is that host path (2026-10-28).
+    assert workspace_absolute_path("/a.py", "/ws") == "/a.py"
+    assert workspace_absolute_path("/ws/../ws/a.py", "/ws") == "/ws/a.py"
+    assert workspace_absolute_path("~/a.py", "/ws") == f"{Path.home()}/a.py"
     assert workspace_absolute_path("..\\x", "/ws") == "/x"
     assert path_from_tool_input({"file_path": "f", "path": "p"}) == "f"
     assert path_from_tool_input({"path": "p"}) == "p"
@@ -526,11 +530,11 @@ def test_read_rules_check_the_resolved_path(tmp_path):
     assert check_read_permission_for_tool(str(ws / "alias" / "k"), {}, ctx_with(ask), str(ws)).behavior == ASK
 
 
-def test_workspace_absolute_path_keeps_config_paths_on_the_host(tmp_path, monkeypatch):
+def test_workspace_absolute_path_keeps_every_absolute_path_on_the_host(tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     host = f"{tmp_path}/cfg/projects/p/r/tool-results/a.txt"
     assert workspace_absolute_path(host, "/ws") == host
-    assert workspace_absolute_path(f"{tmp_path}/cfgx/a", "/ws") == f"/ws{tmp_path}/cfgx/a"
+    assert workspace_absolute_path(f"{tmp_path}/cfgx/a", "/ws") == f"{tmp_path}/cfgx/a"
     assert workspace_absolute_path("cfg/a", "/ws") == "/ws/cfg/a"
 
 

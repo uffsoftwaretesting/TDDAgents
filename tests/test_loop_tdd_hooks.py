@@ -60,8 +60,8 @@ GREEN_MSG = ("TDD cycle incomplete: GREEN is not done (green_passed=False). Impl
 
 def refactor_msg(figure: str) -> str:
     return ("TDD cycle incomplete: REFACTOR is not done (refactor_passed=False). It is mandatory: improve the "
-            "code and the tests, then run RunTests until every test passes with line + branch coverage of at "
-            f"least 90% (last measured: {figure}).")
+            "code and the tests and raise line + branch coverage (a good rule of thumb is "
+            f"90%; last measured: {figure}), then run RunTests until every test passes.")
 
 
 @pytest.mark.parametrize("ledger, message", [

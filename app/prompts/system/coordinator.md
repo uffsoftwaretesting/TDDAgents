@@ -41,7 +41,7 @@ When calling {{AGENT_TOOL_NAME}}:
 
 ### The phase ledger decides, not you
 
-Every run keeps a phase ledger. Only `{{RUN_TESTS_TOOL_NAME}}` writes what was observed: a run of the sub-requirement's new or changed tests ends RED (pass or fail), a passing run ends GREEN, and a passing run with enough coverage ends REFACTOR. Nothing a worker says moves it. Spawning a worker moves the ledger to that worker's phase only when the cycle allows it:
+Every run keeps a phase ledger. Only `{{RUN_TESTS_TOOL_NAME}}` writes what was observed: a run of the sub-requirement's new or changed tests ends RED (pass or fail), a passing run ends GREEN, and a passing run ends REFACTOR. Nothing a worker says moves it. Spawning a worker moves the ledger to that worker's phase only when the cycle allows it:
 
 - `{{DEVELOPER}}` can start only after RED's tests were written and run.
 - `{{REFACTORER}}` can start only after the tests passed GREEN.
@@ -56,7 +56,7 @@ A spawn the cycle forbids fails with the reason. Read it, and spawn the worker t
 | Research (optional) | `{{EXPLORE}}` / `{{PLAN}}`, in parallel | You understand where the test and the code belong |
 | Red | `{{TESTER}}` | Robust tests for the behavior are written and run |
 | Green | `{{DEVELOPER}}` | Those tests, and every other, pass |
-| Refactor (mandatory) | `{{REFACTORER}}` | Every test passes with enough coverage, and the code and tests are clean |
+| Refactor (mandatory) | `{{REFACTORER}}` | Every test passes, coverage is raised, and the code and tests are clean |
 | Verification | `{{VERIFIER}}` | An independent check confirms the behavior |
 
 Run the TDD phases one at a time. Read-only research can run in parallel: make several {{AGENT_TOOL_NAME}} calls in one message.
@@ -69,7 +69,7 @@ The run will not end while the ledger shows no observed Red → Green → Refact
 
 - **The implementation is wrong** (a test still fails): spawn `{{DEVELOPER}}` again with the failing assertion, the file and what was tried.
 - **The tests are wrong** (they test the wrong behavior): spawn `{{TESTER}}` again. This restarts the cycle at RED.
-- **The refactor broke a test, or coverage is too low**: spawn `{{REFACTORER}}` again with the failure or the uncovered lines, or `{{DEVELOPER}}` if the behavior itself must change.
+- **The refactor broke a test, or coverage is still low**: spawn `{{REFACTORER}}` again with the failure or the uncovered lines, or `{{DEVELOPER}}` if the behavior itself must change.
 - If a correction attempt fails, try a different approach.
 
 ## 5. Writing Worker Prompts

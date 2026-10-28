@@ -360,11 +360,15 @@ def check_write_permission_for_tool(
     input_args: dict[str, Any],
     context: ToolPermissionContext,
     cwd: str,
+    *,
+    agent_memory: bool = False,
 ) -> PermissionResult:
     """
     `checkWritePermissionForTool`, the `checkPermissions` of `WriteFile` and `Edit`.
 
     1. A deny rule on the path (or its resolved form) denies.
+    1.5. `checkEditableInternalPath`, reduced to the one editable internal store this loop has:
+       this run's agent memory (`agent_memory`, upstream's `isAgentMemoryPath`) allows.
     2. The safety check asks — and the gate keeps that ask even in bypass mode.
     3. An ask rule asks.
     4. `acceptEdits` allows writes inside the working directories.
@@ -381,6 +385,13 @@ def check_write_permission_for_tool(
                 message=f"Permission to edit {path} has been denied.",
                 decision_reason={"type": "rule", "rule": deny_rule},
             )
+
+    if agent_memory:
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "other", "reason": "Agent memory files are allowed for writing"},
+        )
 
     safe, message, approvable = check_path_safety_for_auto_edit(absolute, candidates)
     if not safe:
@@ -477,12 +488,21 @@ def is_project_dir_path(absolute_path: str, cwd: str) -> bool:
     return normalized.startswith(project_dir + "/")
 
 
-def check_readable_internal_path(absolute_path: str, input_args: dict[str, Any], cwd: str) -> PermissionResult:
+def check_readable_internal_path(
+    absolute_path: str, input_args: dict[str, Any], cwd: str, *, agent_memory: bool = False
+) -> PermissionResult:
     """
-    `checkReadableInternalPath`, reduced to the one internal store this loop has: the
-    project directory. Session memory, plan files, scratchpad, temp, memory, tasks, teams and
-    bundled-skill paths have no equivalent here.
+    `checkReadableInternalPath`, reduced to the internal stores this loop has: the project
+    directory and this run's agent memory (`agent_memory`, upstream's `isAgentMemoryPath`).
+    Session memory, plan files, scratchpad, temp, memdir, tasks, teams and bundled-skill paths
+    have no equivalent here.
     """
+    if agent_memory:
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "other", "reason": "Agent memory files are allowed for reading"},
+        )
     if is_project_dir_path(absolute_path, cwd):
         return PermissionResult(
             behavior=PermissionBehavior.ALLOW,
@@ -497,6 +517,8 @@ def check_read_permission_for_tool(
     input_args: dict[str, Any],
     context: ToolPermissionContext,
     cwd: str,
+    *,
+    agent_memory: bool = False,
 ) -> PermissionResult:
     """
     `checkReadPermissionForTool`, the `check_permissions` of `ReadFile`, `Glob` and `Grep`.
@@ -561,7 +583,7 @@ def check_read_permission_for_tool(
             updated_input=input_args,
             decision_reason={"type": "mode", "mode": PermissionMode.DEFAULT},
         )
-    internal = check_readable_internal_path(absolute, input_args, cwd)
+    internal = check_readable_internal_path(absolute, input_args, cwd, agent_memory=agent_memory)
     if internal.behavior != PermissionBehavior.PASSTHROUGH:
         return internal
     allow_rule = matching_rule_for_input(absolute, context, "read", "allow", cwd)
@@ -635,19 +657,17 @@ def permission_cwd(context: ToolContext) -> str:
 
 def workspace_absolute_path(raw_path: str, cwd: str) -> str:
     """
-    A file tool's path as the permission check sees it. File tools read a leading `/` as
-    the workspace root (`normalize_path`), so it is re-rooted there rather than read as a
-    host path; `..` is kept, so an escape stays visible as outside the working directory.
-    The one exception is a path into this loop's config directory (`<config>/projects/...`,
-    where oversized results are filed): that is a host path, read straight off the host.
+    A file tool's path as the permission check sees it: upstream's `expandPath`. An absolute path
+    is that host path (`~` expanded), a relative one is joined onto the working directory; `..`
+    is kept, so an escape stays visible as outside the working directory. The file tools read
+    paths the same way (`normalize_path`, 2026-10-28): until then a leading `/` meant the
+    workspace root here and there, so the two agreed on a model's absolute path only by both
+    nesting it inside the project.
     """
-    from app.utils.tool_result_storage import config_home
-
-    expanded = os.path.expanduser(raw_path)
-    config_dir = posixpath.normpath(str(config_home()))
-    if posixpath.isabs(expanded) and posixpath.normpath(expanded).startswith(config_dir + "/"):
+    expanded = os.path.expanduser(raw_path).replace("\\", "/")
+    if posixpath.isabs(expanded):
         return posixpath.normpath(expanded)
-    return posixpath.normpath(posixpath.join(cwd, raw_path.replace("\\", "/").lstrip("/")))
+    return posixpath.normpath(posixpath.join(cwd, expanded))
 
 
 def path_from_tool_input(input_args: dict[str, Any]) -> str:
@@ -665,11 +685,14 @@ def check_file_write_permissions() -> Any:
     def check(input_args: dict[str, Any], context: ToolContext) -> PermissionResult:
         cwd = permission_cwd(context)
         raw = path_from_tool_input(input_args)
+        from app.tools.agent_tool.agent_memory import agent_memory_target
+
         return check_write_permission_for_tool(
             workspace_absolute_path(raw, cwd),
             input_args,
             extract_permission_context(context),
             cwd,
+            agent_memory=agent_memory_target(context, raw) is not None,
         )
 
     return check
@@ -686,8 +709,11 @@ def check_file_read_permissions(path_key: str) -> Any:
     def check(input_args: dict[str, Any], context: ToolContext) -> PermissionResult:
         cwd = permission_cwd(context)
         raw = str(input_args.get(path_key) or "")
+        from app.tools.agent_tool.agent_memory import agent_memory_target
+
         target = workspace_absolute_path(raw, cwd) if raw else cwd
-        return check_read_permission_for_tool(target, input_args, extract_permission_context(context), cwd)
+        return check_read_permission_for_tool(target, input_args, extract_permission_context(context), cwd,
+                                              agent_memory=bool(raw) and agent_memory_target(context, raw) is not None)
 
     return check
 

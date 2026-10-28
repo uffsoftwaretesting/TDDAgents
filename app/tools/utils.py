@@ -89,16 +89,30 @@ def invalid(message: str, code: int) -> ValidationResult:
 # ── shared helpers ───────────────────────────────────────────────────────────
 
 
-def read_text(ws: Any, path: str) -> str | None:
+def host_path(context: ToolContext | None, path: str) -> Path | None:
+    """
+    The host file a path names when it lives outside the workspace on purpose: a persisted tool
+    result, or this run's agent memory (`agent_memory_target`). `None` for a workspace path.
+    """
+    if is_persisted_result_path(path):
+        return Path(path).expanduser()
+    from app.tools.agent_tool.agent_memory import agent_memory_target
+
+    memory = agent_memory_target(context, path) if context is not None else None
+    return Path(memory) if memory is not None else None
+
+
+def read_text(ws: Any, path: str, context: ToolContext | None = None) -> str | None:
     """
     File content with CRLF normalized (as `readFileForEdit` does), or None if missing.
 
-    A persisted tool result is read straight off the host: it lives outside the workspace
-    on purpose, so the workspace cannot resolve it.
+    A persisted tool result or agent memory is read straight off the host (`host_path`): it
+    lives outside the workspace on purpose, so the workspace cannot resolve it.
     """
-    if is_persisted_result_path(path):
+    host = host_path(context, path)
+    if host is not None:
         try:
-            return Path(path).expanduser().read_text(encoding="utf-8").replace("\r\n", "\n")
+            return host.read_text(encoding="utf-8").replace("\r\n", "\n")
         except OSError:
             return None
     try:
@@ -113,9 +127,20 @@ def read_state_key(context: ToolContext, path: str) -> str:
     The `readFileState` key of `path`: its workspace-relative form, or the host path itself for
     a persisted tool result, which lives outside the workspace on purpose.
     """
-    if is_persisted_result_path(path):
-        return str(Path(path).expanduser())
+    host = host_path(context, path)
+    if host is not None:
+        return str(host)
     return workspace_path(context.workspace, path)
+
+
+def write_text(ws: Any, path: str, content: str, context: ToolContext) -> None:
+    """Write through the workspace, or on the host for this run's agent memory (`host_path`)."""
+    host = host_path(context, path)
+    if host is None:
+        ws.write_file(path, content)
+        return
+    host.parent.mkdir(parents=True, exist_ok=True)
+    host.write_text(content, encoding="utf-8")
 
 
 def check_read_before_write(
@@ -145,7 +170,7 @@ def activate_conditional_skills(context: ToolContext, file_path: str) -> None:
     and the workspace is the run's working directory, so the path is matched as is.
     """
     registry = context.skill_registry
-    if registry is not None and not is_persisted_result_path(file_path):
+    if registry is not None and host_path(context, file_path) is None:
         registry.activate_conditional_skills_for_paths([workspace_path(context.workspace, file_path)], "")
 
 

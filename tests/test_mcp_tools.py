@@ -201,7 +201,7 @@ def test_the_tdd_phase_tier_runs_before_the_allow_rule(monkeypatch):
 
     seen: list[str] = []
 
-    def refuse(tool: Any, args: Any, ledger: Any) -> tuple[bool, str]:
+    def refuse(tool: Any, args: Any, ledger: Any, **kw: Any) -> tuple[bool, str]:
         seen.append(tool.name)
         return False, "phase forbids"
 

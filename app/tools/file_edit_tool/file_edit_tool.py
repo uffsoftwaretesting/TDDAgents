@@ -28,6 +28,7 @@ from app.tools.utils import (
     is_stale,
     read_text,
     record_write,
+    write_text,
 )
 from app.utils.file import FILE_NOT_FOUND_CWD_NOTE
 from app.utils.permissions.filesystem import (
@@ -50,7 +51,7 @@ def build_edit_tool() -> BuiltTool:
         if ws is None:
             return VALID  # call() reports the missing workspace
 
-        content = read_text(ws, file_path)
+        content = read_text(ws, file_path, context)
         if content is None:
             if old_string == "":
                 return VALID  # empty old_string on a missing file creates it
@@ -89,14 +90,14 @@ def build_edit_tool() -> BuiltTool:
 
         activate_conditional_skills(context, file_path)
         try:
-            original = read_text(ws, file_path)
+            original = read_text(ws, file_path, context)
             if is_stale(context, file_path, original):
                 return ToolResult(content=FILE_UNEXPECTEDLY_MODIFIED_ERROR, is_error=True)
             base = original or ""
             actual_old = find_actual_string(base, old_string) or old_string
             actual_new = preserve_quote_style(old_string, actual_old, new_string)
             updated = actual_new if actual_old == "" else apply_edit_to_file(base, actual_old, actual_new, replace_all)
-            ws.write_file(file_path, updated)
+            write_text(ws, file_path, updated, context)
         except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Error editing file: {e}", is_error=True)
 

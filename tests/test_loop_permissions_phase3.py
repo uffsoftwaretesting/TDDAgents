@@ -730,10 +730,11 @@ def test_write_check_resolves_a_relative_path_against_the_working_dir():
     assert check_write_permission_for_tool("a.py", {}, edits, "/work/ws").behavior == ALLOW
 
 
-def test_workspace_absolute_path_strips_only_slashes():
+def test_workspace_absolute_path_keeps_an_absolute_path():
     from app.utils.permissions.filesystem import workspace_absolute_path
 
-    assert workspace_absolute_path("/XX/f", "/ws") == "/ws/XX/f"
+    assert workspace_absolute_path("/XX/f", "/ws") == "/XX/f"
+    assert workspace_absolute_path("XX/f", "/ws") == "/ws/XX/f"
 
 
 def test_subcommand_message_tolerates_results_without_a_behavior():

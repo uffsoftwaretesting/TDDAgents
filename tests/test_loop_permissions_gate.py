@@ -106,7 +106,7 @@ def test_phase_rule_denies_a_settings_allowed_write_in_red():
 
 
 def test_phase_check_fails_closed(monkeypatch):
-    def boom(tool, args, ledger):
+    def boom(tool, args, ledger, **kw):
         raise RuntimeError("ledger unreadable")
 
     monkeypatch.setattr("app.tdd.phase_permissions.check_tdd_phase_permission", boom)

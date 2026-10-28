@@ -292,9 +292,6 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
         ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=1)], TddPhase.GREEN),
         # REFACTOR never run
         ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, coverage=MET)], TddPhase.REFACTOR),
-        # REFACTOR under the coverage threshold
-        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, coverage=UNDER),
-          SuiteExecutionResult(exit_code=0, coverage=UNDER)], TddPhase.REFACTOR),
         # REFACTOR breaks a test
         ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, coverage=MET),
           SuiteExecutionResult(exit_code=1, coverage=MET)], TddPhase.REFACTOR),

@@ -12,4 +12,4 @@ Operations, applied in order:
 - `remove`: drop the item `id`.
 - `move`: put the item `id` at `position`.
 
-No operation marks a sub-requirement done. An item is done only when RunTests has observed its whole cycle: its tests written and run, then passing, then passing again in REFACTOR with enough coverage; the system then moves to the next item by itself.
+No operation marks a sub-requirement done. An item is done only when RunTests has observed its whole cycle: its tests written and run, then passing, then passing again in REFACTOR; the system then moves to the next item by itself.

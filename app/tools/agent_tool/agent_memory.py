@@ -11,9 +11,11 @@ Implements I5 conforming to §4.5:
 from __future__ import annotations
 
 import logging
+import os
+import posixpath
 import shutil
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +147,23 @@ class AgentMemoryStore:
 
         return "\n".join(memory_block)
 
+    def memory_roots(self, run_id: str | None) -> tuple[str, ...]:
+        """
+        The directories `isAgentMemoryPath` accepts: this run's run-scoped memory (never another
+        run's, so run isolation (I5) holds), then the session, local, project and user scopes.
+        """
+        tdd = self.base_dir / ".tddagents"
+        roots = [tdd / "session-memory", tdd / "agent-memory-local", tdd / "agent-memory",
+                 self.user_home / ".tddagents" / "agent-memory"]
+        if run_id:
+            roots.insert(0, tdd / "run-memory" / run_id)
+        return tuple(posixpath.normpath(str(root)) for root in roots)
+
+    def is_memory_path(self, absolute_path: str, run_id: str | None) -> bool:
+        """`isAgentMemoryPath`: the path, normalized against `..`, lies under one of `memory_roots`."""
+        normalized = posixpath.normpath(absolute_path)
+        return any(normalized.startswith(root + "/") for root in self.memory_roots(run_id))
+
     def discard_run_memory(self, run_id: str) -> None:
         """
         Purge the entire run-scoped memory directory for a specific run ID.
@@ -158,3 +177,21 @@ class AgentMemoryStore:
                 logger.info("Purged run-scoped agent memory for run %s at %s", run_id, run_dir)
             except OSError as e:
                 logger.warning("Failed purging run memory %s: %s", run_dir, e)
+
+
+def agent_memory_target(context: Any, raw_path: str) -> str | None:
+    """
+    The host path of `raw_path` when it names this run's agent memory, else `None`.
+
+    Upstream's agents read and write their memory with the ordinary file tools, and
+    `checkEditableInternalPath` / `checkReadableInternalPath` allow it (`isAgentMemoryPath`). The
+    store lives outside the workspace on purpose (I5), so the file tools reach it on the host,
+    as they read a persisted tool result. Only an absolute path counts: the memory prompt names
+    the directory absolutely, and a relative path is always the project's.
+    """
+    store = getattr(context, "agent_memory_store", None)
+    expanded = os.path.expanduser(str(raw_path or ""))
+    if store is None or not posixpath.isabs(expanded):
+        return None
+    normalized = posixpath.normpath(expanded)
+    return normalized if store.is_memory_path(normalized, getattr(context, "run_id", None) or None) else None

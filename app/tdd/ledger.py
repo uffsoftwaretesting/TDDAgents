@@ -13,8 +13,10 @@ The cycle, since Phase 12 (user decision, 2026-10-28):
 * **RED** writes robust tests; they need not fail. It ends with a RunTests run (pass or fail)
   in which the item's test files changed since it started (`tests_written`).
 * **GREEN** implements; it ends with a passing run (`green_passed`).
-* **REFACTOR** is mandatory: it ends with a passing run whose line + branch coverage of the
-  production code reaches `COVERAGE_THRESHOLD` (`refactor_passed`, `coverage`).
+* **REFACTOR** is mandatory: it ends with a passing run (`refactor_passed`). Its work is to
+  improve the code and the tests and to raise coverage, with `COVERAGE_RULE_OF_THUMB` as a good
+  rule of thumb; the coverage of each run is recorded (`coverage`) but gates nothing (user
+  decision, 2026-10-28).
 """
 
 from __future__ import annotations
@@ -75,8 +77,8 @@ class PhaseLedger:
         The ledger after RunTests observes a run: exit 0 passed, anything else failed (Part D2).
 
         RED moves to GREEN only when the item's tests changed, whatever the outcome. GREEN moves
-        to REFACTOR on a pass. REFACTOR records the coverage of every passing run, and is passed
-        only when that coverage meets the threshold; a failing run un-passes it.
+        to REFACTOR on a pass. REFACTOR is passed by a passing run, whose coverage is recorded;
+        a failing run un-passes it.
         """
         if self.phase == TddPhase.RED:
             if not tests_changed:
@@ -89,7 +91,7 @@ class PhaseLedger:
                            coverage=coverage.percent)
         if exit_code != 0:
             return replace(self, refactor_passed=False)
-        return replace(self, refactor_passed=coverage.met, coverage=coverage.percent)
+        return replace(self, refactor_passed=True, coverage=coverage.percent)
 
     def transition_to(self, new_phase: TddPhase | str) -> PhaseLedger:
         """
@@ -111,7 +113,7 @@ class PhaseLedger:
 
     @property
     def is_cycle_complete(self) -> bool:
-        """True when RED wrote tests, GREEN passed them and REFACTOR passed with enough coverage."""
+        """True when RED wrote tests, GREEN passed them and a REFACTOR run passed."""
         return self.tests_written and self.green_passed and self.refactor_passed
 
 

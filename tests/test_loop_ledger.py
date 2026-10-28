@@ -84,17 +84,18 @@ class TestRefactor:
         assert updated == replace(REFACTOR, refactor_passed=True, coverage=95.0)
         assert updated.is_cycle_complete is True
 
-    def test_a_pass_under_the_threshold_records_the_figure_but_does_not_complete(self):
-        updated = replace(REFACTOR, refactor_passed=True).with_test_result(0, coverage=UNDER)
-        assert updated == replace(REFACTOR, refactor_passed=False, coverage=70.0)
-        assert updated.is_cycle_complete is False
+    def test_any_pass_completes_it_and_records_the_figure(self):
+        """Coverage is a rule of thumb, not a gate (user decision, 2026-10-28)."""
+        updated = REFACTOR.with_test_result(0, coverage=UNDER)
+        assert updated == replace(REFACTOR, refactor_passed=True, coverage=70.0)
+        assert updated.is_cycle_complete is True
 
-    def test_no_production_code_counts_as_met(self):
+    def test_no_production_code_passes_too(self):
         assert REFACTOR.with_test_result(0, coverage=NO_CODE) == replace(REFACTOR, refactor_passed=True)
 
-    def test_unavailable_coverage_never_passes(self):
-        assert REFACTOR.with_test_result(0, coverage=UNAVAILABLE) == REFACTOR
-        assert REFACTOR.with_test_result(0) == REFACTOR
+    def test_unavailable_coverage_passes_and_records_nothing(self):
+        assert REFACTOR.with_test_result(0, coverage=UNAVAILABLE) == replace(REFACTOR, refactor_passed=True)
+        assert REFACTOR.with_test_result(0) == replace(REFACTOR, refactor_passed=True)
 
     def test_a_failure_un_passes_it_and_keeps_the_figure(self):
         passed = replace(REFACTOR, refactor_passed=True, coverage=95.0)

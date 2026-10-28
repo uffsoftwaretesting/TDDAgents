@@ -22,6 +22,7 @@ from app.tools.utils import (
     is_stale,
     read_text,
     record_write,
+    write_text,
 )
 from app.utils.permissions.filesystem import (
     check_file_write_permissions,
@@ -36,7 +37,7 @@ def build_write_file_tool() -> BuiltTool:
         if ws is None:
             return VALID  # call() reports the missing workspace
         path = str(input_args.get("file_path") or "")
-        current = read_text(ws, path)
+        current = read_text(ws, path, context)
         if current is None:
             return VALID
         return check_read_before_write(context, path, current, not_read_code=2, modified_code=3)
@@ -50,10 +51,10 @@ def build_write_file_tool() -> BuiltTool:
 
         activate_conditional_skills(context, file_path)
         try:
-            existing = read_text(ws, file_path)
+            existing = read_text(ws, file_path, context)
             if is_stale(context, file_path, existing):
                 return ToolResult(content=FILE_UNEXPECTEDLY_MODIFIED_ERROR, is_error=True)
-            ws.write_file(file_path, content)
+            write_text(ws, file_path, content, context)
         except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Error writing file: {e}", is_error=True)
         record_write(context, file_path, content)

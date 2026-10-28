@@ -90,9 +90,8 @@ def test_a_pass_in_green_moves_to_the_mandatory_refactor():
     res = asyncio.run(build_run_tests_tool(
         lambda path: SuiteExecutionResult(exit_code=0, stdout="ok", coverage=UNDER)).call({}, ws_ctx(store)))
     assert res.content.startswith(
-        "All tests passed.\nGREEN is done. The phase is REFACTOR, which is mandatory: improve the code and the tests, "
-        "raise coverage, and run RunTests until every test passes with enough coverage (coverage 70.0% "
-        "(needs 90%)).")
+        "All tests passed.\nGREEN is done. The phase is REFACTOR, which is mandatory: improve the code and the tests "
+        "and raise coverage (coverage 70.0% (rule of thumb: 90%)), then run RunTests until every test passes.")
     assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True,
                                                    coverage=70.0)
 
@@ -110,16 +109,15 @@ REFACTORING = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_pas
 
 @pytest.mark.parametrize("result, status, passed", [
     (SuiteExecutionResult(exit_code=0, coverage=MET),
-     "REFACTOR is done (coverage 95.0% (needs 90%)): this sub-requirement's cycle is complete.", True),
+     "REFACTOR is done (coverage 95.0% (rule of thumb: 90%)): this sub-requirement's cycle is complete.", True),
+    # Coverage is a rule of thumb, not a gate (user decision, 2026-10-28).
     (SuiteExecutionResult(exit_code=0, coverage=UNDER),
-     ("REFACTOR is not done: coverage 70.0% (needs 90%). Add tests for the uncovered code, or improve it, and run "
-      "RunTests again."), False),
+     "REFACTOR is done (coverage 70.0% (rule of thumb: 90%)): this sub-requirement's cycle is complete.", True),
     (SuiteExecutionResult(exit_code=0),
-     ("REFACTOR is not done: coverage could not be measured. Add tests for the uncovered code, or improve it, and "
-      "run RunTests again."), False),
+     "REFACTOR is done (coverage could not be measured): this sub-requirement's cycle is complete.", True),
     (SuiteExecutionResult(exit_code=1, coverage=MET), "REFACTOR is not done: every test must pass.", False),
 ])
-def test_refactor_is_judged_by_a_passing_run_with_enough_coverage(result, status, passed):
+def test_refactor_is_judged_by_a_passing_run(result, status, passed):
     store = AppStateStore(AppState(phase_ledger=REFACTORING))
     res = asyncio.run(build_run_tests_tool(lambda path: result).call({}, ws_ctx(store)))
     assert res.content.splitlines()[1] == status
@@ -455,17 +453,12 @@ def test_real_pytest_red_green_and_a_measured_refactor_in_a_local_workspace(pyth
     assert red.exit_code == 1 and red.is_error is False
     assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=False)
 
-    # Half of `sign` is never run: GREEN passes, REFACTOR is not done until it is covered.
+    # Half of `sign` is never run: GREEN passes, and the uncovered lines are shown for REFACTOR.
     ws.write_file("add.py", "def add(a, b):\n    return a + b\n\n\ndef sign(x):\n    if x < 0:\n        return -1\n"
                             "    return 1\n")
     green = asyncio.run(tool.call({"test_path": "tests"}, ctx))
     assert green.exit_code == 0 and store.get().phase_ledger.phase == TddPhase.REFACTOR
     assert "add.py" in green.content and "Missing" in green.content  # term-missing for the model
-    under = asyncio.run(tool.call({"test_path": "tests"}, ctx))
-    ledger = store.get().phase_ledger
-    assert ledger.refactor_passed is False and ledger.coverage is not None and ledger.coverage < 90
-    assert "REFACTOR is not done: coverage" in under.content
-
     ws.write_file("tests/test_add.py", "from add import add, sign\n\ndef test_add():\n    assert add(2, 3) == 5\n\n"
                                        "def test_sign():\n    assert sign(-2) == -1\n    assert sign(2) == 1\n")
     done = asyncio.run(tool.call({"test_path": "tests"}, ctx))
@@ -475,12 +468,12 @@ def test_real_pytest_red_green_and_a_measured_refactor_in_a_local_workspace(pyth
     assert not ws.exists(COVERAGE_REPORT_PATH)
 
 
-def test_real_pytest_with_no_production_code_counts_as_covered(python_workspace):
+def test_real_pytest_with_no_production_code_passes_refactor(python_workspace):
     ws = python_workspace
     store = AppStateStore(AppState(phase_ledger=REFACTORING))
     ws.write_file("tests/test_t.py", "def test_t():\n    assert True\n")
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
-    assert "coverage: no production code to measure (counts as met)" in res.content
+    assert "REFACTOR is done (coverage: no production code to measure)" in res.content
     assert store.get().phase_ledger.is_cycle_complete
 
 

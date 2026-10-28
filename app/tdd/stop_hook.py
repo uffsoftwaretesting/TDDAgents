@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import HumanMessage
 
 from app.query.stop_hooks import StopHookResult
-from app.tdd.coverage_gate import COVERAGE_THRESHOLD
+from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
 from app.tdd.ledger import PhaseLedger
 from app.tdd.phase_permissions import BACK_TO_RED
 from app.tools.ask_user_question_tool.ask_user_question_tool import (
@@ -42,7 +42,7 @@ ASK_THE_USER = "If you need a decision from the user, call AskUserQuestion inste
 
 
 def incomplete_cycle_message(ledger: PhaseLedger) -> str:
-    """What the cycle still needs (Phase 12): RED's tests, GREEN's pass, or REFACTOR's coverage."""
+    """What the cycle still needs (Phase 12): RED's tests, GREEN's pass, or REFACTOR's passing run."""
     if not ledger.tests_written:
         return ("TDD cycle incomplete: RED is not done (tests_written=False). Write robust tests for this "
                 "sub-requirement, covering every relevant scenario and edge case, and run RunTests.")
@@ -51,8 +51,8 @@ def incomplete_cycle_message(ledger: PhaseLedger) -> str:
                 f"describe and run RunTests until every test passes. {BACK_TO_RED}")
     figure = "not measured yet" if ledger.coverage is None else f"{ledger.coverage:.1f}%"
     return ("TDD cycle incomplete: REFACTOR is not done (refactor_passed=False). It is mandatory: improve the "
-            "code and the tests, then run RunTests until every test passes with line + branch coverage of at "
-            f"least {COVERAGE_THRESHOLD:.0f}% (last measured: {figure}).")
+            "code and the tests and raise line + branch coverage (a good rule of thumb is "
+            f"{COVERAGE_RULE_OF_THUMB:.0f}%; last measured: {figure}), then run RunTests until every test passes.")
 
 
 async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> StopHookResult:

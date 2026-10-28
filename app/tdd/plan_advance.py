@@ -35,7 +35,7 @@ def next_item_message(done: PlanItem, plan: TddPlan) -> str:
     assert current is not None
     return (
         f"Sub-requirement {done.id} is done: RunTests observed its tests written, passing, and passing again "
-        "after REFACTOR with enough coverage.\n\n"
+        "after REFACTOR.\n\n"
         f"Next sub-requirement ({plan.done_count + 1} of {len(plan.items)}): {current.id}. {current.text}\n\n"
         "The TDD ledger is back in RED for it: write robust tests for this sub-requirement, covering every "
         "relevant scenario and edge case, and run RunTests before implementing it.\n\n"
