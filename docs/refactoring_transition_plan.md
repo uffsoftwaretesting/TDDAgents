@@ -503,9 +503,10 @@ sub-requirement has been observed Red → Green.
 *Phase 13 outcome (2026-10-28), per the interview:*
 - **Location:** each session's project is `~/.tddagents/workspaces/<thread>/project`
   (`TDDAGENTS_WORKSPACES_DIR` overrides), outside TDDAgents' folder.
-- **Project setup:** the project is a git working tree (TDDAgents `git init`s it and never
-  commits; the model gets upstream's never-commit-unless-asked rule). It has its own
-  `.venv`, and settings seeded from TDDAgents' shipped defaults.
+- **Project setup:** TDDAgents creates the folder, its own `.venv` (activated for every
+  command by a session environment script, as upstream's `CLAUDE_ENV_FILE`), and settings
+  seeded from TDDAgents' shipped defaults. As claude-code, it never runs `git init` and never
+  commits; the Bash prompt carries upstream's never-commit-unless-asked rule.
 - **Lookups:** settings, skills, agents, MCP and hooks are read from the project.
 - **What the model is told:** upstream's environment (the project and its git repository) and
   upstream's never-commit rule in the Bash prompt. The venv is active for every command but

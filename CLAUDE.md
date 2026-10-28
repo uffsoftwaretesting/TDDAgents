@@ -1157,9 +1157,12 @@ in the plan's Phase 13 outcome.
   - `workspaces_root()` is `$TDDAGENTS_WORKSPACES_DIR` or `<config home>/workspaces`.
   - `LocalWorkspace.for_run(thread)` is `<root>/<thread>/project`, and `run_dir` is the
     thread dir.
-  - `session_workspace` → `prepare_project` (`git init` once, a `.gitignore`, and
-    `.tddagents/settings.json` seeded from `SHIPPED_SETTINGS` only if absent) →
-    `ensure_session_python(project)`, which builds `project/.venv` with pip.
+  - `session_workspace` → `prepare_project` (`.tddagents/settings.json` seeded from
+    `SHIPPED_SETTINGS` only if absent) → `ensure_session_python(project)`, which builds
+    `project/.venv` with pip.
+  - **No `git init`, no `.gitignore`** (user decision: follow claude-code, which never creates
+    a repository or commits on its own). Whether the project is a git repository is the
+    model's and the user's business, and the environment section says which it is.
   - `Config.LOCAL_WORKSPACE_ROOT` is gone.
 - **The project is the root of every lookup** (`project_root_of`, upstream's
   `getOriginalCwd()`): settings, skills, agents, MCP (`.mcp.json`) and hooks are read from the
@@ -1167,12 +1170,18 @@ in the plan's Phase 13 outcome.
   A project with no settings therefore runs in `default` mode (`tests/conftest.py::python_workspace`
   prepares one).
 - **The venv is active, never announced** (user decision: follow claude-code, which gives no
-  venv or dependency guidance and lets the model judge how the project installs). It is merged
-  into every command's environment, as upstream's `CLAUDE_ENV_FILE` keeps an activated
-  environment for every Bash command. `LocalWorkspace.execute` re-prepends `$VIRTUAL_ENV/bin`
-  after `bash -l`'s profile runs, because `~/.profile`'s `~/.local/bin` used to come first.
-- **What the model is told** is upstream's: `Primary working directory`, `Is a git repository:
-  true`, and `gitStatus`. The Bash prompt gains upstream's `# Committing changes with git`
+  venv or dependency guidance and lets the model judge how the project installs). It reaches
+  commands the way upstream's does.
+  - `app/utils/session_environment.py` ports `getSessionEnvironmentScript` and
+    `bashProvider.ts`'s command assembly.
+  - `TDDAGENTS_ENV_FILE` (upstream's `CLAUDE_ENV_FILE`) names a script.
+  - `LocalWorkspace.execute` runs `<script> && eval '<command>'` after the login profile, as
+    upstream injects it after the shell snapshot.
+  - Each session writes `<thread>/session-env.sh` (`SessionPython.write_env_file`: the
+    `VIRTUAL_ENV` / `PATH` exports `bin/activate` makes), so `~/.profile`'s `~/.local/bin` can
+    no longer shadow the venv.
+- **What the model is told** is upstream's: `Primary working directory`, `Is a git repository`
+  (true or false, as the folder is), and `gitStatus` when it is one. The Bash prompt gains upstream's `# Committing changes with git`
   section (`getCommitAndPRInstructions`, commit part, without attribution): never commit unless
   the user asks. TDDAgents itself never commits.
 - **A skipped test is not a pass.** `pytest_command` adds `-rs`, and `skipped_count` reads the
@@ -1201,19 +1210,19 @@ in the plan's Phase 13 outcome.
   - the write carve-out is now `(".tddagents", "workspaces")`;
   - `GIT_CEILING_DIRECTORIES` (at the thread dir) and RunTests' `-c /dev/null` probe stay,
     since a home `pyproject.toml` or repo could still be above the project.
-- The fingerprint, the coverage omit and the ignore file leave out `.venv`.
+- The fingerprint and the coverage omit leave out `.venv`.
 
 *Divergences, recorded:*
-- `git init` is TDDAgents' (upstream is opened in an existing repository);
+- `GIT_CEILING_DIRECTORIES` is TDDAgents' (upstream lets git find a parent repository); it keeps
+  each project isolated;
+- the session env file is written by TDDAgents, and `bin/activate` is replaced by its two
+  exports, because a moved venv's `activate` points at its creation path. Upstream's hook env
+  files are not ported (the hook layer has no env-file protocol);
 - the Bash prompt's commit section is upstream's verbatim (checked line by line against
   `tools/BashTool/prompt.ts`), with tool names substituted and no attribution line. Its HEREDOC
   note becomes "pass the message with `-m`", because `$(cat <<'EOF' …)` is refused by the
   command-injection check. The PR section is not ported (no `gh` workflow here);
-- the venv reaches commands as environment variables plus a `PATH` re-prepend after the login
-  profile. Upstream injects its session environment script (where a `CLAUDE_ENV_FILE`
-  activation lives) after the shell snapshot and before the command
-  (`utils/shell/bashProvider.ts`): the same order, through the environment instead of a
-  script;
+- the login shell (`bash -l`) stands in for upstream's shell snapshot;
 - sessions created before Phase 13 under `.tddagents/runs/` are not migrated.
 
 ### The three things that changed most

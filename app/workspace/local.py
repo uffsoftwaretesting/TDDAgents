@@ -6,7 +6,7 @@ trade-off was accepted when the two-execution-target design was locked: there is
 per-call override and no command allowlist, so the only thing standing between an
 agent and an arbitrary host command is the `workspace:` value in its definition file.
 Since Phase 13 every session's project has its own folder outside TDDAgents' own:
-`<workspaces root>/<thread>/project`, a git working tree with its own virtualenv at `.venv`
+`<workspaces root>/<thread>/project`, with its own virtualenv at `.venv`
 (`app/workspace/project.py`, `app/workspace/pyenv.py`), as claude-code works in the folder it
 is opened in. Reports go beside it, in `<thread>/metrics_and_logging/`, outside the git tree.
 """
@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import logging
 import os
-import shlex
 import subprocess
 import time
 from pathlib import Path
 
 from app.config.config import Config
+from app.utils.session_environment import build_command
 from app.workspace.base import (
     CommandResult,
     FileEntry,
@@ -202,10 +202,9 @@ class LocalWorkspace:
         # repository is found first, and nothing above the session's directory ever is.
         environment = {**os.environ, **self._env, **(env or {}), GIT_CEILING_ENV: str(self._root.parent)}
         started = time.monotonic()
-        # The login profile runs after the environment is set and may put its own directories
-        # (`~/.local/bin`) first: the project's venv goes back in front of them (Phase 13).
-        venv = environment.get("VIRTUAL_ENV")
-        script = f'export PATH={shlex.quote(str(Path(venv) / "bin"))}:"$PATH"; {cmd}' if venv else cmd
+        # `bashProvider.ts`: the session environment script (the project's venv activation, upstream's
+        # `CLAUDE_ENV_FILE`) runs after the login profile and before the command (Phase 13).
+        script = build_command(cmd, environment)
 
         try:
             completed = subprocess.run(  # noqa: PLW1510 - a failing command is a result, not an error

@@ -188,16 +188,17 @@ def coordinator_context(config: RunConfig) -> dict[str, Any]:
 
 def session_workspace(thread_id: str) -> LocalWorkspace:
     """
-    The session's project (Phase 13): its own folder outside TDDAgents', a git working tree
-    with seeded settings (`app/workspace/project.py`) and its own venv (`app/workspace/pyenv.py`),
-    first on `PATH` for every command the tools run.
+    The session's project (Phase 13): its own folder outside TDDAgents', with seeded settings
+    (`app/workspace/project.py`) and its own venv (`app/workspace/pyenv.py`), activated for every
+    command by the session environment script (`app/utils/session_environment.py`).
     """
     from app.workspace.project import prepare_project
     from app.workspace.pyenv import ensure_session_python
 
-    project = prepare_project(LocalWorkspace.for_run(thread_id).root)
+    workspace = LocalWorkspace.for_run(thread_id)
+    project = prepare_project(workspace.root)
     python = ensure_session_python(project)
-    return LocalWorkspace.for_run(thread_id, env=python.env())
+    return LocalWorkspace.for_run(thread_id, env=python.write_env_file(workspace.run_dir / "session-env.sh"))
 
 
 def project_root_of(workspace: Any, project_root: Path | str | None = None) -> Path:

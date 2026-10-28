@@ -87,17 +87,14 @@ def test_required_packages_pin_matches_requirements():
     assert SESSION_VENV_DIRNAME == ".venv"
 
 
-def test_session_python_paths_and_env(tmp_path):
+def test_session_python_paths_and_env_file(tmp_path):
     sp = SessionPython(tmp_path / "venv")
     assert sp.bin_dir == tmp_path / "venv" / "bin"
     assert sp.python == tmp_path / "venv" / "bin" / "python"
-    assert sp.env("/usr/bin") == {"PATH": f"{sp.bin_dir}{os.pathsep}/usr/bin", "VIRTUAL_ENV": str(sp.venv_dir)}
-    assert sp.env("") == {"PATH": str(sp.bin_dir), "VIRTUAL_ENV": str(sp.venv_dir)}
-
-
-def test_session_python_env_defaults_to_process_path(monkeypatch, tmp_path):
-    monkeypatch.setenv("PATH", "/a:/b")
-    assert SessionPython(tmp_path).env()["PATH"] == f"{tmp_path / 'bin'}{os.pathsep}/a:/b"
+    env = sp.write_env_file(tmp_path / "deep" / "session-env.sh")
+    assert env == {"TDDAGENTS_ENV_FILE": str(tmp_path / "deep" / "session-env.sh")}
+    assert (tmp_path / "deep" / "session-env.sh").read_text() == (
+        f"export VIRTUAL_ENV={tmp_path / 'venv'}\nexport PATH=\"$VIRTUAL_ENV/bin:$PATH\"\n")
 
 
 def test_ensure_creates_then_provisions(tmp_path):
@@ -555,8 +552,8 @@ def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):
     project = (tmp_path / "runs" / "t-9" / "project").resolve()
     assert seen == [project] and ws.root == project
     assert ws.execute('echo "$VIRTUAL_ENV"').stdout.strip() == str(project / ".venv")
-    # The project is a git working tree with its ignore file and seeded settings (Phase 13).
-    assert (project / ".git").is_dir() and ".venv/" in (project / ".gitignore").read_text()
+    # The project has its seeded settings, and no git of ours (Phase 13, as upstream).
+    assert not (project / ".git").exists() and not (project / ".gitignore").exists()
     shipped = (REPO / ".tddagents" / "settings.json").read_text()
     assert (project / ".tddagents" / "settings.json").read_text() == shipped
 

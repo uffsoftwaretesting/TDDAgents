@@ -14,20 +14,23 @@ virtualenv at `<project>/.venv` (Phase 13, gitignored), with pip, pytest and pyt
 
 The venv is created with `--without-pip` and filled by the orchestrator's own pip through
 `pip --python`, because a system Python may lack `ensurepip` (Debian/Ubuntu split it out).
-pip itself is installed into it the same way. `SessionPython.env()` is what a workspace merges
-into every command, so `python`, `pytest` and `pip` resolve to the session venv for `RunTests`
-and `Bash` alike.
+pip itself is installed into it the same way. It reaches every command as upstream's venv
+activation does: a session environment script (`SessionPython.write_env_file`, upstream's
+`CLAUDE_ENV_FILE`) runs before each command, so `python`, `pytest` and `pip` resolve to the
+session venv for `RunTests` and `Bash` alike.
 """
 
 from __future__ import annotations
 
-import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from app.utils.session_environment import ENV_FILE_VAR
 
 #: Directory, inside a session's project, that holds its virtualenv.
 SESSION_VENV_DIRNAME = ".venv"
@@ -55,13 +58,22 @@ class SessionPython:
     def python(self) -> Path:
         return self.bin_dir / "python"
 
-    def env(self, base_path: str | None = None) -> dict[str, str]:
-        """Environment overrides that make the venv's tools win on `PATH`."""
-        path = base_path if base_path is not None else os.environ.get("PATH", "")
-        return {
-            "PATH": f"{self.bin_dir}{os.pathsep}{path}" if path else str(self.bin_dir),
-            "VIRTUAL_ENV": str(self.venv_dir),
-        }
+    def write_env_file(self, path: Path | str) -> dict[str, str]:
+        """
+        Write the session environment script that activates this venv (upstream's
+        `CLAUDE_ENV_FILE` use: "venv/conda activation to persist across shell commands") and
+        return the environment that points every command at it (`app/utils/session_environment.py`).
+        """
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # What `bin/activate` does for a non-interactive shell, without its creation-time path (a
+        # venv built elsewhere and moved still activates).
+        target.write_text(
+            f"export VIRTUAL_ENV={shlex.quote(str(self.venv_dir))}\n"
+            'export PATH="$VIRTUAL_ENV/bin:$PATH"\n',
+            encoding="utf-8",
+        )
+        return {ENV_FILE_VAR: str(target)}
 
 
 def _run(runner: Runner, argv: Sequence[str], what: str) -> None:

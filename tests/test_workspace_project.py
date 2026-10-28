@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -24,7 +23,7 @@ from app.tdd.run_tests_tool.run_tests_tool import (
 from app.tool import tool_context_for
 from app.types.permissions import PermissionMode
 from app.workspace.local import LocalWorkspace, workspaces_root
-from app.workspace.project import GITIGNORE, SHIPPED_SETTINGS, prepare_project
+from app.workspace.project import SHIPPED_SETTINGS, prepare_project
 from tests.conftest import FakeWorkspace
 
 REPO = Path(__file__).resolve().parents[1]
@@ -45,26 +44,19 @@ def test_projects_live_under_the_config_home_by_default(monkeypatch, tmp_path):
 
 # ── the project folder ───────────────────────────────────────────────────────
 
-def test_a_project_is_a_git_tree_with_an_ignore_file_and_seeded_settings(tmp_path):
+def test_a_project_is_a_folder_with_seeded_settings_and_no_git_of_ours(tmp_path):
+    """As upstream, TDDAgents never runs `git init` nor commits (Phase 13, user decision)."""
     project = prepare_project(tmp_path / "p")
-    assert (project / ".git").is_dir()
-    assert (project / ".gitignore").read_text() == GITIGNORE
+    assert sorted(p.name for p in project.iterdir()) == [".tddagents"]
     assert (project / ".tddagents" / "settings.json").read_text() == SHIPPED_SETTINGS.read_text()
     assert SHIPPED_SETTINGS == REPO / ".tddagents" / "settings.json"
-    status = subprocess.run(["git", "status", "--porcelain", "--ignored"], cwd=project, capture_output=True,
-                            text=True, check=True).stdout
-    assert ".gitignore" in status  # untracked: TDDAgents never commits
 
 
-def test_preparing_again_never_overwrites_the_projects_own_files(tmp_path):
+def test_preparing_again_never_overwrites_the_projects_settings(tmp_path):
     project = prepare_project(tmp_path / "p")
-    (project / ".gitignore").write_text("mine\n")
     (project / ".tddagents" / "settings.json").write_text('{"permissions": {}}')
-    head = (project / ".git" / "HEAD").read_text()
     prepare_project(project)
-    assert (project / ".gitignore").read_text() == "mine\n"
     assert (project / ".tddagents" / "settings.json").read_text() == '{"permissions": {}}'
-    assert (project / ".git" / "HEAD").read_text() == head
 
 
 def test_without_shipped_settings_none_are_seeded(tmp_path):
@@ -72,17 +64,22 @@ def test_without_shipped_settings_none_are_seeded(tmp_path):
     assert not (project / ".tddagents").exists()
 
 
-def test_the_projects_venv_comes_first_on_path_even_after_the_login_profile(tmp_path, session_python):
-    # `bash -l` runs the profile after the environment is set; a profile that prepends its own
-    # bin (as `~/.profile` does with `~/.local/bin`) must not shadow the project's venv.
+def test_the_venv_is_activated_by_the_session_environment_script_after_the_profile(tmp_path, session_python):
+    # `bashProvider.ts`: the session env script (upstream's `CLAUDE_ENV_FILE`) runs after the shell
+    # profile, so a profile that prepends its own bin (as `~/.profile` does with `~/.local/bin`)
+    # cannot shadow the project's venv.
     home = tmp_path / "home"
     (home / "bin").mkdir(parents=True)
     (home / "bin" / "python").write_text("#!/bin/sh\necho shadow\n")
     (home / "bin" / "python").chmod(0o755)
     (home / ".bash_profile").write_text(f'export PATH="{home / "bin"}:$PATH"\n')
-    ws = LocalWorkspace(tmp_path / "p", env={**session_python.env(), "HOME": str(home)})
-    out = ws.execute("python -c 'import sys; print(sys.prefix)'").stdout.strip()
-    assert out == str(session_python.venv_dir)
+    env = session_python.write_env_file(tmp_path / "session-env.sh")
+    assert env == {"TDDAGENTS_ENV_FILE": str(tmp_path / "session-env.sh")}
+    assert (tmp_path / "session-env.sh").read_text() == (
+        f"export VIRTUAL_ENV={session_python.venv_dir}\nexport PATH=\"$VIRTUAL_ENV/bin:$PATH\"\n")
+    ws = LocalWorkspace(tmp_path / "p", env={**env, "HOME": str(home)})
+    assert ws.execute("python -c 'import sys; print(sys.prefix)'").stdout.strip() == str(session_python.venv_dir)
+    assert ws.execute('echo "$VIRTUAL_ENV"').stdout.strip() == str(session_python.venv_dir)
 
 
 # ── everything is read from the project ──────────────────────────────────────
@@ -163,14 +160,19 @@ def test_real_pytest_skips_keep_green_until_the_tool_is_there(python_workspace):
 
 # ── what the model is told ───────────────────────────────────────────────────
 
-def test_the_environment_names_the_project_and_its_git_repo_but_no_venv(tmp_path):
+def test_the_environment_names_the_project_and_whether_it_is_a_git_repo_but_no_venv(tmp_path):
     """As upstream: the working directory and git, nothing about how to install (Phase 13)."""
+    import subprocess as sp
+
     from app.context import compute_env_info, compute_simple_env_info
 
     project = prepare_project(tmp_path / "p")
-    ws = LocalWorkspace(project, env={"VIRTUAL_ENV": str(project / ".venv")})
+    ws = LocalWorkspace(project)
+    assert f" - Primary working directory: {project}\n  - Is a git repository: false\n" in compute_simple_env_info(
+        ws, "m")
+    sp.run(["git", "init", "--quiet", str(project)], check=True)  # the model (or the user) may make it one
     simple = compute_simple_env_info(ws, "m")
-    assert f" - Primary working directory: {project}\n  - Is a git repository: true\n" in simple
+    assert "  - Is a git repository: true\n" in simple
     worker = compute_env_info(ws, "m")
     assert "Is directory a git repo: Yes\n" in worker
     for text in (simple, worker):
