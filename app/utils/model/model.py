@@ -26,14 +26,15 @@ CLAUDE_ALIASES: dict[str, str] = {
     "haiku": "claude-haiku-4-5-20251001",
 }
 
-#: TDDAgents' OpenAI aliases (user decision, 2026-10-22).
-OPENAI_ALIASES: dict[str, str] = {"o4-mini": "o4-mini"}
+#: TDDAgents' OpenAI aliases (user decision, 2026-10-22; gpt-5-mini replaced o4-mini on 2026-10-27,
+#: when OpenAI deprecated o4-mini).
+OPENAI_ALIASES: dict[str, str] = {"gpt-5-mini": "gpt-5-mini"}
 
 #: Every alias the Agent tool's `model` field accepts.
 MODEL_ALIASES: dict[str, str] = {**CLAUDE_ALIASES, **OPENAI_ALIASES}
 
 #: The default alias: the run's default model (`Config.MODEL`).
-DEFAULT_MODEL_ALIAS = "o4-mini"
+DEFAULT_MODEL_ALIAS = "gpt-5-mini"
 
 SUBAGENT_MODEL_ENV = "TDDAGENTS_SUBAGENT_MODEL"
 

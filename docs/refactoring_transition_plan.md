@@ -350,7 +350,7 @@ architecture, while enforcing the TDD cycle"):*
 - Agent definitions resolve from `app/prompts/agents` (+ user/project) only, with upstream's
   frontmatter; `resolveAgentTools` keeps Agent out of every worker.
 - `subagent_type` is required and fork is off. The Agent tool stays concurrency-safe.
-  `model` takes the Claude aliases plus an OpenAI table (default `o4-mini`).
+  `model` takes the Claude aliases plus an OpenAI table (default `o4-mini`; `gpt-5-mini` since 2026-10-27, when OpenAI deprecated o4-mini).
 - An end-to-end test drives coordinator → tester → developer to `completed` on a real
   workspace.
 

@@ -1578,7 +1578,7 @@ loop moves through the plan without a new turn.
 ### State and config
 
 `app/config/config.py` holds `Config`: the provider and model (`CHAT_MODEL = "openai"`,
-`MODEL = "o4-mini"`), the Postgres URL and the E2B sandbox constants. It **raises at import
+`MODEL = "gpt-5-mini"`, since o4-mini was deprecated on 2026-10-27), the Postgres URL and the E2B sandbox constants. It **raises at import
 time** if `OPENAI_API_KEY` is unset (`E2B_API_KEY` and `POSTGRES_URL` are optional), so
 importing anything under `app/` without a `.env` fails immediately. A run's own settings are
 snapshotted once into `RunConfig` (`app/query/config.py`).

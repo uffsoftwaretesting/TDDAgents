@@ -21,7 +21,7 @@ class Config:
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
 
     CHAT_MODEL = "openai"
-    MODEL = "o4-mini"
+    MODEL = "gpt-5-mini"
     TEMPERATURE = 1.0
 
     # ── Sandbox lifecycle ────────────────────────────────────────────────────

@@ -29,9 +29,9 @@ def test_an_env_override_wins_for_a_claude_alias(monkeypatch):
 
 
 def test_the_openai_alias_is_the_default():
-    assert DEFAULT_MODEL_ALIAS == "o4-mini"
-    assert parse_user_specified_model("o4-mini") == "o4-mini"
-    assert set(MODEL_ALIASES) == {"sonnet", "opus", "haiku", "o4-mini"}
+    assert DEFAULT_MODEL_ALIAS == "gpt-5-mini"
+    assert parse_user_specified_model("gpt-5-mini") == "gpt-5-mini"
+    assert set(MODEL_ALIASES) == {"sonnet", "opus", "haiku", "gpt-5-mini"}
 
 
 def test_a_full_model_id_passes_through_trimmed():
@@ -40,7 +40,7 @@ def test_a_full_model_id_passes_through_trimmed():
 
 @pytest.mark.parametrize(
     ("model", "provider"),
-    [("claude-sonnet-4-6", "anthropic"), ("o4-mini", "openai"), ("gpt-4.1", "fallback")],
+    [("claude-sonnet-4-6", "anthropic"), ("gpt-5-mini", "openai"), ("o4-mini", "fallback"), ("gpt-4.1", "fallback")],
 )
 def test_the_provider_follows_the_model(model, provider):
     assert provider_for_model(model, default="fallback") == provider
