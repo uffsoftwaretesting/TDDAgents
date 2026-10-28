@@ -83,8 +83,6 @@ def test_the_projects_venv_comes_first_on_path_even_after_the_login_profile(tmp_
     ws = LocalWorkspace(tmp_path / "p", env={**session_python.env(), "HOME": str(home)})
     out = ws.execute("python -c 'import sys; print(sys.prefix)'").stdout.strip()
     assert out == str(session_python.venv_dir)
-    assert ws.virtual_env == session_python.venv_dir
-    assert LocalWorkspace(tmp_path / "q").virtual_env is None
 
 
 # ── everything is read from the project ──────────────────────────────────────
@@ -117,9 +115,8 @@ def test_skipped_tests_are_counted_from_pytests_summary(output, count):
 
 
 SKIP_HEADER = ("Tests ran without failures, but 1 test(s) were skipped, so this run does not count as passing: a "
-               "skipped test checks nothing. Install what they need into the project's virtual environment (and "
-               "record it in the requirements files), or fix why they skip, then run RunTests again. The skip "
-               "reasons are listed in the short test summary below.")
+               "skipped test checks nothing. Install what they need, or fix why they skip, then run RunTests "
+               "again. The skip reasons are listed in the short test summary below.")
 
 
 @pytest.mark.parametrize("phase", [TddPhase.GREEN, TddPhase.REFACTOR])
@@ -166,23 +163,24 @@ def test_real_pytest_skips_keep_green_until_the_tool_is_there(python_workspace):
 
 # ── what the model is told ───────────────────────────────────────────────────
 
-def test_the_environment_names_the_project_its_git_repo_and_its_venv(tmp_path):
+def test_the_environment_names_the_project_and_its_git_repo_but_no_venv(tmp_path):
+    """As upstream: the working directory and git, nothing about how to install (Phase 13)."""
     from app.context import compute_env_info, compute_simple_env_info
 
     project = prepare_project(tmp_path / "p")
     ws = LocalWorkspace(project, env={"VIRTUAL_ENV": str(project / ".venv")})
     simple = compute_simple_env_info(ws, "m")
     assert f" - Primary working directory: {project}\n  - Is a git repository: true\n" in simple
-    assert f" - Python virtual environment: {project / '.venv'} (active for Bash and RunTests)\n" in simple
     worker = compute_env_info(ws, "m")
-    assert f"Is directory a git repo: Yes\nPython virtual environment: {project / '.venv'}" in worker
+    assert "Is directory a git repo: Yes\n" in worker
+    for text in (simple, worker):
+        assert "venv" not in text and "virtual" not in text
 
 
-def test_the_project_section_tells_the_model_to_install_and_record_dependencies():
-    from app.context import _file_section
+def test_the_bash_prompt_carries_upstreams_commit_rule():
+    from app.tools.bash_tool.bash_tool import build_bash_tool
 
-    text = _file_section("environment.md")()
-    for phrase in ("pip install", "requirements.txt", "requirements-dev.txt", "Never let a test skip",
-                   "NEVER commit changes unless the user explicitly asks you to"):
-        assert phrase in text
-    assert "{{" not in text
+    prompt = build_bash_tool().prompt
+    assert "# Committing changes with git" in prompt
+    assert "NEVER commit changes unless the user explicitly asks you to." in prompt
+    assert "Only create commits when requested by the user. If unclear, ask first." in prompt

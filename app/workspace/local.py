@@ -64,12 +64,6 @@ class LocalWorkspace:
         self._env: dict[str, str] = dict(env or {})
 
     @property
-    def virtual_env(self) -> Path | None:
-        """The project's virtualenv every command runs with (`SessionPython.env()`), if any."""
-        venv = self._env.get("VIRTUAL_ENV")
-        return Path(venv) if venv else None
-
-    @property
     def run_dir(self) -> Path:
         """The session's directory: it holds this project and, beside it, the reports."""
         return self._root.parent

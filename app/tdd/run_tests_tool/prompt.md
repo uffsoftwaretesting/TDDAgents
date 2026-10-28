@@ -11,5 +11,6 @@ the failure detail is the most valuable thing you will read.
 
 Updates the TDD phase ledger from what it observes: in RED, a run of the sub-requirement's
 new or changed tests (pass or fail) ends RED; in GREEN, a pass ends GREEN; in REFACTOR, a
-pass with enough coverage ends REFACTOR. Only a pass (0) or failing tests (1) count;
+pass with enough coverage ends REFACTOR. A run with skipped tests is not a pass. Only a pass (0)
+or failing tests (1) count;
 anything else (no tests collected, usage error, timeout) is reported as an error.

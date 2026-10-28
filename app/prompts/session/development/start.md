@@ -1,4 +1,4 @@
-Implement this project test-first, one sub-requirement at a time, following the TDD plan below. Work in the project folder and its virtual environment named in your environment: install what the project needs there, and record it in its requirements files.
+Implement this project test-first, one sub-requirement at a time, following the TDD plan below.
 
 For each sub-requirement:
 

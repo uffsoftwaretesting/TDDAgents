@@ -507,8 +507,9 @@ sub-requirement has been observed Red → Green.
   commits; the model gets upstream's never-commit-unless-asked rule). It has its own
   `.venv`, and settings seeded from TDDAgents' shipped defaults.
 - **Lookups:** settings, skills, agents, MCP and hooks are read from the project.
-- **What the model is told:** its project, git repository and venv. A new system section
-  says to install dependencies there and record them in requirements files.
+- **What the model is told:** upstream's environment (the project and its git repository) and
+  upstream's never-commit rule in the Bash prompt. The venv is active for every command but
+  never named; as claude-code, the model decides how the project installs its dependencies.
 - **Skips:** a run with skipped tests does not pass GREEN or REFACTOR.
 - **Final run:** the session ends with the project's suite run once more in its own venv
   (`final_test_run.txt`).

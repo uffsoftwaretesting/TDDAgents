@@ -33,6 +33,7 @@ COVERAGE_REPORT_PATH = f"{COVERAGE_DIR}/report.json"
 COVERAGE_CONFIG = (
     "[run]\n"
     "branch = True\n"
+    "data_file = .tddagents/coverage/.coverage\n"
     "omit =\n"
     "    tests/*\n"
     "    */tests/*\n"

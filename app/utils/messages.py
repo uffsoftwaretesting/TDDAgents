@@ -40,7 +40,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.messages.tool import ToolCall
 
 Message = BaseMessage
@@ -213,6 +213,54 @@ def is_attachment_message(message: Any) -> bool:
     """A meta message created from an attachment (hook or async-hook response)."""
     kwargs = getattr(message, "additional_kwargs", None)
     return isinstance(kwargs, Mapping) and isinstance(kwargs.get(ATTACHMENT_KEY), Mapping)
+
+
+def _as_blocks(content: Any) -> list[Any]:
+    if isinstance(content, list):
+        return list(content)
+    return [{"type": "text", "text": content}] if content else []
+
+
+def _merged_content(a: Any, b: Any) -> Any:
+    if isinstance(a, str) and isinstance(b, str):
+        return a + b
+    return [*_as_blocks(a), *_as_blocks(b)]
+
+
+def _same_response_index(out: Sequence[Message], response_id: str) -> int | None:
+    """The earlier block of the same response, walking back over tool results only."""
+    for index in range(len(out) - 1, -1, -1):
+        previous = out[index]
+        if isinstance(previous, AIMessage):
+            if previous.id == response_id:
+                return index
+            continue
+        if not isinstance(previous, ToolMessage):
+            return None
+    return None
+
+
+def merge_split_assistant_messages(messages: Sequence[Message]) -> list[Message]:
+    """
+    `normalizeMessagesForAPI`'s assistant merge (`mergeAssistantMessages`): the content blocks of
+    one model response, stored as one message each (`app/services/api/claude.py`), are merged
+    back into one assistant message by their shared response id before sending. As upstream it
+    walks back over tool results, so a response's parallel tool calls become one assistant
+    message followed by their results, as a provider requires. The stored history is untouched.
+    """
+    out: list[Message] = []
+    for message in messages:
+        index = _same_response_index(out, message.id) if isinstance(message, AIMessage) and message.id else None
+        if index is None:
+            out.append(message)
+            continue
+        previous = out[index]
+        assert isinstance(previous, AIMessage) and isinstance(message, AIMessage)
+        out[index] = previous.model_copy(update={
+            "content": _merged_content(previous.content, message.content),
+            "tool_calls": [*previous.tool_calls, *message.tool_calls],
+        })
+    return out
 
 
 def reorder_attachments_for_api(messages: Sequence[Message]) -> list[Message]:

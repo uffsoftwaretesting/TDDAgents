@@ -214,9 +214,8 @@ def skipped_count(output: str) -> int:
 #: What a passing run with skipped tests is told in GREEN and REFACTOR (Phase 13).
 SKIPPED_IS_NOT_PASSING = (
     "{count} test(s) were skipped, so this run does not count as passing: a skipped test checks "
-    "nothing. Install what they need into the project's virtual environment (and record it in the "
-    "requirements files), or fix why they skip, then run RunTests again. The skip reasons are listed "
-    "in the short test summary below."
+    "nothing. Install what they need, or fix why they skip, then run RunTests again. The skip reasons "
+    "are listed in the short test summary below."
 )
 
 

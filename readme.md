@@ -109,7 +109,7 @@ The plan is saved beside the session transcript (`tdd-plan.json`), so a resumed 
 | **State Persistence & Resumability** | PostgreSQL checkpoints the session graph; resume with `--thread-id`. An unfinished sub-requirement resumes from its transcript (the ledger is never restored — RED must be observed again). |
 | **Self-Correction** | Failing test output goes back to the model as tool results; it fixes and re-runs until the cycle is observed. Model calls are retried with Claude Code's `withRetry` policy. |
 | **Headless Mode** | `python -m app.main -p` runs a spec end to end with no questions, exiting 0 only when every sub-requirement completed its Red → Green → Refactor cycle. |
-| **Structured Output Delivery** | Each project is its own folder (`~/.tddagents/workspaces/<thread_id>/project`): a git repository with its own venv and requirements files. |
+| **Structured Output Delivery** | Each project is its own folder (`~/.tddagents/workspaces/<thread_id>/project`): a git repository with its own virtual environment. |
 
 ---
 
@@ -336,13 +336,12 @@ The checklist is approved automatically; a clarifying question from the Analyst 
 
 ## Output & Deliverables
 
-Each session's project lives in its own folder, outside TDDAgents: `~/.tddagents/workspaces/<thread_id>/` (set `TDDAGENTS_WORKSPACES_DIR` to use another root). The project is a git repository with its own virtual environment; the agents install what it needs there and record it in `requirements.txt` / `requirements-dev.txt`, so anyone re-creating the environment gets the same test results. TDDAgents never commits.
+Each session's project lives in its own folder, outside TDDAgents: `~/.tddagents/workspaces/<thread_id>/` (set `TDDAGENTS_WORKSPACES_DIR` to use another root). The project is a git repository with its own virtual environment, active for every command the agents run; they install what the project needs as they judge best, as claude-code does. A run with skipped tests never counts as passing, and the session ends by running the project's suite once more in that environment (`final_test_run.txt`). TDDAgents never commits.
 
 ```
 ~/.tddagents/workspaces/<thread_id>/
 ├── project/                            # The generated project (a git working tree)
 │   ├── .venv/                          # Its own virtual environment (gitignored)
-│   ├── requirements.txt, requirements-dev.txt
 │   ├── src/ or modules, tests/         # Generated production code and pytest suites
 │   └── .tddagents/settings.json        # The project's TDDAgents settings, seeded from the defaults
 └── metrics_and_logging/

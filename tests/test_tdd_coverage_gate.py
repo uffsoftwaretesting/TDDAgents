@@ -38,6 +38,7 @@ def test_the_config_measures_branches_and_leaves_the_tests_out():
     assert COVERAGE_CONFIG == (
         "[run]\n"
         "branch = True\n"
+        "data_file = .tddagents/coverage/.coverage\n"
         "omit =\n"
         "    tests/*\n"
         "    */tests/*\n"

@@ -1166,18 +1166,15 @@ in the plan's Phase 13 outcome.
   workspace root, never from `Path.cwd()`. Only a workspace with no root falls back to the cwd.
   A project with no settings therefore runs in `default` mode (`tests/conftest.py::python_workspace`
   prepares one).
-- **The venv wins on `PATH`.** `LocalWorkspace.execute` re-prepends `$VIRTUAL_ENV/bin` after
-  `bash -l`'s profile runs, because `~/.profile`'s `~/.local/bin` used to come first.
-  `LocalWorkspace.virtual_env` exposes it.
-- **What the model is told:**
-  - the environment section adds `Python virtual environment: … (active for Bash and RunTests)`;
-  - `Is a git repository: true`, with `gitStatus`;
-  - the new static section `environment.md` (install every dependency into the venv, record it
-    in `requirements.txt` / `requirements-dev.txt`, never let a test skip, and upstream's
-    "NEVER commit … unless the user explicitly asks");
-  - one line in the start prompt.
-
-  TDDAgents itself never commits.
+- **The venv is active, never announced** (user decision: follow claude-code, which gives no
+  venv or dependency guidance and lets the model judge how the project installs). It is merged
+  into every command's environment, as upstream's `CLAUDE_ENV_FILE` keeps an activated
+  environment for every Bash command. `LocalWorkspace.execute` re-prepends `$VIRTUAL_ENV/bin`
+  after `bash -l`'s profile runs, because `~/.profile`'s `~/.local/bin` used to come first.
+- **What the model is told** is upstream's: `Primary working directory`, `Is a git repository:
+  true`, and `gitStatus`. The Bash prompt gains upstream's `# Committing changes with git`
+  section (`getCommitAndPRInstructions`, commit part, without attribution): never commit unless
+  the user asks. TDDAgents itself never commits.
 - **A skipped test is not a pass.** `pytest_command` adds `-rs`, and `skipped_count` reads the
   summary line. In GREEN and REFACTOR an exit-0 run with skips is observed as failing, and the
   header names why. RED is unchanged.
@@ -1186,7 +1183,20 @@ in the plan's Phase 13 outcome.
   skip reads "NOT passing". This answers the live run that "passed" while a flake8 test
   silently skipped and failed elsewhere.
 - **No export.** `app/session/export.py` and `workspace_output_<thread>/` are deleted; the
-  reports go to `<thread>/metrics_and_logging/`.
+  reports go to `<thread>/metrics_and_logging/`. pytest-cov's data file goes to
+  `.tddagents/coverage/.coverage` (gitignored), not the project root.
+- **Fixed: parallel tool calls failed every request after them.** The loop stores one message
+  per content block (Phase 1), so two tool calls in one response were sent as two assistant
+  messages followed by their results, and OpenAI answered 400 ("An assistant message with
+  'tool_calls' must be followed by tool messages…"). That was the Phase 13 live run's
+  `model_error`, reproduced against the API. As upstream:
+  - every block of one response is stamped with one response id (`frame_content_blocks`,
+    upstream's `message.id`);
+  - the request builder merges blocks of the same id back into one assistant message
+    (`merge_split_assistant_messages`, `normalizeMessagesForAPI`'s `mergeAssistantMessages`),
+    walking back over tool results.
+
+  A failed model call is now logged (`Model call failed: …`, upstream's `logError`).
 - **Workarounds:**
   - the write carve-out is now `(".tddagents", "workspaces")`;
   - `GIT_CEILING_DIRECTORIES` (at the thread dir) and RunTests' `-c /dev/null` probe stay,
@@ -1194,8 +1204,9 @@ in the plan's Phase 13 outcome.
 - The fingerprint, the coverage omit and the ignore file leave out `.venv`.
 
 *Divergences, recorded:*
-- the venv line and `environment.md` are TDDAgents additions (upstream has no venv guidance);
 - `git init` is TDDAgents' (upstream is opened in an existing repository);
+- the Bash prompt's commit steps pass the message with `-m` instead of upstream's
+  `$(cat <<EOF …)`, which the Bash security check refuses; the PR section is not ported;
 - sessions created before Phase 13 under `.tddagents/runs/` are not migrated.
 
 ### The three things that changed most

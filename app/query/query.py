@@ -14,6 +14,7 @@ All terminal reasons and continue sites are handled according to the closed voca
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -54,6 +55,8 @@ from app.utils.messages import (
 )
 from app.utils.tokens import token_count_with_estimation
 from app.utils.tool_result_storage import apply_tool_result_budget
+
+logger = logging.getLogger("TDDOrchestrator.Loop")
 
 #: What a run emits: every message as it is produced, then exactly one `Terminated`.
 LoopEvent: TypeAlias = Message | Terminated
@@ -324,6 +327,8 @@ async def run_loop(
                 model_failed = exc
 
         if model_failed is not None:
+            # Upstream's `logError` on a failed model call: the terminal alone says nothing of why.
+            logger.error("Model call failed: %s", model_failed)
             # Upstream repairs before it reports: the stream may already have emitted a
             # tool_use whose tool_result will now never arrive, and the next request would
             # be malformed without one (invariant B7).

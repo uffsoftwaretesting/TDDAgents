@@ -46,10 +46,12 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from collections.abc import AsyncIterable, AsyncIterator, Iterator, Sequence
 from typing import Any, cast
 
 from langchain_core.messages import (
+    AIMessage,
     AIMessageChunk,
     BaseMessage,
     SystemMessage,
@@ -73,7 +75,11 @@ from app.services.api.with_retry import RetryContext, RetryOptions, with_retry
 from app.services.compact.compact import is_compact_boundary_message
 from app.tool import Tool
 from app.utils.chat_model_factory import get_chat_model
-from app.utils.messages import Message, reorder_attachments_for_api
+from app.utils.messages import (
+    Message,
+    merge_split_assistant_messages,
+    reorder_attachments_for_api,
+)
 from app.utils.model.model import provider_for_model
 from app.utils.token_metrics import GlobalTokenTracker
 
@@ -148,7 +154,8 @@ def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]
     system = SystemMessage(content="\n\n".join(request_system_texts(state, config)))
     # The compact boundary is a bookkeeping record (upstream's `system` message), never input.
     sendable = [m for m in state.messages if not is_compact_boundary_message(m)]
-    history = prepend_user_context(reorder_attachments_for_api(sendable), request_user_context(state, config))
+    history = prepend_user_context(
+        reorder_attachments_for_api(merge_split_assistant_messages(sendable)), request_user_context(state, config))
     return [system, *history]
 
 
@@ -343,17 +350,24 @@ async def frame_content_blocks(stream: AsyncIterable[Any]) -> AsyncIterator[Base
     upstream ignores the raw `stream_event` passthroughs it re-yields for the UI.
     """
     accumulator = BlockAccumulator()
+    # Upstream's `message.id`: every block of this response carries it, so the request builder
+    # can merge them back into one assistant message (`merge_split_assistant_messages`).
+    response_id = f"msg_{uuid.uuid4().hex}"
+
+    def stamped(message: BaseMessage) -> BaseMessage:
+        return message.model_copy(update={"id": response_id}) if isinstance(message, AIMessage) else message
+
     async for item in stream:
         if isinstance(item, AIMessageChunk):
             for message in accumulator.add(item):
-                yield message
+                yield stamped(message)
             continue
         if isinstance(item, BaseMessage):
             for message in accumulator.flush():
-                yield message
+                yield stamped(message)
             yield item
     for message in accumulator.flush():
-        yield message
+        yield stamped(message)
 
 
 # ── Phase 5: what is sent to a provider that supports cache breakpoints ────────
