@@ -1186,7 +1186,13 @@ in the plan's Phase 13 outcome.
   the user asks. TDDAgents itself never commits.
 - **A skipped test is not a pass.** `pytest_command` adds `-rs`, and `skipped_count` reads the
   summary line. In GREEN and REFACTOR an exit-0 run with skips is observed as failing, and the
-  header names why. RED is unchanged.
+  header names why. RED is unchanged. Every test must run in a plain RunTests run (user
+  decision): the message says not to gate tests behind environment variables, markers or
+  options, and to size an expensive check so it runs normally. A live run looped on a
+  `RUN_PERF=1`-gated performance test.
+- **A question from the model is normal behaviour** (user decision). A headless run has nobody
+  to answer it, and the stop hook keeps sending the model back. When this happens in a
+  supervised live run, the question is brought to the user; there is no code path for it.
 - **The final run is the project's own suite.** `run_suite` (RunTests' own runner) runs once
   more at the end, in the project's venv, into `metrics_and_logging/final_test_run.txt`. A
   skip reads "NOT passing". This answers the live run that "passed" while a flake8 test

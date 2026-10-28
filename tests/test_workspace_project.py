@@ -112,8 +112,10 @@ def test_skipped_tests_are_counted_from_pytests_summary(output, count):
 
 
 SKIP_HEADER = ("Tests ran without failures, but 1 test(s) were skipped, so this run does not count as passing: a "
-               "skipped test checks nothing. Install what they need, or fix why they skip, then run RunTests "
-               "again. The skip reasons are listed in the short test summary below.")
+               "skipped test checks nothing. Every test must run in a plain RunTests run: install what they "
+               "need, and do not gate tests behind environment variables, markers or options (size an expensive "
+               "check so that it runs in a normal test run). Then run RunTests again. The skip reasons are "
+               "listed in the short test summary below.")
 
 
 @pytest.mark.parametrize("phase", [TddPhase.GREEN, TddPhase.REFACTOR])
