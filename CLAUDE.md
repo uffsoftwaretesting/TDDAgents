@@ -1129,6 +1129,11 @@ mandatory and coverage-checked. The three barriers stay; the rules they enforce 
   - A per-item-and-phase latch then let a run complete 10 of 11 items. It still ended on item
     11 when the model stopped twice in REFACTOR, although the project's 30 tests all passed.
     The user then removed the latch: REFACTOR and GREEN must happen.
+  - The third run then looped on item 10 (9 of 13 done): a test written in RED contradicted the
+    spec, GREEN locks the tests, and the model did not know the way back. The GREEN refusals,
+    the stop hook's GREEN message, the contract and the start prompt now name it
+    (`phase_permissions.BACK_TO_RED`, user decision): spawn the tester agent, whose
+    phase-on-spawn restarts the item at RED. No new mechanism.
   - Tests that drive a model which never finishes now end the turn as a user's Esc would
     (`tests/session_run_helpers.with_a_patient_user`, the scripted models' "script exhausted").
 - **The gate** counts timeouts: each is re-run alone, and one that still hangs counts as

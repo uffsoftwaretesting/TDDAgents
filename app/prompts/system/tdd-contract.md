@@ -9,6 +9,7 @@ The loop enforces a structural Red -> Green -> Refactor cycle for every sub-requ
 2. **GREEN Phase (Make It Pass)**:
    - Implement the code the tests describe, meeting the specified requirements.
    - Run `RunTests` until every test passes. In GREEN the tests are locked: the code is changed to satisfy them, never the other way round.
+   - If a test turns out to be wrong (it contradicts the specification), go back to RED: spawn the tester agent to fix it. That restarts the sub-requirement at RED, where tests may be written; then implement again.
 
 3. **REFACTOR Phase (Mandatory)**:
    - REFACTOR is required for every sub-requirement. Use it to raise test coverage, improve code quality, and strengthen the test suite's effectiveness and robustness.

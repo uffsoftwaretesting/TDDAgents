@@ -51,8 +51,11 @@ def test_hook_allows_exit_when_cycle_complete():
 
 RED_MSG = ("TDD cycle incomplete: RED is not done (tests_written=False). Write robust tests for this "
            "sub-requirement, covering every relevant scenario and edge case, and run RunTests.")
+BACK_TO_RED = ("If a test is wrong (it contradicts the specification), go back to RED: spawn the tester agent "
+               "(Agent with subagent_type 'tester') to fix it. That restarts this sub-requirement at RED; then "
+               "implement again.")
 GREEN_MSG = ("TDD cycle incomplete: GREEN is not done (green_passed=False). Implement the code the tests "
-             "describe and run RunTests until every test passes.")
+             f"describe and run RunTests until every test passes. {BACK_TO_RED}")
 
 
 def refactor_msg(figure: str) -> str:

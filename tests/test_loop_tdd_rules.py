@@ -262,6 +262,11 @@ def test_get_phase_deny_rules_exact_generation():
     assert get_phase_deny_rules(refactor_ledger) == ()
 
 
+BACK_TO_RED = ("If a test is wrong (it contradicts the specification), go back to RED: spawn the tester agent "
+               "(Agent with subagent_type 'tester') to fix it. That restarts this sub-requirement at RED; then "
+               "implement again.")
+
+
 def test_check_tdd_phase_permission_comprehensive():
     red_ledger = PhaseLedger(phase=TddPhase.RED)
     green_ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
@@ -351,13 +356,13 @@ def test_check_tdd_phase_permission_comprehensive():
             allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "tests/test_core.py"}, g_ledger)
             assert allowed is False
             assert reason == (f"TDD phase {g_ledger.phase} denies modifying test file 'tests/test_core.py': GREEN "
-                              "implements what the tests describe. Tests can be improved in REFACTOR.")
+                              f"implements what the tests describe. Tests can be improved in REFACTOR. {BACK_TO_RED}")
 
             # with file_path argument
             allowed, reason = check_tdd_phase_permission(gen_tool, {"file_path": "tests/test_core.py"}, g_ledger)
             assert allowed is False
             assert reason == (f"TDD phase {g_ledger.phase} denies modifying test file 'tests/test_core.py': GREEN "
-                              "implements what the tests describe. Tests can be improved in REFACTOR.")
+                              f"implements what the tests describe. Tests can be improved in REFACTOR. {BACK_TO_RED}")
 
             # with production path allowed in GREEN
             allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "src/core.py"}, g_ledger)

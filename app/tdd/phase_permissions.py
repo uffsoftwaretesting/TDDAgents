@@ -23,6 +23,14 @@ from app.types.permissions import (
 if TYPE_CHECKING:
     from app.tool import Tool
 
+#: How a wrong test is fixed while the tests are locked (Phase 12): go back to RED by spawning
+#: the tester, whose phase-on-spawn restarts the item (`PhaseLedger.transition_to`).
+BACK_TO_RED = (
+    "If a test is wrong (it contradicts the specification), go back to RED: spawn the tester agent "
+    "(Agent with subagent_type 'tester') to fix it. That restarts this sub-requirement at RED; then "
+    "implement again."
+)
+
 #: The shell tool, whose write targets live inside its command string.
 BASH_TOOL_NAME = "Bash"
 
@@ -204,7 +212,7 @@ def check_tdd_phase_permission(
                     return (
                         False,
                         (f"TDD phase {ledger.phase} denies modifying test file '{path}': GREEN implements "
-                         "what the tests describe. Tests can be improved in REFACTOR."),
+                         f"what the tests describe. Tests can be improved in REFACTOR. {BACK_TO_RED}"),
                     )
 
     return True, ""

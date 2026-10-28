@@ -26,6 +26,7 @@ from langchain_core.messages import HumanMessage
 from app.query.stop_hooks import StopHookResult
 from app.tdd.coverage_gate import COVERAGE_THRESHOLD
 from app.tdd.ledger import PhaseLedger
+from app.tdd.phase_permissions import BACK_TO_RED
 
 if TYPE_CHECKING:
     from app.query.config import RunConfig
@@ -39,7 +40,7 @@ def incomplete_cycle_message(ledger: PhaseLedger) -> str:
                 "sub-requirement, covering every relevant scenario and edge case, and run RunTests.")
     if not ledger.green_passed:
         return ("TDD cycle incomplete: GREEN is not done (green_passed=False). Implement the code the tests "
-                "describe and run RunTests until every test passes.")
+                f"describe and run RunTests until every test passes. {BACK_TO_RED}")
     figure = "not measured yet" if ledger.coverage is None else f"{ledger.coverage:.1f}%"
     return ("TDD cycle incomplete: REFACTOR is not done (refactor_passed=False). It is mandatory: improve the "
             "code and the tests, then run RunTests until every test passes with line + branch coverage of at "

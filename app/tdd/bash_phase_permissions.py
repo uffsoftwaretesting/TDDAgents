@@ -32,7 +32,7 @@ and the ledger — not this check — remains the authority on what was really p
 from __future__ import annotations
 
 from app.tdd.ledger import PhaseLedger, TddPhase
-from app.tdd.phase_permissions import is_test_path
+from app.tdd.phase_permissions import BACK_TO_RED, is_test_path
 from app.utils.bash.commands import extract_output_redirections
 
 #: Redirecting here writes nothing, so no phase can object. Upstream short-circuits it too.
@@ -96,7 +96,7 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger) -> tuple[bool, str]:
                     False,
                     (f"TDD phase {ledger.phase} denies modifying test file '{target}' through "
                      "a shell redirection. The tests are what pins the behaviour being "
-                     "implemented; they can be improved in REFACTOR."),
+                     f"implemented; they can be improved in REFACTOR. {BACK_TO_RED}"),
                 )
 
     return True, ""

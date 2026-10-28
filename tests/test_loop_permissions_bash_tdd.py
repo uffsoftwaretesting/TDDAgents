@@ -158,7 +158,9 @@ RED_UNVERIFIABLE = (
 GREEN_TEST_FILE = (
     "TDD phase GREEN denies modifying test file 'tests/test_calc.py' through a shell "
     "redirection. The tests are what pins the behaviour being implemented; they can be "
-    "improved in REFACTOR."
+    "improved in REFACTOR. If a test is wrong (it contradicts the specification), go back to RED: "
+    "spawn the tester agent (Agent with subagent_type 'tester') to fix it. That restarts this "
+    "sub-requirement at RED; then implement again."
 )
 GREEN_UNVERIFIABLE = (
     "TDD phase GREEN cannot verify where this command writes: its redirection target uses "
