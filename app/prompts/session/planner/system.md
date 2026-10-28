@@ -19,7 +19,7 @@ You will return your response using ALWAYS the provided structured output tool (
 Each item in the list (each "Sub-requirement") must be a descriptive, technical, and actionable instruction.
 
 Examples of how to write a plan item:
-- "PHASE 0 - SETUP: Install base dependencies (e.g. pytest, fastapi, uvicorn) defined in the specification, set up the initial directory structure, and create the empty files for the main modules."
+- "PHASE 0 - SETUP: Install base dependencies (e.g. pytest, fastapi, uvicorn) defined in the specification and create the main module, with a test that imports it (failing until the module exists)."
 - "PHASE 1 - CORE LOGIC: The central function or class responsible for the main processing of the problem, with unit tests that validate its success cases and expected behavior."
 - "PHASE 2 - RULES AND LIMITS: Expand the core module to cover edge cases, input validations, and exceptional behaviors, ensuring test coverage for each scenario."
 - "PHASE 3 - INTEGRATION: Compose the modules developed in previous phases into a cohesive flow, with integration tests for the behavior the composition adds."
