@@ -1416,6 +1416,58 @@ the user's direction they are now upstream's text verbatim (external build, our 
 - `RunTests` and `Agent` guidance left `tools.md`. The TDD contract covers `RunTests`, and
   upstream puts the Agent guidance in a session-specific section, outside this one.
 
+### Every prompt with an upstream source, and the tools they describe (2026-10-28)
+
+At the user's direction the port went on to **every prompt with an upstream source**, and to the
+tool features those prompts promise, so no prompt describes something a tool cannot do. Each text
+is upstream's, verbatim, with our tool names, and is pinned by `tests/test_system_prompt_sections.py`
+against the reference snapshot.
+
+**Product substitutions** (user decision), applied wherever upstream names itself:
+"Claude Code" → "TDDAgents", "Anthropic's official CLI for Claude" → "UFF Software Testing Team's
+official CLI tool for TDDAgents", and `CLAUDE.md` → `TDDAGENTS.md`.
+
+- **Prompts:**
+  - `identity.md` is `getSimpleIntroSection` (no output style) with `CYBER_RISK_INSTRUCTION` and
+    the URL rule. TDDAgents' TDD identity stays in `tdd-contract.md`.
+  - WriteFile, Edit, Glob and Grep prompts are upstream's; our extra lines (parents created
+    automatically, Glob truncation, Grep pagination notes) are gone.
+  - `explore/` and `plan/` are `exploreAgent.ts` / `planAgent.ts`. Their frontmatter keeps
+    `model: inherit` (upstream's external `haiku` would cross providers).
+- **ReadFile reads images, PDFs and notebooks** (`FileReadTool.ts` `callInner`), and its prompt is
+  upstream's full `renderPromptTemplate`:
+  - images are downscaled with Pillow (`app/utils/image_resizer.py`, upstream's limits in
+    `app/constants/api_limits.py`) and returned as `ToolResult.content_blocks`;
+  - PDFs: whole files up to `PDF_AT_MENTION_INLINE_THRESHOLD` pages as a document block, more
+    need `pages` (at most `PDF_MAX_PAGES_PER_READ`), which `pdftoppm` renders to page images
+    (`app/utils/pdf.py`; poppler is a system dependency);
+  - notebooks are `notebook.ts`'s cell mapping (`app/utils/notebook.py`);
+  - *provider delivery (user decision):* Anthropic gets the media inline in the tool result; for
+    any other provider, `move_tool_result_media_to_user` (`app/utils/messages.py`) moves it to a
+    meta user message after the result, because OpenAI's tool messages cannot carry images.
+- **WebFetch** (`app/tools/web_fetch_tool/`) ports `WebFetchTool`: URL validation and the
+  HTTP→HTTPS upgrade, same-host redirects followed and cross-host ones reported, the 15-minute LRU
+  cache, HTML→markdown (markdownify for turndown), `PREAPPROVED_HOSTS`, and `WebFetch(domain:…)`
+  permission rules with upstream's suggestions. Pages are processed by `TDDAGENTS_SMALL_FAST_MODEL`,
+  else the run's model, through `with_retry`. It is in the built-in roster and the classifier table.
+- **The verification agent** is `verificationAgent.ts`: the system prompt verbatim, upstream's
+  `whenToUse`, `background: true`, `model: inherit`, no `tools` list (every tool its denylist
+  leaves) and `disallowedTools [Agent, WriteFile, Edit]`.
+  - `criticalSystemReminder_EXPERIMENTAL` is ported: a built-in agent's `criticalSystemReminder`
+    frontmatter reaches `ToolContext.critical_system_reminder`, and the
+    `critical_system_reminder` attachment re-sends it at every worker turn.
+  - `ToolContext.shares_app_state` is upstream's `shareSetAppState` (`False` for a background
+    worker). RunTests in such a worker reports what the tests did, writes nothing and claims no
+    phase move (`BACKGROUND_RUN_NOTE`), since its ledger write would be discarded anyway.
+
+*Divergences, recorded:*
+- `CLAUDE.md` in upstream's prompts reads `TDDAGENTS.md`, this build's memory file;
+- built-in agents are Markdown here, so `criticalSystemReminder` is a frontmatter field honoured for
+  built-ins only (upstream sets it in TypeScript);
+- WebFetch: no domain-blocklist preflight to Anthropic's `domain_info` service (user decision), and
+  the user agent is TDDAgents';
+- ReadFile's media reach a non-Anthropic model as a meta user message, not inside the tool result.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
