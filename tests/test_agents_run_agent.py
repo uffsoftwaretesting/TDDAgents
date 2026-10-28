@@ -271,6 +271,15 @@ def test_the_context_omissions_follow_the_definition():
     assert model.seen[0].tool_context.omit_git_status is True
 
 
+def test_the_critical_reminder_and_the_state_sharing_reach_the_worker():
+    model, _ = _run(definition=dataclasses.replace(TESTER, critical_system_reminder="CRITICAL: verify only."))
+    ctx = model.seen[0].tool_context
+    assert (ctx.critical_system_reminder, ctx.shares_app_state) == ("CRITICAL: verify only.", True)
+    model, _ = _run(is_async=True)
+    ctx = model.seen[0].tool_context
+    assert (ctx.critical_system_reminder, ctx.shares_app_state) == (None, False)
+
+
 def test_max_turns_allows_exactly_that_many_turns():
     bounded = dataclasses.replace(TESTER, max_turns=2)
     model = FakeModel([[asks_for("ReadFile", "c1")], [asks_for("ReadFile", "c2")], [AIMessage(content="d")]])

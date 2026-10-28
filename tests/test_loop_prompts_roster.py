@@ -72,7 +72,8 @@ def test_agent_roster_loads_cleanly() -> None:
         assert agent.phase == expected_phase
         assert len(agent.description) > 5
         assert len(agent.prompt) > 20
-        assert agent.tools is not None
+        # Upstream's verification agent lists no tools: it gets every tool its denylist leaves.
+        assert (agent.tools is None) == (directory == "verification")
 
 
 def test_refactorer_catalogue_reference_exists() -> None:

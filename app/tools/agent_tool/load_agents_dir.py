@@ -9,7 +9,7 @@ dropping it would silently disable the TDD invariant), and the `run`/`session`/`
 scopes (run-scoped memory, Part I5).
 
 Not ported, because their subsystems do not exist here: `color`, `effort`, `isolation`,
-`mcpServers`, `requiredMcpServers`, `initialPrompt`, `criticalSystemReminder`.
+`mcpServers`, `requiredMcpServers`, `initialPrompt`.
 
 Agent definitions from Markdown (`reference/claude-code/src/tools/AgentTool/loadAgentsDir.ts`).
 
@@ -45,6 +45,11 @@ from app.utils.frontmatter_parser import strip_html_comments
 from app.utils.settings.settings import parse_tool_list_from_cli
 
 
+def _critical_system_reminder(fm: Mapping[str, Any], source: str) -> str | None:
+    raw = fm.get("criticalSystemReminder")
+    return raw if source == "built-in" and isinstance(raw, str) and raw.strip() else None
+
+
 class AgentFrontmatterError(ValueError):
     """Raised when an agent definition carries an invalid load-breaking field (such as phase)."""
 
@@ -76,6 +81,10 @@ class AgentDefinition:
     #: Built-in agents only (upstream sets it on Explore and Plan): drop `TDDAGENTS.md` from
     #: the worker's user context.
     omit_claude_md: bool = False
+    #: Built-in agents only (upstream's `criticalSystemReminder_EXPERIMENTAL`, set on the
+    #: verification agent): re-sent to the worker at every turn. Upstream defines built-ins in
+    #: TypeScript; ours are Markdown, so the field is read from a built-in's frontmatter.
+    critical_system_reminder: str | None = None
     #: Kept for `app/utils/frontmatter_parser.py`'s duplicate parser; nothing reads them.
     fork_from: str | None = None
     revert_on_red: bool | None = None
@@ -297,6 +306,7 @@ def load_agent_definition(
         background=background,
         skills=parse_slash_command_tools_from_frontmatter(fm.get("skills")),
         omit_claude_md=source == "built-in" and fm.get("omitClaudeMd") is True,
+        critical_system_reminder=_critical_system_reminder(fm, source),
         source=source,
         base_dir=base_dir,
         raw_frontmatter=dict(fm),

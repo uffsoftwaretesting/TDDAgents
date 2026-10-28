@@ -11,6 +11,8 @@ from app.tool import tool_context_for
 from app.utils.attachments import (
     Attachment,
     get_agent_pending_message_attachments,
+    get_attachments,
+    get_critical_system_reminder_attachment,
     normalize_attachment_for_api,
     wrap_command_text,
 )
@@ -63,3 +65,18 @@ def test_an_explicit_origin_wins_over_the_command_mode():
                                       "commandMode": "task-notification"})
     )
     assert texts == [wrap_command_text("go", "coordinator")]
+
+
+def test_the_critical_reminder_is_attached_at_every_turn():
+    """`getCriticalSystemReminderAttachment` and its `normalizeAttachmentForAPI` case."""
+    import asyncio
+    import dataclasses
+
+    store = AppStateStore()
+    context = dataclasses.replace(_context(store, "a1"), critical_system_reminder="CRITICAL: verify only.")
+    attachment = Attachment("critical_system_reminder", {"content": "CRITICAL: verify only."})
+    assert get_critical_system_reminder_attachment([], context) == [attachment]
+    assert get_critical_system_reminder_attachment([], _context(store, "a1")) == []
+    assert normalize_attachment_for_api(attachment) == ["CRITICAL: verify only."]
+    for _ in range(2):
+        assert attachment in asyncio.run(get_attachments(context, []))

@@ -21,6 +21,7 @@ from app.tdd.coverage_gate import (
 )
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.tdd.run_tests_tool.run_tests_tool import (
+    BACKGROUND_RUN_NOTE,
     LEDGER_EXIT_CODES,
     PYTEST_EXIT_REASONS,
     RunTests,
@@ -614,3 +615,44 @@ def test_the_default_runner_reads_the_coverage_report_back(report, output, readi
         stdout=output, stderr="", exit_code=0, duration=0.1, workspace="local")
     result = asyncio.run(_default_test_runner(".", tool_context_for(AppStateStore(), workspace=ws)))
     assert result.coverage == reading
+
+
+@pytest.mark.parametrize("result, header", [
+    (SuiteExecutionResult(exit_code=0, stdout="out"), "All tests passed."),
+    (SuiteExecutionResult(exit_code=1, stdout="out"), "Tests failed (exit 1)."),
+    (SuiteExecutionResult(
+        exit_code=2, stdout=BANNER + "E   ModuleNotFoundError: No module named 'x'\n!!! Interrupted: 1 error !!!"),
+     "Tests failed (exit 2: collection error — the code under test does not exist yet)."),
+    (SuiteExecutionResult(exit_code=0, stdout="1 passed, 2 skipped"),
+     "Tests ran without failures, but 2 test(s) were skipped"),
+])
+def test_a_background_run_reports_evidence_and_never_the_ledger(result, header):
+    """`shareSetAppState: !isAsync`: a background worker's run makes no phase claim and writes nothing."""
+    import dataclasses
+
+    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
+    before = store.get()
+    ctx = dataclasses.replace(ws_ctx(store), shares_app_state=False)
+    res = asyncio.run(build_run_tests_tool(lambda path: result).call({}, ctx))
+    assert res.content.startswith(header)
+    assert f"\n{BACKGROUND_RUN_NOTE}\n\n--- STDOUT ---\n" in res.content
+    assert "GREEN" not in res.content and "REFACTOR" not in res.content
+    assert (res.is_error, res.exit_code) == (False, result.exit_code)
+    assert store.get() is before
+
+
+def _returning(result: SuiteExecutionResult) -> Any:
+    return lambda path: result
+
+
+def test_a_background_run_names_uncollected_files():
+    import dataclasses
+
+    store = AppStateStore()
+    ctx = dataclasses.replace(ws_ctx(store), shares_app_state=False)
+    for code, prefix in ((0, "Tests ran without failures, but "), (1, "Tests failed (exit 1).\n")):
+        result = SuiteExecutionResult(exit_code=code, collected_files=frozenset())
+        res = asyncio.run(build_run_tests_tool(_returning(result)).call({}, ctx))
+        assert res.content.startswith(prefix)
+        assert "tests/test_foo.py" in res.content.split(BACKGROUND_RUN_NOTE)[0]
+    assert store.get().phase_ledger == PhaseLedger()

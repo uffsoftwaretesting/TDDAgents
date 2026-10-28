@@ -488,6 +488,13 @@ class ToolContext:
     #: `runAgent.ts` -> `systemContextNoGit` (Explore/Plan): the system context goes without
     #: `gitStatus`.
     omit_git_status: bool = False
+    #: Upstream `criticalSystemReminder_EXPERIMENTAL`: the agent definition's short reminder,
+    #: re-sent as a `critical_system_reminder` attachment at every turn of the worker.
+    critical_system_reminder: str | None = None
+    #: Upstream `shareSetAppState`: `False` for a background worker, whose app-state writes
+    #: are discarded (only its task state reaches the root store). RunTests reads it, so a
+    #: background run does not claim to move the TDD ledger.
+    shares_app_state: bool = True
     #: Keys merged into the user context after the session's own, as upstream's
     #: `getCoordinatorUserContext` adds `workerToolsContext` on the coordinator.
     extra_user_context: Mapping[str, str] | None = None

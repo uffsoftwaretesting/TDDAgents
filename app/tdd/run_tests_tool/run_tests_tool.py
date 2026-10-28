@@ -14,6 +14,10 @@ What a run proves depends on the phase (Phase 12, `PhaseLedger.with_test_result`
 - REFACTOR ends with a passing run. Every run measures line + branch coverage with pytest-cov
   (`app/tdd/coverage_gate.py`) and reports it as guidance, not a gate (user decision, 2026-10-28).
 
+A background worker's run (`ToolContext.shares_app_state` is `False`, upstream's
+`shareSetAppState: !isAsync`) reports what the tests did as verification evidence and makes no
+ledger claim, since its app-state writes are discarded.
+
 Only pytest's exit codes 0 (passed) and 1 (tests failed) are observations about the code
 under test — plus one form of exit 2: a collection error raised because the code under test
 does not exist yet (`ModuleNotFoundError`, `ImportError`, `AttributeError` while importing a
@@ -256,6 +260,33 @@ def ledger_status(before: PhaseLedger, after: PhaseLedger, exit_code: int, cover
     return f"REFACTOR is done ({coverage.describe()}): this sub-requirement's cycle is complete."
 
 
+#: A background worker's run (`shareSetAppState: !isAsync`): its app-state writes are discarded.
+BACKGROUND_RUN_NOTE = ("This run does not change the TDD ledger: a background agent's state changes are "
+                       "discarded, so it is verification evidence only.")
+
+
+async def _background_result(exec_result: SuiteExecutionResult, test_path: str, context: ToolContext) -> ToolResult:
+    """The outcome of a run in a background worker: what the tests did, and no phase claim."""
+    code = exec_result.exit_code
+    skipped = exec_result.skipped if exec_result.skipped is not None else skipped_count(
+        f"{exec_result.stdout}\n{exec_result.stderr}")
+    uncollected = await asyncio.to_thread(
+        uncollected_test_files, getattr(context, "workspace", None), test_path, exec_result.collected_files)
+    if code == 0 and skipped > 0:
+        header = f"Tests ran without failures, but {SKIPPED_IS_NOT_PASSING.format(count=skipped)}"
+    elif code == 0 and uncollected:
+        header = f"Tests ran without failures, but {uncollected_message(uncollected)}"
+    elif code == 0:
+        header = "All tests passed."
+    elif code == 1:
+        header = f"Tests failed (exit {code})."
+    else:
+        header = f"Tests failed (exit {code}: collection error — the code under test does not exist yet)."
+    if uncollected and code != 0:
+        header = f"{header}\n{uncollected_message(uncollected)}"
+    return ToolResult(content=format_output(exec_result, f"{header}\n{BACKGROUND_RUN_NOTE}"), exit_code=code)
+
+
 def format_output(exec_result: SuiteExecutionResult, header: str) -> str:
     body = f"{header}\n\n--- STDOUT ---\n{exec_result.stdout}"
     if exec_result.stderr.strip():
@@ -296,6 +327,8 @@ def build_run_tests_tool(
             header = f"Tests could not be evaluated (exit {code}: {reason}). The TDD ledger was not changed."
             return ToolResult(content=format_output(exec_result, header), is_error=True, exit_code=code)
 
+        if not context.shares_app_state:
+            return await _background_result(exec_result, test_path, context)
         before = context.get_app_state()
         changed = False
         if before.phase_ledger.phase == TddPhase.RED:

@@ -45,6 +45,13 @@ Ported from `reference/claude-code/src/utils/attachments.ts` ->
 queued on its task (`queuePendingMessage`) at its next tool round, each becoming a meta
 `queued_command` from the coordinator. The main thread has no agent id and drains nothing.
 
+The `critical_system_reminder` source.
+
+Ported from `reference/claude-code/src/utils/attachments.ts` ->
+`getCriticalSystemReminderAttachment`: an agent definition's `criticalSystemReminder`
+(upstream's `criticalSystemReminder_EXPERIMENTAL`, set on the verification agent) reaches the
+worker's context and is re-sent as a meta message at every turn.
+
 The `changed_files` source: files the agent read that changed under it.
 
 Ported from `reference/claude-code/src/utils/attachments.ts` -> `getChangedFiles` and
@@ -243,6 +250,7 @@ async def get_attachments(
         ("auto_mode", get_auto_mode_attachments),
         ("todo_reminders", get_todo_reminder_attachments),
         ("agent_pending_messages", get_agent_pending_message_attachments),
+        ("critical_system_reminder", get_critical_system_reminder_attachment),
         ("tdd_state", get_tdd_state_attachments),
     ]
     main_thread: list[tuple[str, Source]] = (
@@ -457,6 +465,8 @@ def normalize_attachment_for_api(attachment: Attachment) -> list[str]:
         return [f"Token usage: {data['used']}/{data['total']}; {data['remaining']} remaining"]
     if kind == "async_hook_response":
         return _async_hook_response(data)
+    if kind == "critical_system_reminder":
+        return [str(data["content"])]
     if kind == "tdd_state":
         return _tdd_state(data)
     if kind == "skill_listing":
@@ -497,6 +507,12 @@ def get_agent_pending_message_attachments(messages: Sequence[Message], context: 
         Attachment("queued_command", {"prompt": msg, "origin": {"kind": "coordinator"}, "isMeta": True})
         for msg in drained
     ]
+
+
+def get_critical_system_reminder_attachment(messages: Sequence[Message], context: Any) -> list[Attachment]:
+    """`getCriticalSystemReminderAttachment`: the agent's reminder, re-sent at every turn."""
+    reminder = getattr(context, "critical_system_reminder", None)
+    return [Attachment("critical_system_reminder", {"content": reminder})] if reminder else []
 
 
 DIFF_SNIPPET_MAX_BYTES = 8192
@@ -1129,6 +1145,7 @@ __all__ = [
     "get_auto_mode_attachment_turn_count",
     "get_auto_mode_attachments",
     "get_changed_files",
+    "get_critical_system_reminder_attachment",
     "get_date_change_attachments",
     "get_directories_to_process",
     "get_local_iso_date",

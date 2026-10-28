@@ -247,6 +247,8 @@ def run_agent(
             agent_system_prompt=tuple(system_prompt),
             omit_claude_md=agent_definition.omit_claude_md,
             omit_git_status=agent_type in _NO_GIT_STATUS_AGENT_TYPES,
+            critical_system_reminder=agent_definition.critical_system_reminder,
+            shares_app_state=not is_async,
         )
 
         turns = {"count": 1}

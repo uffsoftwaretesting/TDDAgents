@@ -137,6 +137,14 @@ class TestParseAgentFromMarkdown:
         assert _load(content, source="project").omit_claude_md is False
         assert _load(_md(name="a", description="d"), source="built-in").omit_claude_md is False
 
+    def test_the_critical_reminder_only_for_built_in_agents(self):
+        content = _md(name="a", description="d", criticalSystemReminder="CRITICAL: x")
+        assert _load(content, source="built-in").critical_system_reminder == "CRITICAL: x"
+        assert _load(content, source="project").critical_system_reminder is None
+        for raw in ("  ", 3):
+            assert _load(_md(name="a", description="d", criticalSystemReminder=raw),
+                         source="built-in").critical_system_reminder is None
+
     def test_auto_memory_adds_the_file_tools(self, monkeypatch):
         monkeypatch.setenv("TDDAGENTS_ENABLE_AUTO_MEMORY", "1")
         defn = _load(_md(name="a", description="d", memory="run", tools=["Grep", "ReadFile"]))

@@ -247,3 +247,22 @@ def test_read_is_upstreams_default_template():
             .replace("${lineFormat}", constant("LINE_FORMAT_INSTRUCTION")).replace("${BASH_TOOL_NAME}", "Bash")
             .replace("Claude Code", "TDDAgents"))
     assert build_read_file_tool().prompt == body
+
+
+@needs_reference
+def test_the_verification_agent_is_upstreams():
+    """`verificationAgent.ts`: the prompt verbatim, upstream's `whenToUse`, flags and reminder."""
+    source = (TOOLS / "AgentTool" / "built-in" / "verificationAgent.ts").read_text()
+    body = source.split("const VERIFICATION_SYSTEM_PROMPT = `", 1)[1].split("`\n\nconst ", 1)[0]
+    body = (body.replace("${BASH_TOOL_NAME}", "Bash").replace("${WEB_FETCH_TOOL_NAME}", "WebFetch")
+            .replace("\\`", "`").replace("\\\\", "\\").replace("CLAUDE.md", "TDDAGENTS.md"))
+    when = re.search(r"VERIFICATION_WHEN_TO_USE =\s*'([^']*)'", source)
+    reminder = re.search(r"criticalSystemReminder_EXPERIMENTAL:\s*'([^']*)'", source)
+    assert when is not None and reminder is not None
+    agent = _agent("verification")
+    assert agent.prompt == body  # type: ignore[attr-defined]
+    assert agent.description == when.group(1)  # type: ignore[attr-defined]
+    assert agent.critical_system_reminder == reminder.group(1)  # type: ignore[attr-defined]
+    assert (agent.background, agent.model, agent.tools) == (True, "inherit", None)  # type: ignore[attr-defined]
+    assert agent.disallowed_tools == ("Agent", "WriteFile", "Edit")  # type: ignore[attr-defined]
+    assert "Claude" not in agent.prompt  # type: ignore[attr-defined]
