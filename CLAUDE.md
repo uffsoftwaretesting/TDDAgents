@@ -1205,8 +1205,15 @@ in the plan's Phase 13 outcome.
 
 *Divergences, recorded:*
 - `git init` is TDDAgents' (upstream is opened in an existing repository);
-- the Bash prompt's commit steps pass the message with `-m` instead of upstream's
-  `$(cat <<EOF …)`, which the Bash security check refuses; the PR section is not ported;
+- the Bash prompt's commit section is upstream's verbatim (checked line by line against
+  `tools/BashTool/prompt.ts`), with tool names substituted and no attribution line. Its HEREDOC
+  note becomes "pass the message with `-m`", because `$(cat <<'EOF' …)` is refused by the
+  command-injection check. The PR section is not ported (no `gh` workflow here);
+- the venv reaches commands as environment variables plus a `PATH` re-prepend after the login
+  profile. Upstream injects its session environment script (where a `CLAUDE_ENV_FILE`
+  activation lives) after the shell snapshot and before the command
+  (`utils/shell/bashProvider.ts`): the same order, through the environment instead of a
+  script;
 - sessions created before Phase 13 under `.tddagents/runs/` are not migrated.
 
 ### The three things that changed most
