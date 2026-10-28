@@ -11,8 +11,10 @@ prompt — and reports what the ledger and the plan observed.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
+
+from langchain_core.messages import HumanMessage
 
 from app.cli.print import (
     RUN_ID_NAMESPACE,
@@ -44,10 +46,42 @@ def item_run_id(session_id: Any, idx: int) -> str:
     return f"loop-{uuid.uuid5(RUN_ID_NAMESPACE, f'{session_id}:{idx}').hex}"
 
 
+#: How many TDD stop-hook blocks the scripted "user" waits through before pressing Esc.
+PATIENCE = 1
+
+
+def with_a_patient_user(deps: Any, patience: int = PATIENCE) -> Any:
+    """
+    The production stop hook never gives up (Phase 12), so a scripted model that keeps saying
+    "done" would be sent back forever. Here the user presses Esc once the model has ignored
+    `patience` blocks: the turn aborts, the way it does in the REPL. A model that completes
+    its cycle is never blocked, so this changes nothing for it.
+    """
+    blocks = 0
+    model = deps.call_model
+
+    async def call_model(state: Any, config: Any) -> Any:
+        nonlocal blocks
+        last = state.messages[-1] if state.messages else None
+        if isinstance(last, HumanMessage) and "TDD cycle incomplete" in str(last.content):
+            blocks += 1
+            if blocks > patience:
+                state.tool_context.cancel.cancel()
+        async for message in model(state, config):
+            yield message
+
+    return replace(deps, call_model=call_model)
+
+
 async def run_item(sub_req: str, idx: int, state: Any, *, workspace: Any = None, **run_options: Any) -> ItemOutcome:
     """Run `sub_req` as a one-item plan; `state` carries the `session_id`."""
     session_id = state.get("session_id")
     ws = workspace if workspace is not None else session_workspace(str(session_id))
+    if run_options.get("deps") is None:
+        import app.query.deps as production
+
+        run_options["deps"] = production.get_production_deps()
+    run_options["deps"] = with_a_patient_user(run_options["deps"])
     async with open_session_run(run_id=item_run_id(session_id, idx), plan=TddPlan.from_texts([sub_req]),
                                 workspace=ws, plan_index=idx, **run_options) as run:
         reason = await begin_session(run, sub_req)

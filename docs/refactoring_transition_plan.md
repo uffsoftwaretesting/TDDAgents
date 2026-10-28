@@ -494,6 +494,9 @@ sub-requirement has been observed Red → Green.
 - **The ledger fields are renamed** (`tests_written`, `green_passed`, `refactor_passed`,
   `coverage`), and `events.jsonl` records them.
 - **The mutation gate counts timeouts once they are re-verified alone.**
+- **The TDD stop hook never gives up:** no latch, in any phase, headless included (as
+  upstream). A turn ends early only on pause, abort, a configured `continue: false` or an
+  error.
 
 ---
 

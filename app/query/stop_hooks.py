@@ -15,9 +15,10 @@ have no equivalent here; the summary message and notifications are UI.
 
 1. **The TDD step runs first**, on the main thread: the plan's advance
    (`app/tdd/plan_advance.py`, Phase 11) and then, for the current item,
-   `tdd_phase_incomplete_hook`. Its latch is `stop_hook_active`, per item: once it has
-   blocked for an item, a second refusal prevents continuation rather than looping. A worker
-   (an `agent_id`) is not guarded by it; the coordinator is.
+   `tdd_phase_incomplete_hook`. It has no latch (Phase 12, user decision, as upstream's Stop
+   hooks): every stop of an incomplete cycle is sent back with what is missing, until RunTests
+   observes the cycle, the user pauses or aborts, or an error ends the turn. A worker (an
+   `agent_id`) is not guarded by it; the coordinator is.
 2. **Configured hooks can add a block, never clear one.** Their blocking errors are added to
    the TDD hook's; a configured `continue: false` stops the run as `stop_hook_prevented`,
    which the runner records as a failed sub-requirement, not as `completed`. Nothing a

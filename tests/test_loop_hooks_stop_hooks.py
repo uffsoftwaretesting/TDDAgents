@@ -54,9 +54,7 @@ TDD_RED_MESSAGE = (
 
 def make_state(dispatcher: Any = None, ledger: PhaseLedger = RED, *, stop_hook_active: bool | None = None,
                agent_id: str | None = None, agent_type: str | None = None, messages: tuple[Any, ...] = ()) -> Any:
-    # A live `stop_hook_active` follows a block, which recorded where it blocked.
-    blocked_at = (None, ledger.phase) if stop_hook_active else None
-    store = AppStateStore(AppState(phase_ledger=ledger, tdd_blocked_at=blocked_at,
+    store = AppStateStore(AppState(phase_ledger=ledger,
                                    tool_permission_context=ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)))
     ctx = tool_context_for(store, hook_dispatcher=dispatcher, agent_id=agent_id, agent_type=agent_type)
     state = initial_loop_state(messages or (HumanMessage(content="task"),), ctx)
@@ -142,11 +140,13 @@ def test_tdd_hook_blocks_first_and_configured_blocks_are_added():
     assert [m.content for m in result.blocking_errors] == [TDD_RED_MESSAGE, "Stop hook feedback:\nlint first"]
 
 
-def test_the_latch_prevents_without_running_configured_hooks():
+def test_the_tdd_hook_keeps_blocking_when_stop_hook_active_and_configured_hooks_still_run():
+    """Phase 12 (user decision, as upstream): `stop_hook_active` is no latch for the TDD hook."""
     d = stop([AggregatedHookResult(blocking_error=BLOCK)])
     result = run_stop(make_state(d, stop_hook_active=True))
-    assert result == StopHookResult(prevent_continuation=True)
-    assert d.seen == []
+    assert result.prevent_continuation is False
+    assert [m.content for m in result.blocking_errors] == [TDD_RED_MESSAGE, "Stop hook feedback:\nlint first"]
+    assert [event for event, _ in d.seen] == ["Stop"]
 
 
 def test_configured_continue_false_stops_rather_than_completes():
@@ -179,11 +179,16 @@ def test_a_worker_with_no_agent_type_reports_an_empty_one():
 
 
 class Model:
-    def __init__(self) -> None:
+    """Claims it is done every turn; after `claims` turns the user presses Esc (the turn aborts)."""
+
+    def __init__(self, claims: int = 3) -> None:
         self.calls = 0
+        self.claims = claims
 
     async def __call__(self, state: Any, config: Any) -> AsyncIterator[Any]:
         self.calls += 1
+        if self.calls > self.claims:
+            state.tool_context.cancel.cancel()
         yield AIMessage(content="I am done.")
 
 
@@ -199,16 +204,18 @@ def loop_deps(model: Model) -> LoopDeps:
                     uuid=lambda: str(uuid.uuid4()), now=time.time, emit_event=lambda e: None)
 
 
-@pytest.mark.parametrize("script, model_calls", [
-    ([AggregatedHookResult(permission_behavior="allow")], 2),  # "approves": TDD blocks, then the latch
-    ([], 2),  # says nothing: TDD blocks, then the latch
-    ([AggregatedHookResult(prevent_continuation=True, stop_reason="ship it")], 1),  # continue: false stops at once
+@pytest.mark.parametrize("script, terminal_reason, model_calls", [
+    # "approves": the TDD hook sends every claim back, until the user aborts
+    ([AggregatedHookResult(permission_behavior="allow")], Terminal.ABORTED_STREAMING, 4),
+    ([], Terminal.ABORTED_STREAMING, 4),  # says nothing: the same
+    # continue: false stops at once, and never as `completed`
+    ([AggregatedHookResult(prevent_continuation=True, stop_reason="ship it")], Terminal.STOP_HOOK_PREVENTED, 1),
 ])
-def test_no_configured_hook_completes_an_incomplete_cycle(script, model_calls):
+def test_no_configured_hook_completes_an_incomplete_cycle(script, terminal_reason, model_calls):
     model = Model()
     state = make_state(stop(script))
     terminal = asyncio.run(drain(run_loop(state, CONFIG, loop_deps(model))))
-    assert terminal.reason == Terminal.STOP_HOOK_PREVENTED
+    assert terminal.reason == terminal_reason
     assert model.calls == model_calls  # never `completed`
 
 
@@ -225,10 +232,10 @@ def test_a_real_command_hook_that_approves_cannot_complete_red(tmp_path: Path):
     hook = CommandHook(command=f"{sys.executable} {script}")
     snapshot = HooksConfigSnapshot(hooks={"Stop": (HookMatcher(hooks=(hook,)),)})
     dispatcher = HookDispatcher(snapshot=snapshot, session_id="s", cwd=str(tmp_path), project_dir=str(tmp_path))
-    model = Model()
+    model = Model(claims=2)
     terminal = asyncio.run(drain(run_loop(make_state(dispatcher), CONFIG, loop_deps(model))))
-    assert terminal.reason == Terminal.STOP_HOOK_PREVENTED
-    assert model.calls == 2
+    assert terminal.reason == Terminal.ABORTED_STREAMING
+    assert model.calls == 3
 
 
 def test_a_real_command_hook_exit_2_blocks_a_complete_cycle_once(tmp_path: Path):

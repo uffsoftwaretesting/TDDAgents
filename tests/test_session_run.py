@@ -102,10 +102,11 @@ def test_headless_works_through_the_whole_plan_in_one_conversation(python_worksp
 
 
 def test_headless_stops_at_the_first_unfinished_item(python_workspace, tmp_path):
+    # Both claims are sent back (Phase 12); the script then runs out while the hook still refuses.
     turns = [[AIMessage(content="I am done")], [AIMessage(content="really done")]]
     outcome = asyncio.run(run_headless("s2", "spec", ["add", "sub"], workspace=python_workspace,
                                        **options(tmp_path, scripted(turns, []))))
-    assert outcome.terminal == Terminal.STOP_HOOK_PREVENTED
+    assert outcome.terminal == Terminal.MODEL_ERROR
     assert outcome.completed is False
     assert outcome.plan.done_count == 0
 
@@ -153,7 +154,7 @@ def test_a_resumed_session_keeps_its_saved_plan_and_restarts_the_ledger(python_w
             assert run.ctx.tdd_plan_path == str(plan_path(run_id, str(python_workspace.root)))
             return await begin_session(run, "fresh", "resumed")
 
-    assert asyncio.run(go()) == Terminal.STOP_HOOK_PREVENTED
+    assert asyncio.run(go()) == Terminal.MODEL_ERROR  # both stops refused, then the script ran out
     assert seen[0].messages[0].content == "fresh"
 
 

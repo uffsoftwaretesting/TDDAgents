@@ -65,18 +65,27 @@ def make_test_tool(name: str, *, is_impl: bool = False, is_test: bool = False) -
 
 
 class ScriptedModel:
-    """Fake model yielding a sequence of scripted turns."""
+    """
+    Fake model yielding a sequence of scripted turns. When the script runs out it aborts the
+    turn, as a user's Esc would: since Phase 12 the TDD stop hook never gives up, so a model
+    that keeps claiming it is done would otherwise be sent back forever.
+    """
 
     def __init__(self, turns: list[list[AIMessage]]) -> None:
         self.turns = list(turns)
+        self.stops_blocked = 0
 
     async def __call__(self, state, config) -> AsyncIterator[AIMessage]:
+        if state.messages and isinstance(state.messages[-1], HumanMessage) and \
+                str(state.messages[-1].content).startswith("TDD cycle incomplete"):
+            self.stops_blocked += 1
         if self.turns:
             messages = self.turns.pop(0)
             for m in messages:
                 yield m
         else:
-            yield AIMessage(content="default stop")
+            state.tool_context.cancel.cancel()
+            yield AIMessage(content="script exhausted")
 
 
 # ==============================================================================
@@ -260,7 +269,8 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
             assert terminated is not None
             # Must NOT reach COMPLETED
             assert terminated.reason != Terminal.COMPLETED
-            assert terminated.reason == Terminal.STOP_HOOK_PREVENTED
+            assert terminated.reason == Terminal.ABORTED_STREAMING
+            assert model.stops_blocked == 2  # every claim of "done" was sent back
             assert not store.get().phase_ledger.is_cycle_complete
 
         asyncio.run(go())
@@ -273,7 +283,8 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
             [AIMessage(content="I insist I am done.")],
         ])
         terminated, store = asyncio.run(self._run(model, [SuiteExecutionResult(exit_code=0, coverage=MET)]))
-        assert terminated.reason == Terminal.STOP_HOOK_PREVENTED
+        assert terminated.reason == Terminal.ABORTED_STREAMING
+        assert model.stops_blocked == 2
         assert store.get().phase_ledger == PhaseLedger()
 
     @pytest.mark.parametrize("results, ledger_phase", [
@@ -292,8 +303,10 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
         turns = [[AIMessage(content="", tool_calls=[call("WriteTest", "w")])]]
         turns += [[AIMessage(content="", tool_calls=[call("RunTests", f"r{n}")])] for n in range(len(results))]
         turns += [[AIMessage(content="done")], [AIMessage(content="really done")]]
-        terminated, store = asyncio.run(self._run(ScriptedModel(turns), results))
-        assert terminated.reason == Terminal.STOP_HOOK_PREVENTED
+        model = ScriptedModel(turns)
+        terminated, store = asyncio.run(self._run(model, results))
+        assert terminated.reason == Terminal.ABORTED_STREAMING
+        assert model.stops_blocked == 2  # "done" and "really done" were both sent back
         assert store.get().phase_ledger.phase == ledger_phase
         assert not store.get().phase_ledger.is_cycle_complete
 

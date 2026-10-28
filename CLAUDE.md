@@ -81,8 +81,10 @@ Three things about the loop are load-bearing and easy to undo by accident:
   unbounded, it stays unbounded here. So: **no turn limit** and no `max_turns` (upstream's is
   `number | undefined` and falsy means unbounded), but the **API retry layer keeps
   `withRetry`'s attempt ceiling**, because a provider that never recovers would otherwise hang
-  a run with no exit. `stop_hook_active` and `has_attempted_reactive_compact` remain latches,
-  not budgets, and must not be mistaken for removable. A ceiling that is in neither category
+  a run with no exit. `has_attempted_reactive_compact` remains a latch,
+  not a budget, and must not be mistaken for removable. `stop_hook_active` is still set and
+  passed to hooks as upstream does, but **the TDD stop hook no longer latches on it** (Phase 12,
+  user decision 2026-10-28): it sends every early stop back, as upstream's Stop hooks may. A ceiling that is in neither category
   is still forbidden — invent nothing.
 - **`run_loop` yields `Terminated` as its last event** rather than returning it. That is the
   single forced divergence from the reference: PEP 525 forbids a value in an async
@@ -1115,13 +1117,20 @@ mandatory and coverage-checked. The three barriers stay; the rules they enforce 
   - The threshold reaches prompts as `{{COVERAGE_THRESHOLD}}` (`TDD_PROMPT_VARS`), so the
     figure is written in one place.
   - `tests/test_tdd_phase12_prompts.py` scans every prompt for the old fail-first rule.
-- **The stop hook's latch is per item and phase** (`AppState.tdd_blocked_at`, user decision).
-  - It re-arms when the phase moved since its last block, so an item gets at most three
-    nudges, and a stop with no progress still ends the turn.
-  - Found by the first live run (palindrome, gpt-5-mini), which completed 6 of 13 items with
-    full cycles at 100% coverage. On item 7 the model *said* it had run REFACTOR's tests
-    without running them. The ledger refused, but the old one-nudge-per-item latch had
-    already been spent at GREEN, so the session ended.
+- **The TDD stop hook never gives up** (user decision, as upstream): it has no latch. Every stop
+  of an incomplete cycle, in any phase, is sent back with what is missing. A turn ends early
+  only on `/pause`, Esc, a configured hook's `continue: false`, or a model/API error. A
+  headless run therefore has no limit of its own, as upstream (the retry layer keeps its
+  ceiling).
+  - It got there in two steps, both found by live palindrome runs with gpt-5-mini.
+  - The first run completed 6 of 13 items with full cycles at 100% coverage. On item 7 the model
+    *said* it had run REFACTOR's tests without running them, and the one-nudge-per-item latch,
+    already spent at GREEN, ended the session.
+  - A per-item-and-phase latch then let a run complete 10 of 11 items. It still ended on item
+    11 when the model stopped twice in REFACTOR, although the project's 30 tests all passed.
+    The user then removed the latch: REFACTOR and GREEN must happen.
+  - Tests that drive a model which never finishes now end the turn as a user's Esc would
+    (`tests/session_run_helpers.with_a_patient_user`, the scripted models' "script exhausted").
 - **The gate** counts timeouts: each is re-run alone, and one that still hangs counts as
   detected (`scripts/mutmut_score.py --timeouts-reverified`). The integration tests' venv is
   built once (`tests/conftest.py::shared_test_venv`).

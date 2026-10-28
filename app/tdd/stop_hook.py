@@ -19,7 +19,6 @@ PostToolUse hooks that used to live here:
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage
@@ -51,17 +50,11 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
     """
     Stop hook that blocks turn completion if the TDD cycle is incomplete (Part D5).
 
-    The stop_hook_active contract, per sub-requirement (Phase 11) and phase (Phase 12):
-    - If the hook already blocked for the current item in its current phase
-      (`state.stop_hook_active` and `AppState.tdd_blocked_at` is that item and phase), it
-      declines to block again and sets prevent_continuation=True, terminating with
-      STOP_HOOK_PREVENTED rather than COMPLETED. The cycle has three phases, so each item gets
-      at most three nudges; a stop without progress since the last one ends the turn. Without a
-      plan the item is `None`, which is the one-block-per-phase latch of Part D5.
-    - Otherwise:
-      - If ledger.is_cycle_complete: cycle complete, allows termination (COMPLETED).
-      - If cycle incomplete: returns blocking_errors explaining why the model cannot stop,
-        naming the current sub-requirement when there is a plan.
+    It never gives up (Phase 12, user decision 2026-10-28, as upstream's Stop hooks, which may
+    block every stop): while the cycle is incomplete, every stop is blocked with what is still
+    missing, naming the current sub-requirement when there is a plan. `stop_hook_active` is
+    no latch here; a turn ends early only on `/pause`, a configured hook's `continue: false`,
+    an abort or an error. A complete cycle allows termination (COMPLETED).
     """
     app_state = state.tool_context.get_app_state()
     ledger = app_state.phase_ledger
@@ -70,14 +63,6 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
         return StopHookResult()
 
     current = app_state.tdd_plan.current
-    item_id = current.id if current is not None else None
-    blocked_at = (item_id, ledger.phase)
-    if state.stop_hook_active and app_state.tdd_blocked_at == blocked_at:
-        # Honour stop_hook_active: prevent continuation to stop the turn without retrying forever
-        return StopHookResult(prevent_continuation=True)
-    state.tool_context.set_app_state(lambda s: replace(s, tdd_blocked_at=blocked_at))
-
-    # First block: build explanation of why turn cannot exit
     msg = incomplete_cycle_message(ledger)
     if current is not None:
         msg = f"Current sub-requirement {current.id}: {current.text}\n\n{msg}"

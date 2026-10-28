@@ -200,4 +200,7 @@ def test_a_lying_summary_cannot_complete_an_unobserved_cycle(tmp_path, monkeypat
     tdd = [m for m in after_boundary if (m.additional_kwargs.get("attachment") or {}).get("type") == "tdd_state"]
     assert tdd and tdd[-1].additional_kwargs["attachment"]["tests_written"] is False
     assert events[-1] != Terminated(reason=Terminal.COMPLETED)
-    assert events[-1] == Terminated(reason=Terminal.STOP_HOOK_PREVENTED)
+    # The hook refused both claims (Phase 12: it never gives up), so the script ran out while it
+    # was still refusing: the run ends on the model error, never `completed`.
+    assert "TDD cycle incomplete" in str(model.seen[1].messages[-1].content)
+    assert events[-1] == Terminated(reason=Terminal.MODEL_ERROR)

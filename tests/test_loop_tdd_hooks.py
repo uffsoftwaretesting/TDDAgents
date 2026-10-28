@@ -5,6 +5,7 @@ Tests for tdd_phase_incomplete stop hook and stop_hook_active contract (Part D5)
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from typing import Any
 
 import pytest
@@ -79,51 +80,37 @@ def test_the_hook_names_what_the_cycle_still_needs(ledger, message):
     asyncio.run(go())
 
 
-def test_hook_honours_stop_hook_active_contract():
+def test_the_hook_never_gives_up_even_when_stop_hook_active():
+    """Phase 12 (user decision, as upstream): `stop_hook_active` is no latch; the block repeats."""
 
     async def go():
-        # The hook already blocked here (no plan, RED); `stop_hook_active` says so.
-        store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False),
-                     tdd_blocked_at=(None, TddPhase.RED))
-        )
-        ctx = tool_context_for(store)
-        state = initial_loop_state((HumanMessage(content="task"),), ctx)
-        # Simulate that the hook already blocked on this context
-        state_with_active = type(state)(
-            messages=state.messages,
-            tool_context=state.tool_context,
-            phase_ledger=state.phase_ledger,
-            compaction_tracking=state.compaction_tracking,
-            has_attempted_reactive_compact=state.has_attempted_reactive_compact,
-            stop_hook_active=True,
-            turn_count=state.turn_count,
-            transition=state.transition,
-        )
+        store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
+        state = initial_loop_state((HumanMessage(content="task"),), tool_context_for(store))
         config = build_run_config("test-run", postgres_checkpointing=False)
-
-        result = await tdd_phase_incomplete_hook(state_with_active, config)
-        # Must NOT return blocking errors again (prevents infinite loop!)
-        assert result.prevent_continuation is True
-        assert len(result.blocking_errors) == 0
+        for active in (None, True, True):
+            result = await tdd_phase_incomplete_hook(dataclasses.replace(state, stop_hook_active=active), config)
+            assert result.prevent_continuation is False
+            assert [m.content for m in result.blocking_errors] == [RED_MSG]
 
     asyncio.run(go())
 
 
-def test_stop_hook_in_full_loop_terminates_without_infinite_loop():
+def test_every_early_stop_in_the_loop_is_sent_back():
     async def go():
-        store = AppStateStore(
-            AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False))
-        )
+        store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
         ctx = tool_context_for(store)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
         config = build_run_config("test-run", postgres_checkpointing=False)
+        claims = 4
 
-        # Model repeatedly says "I'm done" without calling any tools
-        model = FakeModel([
-            [AIMessage(content="I claim done turn 1")],
-            [AIMessage(content="I claim done turn 2")],
-        ])
+        class ClaimsDone:
+            calls = 0
+
+            async def __call__(self, state, config):
+                ClaimsDone.calls += 1
+                if ClaimsDone.calls > claims:  # the user presses Esc
+                    state.tool_context.cancel.cancel()
+                yield AIMessage(content=f"I claim done ({ClaimsDone.calls})")
 
         async def run_tools_noop(calls, assistant_msgs, state, config):
             if False:
@@ -135,23 +122,13 @@ def test_stop_hook_in_full_loop_terminates_without_infinite_loop():
             from app.query.state import CompactionResult
             return CompactionResult(compacted=False, messages=s.messages)
 
-        deps = LoopDeps(
-            call_model=model,
-            compact=fake_compact,
-            uuid=lambda: "u1",
-            now=lambda: 1000.0,
-            run_tools=run_tools_noop,
-            stop_hooks=tdd_phase_incomplete_hook,
-            emit_event=events.append,
-        )
-
+        deps = LoopDeps(call_model=ClaimsDone(), compact=fake_compact, uuid=lambda: "u1", now=lambda: 1000.0,
+                        run_tools=run_tools_noop, stop_hooks=tdd_phase_incomplete_hook, emit_event=events.append)
         terminated = await drain(run_loop(state, config, deps))
 
-        # Because model did not fix the failing test, turn 1 blocked, turn 2 prevented continuation!
-        assert terminated.reason == Terminal.STOP_HOOK_PREVENTED
-        # Transition events contain STOP_HOOK_BLOCKING on turn 1
+        assert terminated.reason == Terminal.ABORTED_STREAMING
         reasons = [e.reason for e in events if hasattr(e, "reason")]
-        assert Continue.STOP_HOOK_BLOCKING in reasons
-        assert Terminal.STOP_HOOK_PREVENTED in reasons
+        assert reasons.count(Continue.STOP_HOOK_BLOCKING) == claims
+        assert Terminal.STOP_HOOK_PREVENTED not in reasons
 
     asyncio.run(go())

@@ -552,11 +552,12 @@ def test_runner_defaults_to_the_production_deps(monkeypatch, python_workspace):
     monkeypatch.setattr(factory, "get_production_deps", lambda: deps)
     result = asyncio.run(run_item("spec", 0, {"session_id": "abc"}, workspace=python_workspace))
     assert seen[0][0].tool_context.workspace is python_workspace
-    # Phase 4: the production stop hooks enforce barrier 3. A model that stops without an
-    # observed Red->Green is refused once, then the latch ends the run — never `completed`.
-    assert len(seen) == 2
+    # Phase 4: the production stop hooks enforce barrier 3. A model that stops without the
+    # cycle is refused every time (Phase 12: no latch) until the user aborts — never `completed`.
+    assert len(seen) == 3
     assert "tests_written=False" in str(seen[1][0].messages[-1].content)
-    assert result.terminal_reason == "stop_hook_prevented"
+    assert "tests_written=False" in str(seen[2][0].messages[-1].content)
+    assert result.terminal_reason == "aborted_streaming"
     assert result.status == "failed"
 
 
@@ -566,7 +567,7 @@ def test_runner_tolerates_a_workspace_without_a_run_dir(make_fake_workspace):
     ws = make_fake_workspace()
     assert not hasattr(ws, "run_dir")
     result = asyncio.run(run_item("x", 0, {"session_id": "s"}, workspace=ws, deps=_recording_deps([])))
-    assert result.terminal_reason == "stop_hook_prevented"
+    assert result.terminal_reason == "aborted_streaming"
 
 
 def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):

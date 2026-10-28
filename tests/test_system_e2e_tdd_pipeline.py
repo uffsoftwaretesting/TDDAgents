@@ -4,7 +4,7 @@ End-to-End System Integration Test Suite for TDDAgents.
 Validates the integrated multi-turn lifecycle across Parts D, E, F, G, and H:
 1. End-to-end autonomous TDD cycle (Red -> Green -> Refactor) using run_loop,
    LocalWorkspace, real file edits, test execution, and phase transitions.
-2. Premature exit enforcement via UnifiedStopHooks latching and STOP_HOOK_PREVENTED.
+2. Premature exit enforcement: the stop hooks send every early stop back (Phase 12: no latch).
 3. Cooperative cancellation and abort tree cascading with history-repair placeholder injection.
 4. Optional live LLM roundtrip if OPENAI_API_KEY is configured in the environment or .env.
 """
@@ -274,13 +274,13 @@ async def test_e2e_stop_hook_blocks_premature_exit_and_prevents_infinite_loop(tm
 
     terminated = await drain(run_loop(state, config, deps))
 
-    # Second exit attempt terminated with STOP_HOOK_PREVENTED, halting infinite loop
-    assert terminated.reason == Terminal.STOP_HOOK_PREVENTED
+    # Both exit attempts were sent back (the hook never gives up); the scripted model then ran
+    # out of turns while the hook was still refusing, so the run ends on that model error.
+    assert terminated.reason == Terminal.MODEL_ERROR
 
-    # Ensure turn 1 recorded STOP_HOOK_BLOCKING transition
     reasons = [getattr(e, "reason", None) for e in events_list]
-    assert Continue.STOP_HOOK_BLOCKING in reasons
-    assert Terminal.STOP_HOOK_PREVENTED in reasons
+    assert reasons.count(Continue.STOP_HOOK_BLOCKING) == 2
+    assert Terminal.STOP_HOOK_PREVENTED not in reasons and Terminal.COMPLETED not in reasons
 
 
 # ============================================================================

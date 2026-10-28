@@ -130,13 +130,15 @@ def test_a_developer_before_red_is_refused_and_the_coordinator_is_told(python_wo
             [_call("Agent", "a1", description="green", subagent_type="developer", prompt="Implement add.")],
             [AIMessage(content="stop")],
             [AIMessage(content="stop again")],
+            [AIMessage(content="and again")],
         ],
     }
     seen: list[Any] = []
     result = _run(python_workspace, tmp_path, scripts, seen)
     second = [state for kind, state in seen if kind is None][1]
     assert "Agent 'developer' cannot start: Cannot transition to GREEN" in _tool_results(second)
-    assert result.terminal_reason == "stop_hook_prevented"
+    # Every stop is sent back (Phase 12) until the user aborts; never `completed`.
+    assert result.terminal_reason == "aborted_streaming"
     assert not any(kind == "developer" for kind, _ in seen)
 
 

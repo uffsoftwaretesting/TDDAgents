@@ -183,6 +183,10 @@ class Model:
 
     async def __call__(self, state: Any, config: Any) -> AsyncIterator[Any]:
         self.seen.append(state)
+        if not self.turns and not state.tool_context.get_app_state().tdd_plan.is_complete:
+            # Out of script with work left: the stop hook would send it back forever (Phase 12),
+            # so the scripted user presses Esc.
+            state.tool_context.cancel.cancel()
         turn = self.turns.pop(0) if self.turns else [AIMessage(content="stop")]
         if callable(turn):
             turn = await turn(state)
