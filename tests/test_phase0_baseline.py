@@ -710,3 +710,16 @@ def test_the_runner_refreshes_the_pool_only_when_the_phase_moves(python_workspac
     # Identity is what the engine compares: unchanged phase, unchanged tuple.
     assert seen[0].tool_context.tools is seen[1].tool_context.tools
     assert "WriteFile" in rosters[-1]
+
+
+def test_the_shared_test_venv_is_built_once_and_reused(tmp_path):
+    # The integration tests' venv is reused across pytest sessions (and mutmut's forked
+    # children), so fixture setup never hides inside a mutant's time budget.
+    from tests.conftest import shared_test_venv
+
+    first = shared_test_venv(tmp_path)
+    marker = first / "built-once"
+    marker.write_text("")
+    assert shared_test_venv(tmp_path) == first and marker.exists()
+    assert subprocess.run([str(first / "bin" / "python"), "-c", "import pytest"], check=False).returncode == 0
+    assert not [p for p in tmp_path.iterdir() if "-building-" in p.name]

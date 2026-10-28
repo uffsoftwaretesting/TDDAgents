@@ -1126,8 +1126,10 @@ $P/flake8 app tests
 $P/mypy
 
 # 4. Mutation testing — do the tests actually assert anything?
-$P/mutmut run          # NOT `python -m mutmut`; see the note below
-$P/python scripts/mutmut_score.py   # the gate score by status, and the triage list
+TMPDIR=<a dir on disk> $P/mutmut run --max-children 8    # NOT `python -m mutmut`; see the notes
+$P/python scripts/mutmut_score.py --timeouts             # the timed-out mutants
+$P/mutmut run --max-children 1 <those names>             # re-run each alone, on an idle host
+$P/python scripts/mutmut_score.py --timeouts-reverified  # the gate score, and the triage list
 ```
 
 **Step 1 — write the tests with the code.** A module that sits behind a protocol seam is
@@ -1140,9 +1142,19 @@ findings and mypy checks all of `app/` strictly (only the seam modules below are
 `ignore_errors`). Keep it that way. Config lives in `setup.cfg` (flake8,
 `max-line-length = 120`) and `pyproject.toml` (mypy `strict = true`, pytest, mutmut).
 
-**Step 4 — the gate is ≥ 90% killed**, computed as `killed / (total − timeout)`. Then
-**triage every survivor**: kill it with a test, or write down why it is equivalent or
-unreachable. A survivor left unexamined is the one case this whole gate exists to catch.
+**Step 4 — the gate is ≥ 90% detected**, computed as `(killed + timeout) / total`, and a
+timeout counts only once it is re-verified (since Phase 11, user decision; until then
+timeouts were dropped from the denominator). mutmut times a mutant out by wall clock, so a
+loaded host turns slow-but-passing runs into timeouts. Re-run every timeout alone on an idle
+host: one that now passes is a survivor, one that fails is killed, and one that still hangs
+is a confirmed hang, counted as detected. `scripts/mutmut_score.py` gives no score until
+`--timeouts-reverified` says this was done. Then **triage every survivor**: kill it with a
+test, or write down why it is equivalent or unreachable. A survivor left unexamined is the
+one case this whole gate exists to catch.
+
+**Watch the host during a run.** Report an overloaded host (load far above the cores,
+available memory under ~4 GB) instead of reading its numbers, and lower `--max-children`.
+The 12-core / 19 GB workstation reached 17 GB with 12 children; 8 is the agreed setting.
 
 ### Exempt: the seam modules
 
@@ -1426,6 +1438,13 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
   run only with `RUN_LIVE_LLM_TESTS=1`; the key comes from the repo's gitignored `.env` via
   `tests/conftest.py::read_dotenv_key`. `config.py` calls `load_dotenv()`, so a key in `.env`
   would otherwise silently turn skip conditions into live calls.
+- **The integration tests' venv is built once and reused** (`tests/conftest.py::shared_test_venv`,
+  under `$TMPDIR`, behind a file lock). mutmut's per-mutant time budget counts only the
+  tests' call phase, never fixture setup, and each mutant is a new pytest session. A venv
+  built per session (2.1 s and 15 MB each) was therefore rebuilt per mutant, invisibly to
+  the budget: 12 children running pip at once turned passing mutants into false timeouts.
+  It is built with plain `venv` + `pip`, never through the mutated `ensure_session_python`,
+  so no mutant can corrupt the shared copy.
 - **Real-pytest integration tests use the `python_workspace` fixture**, a `LocalWorkspace` whose
   commands run in one session-scoped venv (`session_python`). A bare `LocalWorkspace` has no
   `python` with pytest on `PATH` on hosts without one, and `RunTests` then exits 127.

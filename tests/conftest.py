@@ -170,12 +170,50 @@ def baseline_path(tmp_path: Path) -> Path:
     return tmp_path / "baseline.json"
 
 
-@pytest.fixture(scope="session")
-def session_python(tmp_path_factory: Any) -> Any:
-    """One real session venv (pytest installed) shared by every integration test."""
-    from app.workspace.pyenv import ensure_session_python
+def shared_test_venv(root: Path | None = None) -> Path:
+    """
+    The real venv (pytest installed) every integration test runs generated code in, built once
+    per interpreter and package set and then reused by every pytest session.
 
-    return ensure_session_python(tmp_path_factory.mktemp("session-run"))
+    mutmut runs each mutant as a new pytest session in a forked child, and its time budget
+    counts only the tests' call phase, never fixture setup. A venv built per session was
+    rebuilt per mutant, invisibly to that budget, so a loaded host turned mutants into false
+    timeouts. It is built here with plain `venv` and `pip`, never through the mutated
+    `ensure_session_python`, so no mutant can leave a broken shared venv behind; a file lock
+    serialises concurrent children, and the venv is moved into place only once complete.
+    """
+    import fcntl
+    import hashlib
+    import shutil
+    import subprocess
+    import tempfile
+
+    from app.workspace.pyenv import REQUIRED_PACKAGES
+
+    key = hashlib.sha256(repr((sys.executable, sys.version, REQUIRED_PACKAGES)).encode()).hexdigest()[:16]
+    base = root if root is not None else Path(tempfile.gettempdir())
+    venv = base / f"tddagents-test-venv-{key}"
+    base.mkdir(parents=True, exist_ok=True)
+    with open(base / f"tddagents-test-venv-{key}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not (venv / "bin" / "python").exists():
+            building = Path(tempfile.mkdtemp(prefix=f"{venv.name}-building-", dir=base))
+            try:
+                subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(building)], check=True)
+                subprocess.run([sys.executable, "-m", "pip", "--python", str(building / "bin" / "python"),
+                                "install", "--quiet", *REQUIRED_PACKAGES], check=True)
+                building.rename(venv)
+            finally:
+                shutil.rmtree(building, ignore_errors=True)
+    return venv
+
+
+@pytest.fixture(scope="session")
+def session_python() -> Any:
+    """One real session venv (pytest installed) shared by every integration test."""
+    from app.workspace.pyenv import SessionPython
+
+    return SessionPython(shared_test_venv())
 
 
 @pytest.fixture
