@@ -9,6 +9,7 @@ from app.utils.model.model import (
     DEFAULT_MODEL_ALIAS,
     MODEL_ALIASES,
     get_agent_model,
+    get_default_haiku_model,
     parse_user_specified_model,
     provider_for_model,
 )
@@ -32,6 +33,14 @@ def test_the_openai_alias_is_the_default():
     assert DEFAULT_MODEL_ALIAS == "gpt-5-mini"
     assert parse_user_specified_model("gpt-5-mini") == "gpt-5-mini"
     assert set(MODEL_ALIASES) == {"sonnet", "opus", "haiku", "gpt-5-mini"}
+
+
+def test_the_default_haiku_is_upstreams_haiku_45(monkeypatch):
+    # `getDefaultHaikuModel`: `ANTHROPIC_DEFAULT_HAIKU_MODEL`, else `getModelStrings().haiku45`.
+    monkeypatch.delenv("TDDAGENTS_DEFAULT_HAIKU_MODEL", raising=False)
+    assert get_default_haiku_model() == "claude-haiku-4-5"
+    monkeypatch.setenv("TDDAGENTS_DEFAULT_HAIKU_MODEL", "claude-haiku-x")
+    assert get_default_haiku_model() == "claude-haiku-x"
 
 
 def test_a_full_model_id_passes_through_trimmed():

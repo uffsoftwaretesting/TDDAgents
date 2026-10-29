@@ -7,6 +7,8 @@ import pytest
 from app.utils.model_cost import (
     COST_HAIKU_35,
     COST_HAIKU_45,
+    COST_HAIKU_55,
+    COST_SONNET_5,
     COST_TIER_3_15,
     COST_TIER_5_25,
     COST_TIER_15_75,
@@ -29,6 +31,8 @@ from app.utils.model_cost import (
         ("claude-opus-4-5-20251101", "claude-opus-4-5"),
         ("claude-opus-4-1-20250805", "claude-opus-4-1"),
         ("claude-opus-4-20250514", "claude-opus-4"),
+        ("claude-sonnet-5", "claude-sonnet-5"),
+        ("claude-haiku-5-5", "claude-haiku-5-5"),
         ("claude-sonnet-4-6", "claude-sonnet-4-6"),
         ("claude-sonnet-4-5-20250929", "claude-sonnet-4-5"),
         ("claude-sonnet-4-20250514", "claude-sonnet-4"),
@@ -58,6 +62,20 @@ def test_canonical_names(model, canonical):
     assert get_canonical_name(model) == canonical
 
 
+def test_sonnet_5_is_priced_beside_upstreams_table():
+    # The run's default model (2026-10-29), newer than upstream's v2.1.88 table.
+    assert MODEL_COSTS["claude-sonnet-5"] is COST_SONNET_5
+    assert COST_SONNET_5 == ModelCosts(2, 10, 2.5, 0.2, 0.01)
+    assert get_model_costs("claude-sonnet-5") == (COST_SONNET_5, True)
+
+
+def test_haiku_5_5_is_priced_beside_upstreams_table():
+    # The run's default model (2026-10-29), newer than upstream's v2.1.88 table.
+    assert MODEL_COSTS["claude-haiku-5-5"] is COST_HAIKU_55
+    assert COST_HAIKU_55 == ModelCosts(0.1, 0.5, 0.125, 0.01, 0.01)
+    assert get_model_costs("claude-haiku-5-5") == (COST_HAIKU_55, True)
+
+
 def test_the_claude_table_is_upstreams():
     assert MODEL_COSTS["claude-3-5-haiku"] is COST_HAIKU_35
     assert MODEL_COSTS["claude-haiku-4-5"] is COST_HAIKU_45
@@ -68,7 +86,7 @@ def test_the_claude_table_is_upstreams():
         assert MODEL_COSTS[name] is COST_TIER_15_75
     for name in ("claude-opus-4-5", "claude-opus-4-6"):
         assert MODEL_COSTS[name] is COST_TIER_5_25
-    assert len(MODEL_COSTS) == 11
+    assert len(MODEL_COSTS) == 13
     assert COST_TIER_3_15 == ModelCosts(3, 15, 3.75, 0.3, 0.01)
     assert COST_TIER_15_75 == ModelCosts(15, 75, 18.75, 1.5, 0.01)
     assert COST_TIER_5_25 == ModelCosts(5, 25, 6.25, 0.5, 0.01)

@@ -193,7 +193,10 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
     )
     lc_tools = [convert_tool_to_langchain(t) for t in state.tool_context.tools]
 
-    model = get_chat_model(provider, model=context.model, temperature=Config.TEMPERATURE)
+    # `retryContext?.maxTokensOverride || getMaxOutputTokensForModel(model)` (`claude.ts`): the
+    # retry layer's override after a context overflow, else the factory's model default.
+    overrides = {"max_tokens": context.max_tokens_override} if context.max_tokens_override else {}
+    model = get_chat_model(provider, model=context.model, temperature=Config.TEMPERATURE, **overrides)
     if lc_tools:
         model = model.bind_tools(lc_tools)
 
@@ -296,8 +299,15 @@ def split_chunk_into_blocks(chunk: AIMessageChunk) -> list[tuple[BlockKey, AIMes
         return [(TEXT_BLOCK, chunk)]
 
     parts: list[tuple[BlockKey, AIMessageChunk]] = []
-    if _has_text(chunk):
-        parts.append((TEXT_BLOCK, AIMessageChunk(content=chunk.content)))
+    content = chunk.content
+    if isinstance(content, list):
+        # Anthropic's list content names each entry's block by `index`. The entry at a tool
+        # call's index (`tool_use`, then `input_json_delta`) repeats `tool_call_chunks`, which
+        # carry the call, so it is not content of this message.
+        tool_indexes = {call.get("index") for call in calls}
+        content = [e for e in content if not (isinstance(e, dict) and e.get("index") in tool_indexes)]
+    if content:
+        parts.append((TEXT_BLOCK, AIMessageChunk(content=content)))
 
     by_index: dict[int, list[dict[str, Any]]] = {}
     for call in calls:
@@ -331,7 +341,9 @@ class BlockAccumulator:
         if _is_empty(chunk):
             # Metadata-only frame: it belongs to the open block, and opens none of its own.
             if self._chunk is not None:
-                self._chunk = self._chunk + chunk
+                # Its empty content takes the open block's shape: `"" + []` would merge as `[""]`.
+                empty: str | list[Any] = [] if isinstance(self._chunk.content, list) else ""
+                self._chunk = self._chunk + chunk.model_copy(update={"content": empty})
             return
 
         for key, part in split_chunk_into_blocks(chunk):

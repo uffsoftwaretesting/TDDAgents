@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 from langchain_together import ChatTogether
 
 from app.config.config import Config
+from app.utils.tokens import get_max_output_tokens_for_model
 
 
 def get_chat_model(provider: str, **kwargs):
@@ -32,6 +33,11 @@ def get_chat_model(provider: str, **kwargs):
     """
 
     if provider.lower() == "anthropic":
+        # Upstream sends `max_tokens: getMaxOutputTokensForModel(model)` on every request
+        # (`services/api/claude.ts`); without it LangChain sends its own default (4096 for a
+        # model it does not know), which truncates long tool calls.
+        if kwargs.get("max_tokens") is None and "model" in kwargs:
+            kwargs["max_tokens"] = get_max_output_tokens_for_model(str(kwargs["model"]))
         return ChatAnthropic(**kwargs)
     elif provider.lower() == "openai":
         return ChatOpenAI(**kwargs)

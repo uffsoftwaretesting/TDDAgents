@@ -275,22 +275,24 @@ class TestCallWiring:
         model = FakeModel([[AIMessage(content="r")]])
         store = AppStateStore(AppState())
         ctx = tool_context_for(store, workspace=SimpleNamespace(root="/proj"))
-        _call(_tool(model), {**ARGS, "model": "haiku"}, ctx)
+        # An alias of another tier than the run's model (`aliasMatchesParentTier` would inherit).
+        _call(_tool(model), {**ARGS, "model": "opus"}, ctx)
         from app.utils.model.model import parse_user_specified_model
 
-        assert model.seen_configs[0].model == parse_user_specified_model("haiku")
+        assert model.seen_configs[0].model == parse_user_specified_model("opus")
         system = model.seen[0].tool_context.agent_system_prompt
         assert system is not None
-        assert system[-1].endswith(f"You are powered by the model {parse_user_specified_model('haiku')}.")
+        assert system[-1].endswith(f"You are powered by the model {parse_user_specified_model('opus')}.")
         assert "Working directory: /proj" in system[-1]
 
     def test_the_definition_model_and_the_run_model_resolve(self):
         model = FakeModel([[AIMessage(content="r")]])
-        defs = {"tester": dataclasses.replace(TESTER, model="sonnet")}
+        # An alias of another tier than the run's model (`aliasMatchesParentTier` would inherit).
+        defs = {"tester": dataclasses.replace(TESTER, model="opus")}
         _, ctx = _ctx()
         _call(_tool(model, definitions=defs), ARGS, ctx)
         system = model.seen[0].tool_context.agent_system_prompt
-        assert system is not None and system[-1].endswith("You are powered by the model claude-sonnet-4-6.")
+        assert system is not None and system[-1].endswith("You are powered by the model claude-opus-4-6.")
         model = FakeModel([[AIMessage(content="r")]])
         _call(_tool(model), ARGS, ctx)
         system = model.seen[0].tool_context.agent_system_prompt

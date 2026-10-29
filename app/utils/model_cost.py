@@ -60,6 +60,12 @@ COST_TIER_5_25 = ModelCosts(5, 25, 6.25, 0.5, 0.01)
 COST_HAIKU_35 = ModelCosts(0.8, 4, 1, 0.08, 0.01)
 #: Pricing for Haiku 4.5: $1 input / $5 output per Mtok.
 COST_HAIKU_45 = ModelCosts(1, 5, 1.25, 0.1, 0.01)
+#: Pricing for Sonnet 5: $2 input / $10 output per Mtok. Newer than upstream's table (v2.1.88): the
+#: prices are Anthropic's model table as of 2026-10-06, the cache prices upstream's 1.25x / 0.1x.
+COST_SONNET_5 = ModelCosts(2, 10, 2.5, 0.2, 0.01)
+#: Pricing for Haiku 5.5: $0.10 input / $0.50 output per Mtok, same source. Anthropic charges
+#: $0.50 / $2.50 for a prompt over 100K tokens; that tier is not modelled here.
+COST_HAIKU_55 = ModelCosts(0.1, 0.5, 0.125, 0.01, 0.01)
 
 #: `MODEL_COSTS`, keyed by canonical short name, exactly upstream's entries.
 MODEL_COSTS: dict[str, ModelCosts] = {
@@ -74,6 +80,9 @@ MODEL_COSTS: dict[str, ModelCosts] = {
     "claude-opus-4-1": COST_TIER_15_75,
     "claude-opus-4-5": COST_TIER_5_25,
     "claude-opus-4-6": COST_TIER_5_25,
+    # Not upstream's (newer than v2.1.88): Sonnet 5, and the run's default model since 2026-10-29.
+    "claude-sonnet-5": COST_SONNET_5,
+    "claude-haiku-5-5": COST_HAIKU_55,
 }
 
 #: OpenAI standard-tier prices (input / output / cache write = input / cached input), per Mtok.
@@ -100,9 +109,11 @@ _CLAUDE_CANONICAL = (
     "claude-opus-4-5",
     "claude-opus-4-1",
     "claude-opus-4",
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
     "claude-sonnet-4",
+    "claude-haiku-5-5",
     "claude-haiku-4-5",
     "claude-3-7-sonnet",
     "claude-3-5-sonnet",

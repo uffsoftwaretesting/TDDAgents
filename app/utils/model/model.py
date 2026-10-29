@@ -38,6 +38,14 @@ DEFAULT_MODEL_ALIAS = "gpt-5-mini"
 
 SUBAGENT_MODEL_ENV = "TDDAGENTS_SUBAGENT_MODEL"
 
+#: `getModelStrings().haiku45`, without the date suffix (the API's alias for the latest snapshot).
+HAIKU_45 = "claude-haiku-4-5"
+
+
+def get_default_haiku_model() -> str:
+    """`getDefaultHaikuModel`: `TDDAGENTS_DEFAULT_HAIKU_MODEL`, else Haiku 4.5."""
+    return os.environ.get("TDDAGENTS_DEFAULT_HAIKU_MODEL") or HAIKU_45
+
 
 def parse_user_specified_model(model_input: str) -> str:
     """`parseUserSpecifiedModel`: an alias resolves to its model, anything else passes through."""
@@ -87,10 +95,12 @@ def get_agent_model(agent_model: str | None, parent_model: str, tool_specified_m
 __all__ = [
     "CLAUDE_ALIASES",
     "DEFAULT_MODEL_ALIAS",
+    "HAIKU_45",
     "MODEL_ALIASES",
     "OPENAI_ALIASES",
     "SUBAGENT_MODEL_ENV",
     "get_agent_model",
+    "get_default_haiku_model",
     "parse_user_specified_model",
     "provider_for_model",
 ]

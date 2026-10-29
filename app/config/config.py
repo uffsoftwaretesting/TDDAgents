@@ -20,8 +20,10 @@ class Config:
     E2B_API_KEY = os.getenv("E2B_API_KEY")
     POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
 
-    CHAT_MODEL = "openai"
-    MODEL = "gpt-5-mini"
+    # Claude Haiku 5.5 (user decision, 2026-10-29; gpt-5-mini before). The small fast model
+    # is upstream's default Haiku 4.5 (`app/utils/model/model.py::get_default_haiku_model`).
+    CHAT_MODEL = "anthropic"
+    MODEL = "claude-haiku-5-5"
     TEMPERATURE = 1.0
 
     # ── Sandbox lifecycle ────────────────────────────────────────────────────

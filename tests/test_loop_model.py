@@ -64,7 +64,7 @@ class MockModel:
         self.tools = tools
         return self
 
-    async def astream(self, messages):
+    async def astream(self, messages, **_kwargs):
         self.sent = messages
         yield AIMessage(content="chunk1")
         yield AIMessage(content="chunk2")
@@ -305,7 +305,7 @@ def test_non_message_items_are_dropped_and_empty_stream_yields_nothing():
 
 def test_stream_call_model_frames_a_chunked_reply_into_blocks(monkeypatch, config):
     class ChunkModel(MockModel):
-        async def astream(self, messages, config=None):
+        async def astream(self, messages, config=None, **_kwargs):
             self.sent = messages
             self.config = config
             for c in [AIMessageChunk(content="a"), AIMessageChunk(content="b")] + _tool_call_chunks():
@@ -320,3 +320,21 @@ def test_stream_call_model_frames_a_chunked_reply_into_blocks(monkeypatch, confi
     assert model.sent and isinstance(model.sent, list)
     assert [m.content for m in out] == ["ab", ""]
     assert tool_calls_in(out[1])[0]["args"] == {"file_path": "tests/test_a.py", "content": "x"}
+
+
+def test_the_retry_layers_max_tokens_override_reaches_the_model(monkeypatch, config):
+    """`retryContext?.maxTokensOverride || getMaxOutputTokensForModel(model)` (`claude.ts`)."""
+    from app.services.api.claude import open_model_stream
+    from app.services.api.with_retry import RetryContext
+
+    got: list[dict] = []
+
+    def factory(provider, **kwargs):
+        got.append(kwargs)
+        return MockModel()
+
+    monkeypatch.setattr("app.services.api.claude.get_chat_model", factory)
+    open_model_stream(_state(), config, RetryContext(model="claude-sonnet-5", max_tokens_override=1234))
+    open_model_stream(_state(), config, RetryContext(model="claude-sonnet-5"))
+    assert got[0]["max_tokens"] == 1234
+    assert "max_tokens" not in got[1]

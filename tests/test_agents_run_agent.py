@@ -169,12 +169,13 @@ def test_max_turns_ends_the_worker():
 
 
 def test_the_resolved_model_is_the_workers_model():
-    haiku = dataclasses.replace(TESTER, model="haiku")
-    model, _ = _run(definition=haiku)
+    # An alias of another tier than the run's model (`aliasMatchesParentTier` would inherit).
+    opus = dataclasses.replace(TESTER, model="opus")
+    model, _ = _run(definition=opus)
     from app.utils.model.model import parse_user_specified_model
 
-    assert model.seen_configs[0].model == parse_user_specified_model("haiku")
-    model, _ = _run(definition=haiku, model_override="o4-mini")
+    assert model.seen_configs[0].model == parse_user_specified_model("opus")
+    model, _ = _run(definition=opus, model_override="o4-mini")
     assert model.seen_configs[0].model == "o4-mini"
 
 

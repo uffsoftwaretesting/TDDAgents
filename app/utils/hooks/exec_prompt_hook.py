@@ -45,6 +45,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.schemas.hooks import PromptHook
 from app.types.hooks import HookResult
 from app.utils.messages import HookAttachment, HookBlockingError, Message
+from app.utils.model.model import get_default_haiku_model, provider_for_model
 from app.utils.shell_command import ABORT_POLL_SECONDS, is_aborted
 
 logger = logging.getLogger("TDDOrchestrator.Hooks")
@@ -86,18 +87,21 @@ def get_small_fast_model(default: str | None = None) -> str:
     """
     `getSmallFastModel` (`src/utils/model/model.ts`): upstream reads
     `ANTHROPIC_SMALL_FAST_MODEL`, else the default Haiku model. Here the variable is renamed
-    `TDDAGENTS_SMALL_FAST_MODEL`, and the fallback is `default` — the dispatcher passes the
-    run's model (`RunConfig.model`), since this build has no small-model tier. `Config.MODEL`
-    is reached only when no default is given.
+    `TDDAGENTS_SMALL_FAST_MODEL`. The run's model is `default` (the dispatcher passes
+    `RunConfig.model`), or `Config.MODEL` when none is given: a Claude run falls back to
+    upstream's default Haiku, and any other run to its own model, so a run on another
+    provider never reaches Anthropic.
     """
     override = os.environ.get(SMALL_FAST_MODEL_ENV)
     if override:
         return override
-    if default is not None:
-        return default
-    from app.config.config import Config
+    if default is None:
+        from app.config.config import Config
 
-    return str(Config.MODEL)
+        default = str(Config.MODEL)
+    if provider_for_model(default, default="") == "anthropic":
+        return get_default_haiku_model()
+    return default
 
 
 def parse_arguments(args: str) -> list[str]:

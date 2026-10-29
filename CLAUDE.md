@@ -303,7 +303,8 @@ architecture"**.
   only *add* blocks, and a configured `continue: false` ends the run `stop_hook_prevented`,
   never `completed`. A worker is guarded by the coordinator, not by the TDD hook.
 - **Prompt and agent hooks** default to `TDDAGENTS_SMALL_FAST_MODEL` (upstream's
-  `ANTHROPIC_SMALL_FAST_MODEL`), then the run's model.
+  `ANTHROPIC_SMALL_FAST_MODEL`), then the run's model *(since 2026-10-29: upstream's default
+  Haiku on a Claude run)*.
 - **The agent-hook verifier** runs in `dontAsk`. Its pool is upstream's: the parent's
   phase-filtered tools minus the disallowed set, plus `StructuredOutput`, with upstream's
   50-turn ceiling. It reads the parent's ledger and rules, so the phase tier applies to every
@@ -1062,6 +1063,7 @@ the open choices decided by interview (recorded in the plan's Phase 11 outcome).
     user's direction**: headless never approves anything, and the REPL is where a plan is
     repaired.
 - **The default model is `gpt-5-mini`** (user decision): OpenAI answers 404 for `o4-mini`.
+  *(Superseded 2026-10-29: Claude Haiku 5.5, below.)*
 - **Ruff 0.17.1** reported 122 findings on the pushed Phase 10 tree (newer default rules).
   They are fixed, so ruff is back to 0. Every deliberate catch-all now carries
   `# noqa: BLE001 - <reason>`.
@@ -1577,6 +1579,46 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
   informational and exit 2 with collection errors as RED evidence, which are TDDAgents' rules;
 - the Doing-tasks items are not in upstream's external build;
 - the session guidance has no `! <command>` item (no `!` prefix here) and no DiscoverSkills item.
+
+### Claude Haiku 5.5 is the default model (2026-10-29)
+
+At the user's direction the run's model is **Claude Haiku 5.5** (`Config.CHAT_MODEL = "anthropic"`,
+`Config.MODEL = "claude-haiku-5-5"`), and the small fast model is **Claude Haiku 4.5**. The
+first choice, Claude Sonnet 5, was replaced the same day by the cheaper Haiku 5.5. A headless
+`is_even` run on Sonnet 5 completed 4/4 items with full cycles (about $0.46, 95% cache reads). The key is
+`ANTHROPIC_API_KEY` in `.env`. The switch exposed two gaps in the Anthropic path, both closed the
+way upstream does it:
+
+- **`max_tokens` is upstream's** (`services/api/claude.ts`: `retryContext?.maxTokensOverride ||
+  getMaxOutputTokensForModel(model)`).
+  - Nothing sent it, so LangChain capped Sonnet 5 at its own 4096 for a model it does not know.
+  - `get_chat_model` now gives every Anthropic client `get_max_output_tokens_for_model` unless the
+    caller passes one.
+  - `open_model_stream` passes the retry layer's `max_tokens_override`, which `with_retry`
+    computed after a context overflow and nothing then read.
+  - OpenAI requests are unchanged.
+- **The small fast model is upstream's default Haiku** (`getSmallFastModel` →
+  `getDefaultHaikuModel`, `app/utils/model/model.py::get_default_haiku_model`,
+  `TDDAGENTS_DEFAULT_HAIKU_MODEL` overrides) on a Claude run.
+  - A run on another provider still falls back to its own model, so it never reaches Anthropic.
+  - `TDDAGENTS_SMALL_FAST_MODEL` wins either way.
+- `claude-sonnet-5` and `claude-haiku-5-5` are priced beside upstream's table, which predates
+  them: `COST_SONNET_5` ($2 / $10 per Mtok) and `COST_HAIKU_55` ($0.10 / $0.50), from Anthropic's
+  model table (2026-10-06), with the cache prices at upstream's 1.25x / 0.1x. Haiku 5.5's
+  price for a prompt over 100K tokens ($0.50 / $2.50) is not modelled.
+- **Anthropic's list content is framed by index** (`split_chunk_into_blocks`). The first Sonnet 5
+  run failed its second model call with a 400: the streamed `input_json_delta` fragments, which
+  the framer (written for OpenAI's string content) took for text, were sent back as content.
+  - The entries at a tool call's index are dropped, since `tool_call_chunks` carry the call.
+  - Text and thinking entries stay.
+  - A metadata-only frame merges with the open block's empty shape, so a tool block's `""` no
+    longer becomes `[""]`.
+
+*Limits, recorded:*
+- the context window stays upstream's external default (200k without `[1m]`), so autocompaction
+  fires earlier than the model's 1M window requires;
+- `Config` still requires `OPENAI_API_KEY` at import;
+- `DEFAULT_MODEL_ALIAS` (unused) still names `gpt-5-mini`.
 
 ### The three things that changed most
 
@@ -2132,8 +2174,8 @@ loop moves through the plan without a new turn.
 
 ### State and config
 
-`app/config/config.py` holds `Config`: the provider and model (`CHAT_MODEL = "openai"`,
-`MODEL = "gpt-5-mini"`, since o4-mini was deprecated on 2026-10-27), the Postgres URL and the E2B sandbox constants. It **raises at import
+`app/config/config.py` holds `Config`: the provider and model (`CHAT_MODEL = "anthropic"`,
+`MODEL = "claude-haiku-5-5"` since 2026-10-29; `gpt-5-mini` before), the Postgres URL and the E2B sandbox constants. It **raises at import
 time** if `OPENAI_API_KEY` is unset (`E2B_API_KEY` and `POSTGRES_URL` are optional), so
 importing anything under `app/` without a `.env` fails immediately. A run's own settings are
 snapshotted once into `RunConfig` (`app/query/config.py`).

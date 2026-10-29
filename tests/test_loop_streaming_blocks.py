@@ -165,3 +165,53 @@ def test_flush_is_idempotent():
     list(acc.add(AIMessageChunk(content="x")))
     assert [m.content for m in acc.flush()] == ["x"]
     assert list(acc.flush()) == []
+
+
+# ── Anthropic's list content (2026-10-29) ───────────────────────────────────
+
+
+def _anthropic_tool_start(index, name, cid):
+    return AIMessageChunk(
+        content=[{"id": cid, "caller": {"type": "direct"}, "input": {}, "name": name,
+                  "type": "tool_use", "index": index}],
+        tool_call_chunks=[{"name": name, "args": "", "id": cid, "index": index}],
+    )
+
+
+def _anthropic_json_delta(index, partial):
+    return AIMessageChunk(
+        content=[{"partial_json": partial, "type": "input_json_delta", "index": index}],
+        tool_call_chunks=[{"name": None, "args": partial, "id": None, "index": index}],
+    )
+
+
+def _anthropic_text(text):
+    return AIMessageChunk(content=[{"text": text, "type": "text", "index": 0}])
+
+
+def test_an_anthropic_tool_delta_belongs_to_its_tool_block_only():
+    # The entry at a tool call's index repeats `tool_call_chunks`; it is not text.
+    [(key, part)] = split_chunk_into_blocks(_anthropic_json_delta(1, '{"a"'))
+    assert key == ("tool", 1)
+    assert part.content == ""
+
+
+def test_an_anthropic_stream_frames_into_text_and_whole_tool_calls():
+    # The chunk sequence Sonnet 5 streams through langchain-anthropic for text + two calls.
+    out = frame([
+        AIMessageChunk(content=[]),
+        _anthropic_text("I'll write "), _anthropic_text("two files."),
+        _anthropic_tool_start(1, "WriteFile", "toolu_1"),
+        _anthropic_json_delta(1, ""), _anthropic_json_delta(1, '{"file_path": "a.py", '),
+        _anthropic_json_delta(1, '"content": "x=1"}'),
+        _anthropic_tool_start(2, "WriteFile", "toolu_2"),
+        _anthropic_json_delta(2, '{"file_path": "b.py", "content": "y=2"}'),
+        AIMessageChunk(content=[], response_metadata={"stop_reason": "tool_use"}),
+    ])
+    assert len(out) == 3
+    assert [b["type"] for b in out[0].content] == ["text"]
+    assert "".join(b["text"] for b in out[0].content) == "I'll write two files."
+    assert [m.content for m in out[1:]] == ["", ""]
+    assert [tool_calls_in(m)[0]["args"] for m in out[1:]] == [
+        {"file_path": "a.py", "content": "x=1"}, {"file_path": "b.py", "content": "y=2"}]
+    assert "input_json_delta" not in repr([m.content for m in out])

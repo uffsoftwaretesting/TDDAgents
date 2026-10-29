@@ -119,13 +119,31 @@ def test_small_fast_model_env_wins(monkeypatch):
     assert get_small_fast_model("d") == "envmodel"
 
 
-def test_small_fast_model_default_then_config(monkeypatch):
+def test_small_fast_model_of_a_claude_run_is_upstreams_default_haiku(monkeypatch):
     monkeypatch.delenv(SMALL_FAST_MODEL_ENV, raising=False)
+    monkeypatch.delenv("TDDAGENTS_DEFAULT_HAIKU_MODEL", raising=False)
+    assert get_small_fast_model("claude-sonnet-5") == "claude-haiku-4-5"
+    assert get_small_fast_model("claude-haiku-5-5") == "claude-haiku-4-5"
+    monkeypatch.setenv("TDDAGENTS_DEFAULT_HAIKU_MODEL", "claude-haiku-x")
+    assert get_small_fast_model("claude-opus-4-6") == "claude-haiku-x"
+
+
+def test_small_fast_model_of_another_provider_is_the_runs_own(monkeypatch):
+    monkeypatch.delenv(SMALL_FAST_MODEL_ENV, raising=False)
+    assert get_small_fast_model("gpt-5-mini") == "gpt-5-mini"
     assert get_small_fast_model("d") == "d"
     assert get_small_fast_model("") == ""
+
+
+def test_small_fast_model_without_a_default_follows_config(monkeypatch):
+    monkeypatch.delenv(SMALL_FAST_MODEL_ENV, raising=False)
+    monkeypatch.delenv("TDDAGENTS_DEFAULT_HAIKU_MODEL", raising=False)
     from app.config.config import Config
 
-    assert get_small_fast_model() == Config.MODEL
+    monkeypatch.setattr(Config, "MODEL", "claude-sonnet-5")
+    assert get_small_fast_model() == "claude-haiku-4-5"
+    monkeypatch.setattr(Config, "MODEL", "gpt-5-mini")
+    assert get_small_fast_model() == "gpt-5-mini"
 
 
 def test_hook_model_overrides_default(monkeypatch):
