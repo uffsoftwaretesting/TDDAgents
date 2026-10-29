@@ -49,9 +49,22 @@ def test_the_user_context_names_the_worker_tools():
     }
 
 
-def test_the_system_prompt_is_rendered_with_no_placeholder_left():
+def test_the_system_prompt_is_rendered_with_no_placeholder_left(monkeypatch):
+    monkeypatch.setenv("TDDAGENTS_VERIFICATION_AGENT", "1")
     prompt = get_coordinator_system_prompt()
     assert not re.search(r"\{\{[A-Z_]+\}\}", prompt)
     for name in ("tester", "developer", "refactorer", "verification", "Agent", "RunTests"):
         assert name in prompt
+
+
+def test_without_the_verification_agent_the_coordinator_never_names_it(monkeypatch):
+    """One switch for the verifier everywhere (user decision, 2026-10-28): off by default, as public Claude Code."""
+    monkeypatch.setenv("TDDAGENTS_VERIFICATION_AGENT", "1")
+    with_verifier = get_coordinator_system_prompt()
+    monkeypatch.delenv("TDDAGENTS_VERIFICATION_AGENT")
+    prompt = get_coordinator_system_prompt()
+    assert "verification" not in prompt and "| Verification |" not in prompt
+    assert not re.search(r"\{\{[A-Z_]+\}\}", prompt)
+    removed = [line for line in with_verifier.splitlines() if line not in prompt.splitlines()]
+    assert len(removed) == 3 and all("verification" in line for line in removed)
     assert prompt.startswith("You are a TDD coordinator")

@@ -75,8 +75,17 @@ def get_coordinator_user_context() -> dict[str, str]:
 
 
 def get_coordinator_system_prompt(vars: dict[str, Any] | None = None) -> str:
-    """`getCoordinatorSystemPrompt`: the TDDAgents coordinator prompt, rendered."""
-    return render_prompt(_PROMPT_PATH.read_text(encoding="utf-8"), {**_PROMPT_VARS, **(vars or {})}).strip()
+    """
+    `getCoordinatorSystemPrompt`: the TDDAgents coordinator prompt, rendered. Without the verification
+    agent (`is_verification_agent_enabled`, off by default) its lines are left out, so the coordinator
+    never names an agent that is not registered.
+    """
+    from app.tools.agent_tool.load_agents_dir import is_verification_agent_enabled
+
+    text = _PROMPT_PATH.read_text(encoding="utf-8")
+    if not is_verification_agent_enabled():
+        text = "\n".join(line for line in text.splitlines() if "{{VERIFIER}}" not in line)
+    return render_prompt(text, {**_PROMPT_VARS, **(vars or {})}).strip()
 
 
 __all__ = [

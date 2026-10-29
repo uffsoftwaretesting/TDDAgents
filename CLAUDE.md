@@ -1508,7 +1508,7 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
   - every other code, a timeout or no runner is an error, and the ledger is untouched.
 - **Kept from the first fix** (claude-code's own text): the two internal-build Doing-tasks items
   (`constants/prompts.ts:211`, `:240`), and `get_session_specific_guidance_section`
-  (`app/context.py`) with the verification contract always on, prompt-only.
+  (`app/context.py`) with the verification contract, prompt-only (on only with `TDDAGENTS_VERIFICATION_AGENT`, below).
 - The session's final run (`app/main.py::write_final_test_run`) names the table's meaning too.
 - **Which files ran is observable only for a run pytest finished** (`files_that_ran`: exit 0 or 1).
   When pytest stops at collection errors its JUnit report lists only the failing files. Reading
@@ -1542,11 +1542,25 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
     the prompt names the asking agent.
   - Headless runs still deny.
 
+- **The verification agent is opt-in, as in public Claude Code** (user decision).
+  - Upstream registers it, its contract and TodoWrite's verification nudge only behind the
+    `VERIFICATION_AGENT` build flag and GrowthBook's `tengu_hive_evidence`. That flag defaults to
+    false outside Anthropic ("verification agent is ant-only A/B", `builtInAgents.ts`,
+    `constants/prompts.ts`), so it is neither standard nor periodic: when on, the model is asked to
+    spawn it after non-trivial work.
+  - Here one switch, `TDDAGENTS_VERIFICATION_AGENT` (`is_verification_agent_enabled`), governs the
+    built-in agent, the session guidance's contract and the coordinator prompt's verifier lines.
+  - A user's or project's own `verification` agent still loads.
+  - The nudge is not ported.
+  - The gpt-5.4 CPF live run (23/23 items, real dependencies, 100% coverage, the app answering
+    correctly on a real server) skipped the verifier although the contract was on, and its flake8
+    config failed its own lint.
+
 *Divergences, recorded:*
 - upstream's verification agent has no permission mode (it uses `bubble` for forks);
 - RunTests has no upstream counterpart (upstream runs tests through Bash). Its table marks exit 1
   informational and exit 2 with collection errors as RED evidence, which are TDDAgents' rules;
-- the Doing-tasks items and the always-on contract are not in upstream's external build;
+- the Doing-tasks items are not in upstream's external build;
 - the session guidance has no `! <command>` item (no `!` prefix here) and no DiscoverSkills item.
 
 ### The three things that changed most

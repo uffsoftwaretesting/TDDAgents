@@ -269,9 +269,11 @@ def test_the_verification_agent_is_upstreams():
 
 
 @needs_reference
-def test_the_session_specific_guidance_is_upstreams_with_the_contract_on():
-    """`getSessionSpecificGuidanceSection`: each item verbatim; the verification contract is on (2026-10-28)."""
+def test_the_session_specific_guidance_is_upstreams_with_the_contract_on(monkeypatch):
+    """`getSessionSpecificGuidanceSection`: each item verbatim; the contract only with the verifier's switch."""
     from app.context import get_session_specific_guidance_section
+
+    monkeypatch.setenv("TDDAGENTS_VERIFICATION_AGENT", "1")
 
     source = PROMPTS_TS.read_text()
     block = _function(source, "getSessionSpecificGuidanceSection")
@@ -304,3 +306,7 @@ def test_the_session_specific_guidance_is_upstreams_with_the_contract_on():
     assert "The contract" not in (get_session_specific_guidance_section(frozenset({"AskUserQuestion"}), True) or "")
     assert get_session_specific_guidance_section(frozenset({"Skill"}), False) is None
     assert get_session_specific_guidance_section(frozenset(), False) is None
+    # Without the switch (public Claude Code's default) the contract is not in the section.
+    monkeypatch.delenv("TDDAGENTS_VERIFICATION_AGENT")
+    assert get_session_specific_guidance_section(tools, True) == "\n".join(
+        ["# Session-specific guidance", *(f" - {text}" for text in expected[:-1])])

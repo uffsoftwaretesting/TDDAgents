@@ -207,10 +207,9 @@ def get_session_specific_guidance_section(enabled_tools: frozenset[str], has_ski
     * The Agent item is `getAgentToolSection`'s non-fork text (forking is off), and the Explore
       items follow `areExplorePlanAgentsEnabled` (true in the external build).
     * There is no `DiscoverSkills` tool.
-    * **The verification contract is always on** (user decision, 2026-10-28). Upstream gates it on
-      `VERIFICATION_AGENT` and GrowthBook's `tengu_hive_evidence` (default false outside
-      Anthropic). It is upstream's answer to a model reporting work it has not proven, which a
-      live run met as a faked `fastapi` package.
+    * **The verification contract follows the verifier's gate** (`is_verification_agent_enabled`,
+      user decision 2026-10-28): upstream gates it on `VERIFICATION_AGENT` and GrowthBook's
+      `tengu_hive_evidence`, false outside Anthropic, so it is off by default, as in public Claude Code.
     """
     has_agent = "Agent" in enabled_tools
     search_tools = "the Glob or Grep"
@@ -237,7 +236,9 @@ def get_session_specific_guidance_section(enabled_tools: frozenset[str], has_ski
             "/<skill-name> (e.g., /commit) is shorthand for users to invoke a user-invocable skill. When executed, "
             "the skill gets expanded to a full prompt. Use the Skill tool to execute them. IMPORTANT: Only use Skill "
             "for skills listed in its user-invocable skills section - do not guess or use built-in CLI commands.")
-    if has_agent:
+    from app.tools.agent_tool.load_agents_dir import is_verification_agent_enabled
+
+    if has_agent and is_verification_agent_enabled():
         items.append(
             "The contract: when non-trivial implementation happens on your turn, independent adversarial verification "
             "must happen before you report completion \u2014 regardless of who did the implementing (you directly, a "

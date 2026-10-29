@@ -29,6 +29,7 @@ Not ported (no subsystem here): `color`, `effort`, `isolation`, `mcpServers`,
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -367,6 +368,20 @@ def _scan_agent_dir(
 BUILT_IN_AGENTS_DIR = Path(__file__).resolve().parents[2] / "prompts" / "agents"
 
 
+#: TDDAgents' switch for upstream's verification agent (user decision, 2026-10-28). Upstream registers
+#: it only behind the `VERIFICATION_AGENT` build flag and GrowthBook's `tengu_hive_evidence`, which
+#: defaults to false outside Anthropic (`builtInAgents.ts`), so public Claude Code has no verifier.
+#: Off by default here too; this one switch also governs its contract and the coordinator's role.
+VERIFICATION_AGENT_ENV = "TDDAGENTS_VERIFICATION_AGENT"
+VERIFICATION_AGENT_TYPE = "verification"
+_TRUTHY = ("1", "true", "yes", "on")
+
+
+def is_verification_agent_enabled() -> bool:
+    """`feature('VERIFICATION_AGENT') && tengu_hive_evidence`: the opt-in environment switch."""
+    return os.environ.get(VERIFICATION_AGENT_ENV, "").strip().lower() in _TRUTHY
+
+
 def get_agent_definitions_with_overrides(
     project_dir: Path | str | None = None,
     user_home: Path | str | None = None,
@@ -376,6 +391,9 @@ def get_agent_definitions_with_overrides(
     """`getAgentDefinitionsWithOverrides`: the active agents, built-in < user < project."""
     definitions: dict[str, AgentDefinition] = {}
     definitions.update(_scan_agent_dir(Path(built_in_dir or BUILT_IN_AGENTS_DIR), "built-in", vars))
+    if not is_verification_agent_enabled():
+        # `getBuiltInAgents`: the verifier joins the built-ins only behind its gate.
+        definitions.pop(VERIFICATION_AGENT_TYPE, None)
     home = Path(user_home) if user_home is not None else Path.home()
     definitions.update(_scan_agent_dir(home / ".tddagents" / "agents", "user", vars))
     project = Path(project_dir) if project_dir is not None else Path.cwd()

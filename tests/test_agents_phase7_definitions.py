@@ -161,10 +161,25 @@ class TestParseAgentFromMarkdown:
 
 
 class TestDefinitionsWithOverrides:
-    def test_the_roster_comes_from_app_prompts_agents(self, tmp_path):
+    def test_the_roster_comes_from_app_prompts_agents(self, tmp_path, monkeypatch):
+        # Public Claude Code has no verification agent (`builtInAgents.ts`: its gate is off outside
+        # Anthropic); TDDAgents registers it only with `TDDAGENTS_VERIFICATION_AGENT` (2026-10-28).
+        monkeypatch.delenv("TDDAGENTS_VERIFICATION_AGENT", raising=False)
         defs = get_agent_definitions_with_overrides(project_dir=tmp_path, user_home=tmp_path)
-        assert set(defs) == {"tester", "developer", "refactorer", "verification", "Explore", "Plan"}
+        assert set(defs) == {"tester", "developer", "refactorer", "Explore", "Plan"}
         assert all(d.source == "built-in" for d in defs.values())
+        for value, registered in (("1", True), ("true", True), ("on", True), ("0", False), ("", False)):
+            monkeypatch.setenv("TDDAGENTS_VERIFICATION_AGENT", value)
+            defs = get_agent_definitions_with_overrides(project_dir=tmp_path, user_home=tmp_path)
+            assert ("verification" in defs) is registered
+
+    def test_a_users_own_verification_agent_loads_without_the_switch(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TDDAGENTS_VERIFICATION_AGENT", raising=False)
+        agents = tmp_path / ".tddagents" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "verification.md").write_text("---\nname: verification\ndescription: mine\n---\nCheck.\n")
+        defs = get_agent_definitions_with_overrides(project_dir=tmp_path, user_home=tmp_path / "home")
+        assert defs["verification"].description == "mine"
 
     def test_project_overrides_user_overrides_built_in(self, tmp_path):
         for scope in ("home", "proj"):
