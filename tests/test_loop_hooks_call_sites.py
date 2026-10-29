@@ -440,7 +440,7 @@ def test_the_request_builder_reorders_hook_messages_after_tool_results(monkeypat
     monkeypatch.setattr(model_mod, "get_session_context", lambda run_id, ws: SimpleNamespace(
         section_cache=None, system_context={}, user_context={}))
     monkeypatch.setattr(model_mod, "resolve_system_prompt_sections", lambda sections, cache: [])
-    monkeypatch.setattr(model_mod, "get_system_prompt", lambda ws, m, mcp: [])
+    monkeypatch.setattr(model_mod, "get_system_prompt", lambda ws, m, mcp, **_: [])
     monkeypatch.setattr(model_mod, "prepend_user_context", lambda msgs, ctx: list(msgs))
     state = initial_loop_state(history, tool_context_for(AppStateStore()))
     request = model_mod.build_request_messages(state, CONFIG)

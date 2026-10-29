@@ -92,9 +92,10 @@ def test_get_system_prompt_structure():
     sections = get_system_prompt(Shell({"uname -s": "Linux", "uname -sr": "Linux 6"}), "m-1")
     names = [s.name for s in sections]
     assert names == [n for n, _ in STATIC_SECTION_FILES] + [
-        SYSTEM_PROMPT_DYNAMIC_BOUNDARY.name, "env_info_simple", "mcp_instructions"]
+        SYSTEM_PROMPT_DYNAMIC_BOUNDARY.name, "session_guidance", "env_info_simple", "mcp_instructions"]
     static, dynamic = split_system_prompt_sections(sections)
-    assert len(static) == 8 and [s.name for s in dynamic] == ["env_info_simple", "mcp_instructions"]
+    assert len(static) == 8
+    assert [s.name for s in dynamic] == ["session_guidance", "env_info_simple", "mcp_instructions"]
     rendered = resolve_system_prompt_sections(sections)
     assert rendered[0] == a.read_system_prompt_file("identity.md").strip()
     # The contract names the coverage rule of thumb as a placeholder; the code fills it.
@@ -103,6 +104,12 @@ def test_get_system_prompt_structure():
     assert rendered[7] == contract.replace("{{COVERAGE_RULE_OF_THUMB}}", "90").strip()
     assert "90% is a good rule of thumb, not a gate" in rendered[7]
     assert rendered[-1].startswith("# Environment")
+    # With no tools there is no session-specific guidance; with Agent, its contract arrives.
+    assert "# Session-specific guidance" not in "\n".join(rendered)
+    with_tools = resolve_system_prompt_sections(
+        get_system_prompt(Shell({}), "m-1", (), enabled_tools=frozenset({"Agent"}), has_skills=False))
+    guidance = next(text for text in with_tools if text.startswith("# Session-specific guidance"))
+    assert 'subagent_type="verification"' in guidance
 
 
 def _mcp_server(name: str, instructions: str | None) -> Any:

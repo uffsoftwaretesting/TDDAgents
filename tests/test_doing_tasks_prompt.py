@@ -18,6 +18,8 @@ from app.context import read_system_prompt_file
 REPO = Path(__file__).resolve().parent.parent
 PROMPTS_TS = REPO / "reference" / "claude-code" / "src" / "constants" / "prompts.ts"
 SESSION = REPO / "app" / "prompts" / "session"
+#: The internal-build (`USER_TYPE === 'ant'`) Doing-tasks items this build ports (2026-10-28).
+PORTED_ANT_ITEMS = ("Before reporting a task complete, verify it actually works", "Report outcomes faithfully")
 
 
 def test_the_section_carries_upstreams_scope_rules():
@@ -31,13 +33,24 @@ def test_the_section_carries_upstreams_scope_rules():
     ):
         assert rule in text
     assert "/help" not in text and "feedback" not in text
+    # Upstream's own words against faking a green result (2026-10-28).
+    assert "never suppress or simplify failing checks (tests, lints, type errors) to manufacture a green result" in text
+    assert "Before reporting a task complete, verify it actually works" in text
 
 
 def _external_items(source: str) -> list[str]:
     """`getSimpleDoingTasksSection`'s bullets as the external build renders them."""
     body = source.split("function getSimpleDoingTasksSection(): string {", 1)[1].split("return [`# Doing tasks`", 1)[0]
-    # The `USER_TYPE === 'ant'` spreads are not in the external build.
-    body = re.sub(r"\.\.\.\(process\.env\.USER_TYPE === 'ant'\s*\?\s*\[.*?\]\s*:\s*\[\]\),", "", body, flags=re.DOTALL)
+    # The `USER_TYPE === 'ant'` spreads are not in the external build, except the two items ported
+    # against faked green results (2026-10-28, user decision): "verify it actually works" and
+    # "Report outcomes faithfully".
+
+    def keep_ported(spread: re.Match[str]) -> str:
+        kept = [f"`{item}`," for item in re.findall(r"`([^`]*)`", spread.group(0)) if item.startswith(PORTED_ANT_ITEMS)]
+        return "\n".join(kept)
+
+    body = re.sub(r"\.\.\.\(process\.env\.USER_TYPE === 'ant'\s*\?\s*\[.*?\]\s*:\s*\[\]\),", keep_ported, body,
+                  flags=re.DOTALL)
     body = re.sub(r"^\s*//.*$", "", body, flags=re.MULTILINE)
 
     def literals(block: str) -> list[str]:

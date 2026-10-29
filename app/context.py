@@ -192,14 +192,86 @@ def get_mcp_instructions_section(mcp_clients: Sequence[Any]) -> str | None:
     return None if is_mcp_instructions_delta_enabled() else get_mcp_instructions(mcp_clients)
 
 
-def get_system_prompt(ws: Any, model_id: str, mcp_clients: Sequence[Any] = ()) -> list[SystemPromptSection]:
+#: `exploreAgent.ts` -> `EXPLORE_AGENT_MIN_QUERIES`.
+EXPLORE_AGENT_MIN_QUERIES = 3
+#: `tools/AgentTool/constants.ts` -> `VERIFICATION_AGENT_TYPE`; `exploreAgent.ts` -> `EXPLORE_AGENT.agentType`.
+VERIFICATION_AGENT_TYPE = "verification"
+EXPLORE_AGENT_TYPE = "Explore"
+
+
+def get_session_specific_guidance_section(enabled_tools: frozenset[str], has_skills: bool) -> str | None:
+    """
+    `getSessionSpecificGuidanceSection` (`constants/prompts.ts`), with this build's tool names.
+
+    * The `! <command>` item is left out: this REPL has no `!` prefix.
+    * The Agent item is `getAgentToolSection`'s non-fork text (forking is off), and the Explore
+      items follow `areExplorePlanAgentsEnabled` (true in the external build).
+    * There is no `DiscoverSkills` tool.
+    * **The verification contract is always on** (user decision, 2026-10-28). Upstream gates it on
+      `VERIFICATION_AGENT` and GrowthBook's `tengu_hive_evidence` (default false outside
+      Anthropic). It is upstream's answer to a model reporting work it has not proven, which a
+      live run met as a faked `fastapi` package.
+    """
+    has_agent = "Agent" in enabled_tools
+    search_tools = "the Glob or Grep"
+    items: list[str] = []
+    if "AskUserQuestion" in enabled_tools:
+        items.append("If you do not understand why the user has denied a tool call, use the AskUserQuestion to ask "
+                     "them.")
+    if has_agent:
+        items.append(
+            "Use the Agent tool with specialized agents when the task at hand matches the agent's description. "
+            "Subagents are valuable for parallelizing independent queries or for protecting the main context window "
+            "from excessive results, but they should not be used excessively when not needed. Importantly, avoid "
+            "duplicating work that subagents are already doing - if you delegate research to a subagent, do not also "
+            "perform the same searches yourself.")
+        items.append(f"For simple, directed codebase searches (e.g. for a specific file/class/function) use "
+                     f"{search_tools} directly.")
+        items.append(
+            f"For broader codebase exploration and deep research, use the Agent tool with "
+            f"subagent_type={EXPLORE_AGENT_TYPE}. This is slower than using {search_tools} directly, so use this only "
+            "when a simple, directed search proves to be insufficient or when your task will clearly require more "
+            f"than {EXPLORE_AGENT_MIN_QUERIES} queries.")
+    if has_skills and "Skill" in enabled_tools:
+        items.append(
+            "/<skill-name> (e.g., /commit) is shorthand for users to invoke a user-invocable skill. When executed, "
+            "the skill gets expanded to a full prompt. Use the Skill tool to execute them. IMPORTANT: Only use Skill "
+            "for skills listed in its user-invocable skills section - do not guess or use built-in CLI commands.")
+    if has_agent:
+        items.append(
+            "The contract: when non-trivial implementation happens on your turn, independent adversarial verification "
+            "must happen before you report completion \u2014 regardless of who did the implementing (you directly, a "
+            "fork you spawned, or a subagent). You are the one reporting to the user; you own the gate. Non-trivial "
+            "means: 3+ file edits, backend/API changes, or infrastructure changes. Spawn the Agent tool with "
+            f'subagent_type="{VERIFICATION_AGENT_TYPE}". Your own checks, caveats, and a fork\'s self-checks do NOT '
+            "substitute \u2014 only the verifier assigns a verdict; you cannot self-assign PARTIAL. Pass the original "
+            "user request, all files changed (by anyone), the approach, and the plan file path if applicable. Flag "
+            "concerns if you have them but do NOT share test results or claim things work. On FAIL: fix, resume the "
+            "verifier with its findings plus your fix, repeat until PASS. On PASS: spot-check it \u2014 re-run 2-3 "
+            "commands from its report, confirm every PASS has a Command run block with output that matches your "
+            "re-run. If any PASS lacks a command block or diverges, resume the verifier with the specifics. On "
+            "PARTIAL (from the verifier): report what passed and what could not be verified.")
+    if not items:
+        return None
+    return "\n".join(["# Session-specific guidance", *(f" - {item}" for item in items)])
+
+
+def get_system_prompt(
+    ws: Any,
+    model_id: str,
+    mcp_clients: Sequence[Any] = (),
+    enabled_tools: frozenset[str] = frozenset(),
+    has_skills: bool = False,
+) -> list[SystemPromptSection]:
     """
     `getSystemPrompt`: static (cacheable) sections, the boundary, then dynamic sections —
-    `env_info_simple`, then upstream's uncached `mcp_instructions` (servers can connect between
-    turns).
+    `session_guidance` (the tools the run starts with), `env_info_simple`, then upstream's
+    uncached `mcp_instructions` (servers can connect between turns).
     """
     static = [systemPromptSection(name, _file_section(filename)) for name, filename in STATIC_SECTION_FILES]
     dynamic = [
+        systemPromptSection("session_guidance",
+                            lambda: get_session_specific_guidance_section(enabled_tools, has_skills)),
         systemPromptSection("env_info_simple", lambda: compute_simple_env_info(ws, model_id)),
         DANGEROUS_uncachedSystemPromptSection(
             "mcp_instructions",
@@ -341,6 +413,7 @@ __all__ = [
     "enhance_system_prompt_with_env_details",
     "get_git_status",
     "get_session_context",
+    "get_session_specific_guidance_section",
     "get_system_context",
     "get_system_prompt",
     "get_user_context",

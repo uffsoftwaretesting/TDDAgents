@@ -37,7 +37,7 @@ def _session(monkeypatch):
         system_context={"gitStatus": "STATUS"},
     )
     monkeypatch.setattr(assembly, "_SESSIONS", {CONFIG.run_id: session})
-    monkeypatch.setattr("app.services.api.claude.get_system_prompt", lambda ws, model, mcp: ["unused"])
+    monkeypatch.setattr("app.services.api.claude.get_system_prompt", lambda ws, model, mcp, **_: ["unused"])
     monkeypatch.setattr(
         "app.services.api.claude.resolve_system_prompt_sections", lambda sections, cache: ["DEFAULT PROMPT"]
     )
@@ -246,3 +246,23 @@ def test_a_fresh_run_reads_its_context_from_the_contexts_workspace(monkeypatch):
     seen.clear()
     request_system_context(_state(workspace=ws), CONFIG)
     assert seen == [("user", ws), ("system", ws)]
+
+
+def test_the_main_thread_prompt_knows_its_tools_and_skills(monkeypatch):
+    """`getSystemPrompt(tools, …)`: `session_guidance` is built from the run's tools and skill commands."""
+    from types import SimpleNamespace
+
+    seen: dict[str, Any] = {}
+
+    def capture(ws: Any, model: str, mcp: Any, **kwargs: Any) -> list[str]:
+        seen.update(kwargs)
+        return ["unused"]
+
+    monkeypatch.setattr("app.services.api.claude.get_system_prompt", capture)
+    tools = (SimpleNamespace(name="Agent"), SimpleNamespace(name="Skill"))
+    for commands, has_skills in (([object()], True), ([], False)):
+        registry = SimpleNamespace(get_skill_tool_commands=lambda commands=commands: commands)
+        request_system_texts(_state(tools=tools, skill_registry=registry), CONFIG)
+        assert seen == {"enabled_tools": frozenset({"Agent", "Skill"}), "has_skills": has_skills}
+    request_system_texts(_state(), CONFIG)
+    assert seen == {"enabled_tools": frozenset(), "has_skills": False}

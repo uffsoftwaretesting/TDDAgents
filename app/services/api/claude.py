@@ -138,8 +138,12 @@ def request_system_texts(state: LoopState, config: RunConfig) -> list[str]:
         sections = list(ctx.agent_system_prompt)
     else:
         session = get_session_context(config.run_id, ctx.workspace)
+        registry = ctx.skill_registry
         sections = resolve_system_prompt_sections(
-            get_system_prompt(ctx.workspace, Config.MODEL, ctx.mcp_clients), session.section_cache)
+            get_system_prompt(ctx.workspace, Config.MODEL, ctx.mcp_clients,
+                              enabled_tools=frozenset(tool.name for tool in ctx.tools),
+                              has_skills=bool(registry is not None and registry.get_skill_tool_commands())),
+            session.section_cache)
     return append_system_context(sections, request_system_context(state, config))
 
 

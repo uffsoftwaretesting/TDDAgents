@@ -493,12 +493,15 @@ def test_real_pytest_with_no_tests_cannot_confirm_red(python_workspace):
 BANNER = "______ ERROR collecting tests/test_mod.py ______\n"
 
 
-@pytest.mark.parametrize("error_line", [
-    "E   ModuleNotFoundError: No module named 'calculator'",
-    "E   ImportError: cannot import name 'sub' from 'calc2' (/w/calc2.py)",
-    "E   AttributeError: module 'calc2' has no attribute 'nothing'",
+@pytest.mark.parametrize("error_line, header", [
+    ("E   ModuleNotFoundError: No module named 'calculator'",
+     "Tests failed (exit 2: collection error — pytest could not import 'calculator')."),
+    ("E   ImportError: cannot import name 'sub' from 'calc2' (/w/calc2.py)",
+     "Tests failed (exit 2: collection error — an import failed, see the error below)."),
+    ("E   AttributeError: module 'calc2' has no attribute 'nothing'",
+     "Tests failed (exit 2: collection error — an import failed, see the error below)."),
 ])
-def test_missing_code_collection_errors_are_failing_tests(error_line):
+def test_missing_code_collection_errors_are_failing_tests(error_line, header):
     from app.tdd.run_tests_tool.run_tests_tool import (
         is_missing_code_collection_error,
         ledger_exit_code,
@@ -510,8 +513,8 @@ def test_missing_code_collection_errors_are_failing_tests(error_line):
     store = AppStateStore()
     out = asyncio.run(build_run_tests_tool(lambda p: res).call({}, ws_ctx(store)))
     assert out.is_error is False and out.exit_code == 2
-    assert out.content.startswith(
-        "Tests failed (exit 2: collection error — the code under test does not exist yet).")
+    # Said as observed: "the code under test does not exist yet" once led a model to fake a package.
+    assert out.content.startswith(header)
     assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
@@ -622,7 +625,7 @@ def test_the_default_runner_reads_the_coverage_report_back(report, output, readi
     (SuiteExecutionResult(exit_code=1, stdout="out"), "Tests failed (exit 1)."),
     (SuiteExecutionResult(
         exit_code=2, stdout=BANNER + "E   ModuleNotFoundError: No module named 'x'\n!!! Interrupted: 1 error !!!"),
-     "Tests failed (exit 2: collection error — the code under test does not exist yet)."),
+     "Tests failed (exit 2: collection error — pytest could not import 'x')."),
     (SuiteExecutionResult(exit_code=0, stdout="1 passed, 2 skipped"),
      "Tests ran without failures, but 2 test(s) were skipped"),
 ])

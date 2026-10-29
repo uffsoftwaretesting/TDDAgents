@@ -1468,6 +1468,58 @@ official CLI tool for TDDAgents", and `CLAUDE.md` → `TDDAGENTS.md`.
   the user agent is TDDAgents';
 - ReadFile's media reach a non-Anthropic model as a meta user message, not inside the tool result.
 
+### A dependency is installed, never faked (2026-10-28)
+
+The CPF live run's agents never installed FastAPI, Pydantic or validate-docbr. They wrote
+`fastapi.py` and `pydantic.py` stand-ins in the project root, and the tests passed against them,
+although `Bash(pip install:*)` was allowed. **The cause was ours:** RunTests labelled every
+`ModuleNotFoundError` "the code under test does not exist yet", so in GREEN the model wrote the
+"missing code", a module named `fastapi`. Every choice below was the user's; the fix must work for
+any language.
+
+- **Claude-code's own answer, ported.**
+  - `app/prompts/system/doing-tasks.md` gains upstream's two internal-build items, verbatim:
+    "Before reporting a task complete, verify it actually works…" (`constants/prompts.ts:211`) and
+    "Report outcomes faithfully … never … manufacture a green result…" (`:240`).
+  - `get_session_specific_guidance_section` (`app/context.py`, the dynamic `session_guidance`
+    section) ports `getSessionSpecificGuidanceSection` with **the verification contract always
+    on**: non-trivial work gets an adversarial `verification` agent before completion is
+    reported. It stays prompt-only, as upstream.
+  - `request_system_texts` hands the prompt the run's tool names and whether skill commands exist.
+- **Upstream's path safety check is the slot.**
+  - `check_path_safety_for_auto_edit` (`checkPathSafetyForAutoEdit`) gains two predicates after
+    upstream's:
+    - a write inside `DEPENDENCY_DIRECTORIES` (`node_modules`, `.venv`, `site-packages`,
+      `vendor`, …; classifier-approvable);
+    - a file or directory named like a dependency the tests could not import, from
+      `ToolPermissionContext.missing_dependencies`; a human decides.
+  - Both are compared below the working directory, case-folded, with `-`, `_` and `.` alike.
+  - The result is upstream's `ask` tagged `safetyCheck`, so bypass, allow rules and PreToolUse
+    `allow` cannot skip it. Headless runs and background agents deny it. It reaches WriteFile,
+    Edit and Bash redirects (`is_path_allowed`).
+- **What marks a dependency: the specification's Core Dependencies.**
+  - A name alone cannot tell `import fastapi` from RED's `from calculator import add`.
+  - `declared_dependencies` (`app/tdd/dependency_guard.py`) reads the engineer specification's
+    "Core Dependencies" section into `AppState.declared_dependencies`: at
+    `open_session_run(specification=…)`, and again on `/requirements`.
+- **RunTests** (the runner seam; pytest today):
+  - a collection error importing a declared dependency the project does not define is an
+    environment error. The ledger is untouched, and the name is recorded on
+    `missing_dependencies` (not by a background worker);
+  - any other missing import is still RED evidence, said as observed (`collection_error_header`:
+    "pytest could not import 'x'");
+  - a run never counts while a project file stands in for a recorded dependency (`stand_ins`),
+    which also catches `cp`/`mv`.
+
+*Divergences, recorded:*
+- the internal-build Doing-tasks items and the always-on contract are not in upstream's external
+  build;
+- `missing_dependencies` is a TDDAgents field on `ToolPermissionContext`;
+- `DEPENDENCY_DIRECTORIES` is TDDAgents' list;
+- the missing-import reading is pytest's (a new runner brings its own);
+- an import name unlike its package name (Pillow → PIL) is not matched;
+- the session guidance has no `! <command>` item (no `!` prefix here) and no DiscoverSkills item.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

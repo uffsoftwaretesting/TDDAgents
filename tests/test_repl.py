@@ -415,7 +415,7 @@ def test_requirements_replans_and_continues(python_workspace, tmp_path):
 
     async def rescope(request: str) -> tuple[str, list[str]] | None:
         asked.append(request)
-        return ("SPEC 2", ["X", "Y"]) if request == "add X" else None
+        return ("## 5. Core Dependencies\n- FastAPI\n", ["X", "Y"]) if request == "add X" else None
 
     model = Model([[AIMessage(content="a")], [AIMessage(content="b")], [AIMessage(content="c")]])
 
@@ -435,10 +435,11 @@ def test_requirements_replans_and_continues(python_workspace, tmp_path):
     assert asked == ["nothing", "add X"]
     assert [(i.text, i.status) for i in repl.plan.items] == [
         ("A", ItemStatus.DONE), ("X", ItemStatus.PENDING), ("Y", ItemStatus.PENDING)]
-    assert repl.specification == "SPEC 2"
+    assert repl.specification == "## 5. Core Dependencies\n- FastAPI\n"
+    assert repl.run.store.get().declared_dependencies == frozenset({"FastAPI"})
     assert "New plan:\n✔ 1. A\n▶ 2. X\n· 3. Y" in io.out
     texts = [str(m.content) for state in model.seen for m in state.messages if isinstance(m, HumanMessage)]
-    assert development_replanned_prompt("SPEC 2", repl.plan) in texts
+    assert development_replanned_prompt(repl.specification, repl.plan) in texts
 
 
 def test_requirements_without_a_rescope_is_unavailable(python_workspace, tmp_path):

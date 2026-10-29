@@ -266,3 +266,41 @@ def test_the_verification_agent_is_upstreams():
     assert (agent.background, agent.model, agent.tools) == (True, "inherit", None)  # type: ignore[attr-defined]
     assert agent.disallowed_tools == ("Agent", "WriteFile", "Edit")  # type: ignore[attr-defined]
     assert "Claude" not in agent.prompt  # type: ignore[attr-defined]
+
+
+@needs_reference
+def test_the_session_specific_guidance_is_upstreams_with_the_contract_on():
+    """`getSessionSpecificGuidanceSection`: each item verbatim; the verification contract is on (2026-10-28)."""
+    from app.context import get_session_specific_guidance_section
+
+    source = PROMPTS_TS.read_text()
+    block = _function(source, "getSessionSpecificGuidanceSection")
+    agent_block = _function(source, "getAgentToolSection")
+    names = {"${ASK_USER_QUESTION_TOOL_NAME}": "AskUserQuestion", "${AGENT_TOOL_NAME}": "Agent",
+             "${searchTools}": "the Glob or Grep", "${EXPLORE_AGENT.agentType}": "Explore",
+             "${EXPLORE_AGENT_MIN_QUERIES}": "3", "${SKILL_TOOL_NAME}": "Skill",
+             '"${VERIFICATION_AGENT_TYPE}"': '"verification"', "\\u2014": "—", "\\`": "`"}
+
+    def item(start: str, text: str = block) -> str:
+        found = re.search(r"`(" + re.escape(start) + r"(?:[^`\\]|\\.)*)`", text)
+        assert found is not None, start
+        out = found.group(1)
+        for key, value in names.items():
+            out = out.replace(key, value)
+        return out
+
+    expected = [
+        item("If you do not understand why the user has denied"),
+        item("Use the ${AGENT_TOOL_NAME} tool with specialized agents", agent_block),
+        item("For simple, directed codebase searches"),
+        item("For broader codebase exploration and deep research"),
+        item("/<skill-name> (e.g., /commit)"),
+        item("The contract: when non-trivial implementation happens"),
+    ]
+    tools = frozenset({"AskUserQuestion", "Agent", "Skill"})
+    assert get_session_specific_guidance_section(tools, True) == "\n".join(
+        ["# Session-specific guidance", *(f" - {text}" for text in expected)])
+    # Without the Agent tool there is no contract (upstream: `hasAgentTool && …`); nothing at all is None.
+    assert "The contract" not in (get_session_specific_guidance_section(frozenset({"AskUserQuestion"}), True) or "")
+    assert get_session_specific_guidance_section(frozenset({"Skill"}), False) is None
+    assert get_session_specific_guidance_section(frozenset(), False) is None

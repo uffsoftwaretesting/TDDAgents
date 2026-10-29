@@ -45,7 +45,7 @@ from __future__ import annotations
 import os
 import posixpath
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -101,6 +101,23 @@ DANGEROUS_DIRECTORIES: tuple[str, ...] = (
     ".idea",
     ".claude",
     ".tddagents",
+)
+
+#: TDDAgents (2026-10-28): where package managers install dependencies, in any ecosystem. A file
+#: written there by hand stands in for a dependency, so a write gets the same safety check as a
+#: dangerous directory. The package manager itself writes there through a command, not a redirect.
+DEPENDENCY_DIRECTORIES: tuple[str, ...] = (
+    "node_modules",
+    "bower_components",
+    "jspm_packages",
+    ".venv",
+    "venv",
+    "site-packages",
+    "dist-packages",
+    "__pypackages__",
+    "vendor",
+    "pods",
+    ".bundle",
 )
 
 _GitIgnorePattern = lookup_pattern("gitignore")
@@ -183,11 +200,60 @@ def has_suspicious_windows_path_pattern(path: str) -> bool:
     return contains_vulnerable_unc_path(path)
 
 
-def check_path_safety_for_auto_edit(path: str, paths_to_check: Sequence[str]) -> tuple[bool, str, bool]:
+def normalize_dependency_name(name: str) -> str:
+    """A dependency or path name compared case-folded, with `-`, `_` and `.` alike."""
+    return re.sub(r"[-_.]", "_", name.casefold())
+
+
+def _project_segments(path: str, cwd: str | None) -> list[str]:
+    """`path`'s segments below `cwd` when it lies inside it, else all of them."""
+    if cwd and (path == cwd or path.startswith(cwd.rstrip("/") + "/")):
+        path = path[len(cwd.rstrip("/")):]
+    return [segment for segment in path.split("/") if segment]
+
+
+def dependency_directory_in(path: str, cwd: str | None = None) -> str | None:
+    """The `DEPENDENCY_DIRECTORIES` entry among `path`'s project segments, if any."""
+    for segment in _project_segments(path, cwd):
+        if normalize_case_for_comparison(segment) in DEPENDENCY_DIRECTORIES:
+            return segment
+    return None
+
+
+def dependency_stood_in_for(path: str, missing_dependencies: Iterable[str], cwd: str | None = None) -> str | None:
+    """
+    The missing dependency `path` would stand in for: one whose name equals the file's stem (the
+    name before its first `.`) or one of its directories, below `cwd` (`normalize_dependency_name`).
+    """
+    wanted = {normalize_dependency_name(name): name for name in missing_dependencies}
+    if not wanted:
+        return None
+    segments = _project_segments(path, cwd)
+    if not segments:
+        return None
+    names = [*segments[:-1], segments[-1].split(".", 1)[0]]
+    for name in names:
+        found = wanted.get(normalize_dependency_name(name))
+        if found is not None:
+            return found
+    return None
+
+
+def check_path_safety_for_auto_edit(
+    path: str,
+    paths_to_check: Sequence[str],
+    missing_dependencies: Iterable[str] = (),
+    cwd: str | None = None,
+) -> tuple[bool, str, bool]:
     """
     `checkPathSafetyForAutoEdit`: `(safe, message, classifier_approvable)`, over the original
     and resolved paths. A suspicious Windows path needs a human (`classifierApprovable:
     false`); a sensitive file may be approved by the auto-mode classifier (`true`).
+
+    TDDAgents adds two predicates after upstream's (2026-10-28): a write inside a dependency
+    directory (`DEPENDENCY_DIRECTORIES`, approvable like a sensitive file), and a file standing in
+    for a dependency the tests could not import (`missing_dependencies`, which RunTests records):
+    a human must decide that one.
     """
     for candidate in paths_to_check:
         if has_suspicious_windows_path_pattern(candidate):
@@ -198,6 +264,20 @@ def check_path_safety_for_auto_edit(path: str, paths_to_check: Sequence[str]) ->
     for candidate in paths_to_check:
         if is_dangerous_file_path_to_auto_edit(candidate):
             return False, f"The agent requested permissions to edit {path} which is a sensitive file.", True
+    for candidate in paths_to_check:
+        directory = dependency_directory_in(candidate, cwd)
+        if directory is not None:
+            return False, (
+                f"The agent requested permissions to write to {path}, inside the dependency directory "
+                f"{directory}. Dependencies are installed with the project's package manager."
+            ), True
+    for candidate in paths_to_check:
+        dependency = dependency_stood_in_for(candidate, missing_dependencies, cwd)
+        if dependency is not None:
+            return False, (
+                f"The agent requested permissions to write to {path}, which would stand in for the dependency "
+                f"'{dependency}' the tests could not import. Install it with the project's package manager instead."
+            ), False
     return True, "", False
 
 
@@ -339,7 +419,8 @@ def is_path_allowed(
 
     candidates = paths_to_check if paths_to_check is not None else get_paths_for_permission_check(resolved_path)
     if operation != "read":
-        safe, message, approvable = check_path_safety_for_auto_edit(resolved_path, candidates)
+        safe, message, approvable = check_path_safety_for_auto_edit(
+            resolved_path, candidates, context.missing_dependencies, cwd)
         if not safe:
             return PathCheckResult(
                 False, {"type": "safetyCheck", "reason": message, "classifierApprovable": approvable}
@@ -393,7 +474,7 @@ def check_write_permission_for_tool(
             decision_reason={"type": "other", "reason": "Agent memory files are allowed for writing"},
         )
 
-    safe, message, approvable = check_path_safety_for_auto_edit(absolute, candidates)
+    safe, message, approvable = check_path_safety_for_auto_edit(absolute, candidates, context.missing_dependencies, cwd)
     if not safe:
         return PermissionResult(
             behavior=PermissionBehavior.ASK,
@@ -721,6 +802,7 @@ def check_file_read_permissions(path_key: str) -> Any:
 __all__ = [
     "DANGEROUS_DIRECTORIES",
     "DANGEROUS_FILES",
+    "DEPENDENCY_DIRECTORIES",
     "FILE_EDIT_TOOL_NAME",
     "FILE_READ_TOOL_NAME",
     "PathCheckResult",
@@ -731,6 +813,8 @@ __all__ = [
     "check_read_permission_for_tool",
     "check_readable_internal_path",
     "check_write_permission_for_tool",
+    "dependency_directory_in",
+    "dependency_stood_in_for",
     "expand_path",
     "generate_suggestions",
     "get_directory_for_path",
@@ -743,6 +827,7 @@ __all__ = [
     "is_project_dir_path",
     "matching_rule_for_input",
     "normalize_case_for_comparison",
+    "normalize_dependency_name",
     "normalize_pattern_to_path",
     "normalize_patterns_to_path",
     "path_from_tool_input",

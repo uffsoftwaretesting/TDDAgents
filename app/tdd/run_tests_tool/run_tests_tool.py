@@ -55,6 +55,14 @@ from app.tdd.coverage_gate import (
     CoverageReading,
     read_coverage,
 )
+from app.tdd.dependency_guard import (
+    missing_dependency,
+    missing_dependency_message,
+    record_missing,
+    stand_in_message,
+    stand_ins,
+    unimportable_module,
+)
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.tdd.suite_fingerprint import fingerprint_test_files, have_tests_changed
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
@@ -260,6 +268,42 @@ def ledger_status(before: PhaseLedger, after: PhaseLedger, exit_code: int, cover
     return f"REFACTOR is done ({coverage.describe()}): this sub-requirement's cycle is complete."
 
 
+def collection_error_header(exec_result: SuiteExecutionResult) -> str:
+    """
+    A collection error that counts as failing tests, said as observed (2026-10-28): an import
+    failed. It used to say "the code under test does not exist yet", and a model then wrote a
+    `fastapi.py` to stand in for the missing package.
+    """
+    code = exec_result.exit_code
+    name = unimportable_module(exec_result.stdout, exec_result.stderr)
+    if name is not None:
+        return f"Tests failed (exit {code}: collection error — pytest could not import '{name}')."
+    return f"Tests failed (exit {code}: collection error — an import failed, see the error below)."
+
+
+async def _dependency_error(exec_result: SuiteExecutionResult, context: ToolContext) -> ToolResult | None:
+    """
+    A run that is no evidence because of a dependency (`app/tdd/dependency_guard.py`): pytest could
+    not import one (recorded for the path safety check, unless this is a background worker), or a
+    project file stands in for one the tests could not import. The ledger is not changed.
+    """
+    workspace = getattr(context, "workspace", None)
+    code = exec_result.exit_code
+    declared = context.get_app_state().declared_dependencies
+    name = await asyncio.to_thread(
+        missing_dependency, exec_result.stdout, exec_result.stderr, code, workspace, declared)
+    if name is not None:
+        if context.shares_app_state:
+            context.set_app_state(lambda s: record_missing(s, name))
+        return ToolResult(content=format_output(exec_result, missing_dependency_message(name)),
+                          is_error=True, exit_code=code)
+    recorded = context.get_app_state().tool_permission_context.missing_dependencies
+    found = await asyncio.to_thread(stand_ins, workspace, recorded)
+    if found:
+        return ToolResult(content=format_output(exec_result, stand_in_message(found)), is_error=True, exit_code=code)
+    return None
+
+
 #: A background worker's run (`shareSetAppState: !isAsync`): its app-state writes are discarded.
 BACKGROUND_RUN_NOTE = ("This run does not change the TDD ledger: a background agent's state changes are "
                        "discarded, so it is verification evidence only.")
@@ -281,7 +325,7 @@ async def _background_result(exec_result: SuiteExecutionResult, test_path: str, 
     elif code == 1:
         header = f"Tests failed (exit {code})."
     else:
-        header = f"Tests failed (exit {code}: collection error — the code under test does not exist yet)."
+        header = collection_error_header(exec_result)
     if uncollected and code != 0:
         header = f"{header}\n{uncollected_message(uncollected)}"
     return ToolResult(content=format_output(exec_result, f"{header}\n{BACKGROUND_RUN_NOTE}"), exit_code=code)
@@ -321,6 +365,9 @@ def build_run_tests_tool(
             )
 
         code = exec_result.exit_code
+        dependency_error = await _dependency_error(exec_result, context)
+        if dependency_error is not None:
+            return dependency_error
         observed = ledger_exit_code(exec_result)
         if observed is None:
             reason = PYTEST_EXIT_REASONS.get(code, "pytest did not report a test outcome")
@@ -369,7 +416,7 @@ def build_run_tests_tool(
         elif code == 1:
             header = f"Tests failed (exit {code})."
         else:
-            header = f"Tests failed (exit {code}: collection error — the code under test does not exist yet)."
+            header = collection_error_header(exec_result)
         if uncollected and not uncollected_block_a_pass:
             header = f"{header}\n{uncollected_message(uncollected, in_red=in_red)}"
         header = f"{header}\n{ledger_status(before.phase_ledger, after, observed, coverage)}"
