@@ -46,9 +46,11 @@ CONFIG = build_run_config("stop-test", postgres_checkpointing=False)
 RED = PhaseLedger(phase=TddPhase.RED)
 DONE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 BLOCK = HookBlockingError(blocking_error="lint first", command="lint.sh")
+#: The refusal with no workspace to read the test files from (`app/tdd/stop_hook.py`).
 TDD_RED_MESSAGE = (
-    "TDD cycle incomplete: RED is not done (tests_written=False). Write robust tests for this "
-    "sub-requirement, covering every relevant scenario and edge case, and run RunTests."
+    "TDD cycle incomplete: RED. RED ends with a run that passes, fails, or stops on collection errors pytest "
+    "reports, after the sub-requirement's test files changed: they could not be read. Write or extend the tests "
+    "for this sub-requirement, covering every relevant scenario and edge case, then run RunTests."
 )
 
 

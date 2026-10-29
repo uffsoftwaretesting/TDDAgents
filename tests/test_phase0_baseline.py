@@ -523,8 +523,8 @@ def test_runner_defaults_to_the_production_deps(monkeypatch, python_workspace):
     # Phase 4: the production stop hooks enforce barrier 3. A model that stops without the
     # cycle is refused every time (Phase 12: no latch) until the user aborts — never `completed`.
     assert len(seen) == 3
-    assert "tests_written=False" in str(seen[1][0].messages[-1].content)
-    assert "tests_written=False" in str(seen[2][0].messages[-1].content)
+    assert "TDD cycle incomplete: RED." in str(seen[1][0].messages[-1].content)
+    assert "TDD cycle incomplete: RED." in str(seen[2][0].messages[-1].content)
     assert result.terminal_reason == "aborted_streaming"
     assert result.status == "failed"
 
@@ -586,7 +586,7 @@ def test_production_stop_hooks_enforce_barrier_three():
     result: StopHookResult = asyncio.run(_as_coroutine(pending))
     assert result.prevent_continuation is False
     assert len(result.blocking_errors) == 1
-    assert "tests_written=False" in str(result.blocking_errors[0].content)
+    assert "TDD cycle incomplete: RED." in str(result.blocking_errors[0].content)
 
 
 def test_provisioning_failure_reports_stdout_when_stderr_is_empty(tmp_path):

@@ -295,7 +295,10 @@ def test_the_tdd_refusal_names_the_tool_only_when_the_pool_has_it():
     state = stop_state([HumanMessage(content="go")], tools=(build_ask_user_question_tool(),))
     hinted = asyncio.run(tdd_phase_incomplete_hook(state, CONFIG))
     assert str(hinted.blocking_errors[0].content) == f"{plain.blocking_errors[0].content} {ASK_THE_USER}"
-    assert ASK_THE_USER == "If you need a decision from the user, call AskUserQuestion instead of asking in text."
+    # Upstream's own escalation rule (`constants/prompts.ts`, Doing tasks), not an invitation to ask at every
+    # refusal: a live run asked the same question three times with the old hint (2026-10-28).
+    assert ASK_THE_USER == ("Escalate to the user with AskUserQuestion only when you're genuinely stuck after "
+                            "investigation, not as a first response to friction.")
 
 
 # ── the REPL ────────────────────────────────────────────────────────────────

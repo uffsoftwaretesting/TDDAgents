@@ -1516,6 +1516,19 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
   with a placeholder. The skipped count is read from the report too (`skipped_tests`); the
   summary line is only a fallback.
 
+- **The TDD stop hook's refusal states the rule and the fact, too** (`incomplete_cycle_message`,
+  the same `PHASE_RULES`). A live CPF plan held two items for one behaviour (the adapter's tests,
+  then its implementation), so the second item's behaviour was already built. The old refusal said
+  only "RED is not done (tests_written=False)", and the agent took its earlier tests as this item's.
+  It then asked the user the same question three times, because every refusal ended with "If you need
+  a decision from the user, call AskUserQuestion…". Now (user decisions):
+  - the RED refusal says the test files "have not changed since this sub-requirement started";
+  - it names both ways forward: extend this item's tests, or, when an earlier item already built its
+    behaviour, propose an UpdatePlan change for the user to approve;
+  - GREEN and REFACTOR name the last recorded run's exit code;
+  - every refusal ends with upstream's own escalation rule (`ASK_THE_USER`, Doing tasks: "only when
+    you're genuinely stuck after investigation").
+
 *Divergences, recorded:*
 - RunTests has no upstream counterpart (upstream runs tests through Bash). Its table marks exit 1
   informational and exit 2 with collection errors as RED evidence, which are TDDAgents' rules;

@@ -49,18 +49,27 @@ def test_hook_allows_exit_when_cycle_complete():
     asyncio.run(go())
 
 
-RED_MSG = ("TDD cycle incomplete: RED is not done (tests_written=False). Write robust tests for this "
-           "sub-requirement, covering every relevant scenario and edge case, and run RunTests.")
+RED_RULE = ("RED ends with a run that passes, fails, or stops on collection errors pytest reports, after the "
+            "sub-requirement's test files changed")
+GREEN_RULE = ("GREEN ends with a run in which every test passes (exit 0), none is skipped and every test file is "
+              "collected")
+REFACTOR_RULE = ("REFACTOR ends with a run in which every test passes (exit 0), none is skipped and every test file "
+                 "is collected")
+WRITE_TESTS = ("Write or extend the tests for this sub-requirement, covering every relevant scenario and edge case, "
+               "then run RunTests.")
+#: A context with no workspace cannot read the test files.
+RED_MSG = f"TDD cycle incomplete: RED. {RED_RULE}: they could not be read. {WRITE_TESTS}"
 BACK_TO_RED = ("If a test is wrong (it contradicts the specification), go back to RED: spawn the tester agent "
                "(Agent with subagent_type 'tester') to fix it. That restarts this sub-requirement at RED; then "
                "implement again.")
-GREEN_MSG = ("TDD cycle incomplete: GREEN is not done (green_passed=False). Implement the code the tests "
-             f"describe and run RunTests until every test passes. {BACK_TO_RED}")
+NO_RUN = "no RunTests run has been recorded for it yet"
+GREEN_MSG = (f"TDD cycle incomplete: GREEN. {GREEN_RULE}: {NO_RUN}. Implement the code the tests describe and run "
+             f"RunTests until every test passes. {BACK_TO_RED}")
 
 
-def refactor_msg(figure: str) -> str:
-    return ("TDD cycle incomplete: REFACTOR is not done (refactor_passed=False). It is mandatory: improve the "
-            "code and the tests and raise line + branch coverage (a good rule of thumb is "
+def refactor_msg(figure: str, run: str = NO_RUN) -> str:
+    return (f"TDD cycle incomplete: REFACTOR. {REFACTOR_RULE}: {run}. It is mandatory: improve the code and the "
+            "tests and raise line + branch coverage (a good rule of thumb is "
             f"90%; last measured: {figure}), then run RunTests until every test passes.")
 
 
@@ -135,3 +144,60 @@ def test_every_early_stop_in_the_loop_is_sent_back():
         assert Terminal.STOP_HOOK_PREVENTED not in reasons
 
     asyncio.run(go())
+
+
+# ── the refusal states the rule and what was observed (2026-10-28) ──────────
+#
+# A live CPF run's plan held a sub-requirement whose behaviour an earlier one had already built.
+# The old refusal said only "RED is not done (tests_written=False)", the agent took its earlier
+# tests as this item's, and it asked the user the same question three times.
+
+def _refusal(app_state: AppState, workspace: Any = None, tools: tuple[Any, ...] = ()) -> str:
+    async def go() -> str:
+        ctx = tool_context_for(AppStateStore(app_state), workspace=workspace, tools=tools)
+        state = initial_loop_state((HumanMessage(content="task"),), ctx)
+        result = await tdd_phase_incomplete_hook(state, build_run_config("test-run", postgres_checkpointing=False))
+        return str(result.blocking_errors[0].content)
+
+    return asyncio.run(go())
+
+
+def test_red_says_the_test_files_have_not_changed_since_the_item_started():
+    from app.tdd.suite_fingerprint import fingerprint_test_files
+    from tests.conftest import FakeWorkspace
+
+    ws = FakeWorkspace(files={"tests/test_adapter.py": "def test_a():\n    pass\n"})
+    baseline = fingerprint_test_files(ws)
+    assert _refusal(AppState(tdd_item_test_baseline=baseline), ws) == (
+        f"TDD cycle incomplete: RED. {RED_RULE}: they have not changed since this sub-requirement started. "
+        f"{WRITE_TESTS}")
+    ws.write_file("tests/test_adapter.py", "def test_a():\n    assert True\n")
+    assert f"{RED_RULE}: they changed, and no RunTests run has counted since." in _refusal(
+        AppState(tdd_item_test_baseline=baseline), ws)
+
+
+def test_red_names_the_update_plan_way_only_when_the_pool_has_it():
+    from types import SimpleNamespace
+
+    from app.tdd.stop_hook import RED_DUPLICATE_WAY
+
+    assert RED_DUPLICATE_WAY == (
+        "If an earlier sub-requirement already built and tested this one's behaviour, you may instead propose an "
+        "UpdatePlan change that merges or rewords it; the user approves it.")
+    assert RED_DUPLICATE_WAY not in _refusal(AppState())
+    with_update_plan = _refusal(AppState(), tools=(SimpleNamespace(name="UpdatePlan"),))
+    assert with_update_plan.endswith(f"{WRITE_TESTS} {RED_DUPLICATE_WAY}")
+    green = AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
+    assert RED_DUPLICATE_WAY not in _refusal(green, tools=(SimpleNamespace(name="UpdatePlan"),))
+
+
+@pytest.mark.parametrize("code, meaning", [(1, "some tests failed"), (2, "test execution was interrupted")])
+def test_green_and_refactor_name_the_last_recorded_run(code, meaning):
+    from app.tdd.ledger import TestRunRecord
+
+    run = TestRunRecord(test_path=".", exit_code=code, stdout="", stderr="")
+    green = AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True), last_test_run=run)
+    assert f"{GREEN_RULE}: the last RunTests run exited {code} ({meaning})." in _refusal(green)
+    refactoring = AppState(phase_ledger=PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True),
+                           last_test_run=run)
+    assert _refusal(refactoring) == refactor_msg("not measured yet", f"the last RunTests run exited {code} ({meaning})")
