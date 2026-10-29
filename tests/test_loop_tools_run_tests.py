@@ -705,3 +705,40 @@ def test_a_background_run_that_is_not_evidence_is_an_error():
     ctx = dataclasses.replace(ws_ctx(AppStateStore()), shares_app_state=False)
     res = asyncio.run(build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=4)).call({}, ctx))
     assert res.is_error is True and NOT_EVIDENCE in res.content
+
+
+def test_files_that_ran_are_known_only_when_pytest_finished():
+    from app.tdd.run_tests_tool.run_tests_tool import files_that_ran
+
+    ran = frozenset({"tests/test_a.py"})
+    assert files_that_ran(SuiteExecutionResult(exit_code=0, collected_files=ran)) == ran
+    assert files_that_ran(SuiteExecutionResult(exit_code=1, collected_files=ran)) == ran
+    for code in (2, 3, 4, 5, 9):
+        assert files_that_ran(SuiteExecutionResult(exit_code=code, collected_files=ran)) is None
+
+
+def test_a_collection_error_never_reports_the_other_files_as_not_collected():
+    """
+    The live CPF run (2026-10-28): pytest stopped on one file's import error, so its JUnit report
+    listed only that file, and RunTests called every other test file "not collected" and kept RED.
+    """
+    files = {"tests/test_a.py": "def test_a():\n    pass\n", "tests/test_web.py": "def test_w():\n    pass\n"}
+    store = AppStateStore()
+    result = SuiteExecutionResult(exit_code=2, collected_files=frozenset({"tests/test_web.py"}),
+                                  collection_errors=frozenset({"tests/test_web.py"}))
+    res = asyncio.run(build_run_tests_tool(lambda p: result).call({}, ws_ctx(store, files)))
+    assert "Not collected" not in res.content
+    assert "TDD ledger: RED → GREEN." in res.content
+    assert store.get().phase_ledger.phase == TddPhase.GREEN
+
+
+def test_real_pytest_one_import_error_among_several_test_files(python_workspace):
+    ws = python_workspace
+    store = AppStateStore()
+    ws.write_file("tests/test_ok.py", "def test_ok():\n    assert True\n")
+    ws.write_file("tests/test_web.py", "from fastapi_not_installed.testclient import TestClient\n\n"
+                                       "def test_w():\n    assert TestClient\n")
+    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "."}, tool_context_for(store, workspace=ws)))
+    head = res.content.split("\n\n", 1)[0]
+    assert "pytest reported errors collecting: tests/test_web.py" in head and "Not collected" not in head
+    assert store.get().phase_ledger.phase == TddPhase.GREEN

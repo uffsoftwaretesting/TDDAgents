@@ -55,6 +55,7 @@ from app.tdd.collection_gate import (
     collected_files,
     collection_error_files,
     junit_options,
+    skipped_tests,
     uncollected_test_files,
 )
 from app.tdd.coverage_gate import (
@@ -82,7 +83,7 @@ class SuiteExecutionResult:
     stdout: str = ""
     stderr: str = ""
     coverage: CoverageReading = UNAVAILABLE
-    #: Tests pytest skipped; `None` reads the count from the output (`skipped_count`).
+    #: Tests pytest skipped, from its JUnit report; `None` reads the summary line (`skipped_count`).
     skipped: int | None = None
     #: The files pytest collected (its JUnit report); `None` when unknown, which checks nothing.
     collected_files: frozenset[str] | None = None
@@ -129,6 +130,17 @@ PYTEST_EXIT_SEMANTICS: dict[int, ExitSemantic] = {
 def exit_semantic(exit_code: int) -> ExitSemantic:
     """The table's entry, else upstream's `DEFAULT_SEMANTIC`: any other non-zero code is an error."""
     return PYTEST_EXIT_SEMANTICS.get(exit_code, ExitSemantic(f"pytest exited with code {exit_code}", True, None))
+
+
+def files_that_ran(result: SuiteExecutionResult) -> frozenset[str] | None:
+    """
+    The test files the run's JUnit report shows ran, when that is observable: only a run pytest
+    finished (exit 0 or 1). When pytest stops at collection errors it runs nothing, and its report
+    lists only the files that failed to import, so which files it collected is unknown (`None`,
+    which checks nothing). Reading "not collected" into that report was a misinterpretation a live
+    run met (2026-10-28).
+    """
+    return result.collected_files if exit_semantic(result.exit_code).outcome is not None else None
 
 
 def run_outcome(result: SuiteExecutionResult) -> tuple[Outcome | None, bool]:
@@ -231,7 +243,8 @@ def run_suite(ws: Any, test_path: str = ".") -> SuiteExecutionResult:
     _discard(ws, JUNIT_REPORT_PATH)
     coverage = read_coverage(report, f"{res.stdout}\n{res.stderr}")
     return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr, coverage=coverage,
-                                collected_files=collected_files(junit), collection_errors=collection_error_files(junit))
+                                skipped=skipped_tests(junit), collected_files=collected_files(junit),
+                                collection_errors=collection_error_files(junit))
 
 
 def _discard(ws: Any, path: str) -> None:
@@ -372,7 +385,7 @@ def build_run_tests_tool(
         skipped = exec_result.skipped if exec_result.skipped is not None else skipped_count(
             f"{exec_result.stdout}\n{exec_result.stderr}")
         uncollected = await asyncio.to_thread(
-            uncollected_test_files, workspace, test_path, exec_result.collected_files)
+            uncollected_test_files, workspace, test_path, files_that_ran(exec_result))
         facts = RunFacts(collection_errors=tuple(sorted(exec_result.collection_errors or ())),
                          uncollected=tuple(uncollected), skipped=skipped, coverage=exec_result.coverage)
         code = exec_result.exit_code

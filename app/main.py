@@ -373,6 +373,7 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
     from app.tdd.run_tests_tool.run_tests_tool import (
         RunTestsUnavailable,
         exit_semantic,
+        files_that_ran,
         run_suite,
         skipped_count,
     )
@@ -384,8 +385,8 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
         _write_text(os.path.join(artifacts_dir, "final_test_run.txt"), "FINAL TEST RUN", summary)
         return summary
     output = f"{result.stdout}\n{result.stderr}".strip()
-    skipped = skipped_count(output)
-    uncollected = uncollected_test_files(workspace, ".", result.collected_files)
+    skipped = result.skipped if result.skipped is not None else skipped_count(output)
+    uncollected = uncollected_test_files(workspace, ".", files_that_ran(result))
     verdict = "passed" if result.exit_code == 0 and skipped == 0 and not uncollected else "NOT passing"
     meaning = exit_semantic(result.exit_code).meaning
     summary = f"{verdict} (exit {result.exit_code}: {meaning}, {skipped} skipped, {result.coverage.describe()})"

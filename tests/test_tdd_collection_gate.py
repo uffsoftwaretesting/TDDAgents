@@ -207,3 +207,22 @@ def test_the_live_case_with_real_pytest(python_workspace):
     python_workspace.move("tests/tests_trivial.py", "tests/test_trivial.py")
     res = asyncio.run(build_run_tests_tool(None).call({}, ctx))
     assert res.exit_code == 1 and "Not collected" not in res.content
+
+
+def test_skipped_tests_are_read_from_the_report():
+    from app.tdd.collection_gate import skipped_tests
+
+    two_suites = ('<testsuites><testsuite name="a" skipped="2"/><testsuite name="b" skipped="1"/>'
+                  '<testsuite name="c"/></testsuites>')
+    assert skipped_tests(two_suites) == 3
+    assert skipped_tests('<testsuite name="a" skipped="4"/>') == 4
+    assert skipped_tests(junit("tests/test_a.py")) == 0
+    for report in (None, "", "not xml <", '<testsuites><testsuite skipped="x"/></testsuites>'):
+        assert skipped_tests(report) is None
+
+
+def test_the_suite_reports_skips_from_its_junit_report(python_workspace):
+    python_workspace.write_file("tests/test_a.py", "import pytest\n\n@pytest.mark.skip\ndef test_s():\n    pass\n\n"
+                                                   "def test_ok():\n    print('3 skipped')\n")
+    result = run_suite(python_workspace, ".")
+    assert (result.exit_code, result.skipped) == (0, 1)

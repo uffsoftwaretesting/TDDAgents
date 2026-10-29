@@ -1510,6 +1510,11 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
   (`constants/prompts.ts:211`, `:240`), and `get_session_specific_guidance_section`
   (`app/context.py`) with the verification contract always on, prompt-only.
 - The session's final run (`app/main.py::write_final_test_run`) names the table's meaning too.
+- **Which files ran is observable only for a run pytest finished** (`files_that_ran`: exit 0 or 1).
+  When pytest stops at collection errors its JUnit report lists only the failing files. Reading
+  "not collected" into that report kept the live CPF run in RED, and the agent replaced its test
+  with a placeholder. The skipped count is read from the report too (`skipped_tests`); the
+  summary line is only a fallback.
 
 *Divergences, recorded:*
 - RunTests has no upstream counterpart (upstream runs tests through Bash). Its table marks exit 1

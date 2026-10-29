@@ -696,3 +696,12 @@ def test_main_messages_are_exact(fake_session: dict[str, Any], monkeypatch: pyte
     monkeypatch.setattr("builtins.input", lambda prompt: "/yes")
     entry.main(["Build Q"])
     assert "🚀  TDDAGENTS SESSION (INTERACTIVE)\n" in capsys.readouterr().out
+
+
+def test_the_final_run_never_reports_files_as_uncollected_when_pytest_stopped(python_workspace, tmp_path):
+    import app.main as entry
+
+    python_workspace.write_file("tests/test_ok.py", "def test_ok():\n    assert True\n")
+    python_workspace.write_file("tests/test_web.py", "import not_installed_anywhere\n\ndef test_w():\n    pass\n")
+    summary = entry.write_final_test_run(str(tmp_path), python_workspace)
+    assert summary.startswith("NOT passing (exit 2: test execution was interrupted") and "not collected" not in summary

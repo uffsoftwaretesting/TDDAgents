@@ -75,6 +75,24 @@ def collection_error_files(report: str | None) -> frozenset[str] | None:
     return frozenset(files)
 
 
+def skipped_tests(report: str | None) -> int | None:
+    """The skipped tests the report's test suites record (`skipped="N"`), or `None` with no readable report."""
+    if not report:
+        return None
+    try:
+        root = ElementTree.fromstring(report)
+    except ElementTree.ParseError:
+        return None
+    suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+    total = 0
+    for suite in suites:
+        try:
+            total += int(suite.get("skipped") or 0)
+        except ValueError:
+            return None
+    return total
+
+
 def _in_scope(path: str, test_path: str) -> bool:
     scope = posixpath.normpath(test_path.split("::", 1)[0].strip() or ".")
     return scope == "." or path == scope or path.startswith(scope.rstrip("/") + "/")
@@ -122,5 +140,6 @@ __all__ = [
     "collection_error_files",
     "junit_options",
     "project_test_modules",
+    "skipped_tests",
     "uncollected_test_files",
 ]
