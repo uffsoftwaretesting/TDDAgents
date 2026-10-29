@@ -62,3 +62,10 @@ def test_the_session_prompts_plan_only_what_was_asked(prompt: str):
     text = (SESSION / prompt).read_text(encoding="utf-8")
     assert "no documentation, README, CI, packaging" in text
     assert "must not be implemented" in text
+
+
+def test_the_planner_names_test_files_pytest_collects():
+    """Two live palindrome plans named `tests/tests_*.py`, which pytest never collects (2026-10-28)."""
+    text = (SESSION / "planner" / "system.md").read_text(encoding="utf-8")
+    assert "use pytest's default discovery pattern (`test_*.py` or `*_test.py`, e.g. `tests/test_core.py`)" in text
+    assert "tests_" not in text
