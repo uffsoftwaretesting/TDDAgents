@@ -13,7 +13,9 @@ does not collect checks nothing, like a skipped test, so it is treated like one:
   define a pytest test (`def test…`, `class Test…`), without `__init__.py` and `conftest.py`,
   and within the run's `test_path`;
 * a module in neither list is uncollected. `run_tests_tool` then refuses RED's evidence and
-  a GREEN or REFACTOR pass, and the session's final run reports it as not passing.
+  a GREEN or REFACTOR pass, and the session's final run reports it as not passing;
+* the same report records the files pytest could not collect (`collection_error_files`): the
+  structured evidence that an exit-2 run stopped on collection errors.
 """
 
 from __future__ import annotations
@@ -35,22 +37,6 @@ _DEFINES_A_TEST = re.compile(r"^\s*(?:async\s+)?def\s+test|^\s*class\s+Test", re
 #: Test-support files pytest never collects as test modules.
 _SUPPORT_FILES = frozenset({"__init__.py", "conftest.py"})
 
-#: What a run is told when test files were not collected.
-UNCOLLECTED_IS_NOT_PASSING = (
-    "pytest did not collect {count} test file(s), so their tests never ran and this run does not count: "
-    "{files}. Make every test file collectable in a plain RunTests run: name it as the project's pytest "
-    "configuration expects (`python_files`, `testpaths`; by default test_*.py or *_test.py), or change that "
-    "configuration. Then run RunTests again."
-)
-
-#: RED writes test files only, so the configuration fix is not open there (user decision, 2026-10-28).
-UNCOLLECTED_IN_RED = (
-    "pytest did not collect {count} test file(s), so their tests never ran and this run does not count: "
-    "{files}. RED writes test files only, so the pytest configuration cannot change now: give each a name "
-    "the project's configuration collects (by default test_*.py or *_test.py) and remove the uncollected "
-    "file. Then run RunTests again."
-)
-
 
 def junit_options() -> str:
     """The pytest options that write the report this module reads."""
@@ -66,6 +52,26 @@ def collected_files(report: str | None) -> frozenset[str] | None:
     except ElementTree.ParseError:
         return None
     files = {posixpath.normpath(str(case.get("file"))) for case in root.iter("testcase") if case.get("file")}
+    return frozenset(files)
+
+
+def collection_error_files(report: str | None) -> frozenset[str] | None:
+    """
+    The test files pytest recorded collection errors for: in its JUnit report, a test case with an
+    `<error message="collection failure">`, naming the file. `None` when there is no readable report.
+    The error's own text is never read (2026-10-28): RunTests reports what pytest recorded, not why.
+    """
+    if not report:
+        return None
+    try:
+        root = ElementTree.fromstring(report)
+    except ElementTree.ParseError:
+        return None
+    files = set()
+    for case in root.iter("testcase"):
+        error = case.find("error")
+        if case.get("file") and error is not None and error.get("message") == "collection failure":
+            files.add(posixpath.normpath(str(case.get("file"))))
     return frozenset(files)
 
 
@@ -110,19 +116,11 @@ def uncollected_test_files(workspace: Any, test_path: str, collected: frozenset[
     return tuple(sorted(modules - collected))
 
 
-def uncollected_message(files: tuple[str, ...], *, in_red: bool = False) -> str:
-    """What the run says about uncollected test files: in RED, only the fix RED allows."""
-    template = UNCOLLECTED_IN_RED if in_red else UNCOLLECTED_IS_NOT_PASSING
-    return template.format(count=len(files), files=", ".join(files))
-
-
 __all__ = [
     "JUNIT_REPORT_PATH",
-    "UNCOLLECTED_IN_RED",
-    "UNCOLLECTED_IS_NOT_PASSING",
     "collected_files",
+    "collection_error_files",
     "junit_options",
     "project_test_modules",
-    "uncollected_message",
     "uncollected_test_files",
 ]

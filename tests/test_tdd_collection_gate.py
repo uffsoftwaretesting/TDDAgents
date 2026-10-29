@@ -1,6 +1,7 @@
 """
 A test file pytest does not collect checks nothing (`app/tdd/collection_gate.py`, user decision
-2026-10-28): RED gets no evidence from it, and a GREEN or REFACTOR pass does not count.
+2026-10-28): RED gets no evidence from it, and a GREEN or REFACTOR pass does not count. The same
+JUnit report records collection errors, RED's structured evidence for an exit-2 run.
 """
 
 from __future__ import annotations
@@ -13,17 +14,16 @@ import pytest
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.collection_gate import (
     JUNIT_REPORT_PATH,
-    UNCOLLECTED_IN_RED,
-    UNCOLLECTED_IS_NOT_PASSING,
     collected_files,
+    collection_error_files,
     junit_options,
     project_test_modules,
-    uncollected_message,
     uncollected_test_files,
 )
 from app.tdd.coverage_gate import CoverageReading, CoverageStatus
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.run_tests_tool.run_tests_tool import (
+    PHASE_RULES,
     SuiteExecutionResult,
     build_run_tests_tool,
     run_suite,
@@ -112,26 +112,25 @@ def test_uncollected_files_are_the_modules_the_report_lacks():
     assert uncollected_test_files(ws, "tests/test_a.py", frozenset({"tests/test_a.py"})) == ()
 
 
-def test_the_message_names_the_files_and_the_way_out():
-    assert uncollected_message(("tests/a.py", "tests/b.py")) == UNCOLLECTED_IS_NOT_PASSING.format(
-        count=2, files="tests/a.py, tests/b.py")
-    assert UNCOLLECTED_IS_NOT_PASSING == (
-        "pytest did not collect {count} test file(s), so their tests never ran and this run does not count: "
-        "{files}. Make every test file collectable in a plain RunTests run: name it as the project's pytest "
-        "configuration expects (`python_files`, `testpaths`; by default test_*.py or *_test.py), or change that "
-        "configuration. Then run RunTests again.")
+def collection_failure(file: str) -> str:
+    return (f'<testcase classname="" name="m" file="{file}" time="0.000">'
+            '<error message="collection failure">E   ModuleNotFoundError: No module named \'x\'</error></testcase>')
 
 
-def test_in_red_the_message_names_only_the_fix_red_allows():
-    """RED writes test files only, so it cannot change `pytest.ini` (user decision, 2026-10-28)."""
-    assert uncollected_message(("tests/a.py",), in_red=True) == UNCOLLECTED_IN_RED.format(
-        count=1, files="tests/a.py")
-    assert uncollected_message(("tests/a.py",), in_red=False) == uncollected_message(("tests/a.py",))
-    assert UNCOLLECTED_IN_RED == (
-        "pytest did not collect {count} test file(s), so their tests never ran and this run does not count: "
-        "{files}. RED writes test files only, so the pytest configuration cannot change now: give each a name "
-        "the project's configuration collects (by default test_*.py or *_test.py) and remove the uncollected "
-        "file. Then run RunTests again.")
+def test_collection_errors_are_the_cases_pytest_marks_as_collection_failures():
+    report = ('<?xml version="1.0"?><testsuites><testsuite name="pytest">'
+              f'{collection_failure("tests/test_api.py")}{collection_failure("tests/./test_b.py")}'
+              '<testcase classname="c" name="t" file="tests/test_ok.py"/>'
+              '<testcase classname="c" name="u" file="tests/test_err.py"><error message="fixture failed"/></testcase>'
+              '<testcase classname="c" name="v"><error message="collection failure"/></testcase>'
+              '</testsuite></testsuites>')
+    assert collection_error_files(report) == frozenset({"tests/test_api.py", "tests/test_b.py"})
+    assert collection_error_files(junit("tests/test_a.py")) == frozenset()
+
+
+@pytest.mark.parametrize("report", [None, "", "not xml <"])
+def test_no_readable_report_has_unknown_collection_errors(report: str | None):
+    assert collection_error_files(report) is None
 
 
 # ── RunTests ────────────────────────────────────────────────────────────────
@@ -148,11 +147,15 @@ def run(ledger: PhaseLedger, collected: frozenset[str] | None, exit_code: int = 
     return asyncio.run(tool.call({}, ctx)), store
 
 
+NOT_COLLECTED = "Not collected by pytest: tests/tests_trivial.py"
+
+
 def test_red_gets_no_evidence_from_an_uncollected_test_file():
     res, store = run(PhaseLedger(), ONLY_A)
     assert store.get().phase_ledger == PhaseLedger()
-    assert res.content.startswith(
-        f"All tests passed.\n{uncollected_message(('tests/tests_trivial.py',), in_red=True)}\nNo test file changed")
+    assert res.content.split("\n\n", 1)[0].splitlines()[1:] == [
+        NOT_COLLECTED, "Coverage: 100.0% (line + branch)",
+        f"TDD ledger: still RED. {PHASE_RULES[TddPhase.RED]}: a test file was not collected."]
 
 
 @pytest.mark.parametrize("ledger, stays", [
@@ -164,20 +167,22 @@ def test_a_pass_with_an_uncollected_test_file_does_not_count(ledger: PhaseLedger
     after = store.get().phase_ledger
     assert after.phase == stays and after.green_passed is (stays == TddPhase.REFACTOR)
     assert after.refactor_passed is False
-    assert res.content.startswith(
-        f"Tests ran without failures, but {uncollected_message(('tests/tests_trivial.py',))}\n")
+    assert res.content.split("\n\n", 1)[0].splitlines()[1:] == [
+        NOT_COLLECTED, "Coverage: 100.0% (line + branch)",
+        f"TDD ledger: still {stays.value}. {PHASE_RULES[stays]}: a test file was not collected."]
 
 
 def test_a_failing_run_names_the_uncollected_files_too():
     res, store = run(PhaseLedger(phase=TddPhase.GREEN, tests_written=True), ONLY_A, exit_code=1)
-    assert res.content.startswith(f"Tests failed (exit 1).\n{uncollected_message(('tests/tests_trivial.py',))}\n")
+    assert NOT_COLLECTED in res.content
+    assert f"{PHASE_RULES[TddPhase.GREEN]}: this run failed, a test file was not collected." in res.content
     assert store.get().phase_ledger.phase == TddPhase.GREEN
 
 
 @pytest.mark.parametrize("collected", [frozenset(FILES), None])
 def test_every_file_collected_or_an_unknown_report_checks_nothing(collected: frozenset[str] | None):
     res, store = run(PhaseLedger(phase=TddPhase.GREEN, tests_written=True), collected)
-    assert res.content.startswith("All tests passed.\nGREEN is done.")
+    assert "Not collected" not in res.content and "TDD ledger: GREEN → REFACTOR." in res.content
     assert store.get().phase_ledger.phase == TddPhase.REFACTOR
 
 
@@ -196,9 +201,9 @@ def test_the_live_case_with_real_pytest(python_workspace):
     store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     ctx = tool_context_for(store, workspace=python_workspace)
     res = asyncio.run(build_run_tests_tool(None).call({}, ctx))
-    assert "pytest did not collect 1 test file(s)" in res.content and "tests/tests_trivial.py" in res.content
+    assert NOT_COLLECTED in res.content
     assert store.get().phase_ledger.phase == TddPhase.GREEN
 
     python_workspace.move("tests/tests_trivial.py", "tests/test_trivial.py")
     res = asyncio.run(build_run_tests_tool(None).call({}, ctx))
-    assert res.exit_code == 1 and "pytest did not collect" not in res.content
+    assert res.exit_code == 1 and "Not collected" not in res.content

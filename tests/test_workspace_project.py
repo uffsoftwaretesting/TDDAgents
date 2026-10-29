@@ -111,11 +111,12 @@ def test_skipped_tests_are_counted_from_pytests_summary(output, count):
     assert skipped_count(output) == count
 
 
-SKIP_HEADER = ("Tests ran without failures, but 1 test(s) were skipped, so this run does not count as passing: a "
-               "skipped test checks nothing. Every test must run in a plain RunTests run: install what they "
-               "need, and do not gate tests behind environment variables, markers or options (size an expensive "
-               "check so that it runs in a normal test run). Then run RunTests again. The skip reasons are "
-               "listed in the short test summary below.")
+def skip_lines(phase: TddPhase) -> list[str]:
+    """The observation and the ledger line of a passing run with one skipped test (2026-10-28: no advice)."""
+    from app.tdd.run_tests_tool.run_tests_tool import PHASE_RULES
+
+    return ["Exit code 0 (pytest: all tests passed)", "Skipped: 1", "Coverage: not measured",
+            f"TDD ledger: still {phase.value}. {PHASE_RULES[phase]}: 1 test(s) were skipped."]
 
 
 @pytest.mark.parametrize("phase", [TddPhase.GREEN, TddPhase.REFACTOR])
@@ -124,7 +125,7 @@ def test_a_pass_with_skips_does_not_pass_green_or_refactor(phase):
     store = AppStateStore(AppState(phase_ledger=ledger))
     result = SuiteExecutionResult(exit_code=0, stdout="== 3 passed, 1 skipped ==")
     res = asyncio.run(build_run_tests_tool(lambda p: result).call({}, tool_context_for(store)))
-    assert res.content.splitlines()[0] == SKIP_HEADER
+    assert res.content.split("\n\n", 1)[0].splitlines() == skip_lines(phase)
     assert store.get().phase_ledger == ledger
     assert not store.get().phase_ledger.is_cycle_complete
 
@@ -155,7 +156,8 @@ def test_real_pytest_skips_keep_green_until_the_tool_is_there(python_workspace):
         "\n\ndef test_lint():\n    pytest.importorskip('not_installed_anywhere')\n"))
     store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
-    assert res.exit_code == 0 and res.content.startswith("Tests ran without failures, but 1 test(s) were skipped")
+    assert res.exit_code == 0 and "Skipped: 1\n" in res.content
+    assert skip_lines(TddPhase.GREEN)[-1] in res.content
     assert "SKIPPED" in res.content and "not_installed_anywhere" in res.content  # -rs lists the reason
     assert store.get().phase_ledger.phase == TddPhase.GREEN
 

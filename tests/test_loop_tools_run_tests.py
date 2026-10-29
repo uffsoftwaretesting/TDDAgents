@@ -1,5 +1,10 @@
 """
 Tests for RunTests loop tool and phase ledger updates (Part D2).
+
+Since 2026-10-28 RunTests reports only what it observed, as claude-code's tools do: the exit code
+with pytest's meaning (`PYTEST_EXIT_SEMANTICS`, upstream's `commandSemantics.ts` shape), the facts
+pytest's reports recorded, the ledger change with the phase's rule, then the raw output. A live run
+whose RunTests said "the code under test does not exist yet" for a missing package is why.
 """
 
 from __future__ import annotations
@@ -21,14 +26,20 @@ from app.tdd.coverage_gate import (
 )
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.tdd.run_tests_tool.run_tests_tool import (
-    BACKGROUND_RUN_NOTE,
-    LEDGER_EXIT_CODES,
-    PYTEST_EXIT_REASONS,
+    BACKGROUND_LEDGER,
+    NO_OUTPUT,
+    NOT_EVIDENCE,
+    PHASE_RULES,
+    PYTEST_EXIT_SEMANTICS,
+    ExitSemantic,
+    Outcome,
     RunTests,
     RunTestsUnavailable,
     SuiteExecutionResult,
     build_run_tests_tool,
+    exit_semantic,
     pytest_command,
+    run_outcome,
     run_tests_timeout_seconds,
 )
 from app.tdd.suite_fingerprint import fingerprint_test_files
@@ -46,16 +57,25 @@ def ws_ctx(store: AppStateStore, files: dict[str, str] | None = None) -> Any:
     return tool_context_for(store, workspace=FakeWorkspace(files=dict(TESTED if files is None else files)))
 
 
-@pytest.mark.parametrize("exit_code, header", [(1, "Tests failed (exit 1)."), (0, "All tests passed.")])
-def test_a_run_of_new_tests_ends_red_whatever_its_outcome(exit_code, header):
+RED_RULE = PHASE_RULES[TddPhase.RED]
+GREEN_RULE = PHASE_RULES[TddPhase.GREEN]
+REFACTOR_RULE = PHASE_RULES[TddPhase.REFACTOR]
+NOT_MEASURED = "Coverage: not measured"
+
+
+def exit_line(code: int) -> str:
+    return f"Exit code {code} (pytest: {exit_semantic(code).meaning})"
+
+
+@pytest.mark.parametrize("exit_code", [1, 0])
+def test_a_run_of_new_tests_ends_red_whatever_its_outcome(exit_code):
     store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
     tool = build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=exit_code, stdout="out", stderr="Err"))
     res = asyncio.run(tool.call({"test_path": "tests/test_foo.py"}, ws_ctx(store)))
     assert (res.is_error, res.exit_code) == (False, exit_code)
     assert res.content == (
-        f"{header}\nRED is done: this sub-requirement's tests were written and run. The phase is GREEN: "
-        "implement the code they describe and run RunTests until every test passes.\n\n--- STDOUT ---\nout"
-        "\n--- STDERR ---\nErr")
+        f"{exit_line(exit_code)}\n{NOT_MEASURED}\nTDD ledger: RED → GREEN. {RED_RULE}: they changed, and this run "
+        "counts.\n\nout\nErr")
     assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
@@ -65,9 +85,8 @@ def test_unchanged_tests_keep_red():
     store = AppStateStore(AppState(tdd_item_test_baseline=baseline))
     tool = build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=1, stdout="out"))
     res = asyncio.run(tool.call({}, ws_ctx(store, files)))
-    assert res.content.startswith(
-        "Tests failed (exit 1).\nNo test file changed since this sub-requirement started, so the phase stays RED: "
-        "write or extend its tests (robust, covering every relevant scenario and edge case), then run RunTests.")
+    assert res.content == (
+        f"{exit_line(1)}\n{NOT_MEASURED}\nTDD ledger: still RED. {RED_RULE}: they have not changed.\n\nout")
     assert store.get().phase_ledger == PhaseLedger()
     assert store.get().last_test_run is not None
 
@@ -90,9 +109,9 @@ def test_a_pass_in_green_moves_to_the_mandatory_refactor():
     store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     res = asyncio.run(build_run_tests_tool(
         lambda path: SuiteExecutionResult(exit_code=0, stdout="ok", coverage=UNDER)).call({}, ws_ctx(store)))
-    assert res.content.startswith(
-        "All tests passed.\nGREEN is done. The phase is REFACTOR, which is mandatory: improve the code and the tests "
-        "and raise coverage (coverage 70.0% (rule of thumb: 90%)), then run RunTests until every test passes.")
+    assert res.content == (
+        f"{exit_line(0)}\nCoverage: 70.0% (line + branch)\nTDD ledger: GREEN → REFACTOR. {GREEN_RULE}: this run "
+        "met it.\n\nok")
     assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True,
                                                    coverage=70.0)
 
@@ -101,32 +120,35 @@ def test_a_failure_in_green_stays_in_green():
     ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     store = AppStateStore(AppState(phase_ledger=ledger))
     res = asyncio.run(build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=1)).call({}, ws_ctx(store)))
-    assert res.content.startswith("Tests failed (exit 1).\nThe phase stays GREEN: every test must pass.")
+    assert res.content == (
+        f"{exit_line(1)}\n{NOT_MEASURED}\nTDD ledger: still GREEN. {GREEN_RULE}: this run failed.\n\n{NO_OUTPUT}")
     assert store.get().phase_ledger == ledger
 
 
 REFACTORING = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)
+REFACTOR_DONE = (f"TDD ledger: REFACTOR passed, so this sub-requirement's cycle is complete. {REFACTOR_RULE}: this "
+                 "run met it.")
 
 
-@pytest.mark.parametrize("result, status, passed", [
-    (SuiteExecutionResult(exit_code=0, coverage=MET),
-     "REFACTOR is done (coverage 95.0% (rule of thumb: 90%)): this sub-requirement's cycle is complete.", True),
-    # Coverage is a rule of thumb, not a gate (user decision, 2026-10-28).
-    (SuiteExecutionResult(exit_code=0, coverage=UNDER),
-     "REFACTOR is done (coverage 70.0% (rule of thumb: 90%)): this sub-requirement's cycle is complete.", True),
-    (SuiteExecutionResult(exit_code=0),
-     "REFACTOR is done (coverage could not be measured): this sub-requirement's cycle is complete.", True),
-    (SuiteExecutionResult(exit_code=1, coverage=MET), "REFACTOR is not done: every test must pass.", False),
+@pytest.mark.parametrize("result, coverage, status, passed", [
+    (SuiteExecutionResult(exit_code=0, coverage=MET), "Coverage: 95.0% (line + branch)", REFACTOR_DONE, True),
+    # Coverage is reported, never gated (user decision, 2026-10-28).
+    (SuiteExecutionResult(exit_code=0, coverage=UNDER), "Coverage: 70.0% (line + branch)", REFACTOR_DONE, True),
+    (SuiteExecutionResult(exit_code=0), NOT_MEASURED, REFACTOR_DONE, True),
+    (SuiteExecutionResult(exit_code=0, coverage=CoverageReading(CoverageStatus.NO_CODE)),
+     "Coverage: no production code to measure", REFACTOR_DONE, True),
+    (SuiteExecutionResult(exit_code=1, coverage=MET), "Coverage: 95.0% (line + branch)",
+     f"TDD ledger: still REFACTOR. {REFACTOR_RULE}: this run failed.", False),
 ])
-def test_refactor_is_judged_by_a_passing_run(result, status, passed):
+def test_refactor_is_judged_by_a_passing_run(result, coverage, status, passed):
     store = AppStateStore(AppState(phase_ledger=REFACTORING))
     res = asyncio.run(build_run_tests_tool(lambda path: result).call({}, ws_ctx(store)))
-    assert res.content.splitlines()[1] == status
+    assert res.content.splitlines()[1:3] == [coverage, status]
     assert store.get().phase_ledger.refactor_passed is passed
     assert store.get().phase_ledger.is_cycle_complete is passed
 
 
-def test_exit_2_is_not_an_observation_and_leaves_the_ledger():
+def test_exit_2_without_recorded_collection_errors_is_not_evidence():
     async def go():
         ledger = PhaseLedger(phase=TddPhase.RED, tests_written=False, green_passed=False)
         store = AppStateStore(AppState(phase_ledger=ledger))
@@ -139,25 +161,23 @@ def test_exit_2_is_not_an_observation_and_leaves_the_ledger():
         res = await build_run_tests_tool(async_runner).call({"test_path": "tests/test_bar.py"}, ctx)
         assert res.is_error is True
         assert res.exit_code == 2
-        assert res.content == (
-            "Tests could not be evaluated (exit 2: test execution was interrupted). The TDD ledger was not "
-            "changed.\n\n--- STDOUT ---\nSyntax error\n--- STDERR ---\nFailed")
+        assert res.content == f"{exit_line(2)}\n{NOT_MEASURED}\n{NOT_EVIDENCE}\n\nSyntax error\nFailed"
         assert store.get().phase_ledger == ledger
 
     asyncio.run(go())
 
 
-@pytest.mark.parametrize("code, reason", [
+@pytest.mark.parametrize("code, meaning", [
     (2, "test execution was interrupted"),
     (3, "pytest hit an internal error"),
     (4, "pytest was invoked incorrectly (usage error)"),
     (5, "no tests were collected"),
-    (127, "pytest did not report a test outcome"),
-    (-9, "pytest did not report a test outcome"),
+    (127, "pytest exited with code 127"),
+    (-9, "pytest exited with code -9"),
 ])
 @pytest.mark.parametrize("phase", list(TddPhase))
-def test_non_observation_codes_never_move_the_ledger(code, reason, phase):
-    """'No tests collected' can never confirm RED; nothing but 0/1 is evidence."""
+def test_non_evidence_codes_never_move_the_ledger(code, meaning, phase):
+    """'No tests collected' can never confirm RED; only the evidence outcomes count."""
     ledger = PhaseLedger(phase=phase, tests_written=phase != TddPhase.RED,
                          green_passed=phase == TddPhase.REFACTOR)
     store = AppStateStore(AppState(phase_ledger=ledger))
@@ -165,18 +185,37 @@ def test_non_observation_codes_never_move_the_ledger(code, reason, phase):
     res = asyncio.run(tool.call({}, tool_context_for(store)))
     assert res.is_error is True
     assert res.exit_code == code
-    assert res.content.startswith(f"Tests could not be evaluated (exit {code}: {reason}). The TDD ledger")
+    assert res.content == f"Exit code {code} (pytest: {meaning})\n{NOT_MEASURED}\n{NOT_EVIDENCE}\n\no"
     assert store.get().phase_ledger == ledger
+    assert store.get().last_test_run is None
 
 
-def test_ledger_codes_constant():
-    assert LEDGER_EXIT_CODES == frozenset({0, 1})
-    assert PYTEST_EXIT_REASONS == {
-        2: "test execution was interrupted",
-        3: "pytest hit an internal error",
-        4: "pytest was invoked incorrectly (usage error)",
-        5: "no tests were collected",
+def test_the_exit_code_table_is_pytests_documented_codes():
+    """Upstream's `COMMAND_SEMANTICS` shape: meaning, is_error and the TDD outcome, from the code alone."""
+    assert PYTEST_EXIT_SEMANTICS == {
+        0: ExitSemantic("all tests passed", False, Outcome.PASSED),
+        1: ExitSemantic("some tests failed", False, Outcome.FAILED),
+        2: ExitSemantic("test execution was interrupted", True, None),
+        3: ExitSemantic("pytest hit an internal error", True, None),
+        4: ExitSemantic("pytest was invoked incorrectly (usage error)", True, None),
+        5: ExitSemantic("no tests were collected", True, None),
     }
+    assert exit_semantic(9) == ExitSemantic("pytest exited with code 9", True, None)
+
+
+@pytest.mark.parametrize("result, expected", [
+    (SuiteExecutionResult(exit_code=0), (Outcome.PASSED, False)),
+    (SuiteExecutionResult(exit_code=1), (Outcome.FAILED, False)),
+    (SuiteExecutionResult(exit_code=2), (None, True)),
+    (SuiteExecutionResult(exit_code=2, collection_errors=frozenset()), (None, True)),
+    (SuiteExecutionResult(exit_code=2, collection_errors=frozenset({"tests/test_a.py"})),
+     (Outcome.COLLECTION_ERRORS, False)),
+    # Only exit 2 is read with the report: pytest's other codes keep their own meaning.
+    (SuiteExecutionResult(exit_code=1, collection_errors=frozenset({"tests/test_a.py"})), (Outcome.FAILED, False)),
+    (SuiteExecutionResult(exit_code=4, collection_errors=frozenset({"tests/test_a.py"})), (None, True)),
+])
+def test_the_run_outcome(result, expected):
+    assert run_outcome(result) == expected
 
 
 def test_default_instance_and_properties():
@@ -184,7 +223,7 @@ def test_default_instance_and_properties():
     from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
     RUN_TESTS_PROMPT = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
-    assert RUN_TESTS_PROMPT.startswith("Runs pytest in the workspace and returns the full output.")
+    assert RUN_TESTS_PROMPT.startswith("Runs pytest in the workspace and returns what it observed:")
     built_instance = build_run_tests_tool()
     for t in (RunTests, built_instance):
         assert t.name == "RunTests"
@@ -206,6 +245,8 @@ def test_default_instance_and_properties():
         assert t.description({"test_path": "tests/test_x.py"}) == "Run tests in tests/test_x.py"
         assert t.description({}) == "Run tests in ."
     assert "workspace" in RUN_TESTS_PROMPT and "sandbox" not in RUN_TESTS_PROMPT
+    for rule in PHASE_RULES.values():
+        assert rule.split(" ends with ", 1)[1] in RUN_TESTS_PROMPT
 
 
 def test_fails_closed_without_a_workspace():
@@ -215,14 +256,15 @@ def test_fails_closed_without_a_workspace():
     res = asyncio.run(RunTests.call({}, tool_context_for(store)))
     assert res.is_error is True
     assert res.exit_code is None
-    assert res.content == ("RunTests could not run the tests: no workspace is available to run the tests in. "
-                           "The TDD ledger was not changed.")
+    assert res.content == ("RunTests could not run the tests: no workspace is available to run the tests in\n"
+                           "TDD ledger: unchanged.")
     assert store.get().phase_ledger == ledger
 
 
 def test_suite_execution_result_defaults():
     res = SuiteExecutionResult(exit_code=0)
     assert (res.exit_code, res.stdout, res.stderr, res.coverage, res.__test__) == (0, "", "", UNAVAILABLE, False)
+    assert (res.skipped, res.collected_files, res.collection_errors) == (None, None, None)
 
 
 class _Wrap:
@@ -293,8 +335,7 @@ def test_non_callable_context_runner_falls_through_to_workspace_rule():
         asyncio.run(_default_test_runner("t.py", NotCallable(tool_context_for(AppStateStore()))))  # type: ignore
 
 
-STAYS_RED = ("No test file changed since this sub-requirement started, so the phase stays RED: write or extend "
-             "its tests (robust, covering every relevant scenario and edge case), then run RunTests.")
+STAYS_RED = f"TDD ledger: still RED. {RED_RULE}: they have not changed."
 
 
 def test_call_argument_handling_and_formatting():
@@ -305,11 +346,12 @@ def test_call_argument_handling_and_formatting():
 
         def recording(path):
             seen.append(path)
-            return SuiteExecutionResult(exit_code=0, stdout=f"Ran {path}", stderr="   \n ")
+            return SuiteExecutionResult(exit_code=0, stdout=f"\n  \nRan {path}\n\n", stderr="   \n ")
 
         tool = build_run_tests_tool(recording)
+        # Upstream's rendering: leading blank lines and trailing whitespace go, empty stderr is left out.
         assert (await tool.call({"test_path": "tests/x.py"}, ctx)).content == (
-            f"All tests passed.\n{STAYS_RED}\n\n--- STDOUT ---\nRan tests/x.py")
+            f"{exit_line(0)}\n{NOT_MEASURED}\n{STAYS_RED}\n\nRan tests/x.py")
         for args in ({"test_path": ""}, {"test_path": None}, {}):
             await tool.call(args, ctx)
             assert seen[-1] == "."
@@ -317,7 +359,10 @@ def test_call_argument_handling_and_formatting():
         fail = build_run_tests_tool(lambda p: SuiteExecutionResult(exit_code=1, stdout="F", stderr="E"))
         res = await fail.call({}, ctx)
         assert (res.is_error, res.exit_code) == (False, 1)
-        assert res.content == f"Tests failed (exit 1).\n{STAYS_RED}\n\n--- STDOUT ---\nF\n--- STDERR ---\nE"
+        assert res.content == f"{exit_line(1)}\n{NOT_MEASURED}\n{STAYS_RED}\n\nF\nE"
+
+        quiet = build_run_tests_tool(lambda p: SuiteExecutionResult(exit_code=1, stderr="only stderr"))
+        assert (await quiet.call({}, ctx)).content.endswith("\n\nonly stderr")
 
         two = build_run_tests_tool(lambda p, c: SuiteExecutionResult(exit_code=0, stdout=f"2 {p} {c is ctx}"))
         assert (await two.call({"test_path": "a"}, ctx)).content.endswith("2 a True")
@@ -327,7 +372,7 @@ def test_call_argument_handling_and_formatting():
 
         res = await build_run_tests_tool(unavailable).call({}, ctx)
         assert (res.is_error, res.content) == (
-            True, "RunTests could not run the tests: runner exploded. The TDD ledger was not changed.")
+            True, "RunTests could not run the tests: runner exploded\nTDD ledger: unchanged.")
 
     asyncio.run(go())
 
@@ -429,8 +474,8 @@ def test_workspace_failure_is_unavailable_not_red(exc):
     ctx = tool_context_for(store, workspace=_RecordingWorkspace(exc=exc))
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests/t.py"}, ctx))
     assert res.is_error is True
-    assert res.content == (f"RunTests could not run the tests: pytest could not be executed in the workspace: {exc}. "
-                           "The TDD ledger was not changed.")
+    assert res.content == (f"RunTests could not run the tests: pytest could not be executed in the workspace: {exc}\n"
+                           "TDD ledger: unchanged.")
     assert store.get().phase_ledger == ledger
 
 
@@ -474,7 +519,7 @@ def test_real_pytest_with_no_production_code_passes_refactor(python_workspace):
     store = AppStateStore(AppState(phase_ledger=REFACTORING))
     ws.write_file("tests/test_t.py", "def test_t():\n    assert True\n")
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
-    assert "REFACTOR is done (coverage: no production code to measure)" in res.content
+    assert "Coverage: no production code to measure\nTDD ledger: REFACTOR passed" in res.content
     assert store.get().phase_ledger.is_cycle_complete
 
 
@@ -488,70 +533,57 @@ def test_real_pytest_with_no_tests_cannot_confirm_red(python_workspace):
     assert store.get().phase_ledger == PhaseLedger()
 
 
-# ── exit 2: a collection error from missing code is RED evidence ─────────────
+# ── exit 2: collection errors pytest records are RED evidence ────────────────
+#
+# Read from pytest's JUnit report (`collection_errors`), never from the error text. The live run
+# that motivated this: RunTests called `No module named 'fastapi'` "the code under test does not
+# exist yet", and the model wrote a fastapi.py.
 
-BANNER = "______ ERROR collecting tests/test_mod.py ______\n"
+COLLECTION_FAILURE = SuiteExecutionResult(
+    exit_code=2, stdout="E   ModuleNotFoundError: No module named 'fastapi'\n!!! Interrupted: 1 error !!!",
+    collection_errors=frozenset({"tests/test_api.py"}))
 
 
-@pytest.mark.parametrize("error_line, header", [
-    ("E   ModuleNotFoundError: No module named 'calculator'",
-     "Tests failed (exit 2: collection error — pytest could not import 'calculator')."),
-    ("E   ImportError: cannot import name 'sub' from 'calc2' (/w/calc2.py)",
-     "Tests failed (exit 2: collection error — an import failed, see the error below)."),
-    ("E   AttributeError: module 'calc2' has no attribute 'nothing'",
-     "Tests failed (exit 2: collection error — an import failed, see the error below)."),
-])
-def test_missing_code_collection_errors_are_failing_tests(error_line, header):
-    from app.tdd.run_tests_tool.run_tests_tool import (
-        is_missing_code_collection_error,
-        ledger_exit_code,
-    )
-
-    res = SuiteExecutionResult(exit_code=2, stdout=BANNER + error_line + "\n!!! Interrupted: 1 error !!!")
-    assert is_missing_code_collection_error(res) is True
-    assert ledger_exit_code(res) == 1
+def test_recorded_collection_errors_are_red_evidence_reported_without_a_cause():
     store = AppStateStore()
-    out = asyncio.run(build_run_tests_tool(lambda p: res).call({}, ws_ctx(store)))
-    assert out.is_error is False and out.exit_code == 2
-    # Said as observed: "the code under test does not exist yet" once led a model to fake a package.
-    assert out.content.startswith(header)
+    res = asyncio.run(build_run_tests_tool(lambda p: COLLECTION_FAILURE).call({}, ws_ctx(store)))
+    assert (res.is_error, res.exit_code) == (False, 2)
+    assert res.content == (
+        f"{exit_line(2)}\npytest reported errors collecting: tests/test_api.py\n{NOT_MEASURED}\n"
+        f"TDD ledger: RED → GREEN. {RED_RULE}: they changed, and this run counts.\n\n"
+        "E   ModuleNotFoundError: No module named 'fastapi'\n!!! Interrupted: 1 error !!!")
     assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
-@pytest.mark.parametrize("stdout, stderr", [
-    (BANNER + "E   SyntaxError: invalid syntax", ""),                                  # broken test
-    (BANNER + "E   ModuleNotFoundError: x\nE   SyntaxError: bad", ""),                # any syntax error wins
-    (BANNER + "E   IndentationError: unexpected indent", ""),
-    (BANNER + "E   TabError: inconsistent", ""),
-    (BANNER + "E   NameError: name 'x' is not defined", ""),                          # not a missing-code kind
-    ("E   ModuleNotFoundError: No module named 'x'", ""),                              # no collection banner
-    ("KeyboardInterrupt", ""),                                                         # interrupted
-    ("", BANNER + "E   ModuleNotFoundError: No module named 'calculator'"),           # stderr counts too
+@pytest.mark.parametrize("phase", [TddPhase.GREEN, TddPhase.REFACTOR])
+def test_recorded_collection_errors_are_a_non_pass_in_green_and_refactor(phase):
+    ledger = PhaseLedger(phase=phase, tests_written=True, green_passed=phase == TddPhase.REFACTOR)
+    store = AppStateStore(AppState(phase_ledger=ledger))
+    res = asyncio.run(build_run_tests_tool(lambda p: COLLECTION_FAILURE).call({}, ws_ctx(store)))
+    assert res.is_error is False
+    assert f"TDD ledger: still {phase.value}. {PHASE_RULES[phase]}: this run had collection errors." in res.content
+    assert store.get().phase_ledger == ledger
+
+
+NO_CAUSE_PHRASES = ("does not exist yet", "not installed", "not written", "missing code", "install", "should",
+                    "must", "implement")
+
+
+@pytest.mark.parametrize("result", [
+    COLLECTION_FAILURE,
+    SuiteExecutionResult(exit_code=1, stdout="1 failed"),
+    SuiteExecutionResult(exit_code=0, stdout="1 passed, 1 skipped", collected_files=frozenset()),
+    SuiteExecutionResult(exit_code=5),
 ])
-def test_other_exit_2_runs_are_not_evidence(stdout, stderr):
-    from app.tdd.run_tests_tool.run_tests_tool import (
-        is_missing_code_collection_error,
-        ledger_exit_code,
-    )
-
-    res = SuiteExecutionResult(exit_code=2, stdout=stdout, stderr=stderr)
-    expected = "calculator" in stderr
-    assert is_missing_code_collection_error(res) is expected
-    assert ledger_exit_code(res) == (1 if expected else None)
-
-
-def test_collection_shape_only_applies_to_exit_2():
-    from app.tdd.run_tests_tool.run_tests_tool import (
-        is_missing_code_collection_error,
-        ledger_exit_code,
-    )
-
-    text = BANNER + "E   ModuleNotFoundError: No module named 'calculator'"
-    for code in (1, 3, 4, 5, 0):
-        assert is_missing_code_collection_error(SuiteExecutionResult(exit_code=code, stdout=text)) is False
-    assert ledger_exit_code(SuiteExecutionResult(exit_code=5, stdout=text)) is None
-    assert ledger_exit_code(SuiteExecutionResult(exit_code=0)) == 0
-    assert ledger_exit_code(SuiteExecutionResult(exit_code=1)) == 1
+@pytest.mark.parametrize("phase", list(TddPhase))
+def test_runtests_states_no_cause_and_gives_no_advice(result, phase):
+    """Everything above the raw output is an observation or a stated rule (2026-10-28)."""
+    ledger = PhaseLedger(phase=phase, tests_written=phase != TddPhase.RED, green_passed=phase == TddPhase.REFACTOR)
+    store = AppStateStore(AppState(phase_ledger=ledger))
+    res = asyncio.run(build_run_tests_tool(lambda p: result).call({}, ws_ctx(store)))
+    head = res.content.split("\n\n", 1)[0]
+    for phrase in NO_CAUSE_PHRASES:
+        assert phrase not in head.lower(), (phrase, head)
 
 
 def test_real_pytest_missing_module_confirms_red(python_workspace):
@@ -560,16 +592,30 @@ def test_real_pytest_missing_module_confirms_red(python_workspace):
     ws.write_file("tests/test_calc.py", "import calculator\n\ndef test_add():\n    assert calculator.add(2, 3) == 5\n")
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
     assert res.exit_code == 2 and res.is_error is False
+    assert "pytest reported errors collecting: tests/test_calc.py" in res.content
     assert store.get().phase_ledger.tests_written is True
 
 
-def test_real_pytest_syntax_error_in_test_is_not_red(python_workspace):
+def test_real_pytest_missing_package_is_reported_as_pytest_recorded_it(python_workspace):
+    """The incident: the result names the file and shows pytest's own line, and says nothing about why."""
+    ws = python_workspace
+    store = AppStateStore()
+    ws.write_file("tests/test_api.py", "import fastapi_not_installed\n\ndef test_a():\n    assert True\n")
+    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
+    head, output = res.content.split("\n\n", 1)
+    assert head.splitlines()[:2] == [exit_line(2), "pytest reported errors collecting: tests/test_api.py"]
+    assert "No module named 'fastapi_not_installed'" in output and "fastapi" not in head.split("\n", 2)[2]
+
+
+def test_real_pytest_syntax_error_in_a_test_is_a_collection_error(python_workspace):
+    """Accepted (user decision, 2026-10-28): any test file pytest cannot import is a collection error."""
     ws = python_workspace
     store = AppStateStore()
     ws.write_file("tests/test_bad.py", "def test_x(:\n    pass\n")
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
-    assert res.exit_code == 2 and res.is_error is True
-    assert store.get().phase_ledger == PhaseLedger()
+    assert res.exit_code == 2 and res.is_error is False
+    assert "pytest reported errors collecting: tests/test_bad.py" in res.content
+    assert store.get().phase_ledger.tests_written is True
 
 
 # ── Phase 5: the last observed run, kept for the TDD re-attach after compaction ─
@@ -620,16 +666,13 @@ def test_the_default_runner_reads_the_coverage_report_back(report, output, readi
     assert result.coverage == reading
 
 
-@pytest.mark.parametrize("result, header", [
-    (SuiteExecutionResult(exit_code=0, stdout="out"), "All tests passed."),
-    (SuiteExecutionResult(exit_code=1, stdout="out"), "Tests failed (exit 1)."),
-    (SuiteExecutionResult(
-        exit_code=2, stdout=BANNER + "E   ModuleNotFoundError: No module named 'x'\n!!! Interrupted: 1 error !!!"),
-     "Tests failed (exit 2: collection error — pytest could not import 'x')."),
-    (SuiteExecutionResult(exit_code=0, stdout="1 passed, 2 skipped"),
-     "Tests ran without failures, but 2 test(s) were skipped"),
+@pytest.mark.parametrize("result, is_error", [
+    (SuiteExecutionResult(exit_code=0, stdout="out"), False),
+    (SuiteExecutionResult(exit_code=1, stdout="out"), False),
+    (COLLECTION_FAILURE, False),
+    (SuiteExecutionResult(exit_code=0, stdout="1 passed, 2 skipped"), False),
 ])
-def test_a_background_run_reports_evidence_and_never_the_ledger(result, header):
+def test_a_background_run_reports_evidence_and_never_the_ledger(result, is_error):
     """`shareSetAppState: !isAsync`: a background worker's run makes no phase claim and writes nothing."""
     import dataclasses
 
@@ -637,25 +680,28 @@ def test_a_background_run_reports_evidence_and_never_the_ledger(result, header):
     before = store.get()
     ctx = dataclasses.replace(ws_ctx(store), shares_app_state=False)
     res = asyncio.run(build_run_tests_tool(lambda path: result).call({}, ctx))
-    assert res.content.startswith(header)
-    assert f"\n{BACKGROUND_RUN_NOTE}\n\n--- STDOUT ---\n" in res.content
+    head = res.content.split("\n\n", 1)[0].splitlines()
+    assert head[0] == exit_line(result.exit_code) and head[-1] == BACKGROUND_LEDGER
     assert "GREEN" not in res.content and "REFACTOR" not in res.content
-    assert (res.is_error, res.exit_code) == (False, result.exit_code)
+    assert (res.is_error, res.exit_code) == (is_error, result.exit_code)
     assert store.get() is before
 
 
-def _returning(result: SuiteExecutionResult) -> Any:
-    return lambda path: result
-
-
-def test_a_background_run_names_uncollected_files():
+def test_a_background_run_names_uncollected_files_and_skips():
     import dataclasses
 
     store = AppStateStore()
     ctx = dataclasses.replace(ws_ctx(store), shares_app_state=False)
-    for code, prefix in ((0, "Tests ran without failures, but "), (1, "Tests failed (exit 1).\n")):
-        result = SuiteExecutionResult(exit_code=code, collected_files=frozenset())
-        res = asyncio.run(build_run_tests_tool(_returning(result)).call({}, ctx))
-        assert res.content.startswith(prefix)
-        assert "tests/test_foo.py" in res.content.split(BACKGROUND_RUN_NOTE)[0]
+    result = SuiteExecutionResult(exit_code=0, stdout="1 passed, 2 skipped", collected_files=frozenset())
+    res = asyncio.run(build_run_tests_tool(lambda path: result).call({}, ctx))
+    assert res.content.split("\n\n", 1)[0] == (
+        f"{exit_line(0)}\nNot collected by pytest: tests/test_foo.py\nSkipped: 2\n{NOT_MEASURED}\n{BACKGROUND_LEDGER}")
     assert store.get().phase_ledger == PhaseLedger()
+
+
+def test_a_background_run_that_is_not_evidence_is_an_error():
+    import dataclasses
+
+    ctx = dataclasses.replace(ws_ctx(AppStateStore()), shares_app_state=False)
+    res = asyncio.run(build_run_tests_tool(lambda path: SuiteExecutionResult(exit_code=4)).call({}, ctx))
+    assert res.is_error is True and NOT_EVIDENCE in res.content

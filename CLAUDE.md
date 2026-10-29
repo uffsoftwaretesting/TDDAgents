@@ -1468,56 +1468,53 @@ official CLI tool for TDDAgents", and `CLAUDE.md` → `TDDAGENTS.md`.
   the user agent is TDDAgents';
 - ReadFile's media reach a non-Anthropic model as a meta user message, not inside the tool result.
 
-### A dependency is installed, never faked (2026-10-28)
+### RunTests reports what it observed (2026-10-28)
 
-The CPF live run's agents never installed FastAPI, Pydantic or validate-docbr. They wrote
-`fastapi.py` and `pydantic.py` stand-ins in the project root, and the tests passed against them,
-although `Bash(pip install:*)` was allowed. **The cause was ours:** RunTests labelled every
-`ModuleNotFoundError` "the code under test does not exist yet", so in GREEN the model wrote the
-"missing code", a module named `fastapi`. Every choice below was the user's; the fix must work for
-any language.
+The CPF live run's agents wrote `fastapi.py` and `pydantic.py` instead of installing the packages,
+and the tests passed against them. **RunTests caused it**: pytest failed on `ModuleNotFoundError:
+No module named 'fastapi'`, RunTests called that "the code under test does not exist yet", and in
+GREEN the model wrote the "missing code". A first fix, a TDDAgents-own guard (dependency
+directories, stand-in names, the specification's Core Dependencies), was **removed at the user's
+direction**: follow claude-code, and redesign RunTests so a misinterpretation cannot happen again.
 
-- **Claude-code's own answer, ported.**
-  - `app/prompts/system/doing-tasks.md` gains upstream's two internal-build items, verbatim:
-    "Before reporting a task complete, verify it actually works…" (`constants/prompts.ts:211`) and
-    "Report outcomes faithfully … never … manufacture a green result…" (`:240`).
-  - `get_session_specific_guidance_section` (`app/context.py`, the dynamic `session_guidance`
-    section) ports `getSessionSpecificGuidanceSection` with **the verification contract always
-    on**: non-trivial work gets an adversarial `verification` agent before completion is
-    reported. It stays prompt-only, as upstream.
-  - `request_system_texts` hands the prompt the run's tool names and whether skill commands exist.
-- **Upstream's path safety check is the slot.**
-  - `check_path_safety_for_auto_edit` (`checkPathSafetyForAutoEdit`) gains two predicates after
-    upstream's:
-    - a write inside `DEPENDENCY_DIRECTORIES` (`node_modules`, `.venv`, `site-packages`,
-      `vendor`, …; classifier-approvable);
-    - a file or directory named like a dependency the tests could not import, from
-      `ToolPermissionContext.missing_dependencies`; a human decides.
-  - Both are compared below the working directory, case-folded, with `-`, `_` and `.` alike.
-  - The result is upstream's `ask` tagged `safetyCheck`, so bypass, allow rules and PreToolUse
-    `allow` cannot skip it. Headless runs and background agents deny it. It reaches WriteFile,
-    Edit and Bash redirects (`is_path_allowed`).
-- **What marks a dependency: the specification's Core Dependencies.**
-  - A name alone cannot tell `import fastapi` from RED's `from calculator import add`.
-  - `declared_dependencies` (`app/tdd/dependency_guard.py`) reads the engineer specification's
-    "Core Dependencies" section into `AppState.declared_dependencies`: at
-    `open_session_run(specification=…)`, and again on `/requirements`.
-- **RunTests** (the runner seam; pytest today):
-  - a collection error importing a declared dependency the project does not define is an
-    environment error. The ledger is untouched, and the name is recorded on
-    `missing_dependencies` (not by a background worker);
-  - any other missing import is still RED evidence, said as observed (`collection_error_header`:
-    "pytest could not import 'x'");
-  - a run never counts while a project file stands in for a recorded dependency (`stand_ins`),
-    which also catches `cp`/`mv`.
+- **Claude-code's way of reporting a command.** Upstream's Bash never reads a command's output
+  for meaning:
+  - `tools/BashTool/commandSemantics.ts` maps exit codes to `isError` and a label, ignoring
+    stdout and stderr;
+  - the model sees `Exit code N` plus the raw output (`utils/toolErrors.ts::getErrorParts`).
+
+  RunTests now says only:
+  - the exit code with pytest's documented meaning (`PYTEST_EXIT_SEMANTICS`, upstream's
+    `COMMAND_SEMANTICS` shape, with a `DEFAULT_SEMANTIC`-like fallback). It is the seam where
+    another runner brings its own table;
+  - what pytest's reports record: collection errors and uncollected files from the JUnit report,
+    the skipped count from its summary, the measured coverage;
+  - a `TDD ledger:` line with the change, the phase's rule (`PHASE_RULES`) and whether the run
+    met it;
+  - the raw output, last, rendered as upstream renders it.
+
+  It never states a cause and never gives advice. `test_runtests_states_no_cause_and_gives_no_advice`
+  pins that.
+- **Exit 2 in RED** counts only when pytest's JUnit report records collection errors
+  (`collection_error_files`, the `<error message="collection failure">` test cases). It is read
+  structurally, never from the error text.
+  - That keeps RED possible for a test importing code not written yet, without guessing why the
+    import failed.
+  - *Accepted consequence:* any test file pytest cannot import, a SyntaxError included, counts
+    for RED, and GREEN then needs it fixed.
+- **`is_error` is table-driven**, as upstream:
+  - exit 0 and 1 are not errors (failing tests are TDD data, like grep's exit 1);
+  - nor is an exit 2 with recorded collection errors;
+  - every other code, a timeout or no runner is an error, and the ledger is untouched.
+- **Kept from the first fix** (claude-code's own text): the two internal-build Doing-tasks items
+  (`constants/prompts.ts:211`, `:240`), and `get_session_specific_guidance_section`
+  (`app/context.py`) with the verification contract always on, prompt-only.
+- The session's final run (`app/main.py::write_final_test_run`) names the table's meaning too.
 
 *Divergences, recorded:*
-- the internal-build Doing-tasks items and the always-on contract are not in upstream's external
-  build;
-- `missing_dependencies` is a TDDAgents field on `ToolPermissionContext`;
-- `DEPENDENCY_DIRECTORIES` is TDDAgents' list;
-- the missing-import reading is pytest's (a new runner brings its own);
-- an import name unlike its package name (Pillow → PIL) is not matched;
+- RunTests has no upstream counterpart (upstream runs tests through Bash). Its table marks exit 1
+  informational and exit 2 with collection errors as RED evidence, which are TDDAgents' rules;
+- the Doing-tasks items and the always-on contract are not in upstream's external build;
 - the session guidance has no `! <command>` item (no `!` prefix here) and no DiscoverSkills item.
 
 ### The three things that changed most

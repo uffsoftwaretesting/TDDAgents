@@ -52,7 +52,6 @@ from app.session.prompts import (
     development_continue_prompt,
     development_replanned_prompt,
 )
-from app.tdd.dependency_guard import declared_dependencies
 from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
 from app.utils.message_queue_manager import QueuedCommand
 
@@ -361,9 +360,6 @@ class Repl:
             self.io.write("The requirements were not changed.")
             return
         self.specification, texts = outcome
-        # The new specification's Core Dependencies replace the old ones (`dependency_guard`).
-        declared = declared_dependencies(self.specification)
-        self.run.store.update(lambda state: replace(state, declared_dependencies=declared))
         updated = update_tdd_plan(self.run.ctx, lambda plan: plan.replace_pending(texts))
         self.io.write(f"New plan:\n{render_plan(updated)}")
         self._start(submit_prompt(self.run, development_replanned_prompt(self.specification, updated)))

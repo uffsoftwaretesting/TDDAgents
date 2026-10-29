@@ -1,18 +1,19 @@
 ---
 name: RunTests
-description: Runs the test suite, measures coverage, and updates the authoritative TDD phase ledger from what it observes.
+description: Runs the test suite with pytest, measures coverage, and records the run in the TDD phase ledger.
 ---
-Runs pytest in the workspace and returns the full output.
+Runs pytest in the workspace and returns what it observed:
 
-Tests failing is a result, not an error. The output includes the exit code, a line saying
-what the run did to the TDD ledger and what the phase now needs, the line and branch
-coverage report with the uncovered lines (`Missing`), and is verbose on purpose because
-the failure detail is the most valuable thing you will read.
+- the exit code with pytest's meaning of it;
+- the test files pytest reported collection errors for, the test files it did not collect, and the number of skipped tests, as pytest's reports record them;
+- the line and branch coverage it measured;
+- a `TDD ledger:` line: what the run did to the TDD ledger, the current phase's rule, and whether the run met it;
+- the raw pytest output, which includes the uncovered lines (`Missing`). It is verbose on purpose: the failure detail is the most valuable thing you will read.
 
-Updates the TDD phase ledger from what it observes: in RED, a run of the sub-requirement's
-new or changed tests (pass or fail) ends RED; in GREEN, a pass ends GREEN; in REFACTOR, a
-pass ends REFACTOR (coverage is reported on every run, as guidance). A run with skipped tests is not a pass: every test must run in a plain RunTests run,
-never gated behind environment variables, markers or options. Neither is a run in which pytest does not collect
-a test file (for example a name the project's `python_files` setting does not match): every test file must be collected. Only a pass (0)
-or failing tests (1) count;
-anything else (no tests collected, usage error, timeout) is reported as an error.
+Failing tests are a result, not an error.
+
+The phase rules:
+- RED ends with a run that passes, fails, or stops on collection errors pytest reports, after the sub-requirement's test files changed.
+- GREEN and REFACTOR each end with a run in which every test passes (exit 0), none is skipped and every test file is collected.
+
+Any other run (interrupted, an internal or usage error, no tests collected, a timeout) is reported as an error and leaves the ledger unchanged.

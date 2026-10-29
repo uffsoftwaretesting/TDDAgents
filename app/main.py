@@ -372,6 +372,7 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
     from app.tdd.collection_gate import uncollected_test_files
     from app.tdd.run_tests_tool.run_tests_tool import (
         RunTestsUnavailable,
+        exit_semantic,
         run_suite,
         skipped_count,
     )
@@ -386,7 +387,8 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
     skipped = skipped_count(output)
     uncollected = uncollected_test_files(workspace, ".", result.collected_files)
     verdict = "passed" if result.exit_code == 0 and skipped == 0 and not uncollected else "NOT passing"
-    summary = f"{verdict} (exit {result.exit_code}, {skipped} skipped, {result.coverage.describe()})"
+    meaning = exit_semantic(result.exit_code).meaning
+    summary = f"{verdict} (exit {result.exit_code}: {meaning}, {skipped} skipped, {result.coverage.describe()})"
     if uncollected:
         summary += f"; not collected: {', '.join(uncollected)}"
     lines = [f"Project: {getattr(workspace, 'root', '?')}", f"Result: {summary}", "-" * 80, output]

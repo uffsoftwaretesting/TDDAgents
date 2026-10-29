@@ -63,10 +63,6 @@ class AppState:
     #: (Phase 12, `app/tdd/suite_fingerprint.py`): RunTests ends RED only once they changed.
     #: `None` when it could not be taken.
     tdd_item_test_baseline: str | None = None
-    #: The dependencies the session's specification declares (its "Core Dependencies" section,
-    #: `app/tdd/dependency_guard.py::declared_dependencies`), set once when the session opens. A
-    #: missing import of one is an environment error, not a failing test (2026-10-28).
-    declared_dependencies: frozenset[str] = frozenset()
 
 
 @dataclass(slots=True)

@@ -150,10 +150,6 @@ class ToolPermissionContext:
     #: editable ones. Upstream finds them through process globals (cwd, home); `None` for a
     #: context not built from settings, which then persists nothing.
     settings_locations: SettingsLocations | None = None
-    #: TDDAgents (2026-10-28): the dependencies a test run could not import, recorded by RunTests
-    #: only. The path safety check asks before a file stands in for one
-    #: (`check_path_safety_for_auto_edit`), as upstream asks before a sensitive file is written.
-    missing_dependencies: frozenset[str] = frozenset()
 
 
 #: `PERMISSION_MODE_CONFIG[mode].title`.

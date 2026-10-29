@@ -6,27 +6,36 @@ This is the only component that observes ground truth:
 that can observe ground truth: the test runner. No agent asserts its own progress."
 (§3.3 of `docs/transition_elaboration_plan.md`)
 
+**It reports what it observed, as claude-code's tools do (2026-10-28).** A live run's pytest failed
+on `ModuleNotFoundError: No module named 'fastapi'`, RunTests called that "the code under test
+does not exist yet", and the model wrote a `fastapi.py`. Upstream's Bash never reads a command's
+output for meaning: `tools/BashTool/commandSemantics.ts` maps **exit codes** to `isError` and a
+label, ignoring stdout/stderr, and the model sees `Exit code N` plus the raw output
+(`utils/toolErrors.ts::getErrorParts`). So RunTests says only:
+
+* the exit code and pytest's documented meaning of it (`PYTEST_EXIT_SEMANTICS`, upstream's
+  `COMMAND_SEMANTICS` shape: the seam where another runner brings its own table);
+* the facts pytest's own reports record: the files it reported collection errors for, the files
+  it did not collect (JUnit, `app/tdd/collection_gate.py`), the skipped count from its summary,
+  the coverage it measured (`app/tdd/coverage_gate.py`);
+* the ledger change and the phase's rule, stated as rules;
+* the raw output, last.
+
+Never a cause, never advice.
+
 What a run proves depends on the phase (Phase 12, `PhaseLedger.with_test_result`):
-- RED ends with a run, pass or fail, in which the sub-requirement's test files changed since
-  it started. RunTests observes that itself, by fingerprinting the test files
-  (`app/tdd/suite_fingerprint.py`) against the item's baseline.
-- GREEN ends with a passing run.
-- REFACTOR ends with a passing run. Every run measures line + branch coverage with pytest-cov
-  (`app/tdd/coverage_gate.py`) and reports it as guidance, not a gate (user decision, 2026-10-28).
+- RED ends with a run that passes, fails, or stops on collection errors pytest reports, after the
+  sub-requirement's test files changed since it started. RunTests observes the change itself, by
+  fingerprinting the test files (`app/tdd/suite_fingerprint.py`) against the item's baseline. A
+  file that fails to import for any reason (a missing module, a SyntaxError) is a collection error
+  (user decision, 2026-10-28).
+- GREEN and REFACTOR end with a run that exits 0 with no skipped test and every test file collected.
+  Coverage is measured on every run and reported, never gated (user decision, 2026-10-28).
 
+Any other outcome (interrupted without collection errors, an internal error, a usage error, no
+tests collected, a timeout, no workspace) is not evidence: an error result, the ledger untouched.
 A background worker's run (`ToolContext.shares_app_state` is `False`, upstream's
-`shareSetAppState: !isAsync`) reports what the tests did as verification evidence and makes no
-ledger claim, since its app-state writes are discarded.
-
-Only pytest's exit codes 0 (passed) and 1 (tests failed) are observations about the code
-under test — plus one form of exit 2: a collection error raised because the code under test
-does not exist yet (`ModuleNotFoundError`, `ImportError`, `AttributeError` while importing a
-test), which counts as failing tests. Every other outcome —
-2 interrupted, 3 internal error, 4 usage error, 5 no tests collected, a timeout, a missing
-workspace, a crashed runner — says nothing about Red or Green, so it is reported as an
-error and the ledger is left untouched. In particular "no tests collected" can never confirm
-RED. The tool fails closed: with no workspace and no injected runner it refuses rather than
-pretending the suite passed.
+`shareSetAppState: !isAsync`) reports the same observations and changes no ledger.
 """
 
 from __future__ import annotations
@@ -37,14 +46,15 @@ import re
 import shlex
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from app.tdd.collection_gate import (
     JUNIT_REPORT_PATH,
     collected_files,
+    collection_error_files,
     junit_options,
-    uncollected_message,
     uncollected_test_files,
 )
 from app.tdd.coverage_gate import (
@@ -53,15 +63,8 @@ from app.tdd.coverage_gate import (
     COVERAGE_REPORT_PATH,
     UNAVAILABLE,
     CoverageReading,
+    CoverageStatus,
     read_coverage,
-)
-from app.tdd.dependency_guard import (
-    missing_dependency,
-    missing_dependency_message,
-    record_missing,
-    stand_in_message,
-    stand_ins,
-    unimportable_module,
 )
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.tdd.suite_fingerprint import fingerprint_test_files, have_tests_changed
@@ -83,52 +86,60 @@ class SuiteExecutionResult:
     skipped: int | None = None
     #: The files pytest collected (its JUnit report); `None` when unknown, which checks nothing.
     collected_files: frozenset[str] | None = None
+    #: The files pytest recorded collection errors for (its JUnit report); `None` when unknown.
+    collection_errors: frozenset[str] | None = None
     __test__: bool = False
 
 
 TestRunner = Callable[[str, ToolContext], Awaitable[SuiteExecutionResult] | SuiteExecutionResult]
 
 
-#: pytest exit codes that are observations about the code under test.
-LEDGER_EXIT_CODES: frozenset[int] = frozenset({0, 1})
+class Outcome(Enum):
+    """What a run is, as evidence. `None` (no outcome) is a run that is not evidence."""
 
-#: Why a non-observation exit code tells us nothing about Red or Green.
-PYTEST_EXIT_REASONS: dict[int, str] = {
-    2: "test execution was interrupted",
-    3: "pytest hit an internal error",
-    4: "pytest was invoked incorrectly (usage error)",
-    5: "no tests were collected",
+    PASSED = "passed"
+    FAILED = "failed"
+    COLLECTION_ERRORS = "collection errors"
+
+
+@dataclass(frozen=True, slots=True)
+class ExitSemantic:
+    """
+    Upstream's `CommandSemantic` result (`tools/BashTool/commandSemantics.ts`): what an exit code
+    means, whether it is an error, and here what it is as TDD evidence. Read from the code alone.
+    """
+
+    meaning: str
+    is_error: bool
+    outcome: Outcome | None
+
+
+#: pytest's documented exit codes (`pytest.ExitCode`). Exit 1 is informational, as upstream's grep
+#: exit 1 is: failing tests are data in TDD, not a tool error.
+PYTEST_EXIT_SEMANTICS: dict[int, ExitSemantic] = {
+    0: ExitSemantic("all tests passed", False, Outcome.PASSED),
+    1: ExitSemantic("some tests failed", False, Outcome.FAILED),
+    2: ExitSemantic("test execution was interrupted", True, None),
+    3: ExitSemantic("pytest hit an internal error", True, None),
+    4: ExitSemantic("pytest was invoked incorrectly (usage error)", True, None),
+    5: ExitSemantic("no tests were collected", True, None),
 }
 
 
-#: pytest's collection-error banner, and the exception kinds that mean "code not written yet".
-_COLLECTION_BANNER = "ERROR collecting"
-_MISSING_CODE_ERROR = re.compile(r"^E\s+(ModuleNotFoundError|ImportError|AttributeError):", re.MULTILINE)
-_BROKEN_TEST_ERROR = re.compile(r"^E\s+(SyntaxError|IndentationError|TabError):", re.MULTILINE)
+def exit_semantic(exit_code: int) -> ExitSemantic:
+    """The table's entry, else upstream's `DEFAULT_SEMANTIC`: any other non-zero code is an error."""
+    return PYTEST_EXIT_SEMANTICS.get(exit_code, ExitSemantic(f"pytest exited with code {exit_code}", True, None))
 
 
-def is_missing_code_collection_error(result: SuiteExecutionResult) -> bool:
+def run_outcome(result: SuiteExecutionResult) -> tuple[Outcome | None, bool]:
     """
-    Exit 2 caused by importing code that does not exist yet. A syntax error in a test file
-    is a broken test, not a failing one, so any such error disqualifies the run.
+    `(outcome, is_error)`. Exit 2 is a collection-error outcome, and no error, only when pytest's
+    report recorded collection errors: pytest stopped there, which RED counts as a run.
     """
-    if result.exit_code != 2:
-        return False
-    text = f"{result.stdout}\n{result.stderr}"
-    return (
-        _COLLECTION_BANNER in text
-        and _MISSING_CODE_ERROR.search(text) is not None
-        and _BROKEN_TEST_ERROR.search(text) is None
-    )
-
-
-def ledger_exit_code(result: SuiteExecutionResult) -> int | None:
-    """The exit code the ledger observes, or None when the run is not evidence."""
-    if result.exit_code in LEDGER_EXIT_CODES:
-        return result.exit_code
-    if is_missing_code_collection_error(result):
-        return 1
-    return None
+    semantic = exit_semantic(result.exit_code)
+    if result.exit_code == 2 and result.collection_errors:
+        return Outcome.COLLECTION_ERRORS, False
+    return semantic.outcome, semantic.is_error
 
 
 class RunTestsUnavailable(Exception):
@@ -220,7 +231,7 @@ def run_suite(ws: Any, test_path: str = ".") -> SuiteExecutionResult:
     _discard(ws, JUNIT_REPORT_PATH)
     coverage = read_coverage(report, f"{res.stdout}\n{res.stderr}")
     return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr, coverage=coverage,
-                                collected_files=collected_files(junit))
+                                collected_files=collected_files(junit), collection_errors=collection_error_files(junit))
 
 
 def _discard(ws: Any, path: str) -> None:
@@ -240,102 +251,97 @@ def skipped_count(output: str) -> int:
     return int(found[-1]) if found else 0
 
 
-#: What a passing run with skipped tests is told in GREEN and REFACTOR (Phase 13).
-SKIPPED_IS_NOT_PASSING = (
-    "{count} test(s) were skipped, so this run does not count as passing: a skipped test checks "
-    "nothing. Every test must run in a plain RunTests run: install what they need, and do not gate "
-    "tests behind environment variables, markers or options (size an expensive check so that it runs "
-    "in a normal test run). Then run RunTests again. The skip reasons are listed in the short test "
-    "summary below."
-)
+#: Each phase's rule, stated as a rule in every result (2026-10-28).
+PHASE_RULES: dict[TddPhase, str] = {
+    TddPhase.RED: ("RED ends with a run that passes, fails, or stops on collection errors pytest reports, after "
+                   "the sub-requirement's test files changed"),
+    TddPhase.GREEN: ("GREEN ends with a run in which every test passes (exit 0), none is skipped and every test "
+                     "file is collected"),
+    TddPhase.REFACTOR: ("REFACTOR ends with a run in which every test passes (exit 0), none is skipped and every "
+                        "test file is collected"),
+}
 
-
-def ledger_status(before: PhaseLedger, after: PhaseLedger, exit_code: int, coverage: CoverageReading) -> str:
-    """What the run did to the TDD ledger, and what the phase now needs."""
-    if before.phase == TddPhase.RED:
-        if after.phase == TddPhase.RED:
-            return ("No test file changed since this sub-requirement started, so the phase stays RED: write or "
-                    "extend its tests (robust, covering every relevant scenario and edge case), then run RunTests.")
-        return ("RED is done: this sub-requirement's tests were written and run. The phase is GREEN: implement "
-                "the code they describe and run RunTests until every test passes.")
-    if before.phase == TddPhase.GREEN:
-        if exit_code != 0:
-            return "The phase stays GREEN: every test must pass."
-        return ("GREEN is done. The phase is REFACTOR, which is mandatory: improve the code and the tests and "
-                f"raise coverage ({coverage.describe()}), then run RunTests until every test passes.")
-    if exit_code != 0:
-        return "REFACTOR is not done: every test must pass."
-    return f"REFACTOR is done ({coverage.describe()}): this sub-requirement's cycle is complete."
-
-
-def collection_error_header(exec_result: SuiteExecutionResult) -> str:
-    """
-    A collection error that counts as failing tests, said as observed (2026-10-28): an import
-    failed. It used to say "the code under test does not exist yet", and a model then wrote a
-    `fastapi.py` to stand in for the missing package.
-    """
-    code = exec_result.exit_code
-    name = unimportable_module(exec_result.stdout, exec_result.stderr)
-    if name is not None:
-        return f"Tests failed (exit {code}: collection error — pytest could not import '{name}')."
-    return f"Tests failed (exit {code}: collection error — an import failed, see the error below)."
-
-
-async def _dependency_error(exec_result: SuiteExecutionResult, context: ToolContext) -> ToolResult | None:
-    """
-    A run that is no evidence because of a dependency (`app/tdd/dependency_guard.py`): pytest could
-    not import one (recorded for the path safety check, unless this is a background worker), or a
-    project file stands in for one the tests could not import. The ledger is not changed.
-    """
-    workspace = getattr(context, "workspace", None)
-    code = exec_result.exit_code
-    declared = context.get_app_state().declared_dependencies
-    name = await asyncio.to_thread(
-        missing_dependency, exec_result.stdout, exec_result.stderr, code, workspace, declared)
-    if name is not None:
-        if context.shares_app_state:
-            context.set_app_state(lambda s: record_missing(s, name))
-        return ToolResult(content=format_output(exec_result, missing_dependency_message(name)),
-                          is_error=True, exit_code=code)
-    recorded = context.get_app_state().tool_permission_context.missing_dependencies
-    found = await asyncio.to_thread(stand_ins, workspace, recorded)
-    if found:
-        return ToolResult(content=format_output(exec_result, stand_in_message(found)), is_error=True, exit_code=code)
-    return None
-
+#: A run that is not evidence, whatever the phase.
+NOT_EVIDENCE = ("TDD ledger: unchanged. A run is evidence only when it passes, fails, or stops on collection errors "
+                "pytest reports; this one did not.")
 
 #: A background worker's run (`shareSetAppState: !isAsync`): its app-state writes are discarded.
-BACKGROUND_RUN_NOTE = ("This run does not change the TDD ledger: a background agent's state changes are "
-                       "discarded, so it is verification evidence only.")
+BACKGROUND_LEDGER = "TDD ledger: not changed by a background agent's run."
+
+NO_OUTPUT = "(RunTests completed with no output)"
 
 
-async def _background_result(exec_result: SuiteExecutionResult, test_path: str, context: ToolContext) -> ToolResult:
-    """The outcome of a run in a background worker: what the tests did, and no phase claim."""
-    code = exec_result.exit_code
-    skipped = exec_result.skipped if exec_result.skipped is not None else skipped_count(
-        f"{exec_result.stdout}\n{exec_result.stderr}")
-    uncollected = await asyncio.to_thread(
-        uncollected_test_files, getattr(context, "workspace", None), test_path, exec_result.collected_files)
-    if code == 0 and skipped > 0:
-        header = f"Tests ran without failures, but {SKIPPED_IS_NOT_PASSING.format(count=skipped)}"
-    elif code == 0 and uncollected:
-        header = f"Tests ran without failures, but {uncollected_message(uncollected)}"
-    elif code == 0:
-        header = "All tests passed."
-    elif code == 1:
-        header = f"Tests failed (exit {code})."
-    else:
-        header = collection_error_header(exec_result)
-    if uncollected and code != 0:
-        header = f"{header}\n{uncollected_message(uncollected)}"
-    return ToolResult(content=format_output(exec_result, f"{header}\n{BACKGROUND_RUN_NOTE}"), exit_code=code)
+@dataclass(frozen=True, slots=True)
+class RunFacts:
+    """What pytest's reports recorded about a run, beside its exit code."""
+
+    collection_errors: tuple[str, ...]
+    uncollected: tuple[str, ...]
+    skipped: int
+    coverage: CoverageReading
 
 
-def format_output(exec_result: SuiteExecutionResult, header: str) -> str:
-    body = f"{header}\n\n--- STDOUT ---\n{exec_result.stdout}"
-    if exec_result.stderr.strip():
-        body += f"\n--- STDERR ---\n{exec_result.stderr}"
-    return body
+def coverage_line(coverage: CoverageReading) -> str:
+    if coverage.status == CoverageStatus.MEASURED:
+        return f"Coverage: {coverage.percent:.1f}% (line + branch)"
+    if coverage.status == CoverageStatus.NO_CODE:
+        return "Coverage: no production code to measure"
+    return "Coverage: not measured"
+
+
+def observation_lines(result: SuiteExecutionResult, facts: RunFacts) -> list[str]:
+    """The exit code with pytest's meaning, then what its reports recorded. Nothing is inferred."""
+    lines = [f"Exit code {result.exit_code} (pytest: {exit_semantic(result.exit_code).meaning})"]
+    if facts.collection_errors:
+        lines.append(f"pytest reported errors collecting: {', '.join(facts.collection_errors)}")
+    if facts.uncollected:
+        lines.append(f"Not collected by pytest: {', '.join(facts.uncollected)}")
+    if facts.skipped:
+        lines.append(f"Skipped: {facts.skipped}")
+    lines.append(coverage_line(facts.coverage))
+    return lines
+
+
+def raw_output(result: SuiteExecutionResult) -> str:
+    """stdout, then stderr, as upstream renders a command's output: leading blank lines and trailing space go."""
+    parts = [text for text in (result.stdout, result.stderr) if text.strip()]
+    text = "\n".join(parts)
+    text = re.sub(r"^(\s*\n)+", "", text).rstrip()
+    return text or NO_OUTPUT
+
+
+def render_result(result: SuiteExecutionResult, facts: RunFacts, ledger_line: str) -> str:
+    return "\n".join([*observation_lines(result, facts), ledger_line]) + "\n\n" + raw_output(result)
+
+
+#: How a run that did not pass is named in the ledger line.
+_NOT_PASSED: dict[Outcome, str] = {
+    Outcome.FAILED: "this run failed",
+    Outcome.COLLECTION_ERRORS: "this run had collection errors",
+}
+
+
+def ledger_line(before: PhaseLedger, after: PhaseLedger, *, outcome: Outcome, facts: RunFacts) -> str:
+    """The ledger change, the phase's rule, and the observed facts that met it or did not."""
+    phase = TddPhase(before.phase)
+    rule = PHASE_RULES[phase]
+    if phase == TddPhase.RED:
+        if after.phase != TddPhase.RED:
+            return f"TDD ledger: RED → GREEN. {rule}: they changed, and this run counts."
+        why = "a test file was not collected" if facts.uncollected else "they have not changed"
+        return f"TDD ledger: still RED. {rule}: {why}."
+    unmet = []
+    if outcome != Outcome.PASSED:
+        unmet.append(_NOT_PASSED[outcome])
+    if facts.skipped:
+        unmet.append(f"{facts.skipped} test(s) were skipped")
+    if facts.uncollected:
+        unmet.append("a test file was not collected")
+    if unmet:
+        return f"TDD ledger: still {phase.value}. {rule}: {', '.join(unmet)}."
+    if phase == TddPhase.GREEN:
+        return f"TDD ledger: GREEN → REFACTOR. {rule}: this run met it."
+    return f"TDD ledger: REFACTOR passed, so this sub-requirement's cycle is complete. {rule}: this run met it."
 
 
 def build_run_tests_tool(
@@ -359,41 +365,35 @@ def build_run_tests_tool(
             else:
                 exec_result = res
         except RunTestsUnavailable as exc:
-            return ToolResult(
-                content=f"RunTests could not run the tests: {exc}. The TDD ledger was not changed.",
-                is_error=True,
-            )
+            return ToolResult(content=f"RunTests could not run the tests: {exc}\nTDD ledger: unchanged.", is_error=True)
 
-        code = exec_result.exit_code
-        dependency_error = await _dependency_error(exec_result, context)
-        if dependency_error is not None:
-            return dependency_error
-        observed = ledger_exit_code(exec_result)
-        if observed is None:
-            reason = PYTEST_EXIT_REASONS.get(code, "pytest did not report a test outcome")
-            header = f"Tests could not be evaluated (exit {code}: {reason}). The TDD ledger was not changed."
-            return ToolResult(content=format_output(exec_result, header), is_error=True, exit_code=code)
-
-        if not context.shares_app_state:
-            return await _background_result(exec_result, test_path, context)
-        before = context.get_app_state()
-        changed = False
-        if before.phase_ledger.phase == TddPhase.RED:
-            current = await asyncio.to_thread(fingerprint_test_files, getattr(context, "workspace", None))
-            changed = have_tests_changed(current, before.tdd_item_test_baseline)
-        coverage = exec_result.coverage
+        workspace = getattr(context, "workspace", None)
+        outcome, is_error = run_outcome(exec_result)
         skipped = exec_result.skipped if exec_result.skipped is not None else skipped_count(
             f"{exec_result.stdout}\n{exec_result.stderr}")
-        skips_block_a_pass = observed == 0 and skipped > 0 and before.phase_ledger.phase != TddPhase.RED
-        # A test file pytest did not collect checks nothing either, in every phase (user decision).
         uncollected = await asyncio.to_thread(
-            uncollected_test_files, getattr(context, "workspace", None), test_path, exec_result.collected_files)
-        uncollected_block_a_pass = bool(uncollected) and observed == 0 and before.phase_ledger.phase != TddPhase.RED
-        if uncollected:
-            changed = False
-        if skips_block_a_pass or uncollected_block_a_pass:
-            # A skipped test checks nothing, so the run is not a pass (Phase 13, user decision).
-            observed = 1
+            uncollected_test_files, workspace, test_path, exec_result.collected_files)
+        facts = RunFacts(collection_errors=tuple(sorted(exec_result.collection_errors or ())),
+                         uncollected=tuple(uncollected), skipped=skipped, coverage=exec_result.coverage)
+        code = exec_result.exit_code
+        if outcome is None:
+            return ToolResult(content=render_result(exec_result, facts, NOT_EVIDENCE), is_error=True, exit_code=code)
+        if not context.shares_app_state:
+            return ToolResult(content=render_result(exec_result, facts, BACKGROUND_LEDGER), is_error=is_error,
+                              exit_code=code)
+
+        before = context.get_app_state()
+        phase = before.phase_ledger.phase
+        changed = False
+        if phase == TddPhase.RED:
+            current = await asyncio.to_thread(fingerprint_test_files, workspace)
+            # A test file pytest did not collect ran nothing, so RED gets no evidence from the run.
+            changed = have_tests_changed(current, before.tdd_item_test_baseline) and not uncollected
+        # The ledger's input: 0 a pass, 1 a non-pass. In GREEN and REFACTOR a skipped test or an
+        # uncollected file keeps a run from being a pass (Phase 13 and 2026-10-28, user decisions).
+        passes = outcome == Outcome.PASSED and (phase == TddPhase.RED or (not skipped and not uncollected))
+        observed = 0 if passes else 1
+        coverage = exec_result.coverage
         after = before.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage)
 
         # Update the authoritative AppState phase_ledger: the only writer (Part D2)
@@ -405,23 +405,8 @@ def build_run_tests_tool(
                 s, phase_ledger=s.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage),
                 last_test_run=record)
         )
-
-        in_red = before.phase_ledger.phase == TddPhase.RED
-        if skips_block_a_pass:
-            header = f"Tests ran without failures, but {SKIPPED_IS_NOT_PASSING.format(count=skipped)}"
-        elif uncollected_block_a_pass:
-            header = f"Tests ran without failures, but {uncollected_message(uncollected, in_red=in_red)}"
-        elif code == 0:
-            header = "All tests passed."
-        elif code == 1:
-            header = f"Tests failed (exit {code})."
-        else:
-            header = collection_error_header(exec_result)
-        if uncollected and not uncollected_block_a_pass:
-            header = f"{header}\n{uncollected_message(uncollected, in_red=in_red)}"
-        header = f"{header}\n{ledger_status(before.phase_ledger, after, observed, coverage)}"
-        # is_error stays False on failure: a failing test is normal data in TDD
-        return ToolResult(content=format_output(exec_result, header), exit_code=code)
+        line = ledger_line(before.phase_ledger, after, outcome=outcome, facts=facts)
+        return ToolResult(content=render_result(exec_result, facts, line), is_error=is_error, exit_code=code)
 
     prompt_text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
 

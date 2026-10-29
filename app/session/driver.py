@@ -252,8 +252,7 @@ async def _develop_interactive(
     plan = TddPlan.from_texts(list(values.get("plan") or []))
     opts = {**development_run_options(shell, options), **run_options}
     async with open_session_run(run_id=session_run_id(thread_id), plan=plan, workspace=workspace,
-                                can_use_tool=build_interactive_can_use_tool(ask, ask_questions),
-                                specification=specification, **opts) as run:
+                                can_use_tool=build_interactive_can_use_tool(ask, ask_questions), **opts) as run:
         io = io_factory(lambda: holder["repl"].interrupt())
         loop = asyncio.get_running_loop()
 

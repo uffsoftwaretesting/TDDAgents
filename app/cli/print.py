@@ -70,7 +70,6 @@ from app.query.state import initial_loop_state
 from app.query.transitions import Terminal
 from app.query_engine import QueryEngine
 from app.state.app_state_store import AppState, AppStateStore
-from app.tdd.dependency_guard import declared_dependencies
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
 from app.tdd.suite_fingerprint import fingerprint_test_files
@@ -326,7 +325,6 @@ async def open_session_run(
     dangerously_skip_permissions: bool = False,
     plan_index: int = 0,
     can_use_tool: Any = None,
-    specification: str = "",
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -362,10 +360,7 @@ async def open_session_run(
     perm = permission_context or run_permission_context(
         config, workspace, project_root, home, managed_dir, interactive=can_use_tool is not None
     )
-    # The specification's Core Dependencies tell RunTests a missing import is a dependency
-    # (`app/tdd/dependency_guard.py`).
-    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan,
-                                         declared_dependencies=declared_dependencies(specification)))
+    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan))
     root_dir = project_root_of(workspace, project_root)
     from app.skills.load_skills_dir import get_skill_registry
 
@@ -687,7 +682,7 @@ async def run_headless(
     )
 
     async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan.from_texts(list(plan_texts)),
-                                workspace=workspace, specification=specification, **run_options) as run:
+                                workspace=workspace, **run_options) as run:
         plan = run.store.get().tdd_plan
         reason = await begin_session(
             run, development_start_prompt(specification, plan), prompt or development_resume_prompt(plan)

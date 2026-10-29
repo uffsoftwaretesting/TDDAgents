@@ -214,18 +214,3 @@ def test_an_interactive_run_can_prompt_and_holds_its_can_use_tool(python_workspa
     asyncio.run(go(can_use))
     asyncio.run(go(None))
     assert seen == {"True": (can_use, False), "False": (None, True)}
-
-
-def test_the_specifications_core_dependencies_reach_the_session_state(python_workspace, tmp_path):
-    """RunTests tells a missing dependency from unwritten code by them (`app/tdd/dependency_guard.py`)."""
-    spec = "## 5. Core Dependencies\n- FastAPI\n- validate-docbr\n"
-
-    async def go() -> tuple[frozenset[str], frozenset[str]]:
-        async with open_session_run(run_id="loop-deps", plan=FINISHED, workspace=python_workspace,
-                                    specification=spec, **options(tmp_path, scripted([], []))) as run:
-            declared = run.store.get().declared_dependencies
-        async with open_session_run(run_id="loop-nodeps", plan=FINISHED, workspace=python_workspace,
-                                    **options(tmp_path, scripted([], []))) as run:
-            return declared, run.store.get().declared_dependencies
-
-    assert asyncio.run(go()) == (frozenset({"FastAPI", "validate-docbr"}), frozenset())
