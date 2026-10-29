@@ -9,6 +9,7 @@ import asyncio
 import dataclasses
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Self
 
 import pytest
@@ -115,6 +116,28 @@ def test_render_permission_prompt():
         "⚠ Permission needed: Bash — Run make\nneeds approval\n  1. Yes\n  2. Yes, during this session\n  3. No\n"
         "Choose 1-3; after a No you may add what to do instead (e.g. \"3 use the existing helper\").")
     assert "needs approval" not in render_permission_prompt(dataclasses.replace(prompt, message=""))
+    # A background agent's prompt (upstream's `bubble`) says which agent asks.
+    assert render_permission_prompt(dataclasses.replace(prompt, agent="verification")).startswith(
+        "⚠ Permission needed: Bash — Run make (the verification agent asks)\n")
+
+
+def test_two_prompts_at_once_are_shown_one_after_the_other():
+    """A background agent's prompt waits for the one on screen (upstream's `toolUseConfirmQueue`)."""
+    async def go() -> list[str]:
+        io = FakeIO()
+        repl = Repl(SimpleNamespace(on_message=None), io)  # type: ignore[arg-type]
+        first = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "one", "", {}, OPTIONS)))
+        second = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "two", "", {}, OPTIONS)))
+        await asyncio.sleep(0.01)
+        assert sum("Permission needed" in text for text in io.out) == 1
+        repl.pending.future.set_result(PermissionAnswer("yes"))  # type: ignore[union-attr]
+        assert (await first).value == "yes"
+        await asyncio.sleep(0.01)
+        repl.pending.future.set_result(PermissionAnswer("no"))  # type: ignore[union-attr]
+        assert (await second).value == "no"
+        return [text.splitlines()[0] for text in io.out if "Permission needed" in text]
+
+    assert asyncio.run(go()) == ["⚠ Permission needed: Bash — one", "⚠ Permission needed: Bash — two"]
 
 
 def test_render_message():

@@ -100,7 +100,8 @@ def render_message(event: Any) -> str | None:
 
 def render_permission_prompt(prompt: PermissionPrompt) -> str:
     """The permission question, with its options numbered."""
-    lines = [f"⚠ Permission needed: {prompt.tool_name} — {prompt.description}"]
+    asker = f" (the {prompt.agent} agent asks)" if prompt.agent else ""
+    lines = [f"⚠ Permission needed: {prompt.tool_name} — {prompt.description}{asker}"]
     if prompt.message:
         lines.append(prompt.message)
     lines += [f"  {i}. {option.label}" for i, option in enumerate(prompt.options, start=1)]
@@ -204,6 +205,9 @@ class Repl:
         self.turn: asyncio.Task[None] | None = None
         self.deferred: list[SlashCommand] = []
         self.pending: PendingAnswer | None = None
+        #: One question on screen at a time: a background agent's prompt waits for the one shown
+        #: (upstream's `toolUseConfirmQueue`).
+        self._asking = asyncio.Lock()
         self.last_terminal: Terminal | None = None
         self.exiting = False
         run.on_message = self._show
@@ -225,13 +229,14 @@ class Repl:
     # ── permissions ────────────────────────────────────────────────────────
 
     async def _wait_for_answer(self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any) -> Any:
-        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-        self.pending = PendingAnswer(parse=parse, future=future, retry=retry, cancelled=cancelled)
-        self.io.write(text)
-        try:
-            return await future
-        finally:
-            self.pending = None
+        async with self._asking:
+            future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+            self.pending = PendingAnswer(parse=parse, future=future, retry=retry, cancelled=cancelled)
+            self.io.write(text)
+            try:
+                return await future
+            finally:
+                self.pending = None
 
     async def ask_permission(self, prompt: PermissionPrompt) -> PermissionAnswer:
         """The run's `canUseTool` prompt: shown now, answered by the next line typed."""

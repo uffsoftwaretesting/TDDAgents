@@ -106,7 +106,9 @@ def _agent_get_app_state(
         context = state.tool_permission_context
         if permission_mode and context.mode not in _PERMISSIVE_PARENT_MODES:
             context = replace(context, mode=PermissionMode(permission_mode))
-        if is_async:
+        # `runAgent.ts`: `bubble` always shows prompts (they surface to the parent's terminal);
+        # otherwise an async agent cannot show one, so its prompts are avoided.
+        if is_async and permission_mode != PermissionMode.BUBBLE:
             context = replace(context, should_avoid_permission_prompts=True)
         if context is state.tool_permission_context:
             return state
@@ -237,9 +239,10 @@ def run_agent(
             read_file_state={},
             nested_memory_attachment_triggers=set(),
             loaded_nested_memory_paths=set(),
-            # A worker never prompts: its context avoids permission prompts, as upstream's
-            # outside swarm mode, so the parent's interactive `canUseTool` is not inherited.
-            can_use_tool=None,
+            # A worker never prompts, as upstream's outside swarm mode, so the parent's interactive
+            # `canUseTool` is not inherited, except by a `bubble` agent, whose prompts surface to the
+            # parent's terminal (`runAgent.ts`; the verification agent, user decision 2026-10-28).
+            can_use_tool=parent.can_use_tool if agent_definition.permission_mode == PermissionMode.BUBBLE else None,
             agent_id=agent_id,
             agent_type=agent_type,
             # `createSubagentContext`: the worker's model is its own (`worker_config`).

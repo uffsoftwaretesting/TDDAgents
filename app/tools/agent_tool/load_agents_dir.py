@@ -102,6 +102,9 @@ _LEADING_INT_RE = re.compile(r"^\s*[+-]?\d+")
 
 #: Upstream's `PERMISSION_MODES` (with `auto`, which the classifier build adds).
 _VALID_PERMISSION_MODES: tuple[str, ...] = tuple(str(mode) for mode in PERMISSION_MODES)
+#: Upstream's internal `bubble` mode, which only built-in definitions set (`forkSubagent.ts`): a
+#: background agent's permission prompts surface to the parent's terminal (`runAgent.ts`).
+BUBBLE_MODE = "bubble"
 
 #: Upstream's `user`/`project`/`local`, plus TDDAgents' run-scoped memory (Part I5).
 _VALID_MEMORIES = frozenset({"user", "project", "local", "run", "session", "none"})
@@ -259,7 +262,7 @@ def load_agent_definition(
     permission_mode: str | None = None
     raw_mode = fm.get("permissionMode")
     if raw_mode:
-        if raw_mode in _VALID_PERMISSION_MODES:
+        if raw_mode in _VALID_PERMISSION_MODES or (raw_mode == BUBBLE_MODE and source == "built-in"):
             permission_mode = raw_mode
         else:
             logger.debug(

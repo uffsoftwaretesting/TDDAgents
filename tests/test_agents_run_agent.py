@@ -450,3 +450,20 @@ def test_preloaded_skills_see_the_runs_session_id(tmp_path):
     parent = dataclasses.replace(_parent(), skill_registry=registry, run_id="r1")
     model, _ = _run(dataclasses.replace(TESTER, skills=("sid",)), parent=parent)
     assert "session=r1" in str(model.seen[0].messages[1].content)
+
+
+def test_a_bubble_agent_in_the_background_asks_through_the_parents_terminal():
+    """Upstream `runAgent.ts`: `bubble` always shows prompts; they surface to the parent's terminal (2026-10-28)."""
+    def ask(*args: Any) -> None:
+        return None
+
+    bubble = dataclasses.replace(TESTER, permission_mode="bubble")
+    parent = dataclasses.replace(_parent(), can_use_tool=ask)
+    model, _ = _run(definition=bubble, parent=parent, is_async=True)
+    ctx = model.seen[0].tool_context
+    assert ctx.can_use_tool is ask
+    assert ctx.get_app_state().tool_permission_context.should_avoid_permission_prompts is False
+    # Any other worker, background or not, never gets the parent's prompt.
+    for definition, is_async in ((TESTER, True), (TESTER, False), (bubble, False)):
+        model, _ = _run(definition=definition, parent=parent, is_async=is_async)
+        assert (model.seen[0].tool_context.can_use_tool is ask) is (definition is bubble)

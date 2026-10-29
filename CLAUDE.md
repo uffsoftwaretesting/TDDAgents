@@ -1531,7 +1531,19 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
   - every refusal ends with upstream's own escalation rule (`ASK_THE_USER`, Doing tasks: "only when
     you're genuinely stuck after investigation").
 
+- **The verification agent asks through the user's terminal** (user decision): it carries upstream's
+  internal `bubble` permission mode (`runAgent.ts`: "bubble mode: always show prompts (bubbles to
+  parent terminal)").
+  - A background verifier used to be auto-denied every command no rule allowed, so it could not
+    start or probe the app it was checking.
+  - `bubble` is accepted only from a built-in definition.
+  - A `bubble` worker keeps the parent's `canUseTool` and does not avoid prompts.
+  - The REPL shows one question at a time (`Repl._asking`, upstream's `toolUseConfirmQueue`), and
+    the prompt names the asking agent.
+  - Headless runs still deny.
+
 *Divergences, recorded:*
+- upstream's verification agent has no permission mode (it uses `bubble` for forks);
 - RunTests has no upstream counterpart (upstream runs tests through Bash). Its table marks exit 1
   informational and exit 2 with collection errors as RED evidence, which are TDDAgents' rules;
 - the Doing-tasks items and the always-on contract are not in upstream's external build;

@@ -78,10 +78,16 @@ class TestParseAgentFromMarkdown:
             defn = _load(_md(name="a", description="d", permissionMode=mode))
             assert defn is not None and defn.permission_mode == mode
         with caplog.at_level(logging.DEBUG):
-            for bad in ("read_only", "workspace_write", "ACCEPTEDITS", "bubble"):
+            for bad in ("read_only", "workspace_write", "ACCEPTEDITS"):
                 defn = _load(_md(name="a", description="d", permissionMode=bad))
                 assert defn is not None and defn.permission_mode is None
+            # Upstream's internal `bubble` is set only by built-in definitions.
+            bubble = _md(name="a", description="d", permissionMode="bubble")
+            for source in ("user", "project"):
+                assert _load(bubble, source=source).permission_mode is None
         assert "invalid permissionMode 'read_only'" in caplog.text
+        assert _load(_md(name="a", description="d", permissionMode="bubble"),
+                     source="built-in").permission_mode == "bubble"
 
     def test_model_is_trimmed_and_inherit_is_a_sentinel(self):
         assert _load(_md(name="a", description="d", model=" INHERIT ")).model == "inherit"
@@ -202,9 +208,11 @@ class TestTheShippedRoster:
         defn = load_agent_definition_from_path(PROMPTS / directory / "AGENT.md")
         assert defn is not None
         assert (defn.name, defn.phase) == (name, phase)
-        # Upstream's worker default (`permissionMode ?? 'acceptEdits'`) is applied at spawn.
-        assert defn.permission_mode is None
-        assert "permissionMode" not in defn.raw_frontmatter
+        # Upstream's worker default (`permissionMode ?? 'acceptEdits'`) is applied at spawn. The verifier
+        # alone sets upstream's internal `bubble`, so its prompts reach the user (2026-10-28).
+        expected = "bubble" if name == "verification" else None
+        assert defn.permission_mode == expected
+        assert ("permissionMode" in defn.raw_frontmatter) is (expected is not None)
         assert "revertOnRed" not in defn.raw_frontmatter
         if phase is None:
             assert defn.disallowed_tools == ("Agent", "WriteFile", "Edit")

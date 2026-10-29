@@ -56,6 +56,8 @@ class PermissionPrompt:
     message: str
     input: dict[str, Any]
     options: tuple[PermissionOption, ...] = field(default_factory=tuple)
+    #: The agent asking, when it is not the main thread (a `bubble` agent's prompt).
+    agent: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +114,7 @@ def build_interactive_can_use_tool(ask_user: AskUser, ask_questions: AskQuestion
             message=result.message,
             input=input_args,
             options=tuple(options),
+            agent=getattr(context, "agent_type", None),
         ))
         choice = _chosen(options, answer.value)
         if choice.reject:
