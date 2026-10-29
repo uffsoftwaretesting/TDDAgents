@@ -359,10 +359,11 @@ def build_run_tests_tool(
                 last_test_run=record)
         )
 
+        in_red = before.phase_ledger.phase == TddPhase.RED
         if skips_block_a_pass:
             header = f"Tests ran without failures, but {SKIPPED_IS_NOT_PASSING.format(count=skipped)}"
         elif uncollected_block_a_pass:
-            header = f"Tests ran without failures, but {uncollected_message(uncollected)}"
+            header = f"Tests ran without failures, but {uncollected_message(uncollected, in_red=in_red)}"
         elif code == 0:
             header = "All tests passed."
         elif code == 1:
@@ -370,7 +371,7 @@ def build_run_tests_tool(
         else:
             header = f"Tests failed (exit {code}: collection error — the code under test does not exist yet)."
         if uncollected and not uncollected_block_a_pass:
-            header = f"{header}\n{uncollected_message(uncollected)}"
+            header = f"{header}\n{uncollected_message(uncollected, in_red=in_red)}"
         header = f"{header}\n{ledger_status(before.phase_ledger, after, observed, coverage)}"
         # is_error stays False on failure: a failing test is normal data in TDD
         return ToolResult(content=format_output(exec_result, header), exit_code=code)

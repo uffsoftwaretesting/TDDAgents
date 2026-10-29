@@ -53,6 +53,7 @@ Divergences, each forced by the `Workspace` protocol:
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -102,14 +103,51 @@ def host_path(context: ToolContext | None, path: str) -> Path | None:
     return Path(memory) if memory is not None else None
 
 
+def outside_host_path(ws: Any, path: str) -> Path | None:
+    """
+    The host file an absolute path names when it lies outside the workspace's host root, as
+    upstream's `expandPath` reads any absolute path. `None` for a path inside the project, a
+    relative path, or a workspace with no host root (E2B), which stays bounded.
+    """
+    root = getattr(ws, "root", None)
+    if root is None:
+        return None
+    candidate = Path(str(path).strip()).expanduser()
+    if not candidate.is_absolute():
+        return None
+    candidate = Path(os.path.normpath(candidate))
+    base = Path(os.path.normpath(Path(str(root))))
+    if candidate == base or base in candidate.parents:
+        return None
+    return candidate
+
+
+def search_target(ws: Any, path: str) -> str:
+    """What Glob and Grep hand ripgrep: a directory outside the project as is, else its workspace form."""
+    outside = outside_host_path(ws, path)
+    return str(outside) if outside is not None else workspace_path(ws, path)
+
+
+def read_host_path(context: ToolContext | None, path: str) -> Path | None:
+    """
+    Where a read of `path` goes on the host: `host_path`, or a path outside the project
+    (`outside_host_path`). The read tools read there once permission allows it (upstream's
+    Read); writes keep `host_path` only, so the project stays the one place they land.
+    """
+    host = host_path(context, path)
+    if host is not None or context is None:
+        return host
+    return outside_host_path(context.workspace, path)
+
+
 def read_text(ws: Any, path: str, context: ToolContext | None = None) -> str | None:
     """
     File content with CRLF normalized (as `readFileForEdit` does), or None if missing.
 
-    A persisted tool result or agent memory is read straight off the host (`host_path`): it
-    lives outside the workspace on purpose, so the workspace cannot resolve it.
+    A persisted tool result, agent memory or a file outside the project is read straight off
+    the host (`read_host_path`): the workspace cannot resolve it.
     """
-    host = host_path(context, path)
+    host = read_host_path(context, path)
     if host is not None:
         try:
             return host.read_text(encoding="utf-8").replace("\r\n", "\n")
@@ -125,9 +163,9 @@ def read_text(ws: Any, path: str, context: ToolContext | None = None) -> str | N
 def read_state_key(context: ToolContext, path: str) -> str:
     """
     The `readFileState` key of `path`: its workspace-relative form, or the host path itself for
-    a persisted tool result, which lives outside the workspace on purpose.
+    a file read off the host (`read_host_path`).
     """
-    host = host_path(context, path)
+    host = read_host_path(context, path)
     if host is not None:
         return str(host)
     return workspace_path(context.workspace, path)
@@ -170,7 +208,7 @@ def activate_conditional_skills(context: ToolContext, file_path: str) -> None:
     and the workspace is the run's working directory, so the path is matched as is.
     """
     registry = context.skill_registry
-    if registry is not None and host_path(context, file_path) is None:
+    if registry is not None and read_host_path(context, file_path) is None:
         registry.activate_conditional_skills_for_paths([workspace_path(context.workspace, file_path)], "")
 
 
@@ -180,7 +218,10 @@ def record_write(context: ToolContext, path: str, content: str) -> None:
 
 
 def path_kind(ws: Any, path: str) -> str | None:
-    """'dir', 'file', or None if absent — decided through the protocol alone."""
+    """'dir', 'file', or None if absent — through the protocol, or on the host outside the project."""
+    outside = outside_host_path(ws, path or ".")
+    if outside is not None:
+        return "dir" if outside.is_dir() else "file" if outside.exists() else None
     normalized = workspace_path(ws, path or ".")
     if normalized == ".":
         return "dir"

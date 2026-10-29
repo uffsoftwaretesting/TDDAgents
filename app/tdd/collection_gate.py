@@ -43,6 +43,14 @@ UNCOLLECTED_IS_NOT_PASSING = (
     "configuration. Then run RunTests again."
 )
 
+#: RED writes test files only, so the configuration fix is not open there (user decision, 2026-10-28).
+UNCOLLECTED_IN_RED = (
+    "pytest did not collect {count} test file(s), so their tests never ran and this run does not count: "
+    "{files}. RED writes test files only, so the pytest configuration cannot change now: give each a name "
+    "the project's configuration collects (by default test_*.py or *_test.py) and remove the uncollected "
+    "file. Then run RunTests again."
+)
+
 
 def junit_options() -> str:
     """The pytest options that write the report this module reads."""
@@ -102,12 +110,15 @@ def uncollected_test_files(workspace: Any, test_path: str, collected: frozenset[
     return tuple(sorted(modules - collected))
 
 
-def uncollected_message(files: tuple[str, ...]) -> str:
-    return UNCOLLECTED_IS_NOT_PASSING.format(count=len(files), files=", ".join(files))
+def uncollected_message(files: tuple[str, ...], *, in_red: bool = False) -> str:
+    """What the run says about uncollected test files: in RED, only the fix RED allows."""
+    template = UNCOLLECTED_IN_RED if in_red else UNCOLLECTED_IS_NOT_PASSING
+    return template.format(count=len(files), files=", ".join(files))
 
 
 __all__ = [
     "JUNIT_REPORT_PATH",
+    "UNCOLLECTED_IN_RED",
     "UNCOLLECTED_IS_NOT_PASSING",
     "collected_files",
     "junit_options",

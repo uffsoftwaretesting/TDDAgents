@@ -13,6 +13,7 @@ import pytest
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.collection_gate import (
     JUNIT_REPORT_PATH,
+    UNCOLLECTED_IN_RED,
     UNCOLLECTED_IS_NOT_PASSING,
     collected_files,
     junit_options,
@@ -121,6 +122,18 @@ def test_the_message_names_the_files_and_the_way_out():
         "configuration. Then run RunTests again.")
 
 
+def test_in_red_the_message_names_only_the_fix_red_allows():
+    """RED writes test files only, so it cannot change `pytest.ini` (user decision, 2026-10-28)."""
+    assert uncollected_message(("tests/a.py",), in_red=True) == UNCOLLECTED_IN_RED.format(
+        count=1, files="tests/a.py")
+    assert uncollected_message(("tests/a.py",), in_red=False) == uncollected_message(("tests/a.py",))
+    assert UNCOLLECTED_IN_RED == (
+        "pytest did not collect {count} test file(s), so their tests never ran and this run does not count: "
+        "{files}. RED writes test files only, so the pytest configuration cannot change now: give each a name "
+        "the project's configuration collects (by default test_*.py or *_test.py) and remove the uncollected "
+        "file. Then run RunTests again.")
+
+
 # ── RunTests ────────────────────────────────────────────────────────────────
 
 FILES = {"tests/test_a.py": TEST, "tests/tests_trivial.py": TEST}
@@ -139,7 +152,7 @@ def test_red_gets_no_evidence_from_an_uncollected_test_file():
     res, store = run(PhaseLedger(), ONLY_A)
     assert store.get().phase_ledger == PhaseLedger()
     assert res.content.startswith(
-        f"All tests passed.\n{uncollected_message(('tests/tests_trivial.py',))}\nNo test file changed")
+        f"All tests passed.\n{uncollected_message(('tests/tests_trivial.py',), in_red=True)}\nNo test file changed")
 
 
 @pytest.mark.parametrize("ledger, stays", [

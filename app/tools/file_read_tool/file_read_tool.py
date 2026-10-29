@@ -42,6 +42,7 @@ from app.tools.utils import (
     host_path,
     invalid,
     is_non_negative_int,
+    read_host_path,
     read_state_key,
     read_text,
 )
@@ -97,7 +98,12 @@ def _extension(file_path: str) -> str:
 
 
 def _host_file(context: ToolContext, file_path: str) -> Path:
-    """The file on the host, for the binary formats (`LocalWorkspace.resolve`)."""
+    """The file on the host, for the binary formats (`read_host_path`, else `LocalWorkspace.resolve`)."""
+    outside = read_host_path(context, file_path)
+    if outside is not None:
+        if not outside.is_file():
+            raise FileNotFoundError(file_path)
+        return outside
     resolve = getattr(context.workspace, "resolve", None)
     if not callable(resolve):
         raise ReadFileError("Images, PDFs and notebooks can only be read from a local workspace.")
@@ -105,6 +111,12 @@ def _host_file(context: ToolContext, file_path: str) -> Path:
     if not path.is_file():
         raise FileNotFoundError(file_path)
     return path
+
+
+def _trigger_nested_memory(context: ToolContext, file_path: str) -> None:
+    """`nestedMemoryAttachmentTriggers`: a project file's directories may hold nested memory."""
+    if read_host_path(context, file_path) is None:
+        context.nested_memory_attachment_triggers.add(workspace_path(context.workspace, file_path))
 
 
 def _meta(content: Any) -> HumanMessage:
@@ -150,7 +162,7 @@ def _read_notebook(context: ToolContext, file_path: str, content: str) -> ToolRe
             f'  cat "{file_path}" | jq \'.cells | length\' # Count total cells\n'
             f'  cat "{file_path}" | jq \'.cells[] | select(.cell_type=="code") | .source\' # All code sources')
     context.read_file_state[read_state_key(context, file_path)] = FileState(content=cells_json)
-    context.nested_memory_attachment_triggers.add(workspace_path(context.workspace, file_path))
+    _trigger_nested_memory(context, file_path)
     blocks = map_notebook_cells_to_blocks(cells)
     text = "\n".join(b["text"] for b in blocks if b["type"] == "text")
     return ToolResult(content=text, content_blocks=tuple(blocks))
@@ -158,7 +170,7 @@ def _read_notebook(context: ToolContext, file_path: str, content: str) -> ToolRe
 
 def _read_image(context: ToolContext, file_path: str) -> ToolResult:
     data, media_type, original_size, dims = read_image_with_token_budget(_host_file(context, file_path))
-    context.nested_memory_attachment_triggers.add(workspace_path(context.workspace, file_path))
+    _trigger_nested_memory(context, file_path)
     metadata = create_image_metadata_text(dims) if dims else None
     return ToolResult(
         content=f"Image file read: {file_path} ({media_type}, {format_file_size(original_size)})",
@@ -281,8 +293,7 @@ def build_read_file_tool() -> BuiltTool:
             limit=limit if partial else None,
         )
         # `FileReadTool`: the file's directories may hold nested memory to attach next turn.
-        if host_path(context, file_path) is None:
-            context.nested_memory_attachment_triggers.add(workspace_path(context.workspace, file_path))
+        _trigger_nested_memory(context, file_path)
         activate_conditional_skills(context, file_path)
 
         if window:

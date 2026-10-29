@@ -18,6 +18,7 @@ from app.tools.utils import (
     invalid,
     path_kind,
     search_pattern_permission_matcher,
+    search_target,
 )
 from app.utils.file import FILE_NOT_FOUND_CWD_NOTE
 from app.utils.glob import extract_glob_base_directory
@@ -28,7 +29,6 @@ from app.utils.permissions.filesystem import (
 )
 from app.utils.permissions.permissions import extract_permission_context
 from app.utils.ripgrep import rip_grep, to_relative_path
-from app.workspace.base import workspace_path
 
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
@@ -55,11 +55,11 @@ def build_glob_tool() -> BuiltTool:
         if ws is None:
             return NO_WORKSPACE
 
-        search_dir = workspace_path(ws, str(input_args.get("path") or "."))
+        search_dir = search_target(ws, str(input_args.get("path") or "."))
         if pattern.startswith("/"):
             # An absolute pattern names its own base directory, as upstream's `extractGlobBaseDirectory`.
             base, pattern = extract_glob_base_directory(pattern)
-            search_dir = workspace_path(ws, base)
+            search_dir = search_target(ws, base)
         args = ["--files", "--glob", pattern, "--sort=modified", "--no-ignore", "--hidden"]
         args += read_deny_ignore_globs(
             extract_permission_context(context), permission_cwd(context), anchor_floating=False

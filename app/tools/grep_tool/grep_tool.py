@@ -20,6 +20,7 @@ from app.tools.utils import (
     is_non_negative_int,
     path_kind,
     search_pattern_permission_matcher,
+    search_target,
 )
 from app.utils.file import FILE_NOT_FOUND_CWD_NOTE
 from app.utils.permissions.filesystem import (
@@ -29,7 +30,6 @@ from app.utils.permissions.filesystem import (
 )
 from app.utils.permissions.permissions import extract_permission_context
 from app.utils.ripgrep import rip_grep, to_relative_path
-from app.workspace.base import workspace_path
 
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
@@ -165,7 +165,7 @@ def build_grep_tool() -> BuiltTool:
         if ws is None:
             return NO_WORKSPACE
 
-        target = workspace_path(ws, str(input_args.get("path") or "."))
+        target = search_target(ws, str(input_args.get("path") or "."))
         try:
             ignore = read_deny_ignore_globs(
                 extract_permission_context(context), permission_cwd(context), anchor_floating=True
