@@ -1556,6 +1556,21 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
     correctly on a real server) skipped the verifier although the contract was on, and its flake8
     config failed its own lint.
 
+- **Bundled skill reference files are read without a prompt, as upstream** (user decision,
+  2026-10-29).
+  - The motivating case: the CPF live run asked the user twice to approve reading TDDAgents' own
+    `app/prompts/skills/*/references/*.md`.
+  - Upstream's `registerBundledSkill` extracts a skill's files on first invocation under
+    `getBundledSkillsRoot()`, `<temp>/bundled-skills/<version>/<per-process nonce>`, and
+    `checkReadableInternalPath` allows that subtree.
+  - Ported as `get_tddagents_temp_dir` / `get_bundled_skills_root`
+    (`app/utils/permissions/filesystem.py`, `TDDAGENTS_TMPDIR` or `/tmp`, `tddagents-<uid>`) and
+    `app/skills/bundled_skills.py`, which copies everything beside `SKILL.md`. Writes are
+    owner-only, `O_EXCL | O_NOFOLLOW`, with traversal refused; extraction happens once per
+    process, and a failure leaves the skill without its base directory.
+  - A bundled `SkillCommand.skill_root` is the extraction dir.
+  - The test suite gets its own temp root (`tests/conftest.py`).
+
 *Divergences, recorded:*
 - upstream's verification agent has no permission mode (it uses `bubble` for forks);
 - RunTests has no upstream counterpart (upstream runs tests through Bash). Its table marks exit 1

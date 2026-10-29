@@ -57,6 +57,24 @@ def _isolated_config_home(tmp_path_factory: Any, monkeypatch: Any) -> None:
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path_factory.mktemp("config-home")))
 
 
+@pytest.fixture(autouse=True)
+def _isolated_bundled_skills_root(tmp_path_factory: Any, monkeypatch: Any) -> Any:
+    """
+    Launching a bundled skill extracts its files under the per-process bundled-skills root
+    (`app/skills/bundled_skills.py`). No test may write to the real `/tmp/tddagents-<uid>`: each
+    gets its own temp dir and a fresh root, as a new process would.
+    """
+    from app.skills.bundled_skills import clear_extracted_bundled_skills
+    from app.utils.permissions.filesystem import get_bundled_skills_root
+
+    monkeypatch.setenv("TDDAGENTS_TMPDIR", str(tmp_path_factory.mktemp("tddagents-tmp")))
+    get_bundled_skills_root.cache_clear()
+    clear_extracted_bundled_skills()
+    yield
+    get_bundled_skills_root.cache_clear()
+    clear_extracted_bundled_skills()
+
+
 def read_dotenv_key(name: str) -> str | None:
     """A real credential from the repo's .env (the conftest placeholders do not count)."""
     env_path = REPO_ROOT / ".env"

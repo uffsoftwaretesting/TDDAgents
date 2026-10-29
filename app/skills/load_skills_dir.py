@@ -3,9 +3,10 @@ A skill command (Phase 8).
 
 Ported from `reference/claude-code/src/skills/loadSkillsDir.ts` -> `createSkillCommand` (the
 `PromptCommand` a `SKILL.md` becomes) and `skills/bundledSkills.ts` -> `registerBundledSkill`.
-TDDAgents' bundled skills live as files under `app/prompts/skills/` rather than in code, so a
-bundled command carries its directory as `skill_root` — upstream's `prependBaseDir` for a
-bundled skill with `files` — and the model reads `references/` from there on demand.
+TDDAgents' bundled skills live as files under `app/prompts/skills/` rather than in code. As
+upstream's `registerBundledSkill` with `files`, a bundled command's `skill_root` is its per-process
+extraction directory (`app/skills/bundled_skills.py`), its reference files are written there on
+first invocation, and `prependBaseDir` names it, so the model reads `references/` without a prompt.
 
 `getPromptForCommand` is `prompt_for_command`: the base-directory line, argument substitution,
 then the skill-dir and session placeholders, here `${TDDAGENTS_SKILL_DIR}` and
@@ -57,6 +58,7 @@ from typing import Any
 import pathspec
 import yaml
 
+from app.skills.bundled_skills import get_bundled_skill_extract_dir
 from app.utils.argument_substitution import parse_argument_names, substitute_arguments
 from app.utils.model.model import parse_user_specified_model
 from app.utils.settings.settings import MANAGED_DIR, parse_tool_list_from_cli
@@ -94,6 +96,9 @@ class SkillCommand:
     paths: tuple[str, ...] | None = None
     hooks: dict[str, Any] | None = None
     progress_message: str = "running"
+    #: A bundled skill's own directory under `app/prompts/skills/`, whose reference files are
+    #: extracted to `skill_root` (the per-process `get_bundled_skill_extract_dir`) on first use.
+    bundled_source_dir: str | None = None
 
     @property
     def is_hidden(self) -> bool:
@@ -107,15 +112,24 @@ class SkillCommand:
         return self.display_name or self.name
 
     def prompt_for_command(self, args: str, session_id: str = "") -> str:
-        """`getPromptForCommand`: the skill's text as the model receives it."""
+        """
+        `getPromptForCommand`: the skill's text as the model receives it. A bundled skill's files are
+        extracted on its first invocation (`registerBundledSkill`); if that fails it goes on without
+        its base directory.
+        """
+        root = self.skill_root
+        if self.bundled_source_dir is not None:
+            from app.skills.bundled_skills import extract_bundled_skill_files
+
+            root = extract_bundled_skill_files(self.name, self.bundled_source_dir)
         content = (
-            f"Base directory for this skill: {self.skill_root}\n\n{self.markdown_content}"
-            if self.skill_root
+            f"Base directory for this skill: {root}\n\n{self.markdown_content}"
+            if root
             else self.markdown_content
         )
         content = substitute_arguments(content, args, True, self.argument_names)
-        if self.skill_root:
-            content = content.replace(SKILL_DIR_PLACEHOLDER, self.skill_root)
+        if root:
+            content = content.replace(SKILL_DIR_PLACEHOLDER, root)
         return content.replace(SESSION_ID_PLACEHOLDER, session_id)
 
 
@@ -255,7 +269,9 @@ def load_skills_from_skills_dir(
         results.append((
             SkillCommand(
                 name=entry.name, markdown_content=markdown, source=source, loaded_from=loaded_from,
-                skill_root=str(entry), paths=None if bundled else parse_skill_paths(frontmatter), **fields,
+                skill_root=get_bundled_skill_extract_dir(entry.name) if bundled else str(entry),
+                bundled_source_dir=str(entry) if bundled else None,
+                paths=None if bundled else parse_skill_paths(frontmatter), **fields,
             ),
             skill_file,
         ))

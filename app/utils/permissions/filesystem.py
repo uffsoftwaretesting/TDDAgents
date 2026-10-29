@@ -42,9 +42,11 @@ directory: the workspace may not be on this host, so the path is never stat'ed.
 
 from __future__ import annotations
 
+import functools
 import os
 import posixpath
 import re
+import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
@@ -488,14 +490,45 @@ def is_project_dir_path(absolute_path: str, cwd: str) -> bool:
     return normalized.startswith(project_dir + "/")
 
 
+#: `CLAUDE_CODE_TMPDIR`: where TDDAgents' per-user temp directory lives, `/tmp` by default.
+TMPDIR_ENV = "TDDAGENTS_TMPDIR"
+
+
+def get_tddagents_temp_dir() -> str:
+    """
+    `getClaudeTempDir`: `<TDDAGENTS_TMPDIR or /tmp>/tddagents-<uid>/`, with the base's symlinks
+    resolved so the path matches the resolved paths permission checks see.
+    """
+    base = os.environ.get(TMPDIR_ENV) or "/tmp"
+    try:
+        base = os.path.realpath(base)
+    except OSError:
+        pass
+    uid = os.getuid() if hasattr(os, "getuid") else 0
+    return os.path.join(base, f"tddagents-{uid}")
+
+
+@functools.cache
+def get_bundled_skills_root() -> str:
+    """
+    `getBundledSkillsRoot`: `<temp dir>/bundled-skills/<version>/<nonce>`. The per-process random
+    nonce is the defense: uid and version are public knowledge and squattable, so a path someone
+    else could have pre-created would let them plant files the read allowlist then trusts.
+    Memoized, so the extraction writes and the permission check agree for the life of the process.
+    """
+    from app.services.mcp.client import client_version
+
+    return os.path.join(get_tddagents_temp_dir(), "bundled-skills", client_version(), secrets.token_hex(16))
+
+
 def check_readable_internal_path(
     absolute_path: str, input_args: dict[str, Any], cwd: str, *, agent_memory: bool = False
 ) -> PermissionResult:
     """
     `checkReadableInternalPath`, reduced to the internal stores this loop has: the project
-    directory and this run's agent memory (`agent_memory`, upstream's `isAgentMemoryPath`).
-    Session memory, plan files, scratchpad, temp, memdir, tasks, teams and bundled-skill paths
-    have no equivalent here.
+    directory, this run's agent memory (`agent_memory`, upstream's `isAgentMemoryPath`) and the
+    extracted bundled skill files (`get_bundled_skills_root`). Session memory, plan files,
+    scratchpad, temp, memdir, tasks and teams have no equivalent here.
     """
     if agent_memory:
         return PermissionResult(
@@ -508,6 +541,15 @@ def check_readable_internal_path(
             behavior=PermissionBehavior.ALLOW,
             updated_input=input_args,
             decision_reason={"type": "other", "reason": "Project directory files are allowed for reading"},
+        )
+    # Bundled skill reference files extracted on first invocation. The per-process nonce in
+    # `get_bundled_skills_root` is the load-bearing defense; content under it is written by
+    # TDDAgents before any read (`app/skills/bundled_skills.py`).
+    if absolute_path.startswith(get_bundled_skills_root() + os.sep):
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "other", "reason": "Bundled skill reference files are allowed for reading"},
         )
     return PermissionResult(behavior=PermissionBehavior.PASSTHROUGH)
 
@@ -733,10 +775,12 @@ __all__ = [
     "check_write_permission_for_tool",
     "expand_path",
     "generate_suggestions",
+    "get_bundled_skills_root",
     "get_directory_for_path",
     "get_file_read_ignore_patterns",
     "get_paths_for_permission_check",
     "get_patterns_by_root",
+    "get_tddagents_temp_dir",
     "has_suspicious_windows_path_pattern",
     "is_dangerous_file_path_to_auto_edit",
     "is_path_allowed",

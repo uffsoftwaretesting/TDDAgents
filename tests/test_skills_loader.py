@@ -214,15 +214,36 @@ def test_the_shipped_roster_is_bundled_and_invocable_headless():
         assert cmd.when_to_use and cmd.argument_hint
 
 
+@pytest.fixture
+def bundled_root(tmp_path, monkeypatch):
+    """A fresh per-process bundled-skills root under the test's own temp dir."""
+    from app.skills.bundled_skills import clear_extracted_bundled_skills
+    from app.utils.permissions.filesystem import get_bundled_skills_root
+
+    monkeypatch.setenv("TDDAGENTS_TMPDIR", str(tmp_path))
+    get_bundled_skills_root.cache_clear()
+    clear_extracted_bundled_skills()
+    yield get_bundled_skills_root()
+    get_bundled_skills_root.cache_clear()
+    clear_extracted_bundled_skills()
+
+
 @pytest.mark.parametrize("name", ["tdd-test-design", "tdd-refactor-clean", "tdd-mutation-defense"])
-def test_each_shipped_skill_references_its_material_relative_to_its_base_dir(name):
+def test_each_shipped_skill_references_its_material_relative_to_its_base_dir(name, bundled_root):
+    """`registerBundledSkill`: the base directory is the per-process extraction dir, written on first use."""
     reg = get_skill_registry(BUNDLED_SKILLS_DIR, bundled_dir=BUNDLED_SKILLS_DIR, user_home=Path("/nonexistent"),
                              managed_dir=Path("/nonexistent"))
     cmd = reg.find_command(name)
     assert cmd is not None
+    extracted = Path(bundled_root) / name
+    assert cmd.skill_root == str(extracted) and not extracted.exists()
     text = cmd.prompt_for_command("")
-    assert text.startswith(f"Base directory for this skill: {BUNDLED_SKILLS_DIR / name}\n\n")
+    assert text.startswith(f"Base directory for this skill: {extracted}\n\n")
     assert "references/" in text
+    source = BUNDLED_SKILLS_DIR / name
+    for original in (source / "references").glob("*"):
+        assert (extracted / "references" / original.name).read_text() == original.read_text()
+    assert not (extracted / "SKILL.md").exists()
 
 
 # ── mutation-gate pins (Phase 8) ────────────────────────────────────────────
