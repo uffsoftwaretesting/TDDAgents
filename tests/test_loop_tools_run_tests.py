@@ -632,7 +632,7 @@ def test_an_observed_run_is_recorded_beside_the_ledger():
     store = _record_run(SuiteExecutionResult(exit_code=1, stdout="E   assert 1 == 2\n1 failed", stderr="warn"))
     run = store.get().last_test_run
     assert run == TestRunRecord(test_path="tests/test_calc.py", exit_code=1, stdout="E   assert 1 == 2\n1 failed",
-                                stderr="warn")
+                                stderr="warn", phase=TddPhase.RED)
     assert store.get().phase_ledger.tests_written is True
 
 
@@ -648,7 +648,8 @@ def test_a_later_run_replaces_the_record():
     tool = build_run_tests_tool(lambda path: next(results))
     asyncio.run(tool.call({"test_path": "a"}, ctx))
     asyncio.run(tool.call({"test_path": "b"}, ctx))
-    assert store.get().last_test_run == TestRunRecord(test_path="b", exit_code=0, stdout="ok", stderr="")
+    assert store.get().last_test_run == TestRunRecord(test_path="b", exit_code=0, stdout="ok", stderr="",
+                                                      phase=TddPhase.RED)
 
 
 @pytest.mark.parametrize("report, output, reading", [

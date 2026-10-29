@@ -65,14 +65,20 @@ def _red_fact(state: LoopState) -> str:
     return "they changed, and no RunTests run has counted since"
 
 
-def _last_run_fact(state: LoopState) -> str:
-    """The last RunTests run, as recorded: its exit code and pytest's meaning, or none."""
+def _last_run_fact(state: LoopState, phase: TddPhase) -> str:
+    """
+    The phase's last recorded run, or that there has been none since the phase started. A run
+    recorded in an earlier phase (the passing run that ended GREEN) is never named here: a model
+    read "the last run exited 0" as REFACTOR already met (2026-10-28). A run recorded in this phase
+    did not meet the rule, or the phase would have moved on.
+    """
     from app.tdd.run_tests_tool.run_tests_tool import exit_semantic
 
     run = state.tool_context.get_app_state().last_test_run
-    if run is None:
-        return "no RunTests run has been recorded for it yet"
-    return f"the last RunTests run exited {run.exit_code} ({exit_semantic(run.exit_code).meaning})"
+    if run is None or run.phase != phase:
+        return f"no RunTests run since {phase.value} started"
+    return (f"the last RunTests run in {phase.value} exited {run.exit_code} ({exit_semantic(run.exit_code).meaning}) "
+            "and did not meet it")
 
 
 def incomplete_cycle_message(ledger: PhaseLedger, state: LoopState) -> str:
@@ -90,10 +96,12 @@ def incomplete_cycle_message(ledger: PhaseLedger, state: LoopState) -> str:
             open_work = f"{open_work} {RED_DUPLICATE_WAY}"
         return f"TDD cycle incomplete: RED. {PHASE_RULES[TddPhase.RED]}: {_red_fact(state)}. {open_work}"
     if not ledger.green_passed:
-        return (f"TDD cycle incomplete: GREEN. {PHASE_RULES[TddPhase.GREEN]}: {_last_run_fact(state)}. Implement "
+        fact = _last_run_fact(state, TddPhase.GREEN)
+        return (f"TDD cycle incomplete: GREEN. {PHASE_RULES[TddPhase.GREEN]}: {fact}. Implement "
                 f"the code the tests describe and run RunTests until every test passes. {BACK_TO_RED}")
     figure = "not measured yet" if ledger.coverage is None else f"{ledger.coverage:.1f}%"
-    return (f"TDD cycle incomplete: REFACTOR. {PHASE_RULES[TddPhase.REFACTOR]}: {_last_run_fact(state)}. It is "
+    fact = _last_run_fact(state, TddPhase.REFACTOR)
+    return (f"TDD cycle incomplete: REFACTOR. {PHASE_RULES[TddPhase.REFACTOR]}: {fact}. It is "
             "mandatory: improve the code and the tests and raise line + branch coverage (a good rule of thumb is "
             f"{COVERAGE_RULE_OF_THUMB:.0f}%; last measured: {figure}), then run RunTests until every test passes.")
 

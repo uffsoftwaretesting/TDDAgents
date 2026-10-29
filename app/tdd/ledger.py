@@ -129,4 +129,7 @@ class TestRunRecord:
     exit_code: int
     stdout: str = ""
     stderr: str = ""
+    #: The phase the run was observed in (2026-10-28). A refusal says "no run since REFACTOR
+    #: started" rather than naming the passing run that ended GREEN, which a model read as met.
+    phase: TddPhase | None = None
     __test__ = False

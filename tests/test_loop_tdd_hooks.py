@@ -62,12 +62,18 @@ RED_MSG = f"TDD cycle incomplete: RED. {RED_RULE}: they could not be read. {WRIT
 BACK_TO_RED = ("If a test is wrong (it contradicts the specification), go back to RED: spawn the tester agent "
                "(Agent with subagent_type 'tester') to fix it. That restarts this sub-requirement at RED; then "
                "implement again.")
-NO_RUN = "no RunTests run has been recorded for it yet"
+
+
+def no_run(phase: str) -> str:
+    return f"no RunTests run since {phase} started"
+
+
+NO_RUN = no_run("GREEN")
 GREEN_MSG = (f"TDD cycle incomplete: GREEN. {GREEN_RULE}: {NO_RUN}. Implement the code the tests describe and run "
              f"RunTests until every test passes. {BACK_TO_RED}")
 
 
-def refactor_msg(figure: str, run: str = NO_RUN) -> str:
+def refactor_msg(figure: str, run: str = no_run("REFACTOR")) -> str:
     return (f"TDD cycle incomplete: REFACTOR. {REFACTOR_RULE}: {run}. It is mandatory: improve the code and the "
             "tests and raise line + branch coverage (a good rule of thumb is "
             f"90%; last measured: {figure}), then run RunTests until every test passes.")
@@ -192,12 +198,32 @@ def test_red_names_the_update_plan_way_only_when_the_pool_has_it():
 
 
 @pytest.mark.parametrize("code, meaning", [(1, "some tests failed"), (2, "test execution was interrupted")])
-def test_green_and_refactor_name_the_last_recorded_run(code, meaning):
+def test_green_and_refactor_name_the_last_run_of_their_own_phase(code, meaning):
     from app.tdd.ledger import TestRunRecord
 
-    run = TestRunRecord(test_path=".", exit_code=code, stdout="", stderr="")
-    green = AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True), last_test_run=run)
-    assert f"{GREEN_RULE}: the last RunTests run exited {code} ({meaning})." in _refusal(green)
+    def run_in(phase: TddPhase) -> TestRunRecord:
+        return TestRunRecord(test_path=".", exit_code=code, stdout="", stderr="", phase=phase)
+
+    green = AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
+                     last_test_run=run_in(TddPhase.GREEN))
+    assert f"{GREEN_RULE}: the last RunTests run in GREEN exited {code} ({meaning}) and did not meet it." in _refusal(
+        green)
     refactoring = AppState(phase_ledger=PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True),
-                           last_test_run=run)
-    assert _refusal(refactoring) == refactor_msg("not measured yet", f"the last RunTests run exited {code} ({meaning})")
+                           last_test_run=run_in(TddPhase.REFACTOR))
+    assert _refusal(refactoring) == refactor_msg(
+        "not measured yet", f"the last RunTests run in REFACTOR exited {code} ({meaning}) and did not meet it")
+
+
+@pytest.mark.parametrize("phase, earlier", [(TddPhase.REFACTOR, TddPhase.GREEN), (TddPhase.GREEN, TddPhase.RED)])
+def test_a_passing_run_from_the_phase_before_is_never_named(phase, earlier):
+    """
+    The live CPF run (2026-10-28): in REFACTOR the refusal said "the last RunTests run exited 0", the run
+    that ended GREEN, and the agent declared REFACTOR done three times without running RunTests.
+    """
+    from app.tdd.ledger import TestRunRecord
+
+    ledger = PhaseLedger(phase=phase, tests_written=True, green_passed=phase == TddPhase.REFACTOR)
+    for record in (TestRunRecord(test_path=".", exit_code=0, phase=earlier), TestRunRecord(test_path=".", exit_code=0),
+                   None):
+        refusal = _refusal(AppState(phase_ledger=ledger, last_test_run=record))
+        assert f": {no_run(phase.value)}." in refusal and "exited 0" not in refusal

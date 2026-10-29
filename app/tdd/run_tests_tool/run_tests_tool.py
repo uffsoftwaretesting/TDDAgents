@@ -411,7 +411,8 @@ def build_run_tests_tool(
 
         # Update the authoritative AppState phase_ledger: the only writer (Part D2)
         record = TestRunRecord(
-            test_path=test_path, exit_code=code, stdout=exec_result.stdout, stderr=exec_result.stderr
+            test_path=test_path, exit_code=code, stdout=exec_result.stdout, stderr=exec_result.stderr,
+            phase=TddPhase(phase)
         )
         context.set_app_state(
             lambda s: replace(

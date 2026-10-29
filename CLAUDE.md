@@ -1525,7 +1525,9 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
   - the RED refusal says the test files "have not changed since this sub-requirement started";
   - it names both ways forward: extend this item's tests, or, when an earlier item already built its
     behaviour, propose an UpdatePlan change for the user to approve;
-  - GREEN and REFACTOR name the last recorded run's exit code;
+  - GREEN and REFACTOR name the last run recorded *in that phase* (`TestRunRecord.phase`), or say
+    "no RunTests run since REFACTOR started". Naming the passing run that ended GREEN let an agent
+    read REFACTOR as met; it declared REFACTOR done three times without running RunTests;
   - every refusal ends with upstream's own escalation rule (`ASK_THE_USER`, Doing tasks: "only when
     you're genuinely stuck after investigation").
 
