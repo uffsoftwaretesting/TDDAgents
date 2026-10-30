@@ -29,7 +29,7 @@ from app.state.app_state_store import AppStateStore
 from app.tool import ToolContext, ToolResult, build_tool, tool_context_for
 from app.utils.messages import Message, ToolCall
 
-CONFIG = build_run_config("recovery-test", postgres_checkpointing=False)
+CONFIG = build_run_config("recovery-test")
 
 
 def make_deps(

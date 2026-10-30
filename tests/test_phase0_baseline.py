@@ -182,7 +182,7 @@ def test_python_workspace_runs_the_session_interpreter(python_workspace, session
 # ── entry point health and the optional E2B key ──────────────────────────────
 
 def _clean_env(**extra: str) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in ("E2B_API_KEY", "OPENAI_API_KEY", "POSTGRES_URL")}
+    env = {k: v for k, v in os.environ.items() if k not in ("E2B_API_KEY", "OPENAI_API_KEY")}
     env.update(PYTHONPATH=str(REPO), **extra)
     if "MUTANT_UNDER_TEST" in env:
         # Under mutmut the child imports the mutated copy, whose trampolines need mutmut's config,
@@ -193,7 +193,7 @@ def _clean_env(**extra: str) -> dict[str, str]:
 
 def test_app_main_imports_without_an_e2b_key(tmp_path):
     """The import chain app.main -> session driver -> runner -> factory was broken (ImportError)."""
-    env = _clean_env(OPENAI_API_KEY="k", POSTGRES_URL="postgresql://x")
+    env = _clean_env(OPENAI_API_KEY="k")
     res = subprocess.run([sys.executable, "-c", "import app.main, app.query.deps, app.cli.print"],
                          cwd=tmp_path, env=env, capture_output=True, text=True, check=False)
     assert res.returncode == 0, res.stderr
@@ -213,9 +213,9 @@ def test_production_deps_are_complete():
     deps.emit_event(object())
 
 
-def test_openai_and_postgres_stay_required(tmp_path):
+def test_openai_stays_required(tmp_path):
     res = subprocess.run([sys.executable, "-c", "import app.config.config"], cwd=tmp_path,
-                         env=_clean_env(POSTGRES_URL="postgresql://x"), capture_output=True, text=True,
+                         env=_clean_env(), capture_output=True, text=True,
                          check=False)
     assert "No API key configured" in res.stderr
 
@@ -317,7 +317,7 @@ def test_engine_does_not_write_a_stale_state_ledger_back():
 
     deps = LoopDeps(call_model=model, run_tools=no_tools, compact=no_compact, stop_hooks=no_stop,
                     uuid=lambda: "u", now=lambda: 0.0, emit_event=lambda e: None)
-    asyncio.run(drain(run_loop(state, build_run_config("r", postgres_checkpointing=False), deps)))
+    asyncio.run(drain(run_loop(state, build_run_config("r"), deps)))
     assert store.get().phase_ledger == PhaseLedger()
 
 
@@ -394,10 +394,11 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     assert perm.additional_working_directories == (str(tmp_path),)
     # Phase 7: the main thread also holds the Agent tool, as upstream's always does; Phase 8
     # adds TaskOutput and TaskStop (SendMessage is off without agent teams), Phase 11 UpdatePlan,
-    # and AskUserQuestion is upstream's main-thread base tool.
+    # and AskUserQuestion is upstream's main-thread base tool, as are EnterPlanMode and ExitPlanMode.
     assert {t.name for t in ctx.tools} == {
         "ReadFile", "WriteFile", "Edit", "Glob", "Grep", "Bash", "RunTests", "TodoWrite", "Agent",
-        "TaskOutput", "TaskStop", "Skill", "UpdatePlan", "AskUserQuestion", "WebFetch"}
+        "TaskOutput", "TaskStop", "Skill", "UpdatePlan", "AskUserQuestion", "WebFetch", "EnterPlanMode",
+        "ExitPlanMode"}
     assert seen[0].messages[0].content == "add two numbers"
     # Phase 5: the user-input attachments follow the prompt — since Phase 8 the skill listing,
     # then the initial TDD state (upstream's source order).
@@ -500,7 +501,6 @@ def test_runner_hands_the_loop_its_run_config_and_context(python_workspace):
                          deps=_recording_deps(seen)))
     state, config = seen[0]
     assert re.fullmatch(r"loop-[0-9a-f]{32}", config.run_id)
-    assert config.gates.postgres_checkpointing is False
     from app.utils.session_storage_portable import get_transcript_path
 
     assert get_transcript_path(config.run_id, str(python_workspace.root)).is_file()

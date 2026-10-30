@@ -61,11 +61,10 @@ def test_the_transcript_is_named_by_the_item_run_id(make_fake_workspace, tmp_pat
 
 def test_startup_flags_reach_the_run_config(make_fake_workspace, tmp_path) -> None:
     seen: list[Any] = []
-    _run(make_fake_workspace, _recording_model(seen), tmp_path, postgres_checkpointing=True,
+    _run(make_fake_workspace, _recording_model(seen), tmp_path,
          permission_mode="acceptEdits", settings_path=str(tmp_path / "flag.json"), dangerously_skip_permissions=True)
     config = seen[0][1]
     assert config.run_id == item_run_id("s", 2)
-    assert config.gates.postgres_checkpointing is True
     assert config.permission_mode == "acceptEdits"
     assert config.settings_path == str(tmp_path / "flag.json")
     assert config.dangerously_skip_permissions is True
@@ -75,7 +74,6 @@ def test_flags_default_to_off(make_fake_workspace, tmp_path) -> None:
     seen: list[Any] = []
     _run(make_fake_workspace, _recording_model(seen), tmp_path)
     config = seen[0][1]
-    assert config.gates.postgres_checkpointing is False
     assert config.permission_mode is None
     assert config.settings_path is None
     assert config.dangerously_skip_permissions is False

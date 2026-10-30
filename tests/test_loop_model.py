@@ -78,7 +78,7 @@ def _collect(state, config):
 
 @pytest.fixture
 def config():
-    return build_run_config(run_id="test", postgres_checkpointing=False)
+    return build_run_config(run_id="test")
 
 
 def _state(ws=None, messages=(), ledger=None, tools=(), todos=()):
@@ -184,8 +184,8 @@ def test_request_is_keyed_by_run_and_memoizes_sections(monkeypatch, tmp_path):
 
     monkeypatch.setattr(assembly, "compute_simple_env_info", counting)
     ws = LocalWorkspace(str(tmp_path))
-    run_a = build_run_config(run_id="A", postgres_checkpointing=False)
-    run_b = build_run_config(run_id="B", postgres_checkpointing=False)
+    run_a = build_run_config(run_id="A")
+    run_b = build_run_config(run_id="B")
     first = build_request_messages(_state(ws), run_a)
     build_request_messages(_state(ws), run_a)
     assert calls == [(ws, Config.MODEL)]  # one computation per run, with this workspace and model

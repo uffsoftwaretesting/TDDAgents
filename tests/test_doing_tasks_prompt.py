@@ -1,6 +1,6 @@
 """
 The development agents' "Doing tasks" section is upstream's `getSimpleDoingTasksSection`
-verbatim (2026-10-28), and the session's planner and engineer carry the same scope rule.
+verbatim (2026-10-28). Planning is plan mode's, and the TDD contract states how a plan runs.
 
 A live palindrome run's plan added a README, a CI workflow and a "release preparation" step the
 specification forbade. The section had been a loose paraphrase without upstream's scope rules.
@@ -70,30 +70,17 @@ def test_the_section_is_upstreams_verbatim():
     assert read_system_prompt_file("doing-tasks.md").rstrip("\n") == expected
 
 
-@pytest.mark.parametrize("prompt", ["planner/system.md", "planner/request.md", "engineer/system.md",
-                                    "engineer/request.md"])
-def test_the_session_prompts_carry_no_scope_rules(prompt: str):
-    """
-    Upstream's Plan agent (`planAgent.ts`) has no scope rule; the user's review holds scope
-    (2026-10-29). The rules the 2026-10-28 prompts carried are gone.
-    """
-    text = (SESSION / prompt).read_text(encoding="utf-8")
-    for rule in ("unless", "README", " CI", "packaging", "MUST ALWAYS", "gold standard",
-                 "Python ecosystem", "must not be implemented", "PHASE 0"):
-        assert rule not in text, rule
+def test_the_session_prompts_are_gone():
+    """Planning is plan mode's (2026-10-30): the engineer and planner prompts were removed with them."""
+    assert not (SESSION / "planner").exists() and not (SESSION / "engineer").exists()
 
 
-@pytest.mark.parametrize("prompt", ["planner/system.md", "engineer/system.md"])
-def test_the_session_prompts_have_the_plan_agents_shape(prompt: str):
-    text = (SESSION / prompt).read_text(encoding="utf-8")
-    assert text.startswith("You are a ")
-    assert "## Your Process" in text and "## Required Output" in text
-
-
-def test_the_planner_is_told_which_test_files_pytest_collects():
+def test_the_contract_tells_the_analyst_how_the_plan_runs():
     """Two live palindrome plans named `tests/tests_*.py`, which pytest never collects (2026-10-28)."""
-    text = (SESSION / "planner" / "system.md").read_text(encoding="utf-8")
+    text = read_system_prompt_file("tdd-contract.md")
+    assert "numbered items under its `## Implementation Plan` heading become the sub-requirements" in text
     assert ("RunTests runs pytest and reports the test files pytest does not collect. pytest's default "
             "discovery collects `test_*.py` and `*_test.py` files") in text
     assert "exactly one Red -> Green -> Refactor cycle that the RunTests tool observes" in text
-    assert "tests_" not in text
+    for rule in ("unless", "README", " CI", "packaging", "MUST ALWAYS", "gold standard", "tests_"):
+        assert rule not in text, rule

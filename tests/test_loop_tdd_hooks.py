@@ -40,7 +40,7 @@ def test_hook_allows_exit_when_cycle_complete():
         )
         ctx = tool_context_for(store)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
-        config = build_run_config("test-run", postgres_checkpointing=False)
+        config = build_run_config("test-run")
 
         result = await tdd_phase_incomplete_hook(state, config)
         assert result.prevent_continuation is False
@@ -91,7 +91,7 @@ def test_the_hook_names_what_the_cycle_still_needs(ledger, message):
     async def go():
         ctx = tool_context_for(AppStateStore(AppState(phase_ledger=ledger)))
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
-        result = await tdd_phase_incomplete_hook(state, build_run_config("test-run", postgres_checkpointing=False))
+        result = await tdd_phase_incomplete_hook(state, build_run_config("test-run"))
         assert result.prevent_continuation is False
         assert [m.content for m in result.blocking_errors] == [message]
 
@@ -104,7 +104,7 @@ def test_the_hook_never_gives_up_even_when_stop_hook_active():
     async def go():
         store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
         state = initial_loop_state((HumanMessage(content="task"),), tool_context_for(store))
-        config = build_run_config("test-run", postgres_checkpointing=False)
+        config = build_run_config("test-run")
         for active in (None, True, True):
             result = await tdd_phase_incomplete_hook(dataclasses.replace(state, stop_hook_active=active), config)
             assert result.prevent_continuation is False
@@ -118,7 +118,7 @@ def test_every_early_stop_in_the_loop_is_sent_back():
         store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
         ctx = tool_context_for(store)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
-        config = build_run_config("test-run", postgres_checkpointing=False)
+        config = build_run_config("test-run")
         claims = 4
 
         class ClaimsDone:
@@ -162,7 +162,7 @@ def _refusal(app_state: AppState, workspace: Any = None, tools: tuple[Any, ...] 
     async def go() -> str:
         ctx = tool_context_for(AppStateStore(app_state), workspace=workspace, tools=tools)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
-        result = await tdd_phase_incomplete_hook(state, build_run_config("test-run", postgres_checkpointing=False))
+        result = await tdd_phase_incomplete_hook(state, build_run_config("test-run"))
         return str(result.blocking_errors[0].content)
 
     return asyncio.run(go())

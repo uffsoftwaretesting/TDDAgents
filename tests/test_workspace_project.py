@@ -92,7 +92,7 @@ def test_settings_come_from_the_project_not_the_process_cwd(tmp_path, monkeypatc
     project = prepare_project(tmp_path / "p")
     ws = LocalWorkspace(project)
     assert project_root_of(ws) == project
-    perm = run_permission_context(build_run_config("r", postgres_checkpointing=False), ws, home=tmp_path / "h",
+    perm = run_permission_context(build_run_config("r"), ws, home=tmp_path / "h",
                                   managed_dir=tmp_path / "etc")
     assert perm.mode == PermissionMode.ACCEPT_EDITS  # the project's seeded settings
     assert project_root_of(object()) == cwd and project_root_of(ws, tmp_path) == tmp_path

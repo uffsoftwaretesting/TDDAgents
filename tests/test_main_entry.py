@@ -8,13 +8,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from langgraph.checkpoint.memory import MemorySaver
 
 import app.main as entry
 from app.cli.print import DevelopmentOutcome
 from app.query.transitions import Terminal
-from app.session.driver import SessionOptions, SessionRun, build_session_shell
-from app.session.state import SessionStatus
+from app.session.driver import SessionOptions
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.plan import TddPlan
 
@@ -22,21 +20,19 @@ CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=Tr
 PLAN = TddPlan.from_texts(["Item A"])
 DONE = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=PLAN.complete_current(CYCLE))
 STOPPED = DevelopmentOutcome(terminal=Terminal.STOP_HOOK_PREVENTED, plan=PLAN)
-PLANNED = SessionRun(values={"status": SessionStatus.PLANNED})
-
-
-def checklist(user_input: str, history: str) -> dict[str, Any]:
-    return {"response": "Checklist. Can I proceed?", "needs_clarification": False, "has_checklist": True}
+#: A session that ended in plan mode: no approved plan, nothing developed.
+UNPLANNED = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=TddPlan())
 
 
 @pytest.fixture
 def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
-    """`build_session_shell` with fake seams, an in-memory checkpointer and a tmp workspace."""
+    """The session's project, `session_exists` and the two develop paths, faked over a tmp workspace."""
     monkeypatch.chdir(tmp_path)
     # setenv first so teardown restores the variable `--coordinator` writes to os.environ.
     monkeypatch.setenv("TDDAGENTS_COORDINATOR_MODE", "")
     monkeypatch.delenv("TDDAGENTS_COORDINATOR_MODE")
-    holder: dict[str, Any] = {"outcome": DONE, "options": [], "threads": [], "developed": [], "prompts": []}
+    holder: dict[str, Any] = {"outcome": DONE, "options": [], "threads": [], "developed": [], "prompts": [],
+                              "sessions": set()}
 
     class Workspace:
         root = tmp_path / "session" / "project"
@@ -45,45 +41,39 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     Workspace.root.mkdir(parents=True)
     (Workspace.root / "calc.py").write_text("x = 1\n")
 
-    def fake_build(thread_id: str, options: SessionOptions) -> Any:
-        holder["options"].append(options)
+    def fake_workspace(thread_id: str) -> Any:
         holder["threads"].append(thread_id)
-        return build_session_shell(
-            thread_id, SessionOptions(headless=options.headless, checkpoint="memory"),
-            workspace_factory=lambda t: Workspace(), analyzer_fn=checklist,
-            engineer_fn=lambda *_: "# Spec", planner_fn=lambda *_: ["Item A"],
-        )
+        return Workspace()
 
-    def fake_develop(shell: Any, thread_id: str, values: Any, workspace: Any, options: Any,
+    def fake_develop(thread_id: str, request: str | None, workspace: Any, options: Any,
                      prompt: str | None = None) -> DevelopmentOutcome:
-        holder["developed"].append((thread_id, values["plan"], options))
+        holder["developed"].append((thread_id, request))
+        holder["options"].append(options)
         holder["prompts"].append(prompt)
+        holder["sessions"].add(thread_id)
         outcome: DevelopmentOutcome = holder["outcome"]
         return outcome
 
-    monkeypatch.setattr(entry, "build_session_shell", fake_build)
+    monkeypatch.setattr("app.cli.print.session_workspace", fake_workspace)
+    monkeypatch.setattr(entry, "session_exists", lambda thread_id, workspace: thread_id in holder["sessions"])
     monkeypatch.setattr(entry, "develop_headless", fake_develop)
     monkeypatch.setattr(entry, "develop_interactive", fake_develop)
-    # One saver for every build, as one Postgres database would be across processes.
-    saver = MemorySaver()
-    monkeypatch.setattr("app.session.driver.build_checkpointer", lambda uri: saver)
     return holder
 
 
 def test_parse_args_defaults() -> None:
     args = entry.parse_args([])
     assert args.prompt is None and args.print is False and args.spec is None
-    assert args.fresh is False and args.thread_id is None and args.checkpoint is None
+    assert args.fresh is False and args.thread_id is None
     assert args.permission_mode is None and args.settings is None
     assert args.dangerously_skip_permissions is False and args.coordinator is False
 
 
 def test_parse_args_flags() -> None:
-    args = entry.parse_args(["-p", "Build X", "--spec", "s.txt", "--fresh", "--thread-id", "t", "--checkpoint",
-                             "memory", "--permission-mode", "auto", "--settings", "f.json",
+    args = entry.parse_args(["-p", "Build X", "--spec", "s.txt", "--fresh", "--thread-id", "t",
+                             "--permission-mode", "auto", "--settings", "f.json",
                              "--dangerously-skip-permissions", "--coordinator"])
-    assert (args.print, args.prompt, args.spec, args.fresh, args.thread_id, args.checkpoint) == (
-        True, "Build X", "s.txt", True, "t", "memory")
+    assert (args.print, args.prompt, args.spec, args.fresh, args.thread_id) == (True, "Build X", "s.txt", True, "t")
     assert (args.permission_mode, args.settings, args.dangerously_skip_permissions, args.coordinator) == (
         "auto", "f.json", True, True)
     assert entry.parse_args(["--print"]).print is True
@@ -95,11 +85,9 @@ def test_parse_args_rejects_an_unknown_mode() -> None:
 
 
 def test_session_options() -> None:
-    args = entry.parse_args(["-p", "--checkpoint", "memory", "--permission-mode", "plan", "--settings", "f",
-                             "--dangerously-skip-permissions"])
+    args = entry.parse_args(["-p", "--permission-mode", "plan", "--settings", "f", "--dangerously-skip-permissions"])
     assert entry.session_options(args) == SessionOptions(
-        headless=True, checkpoint="memory", permission_mode="plan", settings_path="f",
-        dangerously_skip_permissions=True)
+        headless=True, permission_mode="plan", settings_path="f", dangerously_skip_permissions=True)
     assert entry.session_options(entry.parse_args([])) == SessionOptions()
 
 
@@ -138,47 +126,6 @@ def test_resolve_thread_id() -> None:
     assert entry.resolve_thread_id(entry.parse_args([]), None).startswith("tdd-")
 
 
-def test_interactive_answer(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr("builtins.input", lambda prompt: "  /yes ")
-    assert entry.interactive_answer({"prompt": "Checklist", "has_checklist": True}) == "/yes"
-    out = capsys.readouterr().out
-    assert "Checklist" in out and "Type '/yes' to proceed" in out
-    monkeypatch.setattr("builtins.input", lambda prompt: "EUR")
-    assert entry.interactive_answer({"prompt": "Which?"}) == "EUR"
-    assert "The Analyst needs more details." in capsys.readouterr().out
-    for leave in ("/exit", "/QUIT"):
-        monkeypatch.setattr("builtins.input", lambda prompt, leave=leave: leave)
-        assert entry.interactive_answer({}) is None
-
-    def eof(prompt: str) -> str:
-        raise EOFError
-
-    monkeypatch.setattr("builtins.input", eof)
-    assert entry.interactive_answer({}) is None
-
-
-def test_write_session_artifacts(tmp_path: Path) -> None:
-    values = {
-        "user_prompts": ["Build X", "/yes"], "conversation_history": "[User]: Build X\n[Analyst]: ok",
-        "plan": ["A", "B"], "specification": "# Spec",
-    }
-    artifacts = Path(entry.write_session_artifacts(str(tmp_path), values))
-    assert artifacts == tmp_path / "metrics_and_logging"
-    dialogue = (artifacts / "user_analyst_dialogue.txt").read_text()
-    assert "1. Build X\n2. /yes" in dialogue and "[Analyst]: ok" in dialogue
-    assert "Build X" in (artifacts / "initial_user_prompt.txt").read_text()
-    assert "1. A\n2. B" in (artifacts / "planner.txt").read_text()
-    assert "# Spec" in (artifacts / "engineer_specifications.txt").read_text()
-    assert "[Analyst]: ok" in (artifacts / "confirmed_user_requirements.txt").read_text()
-    assert not (artifacts / "subreq_results.txt").exists()
-
-
-def test_write_session_artifacts_without_a_plan(tmp_path: Path) -> None:
-    artifacts = Path(entry.write_session_artifacts(str(tmp_path), {}))
-    assert not (artifacts / "planner.txt").exists()
-    assert "(empty)" in (artifacts / "initial_user_prompt.txt").read_text()
-
-
 def test_headless_run_succeeds(fake_session: dict[str, Any], tmp_path: Path,
                                capsys: pytest.CaptureFixture[str]) -> None:
     code = entry.main(["-p", "Build X", "--permission-mode", "acceptEdits"])
@@ -194,8 +141,7 @@ def test_headless_run_succeeds(fake_session: dict[str, Any], tmp_path: Path,
     assert (out_dir / "metrics_and_logging" / "final_test_run.txt").exists()
     out = capsys.readouterr().out
     assert "PIPELINE COMPLETED SUCCESSFULLY" in out and thread_id in out and "(HEADLESS)" in out
-    (developed,) = fake_session["developed"]
-    assert developed[:2] == (thread_id, ["Item A"])
+    assert fake_session["developed"] == [(thread_id, "Build X")]
     assert "1. [DONE   ] Item A" in (out_dir / "metrics_and_logging" / "subreq_results.txt").read_text()
 
 
@@ -207,12 +153,13 @@ def test_headless_failure_exits_one(fake_session: dict[str, Any], capsys: pytest
     assert "   • 1. Item A: not done" in out
 
 
-def test_a_session_that_never_planned_is_not_developed(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
-                                                       capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(entry, "drive_session", lambda *a, **k: SessionRun(values={"status": SessionStatus.FAILED}))
+def test_a_session_without_an_approved_plan_exits_one(fake_session: dict[str, Any],
+                                                      capsys: pytest.CaptureFixture[str]) -> None:
+    """Headless, as upstream's `-p`: the plan's approval is denied, so the session ends in plan mode."""
+    fake_session["outcome"] = UNPLANNED
     assert entry.main(["-p", "Build X"]) == 1
-    assert fake_session["developed"] == []
-    assert "FINISHED WITH STATUS: 'failed'" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "\n📋  NO APPROVED PLAN: the session ended in plan mode.\n" in out and "Final test run" not in out
 
 
 def test_headless_without_a_request_exits_one(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
@@ -242,20 +189,12 @@ def test_thread_id_without_a_session_or_request_exits_one(fake_session: dict[str
 def test_interactive_run_uses_the_menu_and_answers(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
                                                    capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(entry, "get_initial_user_prompt", lambda: "Build Y")
-    monkeypatch.setattr("builtins.input", lambda prompt: "/yes")
     assert entry.main([]) == 0
     assert fake_session["options"][0].headless is False
     from app.session.driver import derive_thread_id
 
     assert fake_session["threads"] == [derive_thread_id("Build Y")]
     assert "(INTERACTIVE)" in capsys.readouterr().out
-
-
-def test_interactive_exit_pauses(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
-                                 capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr("builtins.input", lambda prompt: "/exit")
-    assert entry.main(["Build Z"]) == 1
-    assert "Session paused" in capsys.readouterr().out
 
 
 def test_menu_cancel_exits_zero(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -270,10 +209,10 @@ def test_menu_cancel_exits_zero(fake_session: dict[str, Any], monkeypatch: pytes
 def test_keyboard_interrupt_during_the_drive(
     fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def interrupted(*args: Any, **kwargs: Any) -> SessionRun:
+    def interrupted(*args: Any, **kwargs: Any) -> DevelopmentOutcome:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(entry, "drive_session", interrupted)
+    monkeypatch.setattr(entry, "develop_headless", interrupted)
     assert entry.main(["-p", "Build X", "--thread-id", "tdd-k"]) == 130
     assert "--thread-id tdd-k" in capsys.readouterr().out
 
@@ -295,7 +234,7 @@ def test_report_status_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     class Workspace:
         root = tmp_path / "missing"
 
-    entry.report(PLANNED, "t", Workspace(), DONE.plan, Terminal.COMPLETED)
+    entry.report("t", Workspace(), None, DONE)
     out = capsys.readouterr().out
     # Without a session directory the reports go to `<workspaces root>/<thread>/`.
     from app.workspace.local import workspaces_root
@@ -382,29 +321,6 @@ def test_menu_specs_path_is_a_file(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert "Specs directory not found" in capsys.readouterr().out
 
 
-def test_format_dialogue_text() -> None:
-    assert entry.format_dialogue_text("") == "(empty)"
-    assert entry.format_dialogue_text("  \n ") == "(empty)"
-    long_answer = " ".join(["word"] * 30)
-    text = f"[User]: hi\n\n[Analyst]:\n[Analyst]: {long_answer}\nplain {long_answer}"
-    expected_analyst = (
-        "[Analyst]: " + " ".join(["word"] * 15) + "\n"
-        "           " + " ".join(["word"] * 15)
-    )
-    assert entry.format_dialogue_text(text, width=88) == "\n".join([
-        "[User]: hi", "", "[Analyst]:", expected_analyst,
-        "plain " + " ".join(["word"] * 16) + "\n" + " ".join(["word"] * 14),
-    ])
-    hyphen = "[User]: " + "-".join(["ab"] * 40)
-    assert entry.format_dialogue_text(hyphen, width=20) == hyphen
-    assert entry.format_dialogue_text("x" * 30, width=10) == "x" * 30
-
-
-def test_format_dialogue_default_width() -> None:
-    line = "[User]: " + " ".join(["w"] * 60)
-    assert entry.format_dialogue_text(line).split("\n")[0] == "[User]: " + " ".join(["w"] * 40)
-
-
 def test_parser_help_and_metadata() -> None:
     parser = entry.build_parser()
     assert parser.description == (
@@ -417,8 +333,6 @@ def test_parser_help_and_metadata() -> None:
         "spec": "Read the initial request from this file.",
         "fresh": "Forces a new run by generating a random thread_id.",
         "thread_id": "Explicitly sets the thread_id (continues that session).",
-        "checkpoint": "Checkpointer URI, or 'memory'. Defaults to POSTGRES_URL, falling back to memory if it cannot "
-                      "connect.",
         "permission_mode": None,
         "settings": "A settings file (upstream's flag settings).",
         "dangerously_skip_permissions": None,
@@ -429,64 +343,6 @@ def test_parser_help_and_metadata() -> None:
     assert flags["dangerously_skip_permissions"] == ("--dangerously-skip-permissions",)
     assert next(a for a in parser._actions if a.dest == "permission_mode").choices == [
         "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"]
-
-
-def test_interactive_answer_exact_output(monkeypatch: pytest.MonkeyPatch,
-                                         capsys: pytest.CaptureFixture[str]) -> None:
-    prompts = _scripted_input(monkeypatch, ["ok", "fine"])
-    entry.interactive_answer({"prompt": "The list", "has_checklist": True})
-    assert capsys.readouterr().out == (
-        "\n🤖 [Requirements Analyst]:\nThe list\n\n"
-        "💡 TIP: The Analyst has generated the Final Checklist.\n"
-        "   - Type '/yes' to proceed to Engineering.\n"
-        "   - Or type the changes you'd like to make (e.g. 'Missing validation X').\n"
-    )
-    entry.interactive_answer({})
-    assert capsys.readouterr().out == (
-        "\n🤖 [Requirements Analyst]:\n\n\n"
-        "💡 TIP: The Analyst needs more details.\n"
-        "   - Answer the question to help define the scope.\n"
-    )
-    assert prompts == ["\n👤 [Your Response] (or '/exit'): "] * 2
-
-
-def test_interactive_answer_ctrl_c_leaves(monkeypatch: pytest.MonkeyPatch) -> None:
-    def interrupt(prompt: str) -> str:
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr("builtins.input", interrupt)
-    assert entry.interactive_answer({}) is None
-
-
-def test_artifact_files_exact(tmp_path: Path) -> None:
-    values = {
-        "user_prompts": ["Build X " + "y" * 90, "/yes"], "conversation_history": "[User]: Build X",
-        "plan": ["A"], "specification": "# Spec",
-    }
-    artifacts = tmp_path / "metrics_and_logging"
-    entry.write_session_artifacts(str(tmp_path), values)
-    bar = "=" * 80
-    assert (artifacts / "user_analyst_dialogue.txt").read_text(encoding="utf-8") == (
-        f"PROMPTS SENT BY THE USER VIA TERMINAL\n{bar}\n"
-        f"1. Build X\n   {'y' * 90}\n2. /yes\n{bar}\n\n"
-        f"FULL DIALOGUE BETWEEN USER AND ANALYST\n{bar}\n[User]: Build X\n{bar}\n"
-    )
-    assert (artifacts / "initial_user_prompt.txt").read_text(encoding="utf-8") == (
-        f"INITIAL PROMPT SENT BY THE USER\n{bar}\nBuild X {'y' * 72}\n{'y' * 18}\n{bar}\n"
-    )
-    assert (artifacts / "planner.txt").read_text(encoding="utf-8") == f"TDD SUB-REQUIREMENTS PLAN\n{bar}\n1. A\n{bar}\n"
-    assert (artifacts / "engineer_specifications.txt").read_text(encoding="utf-8") == (
-        f"ENGINEER'S TECHNICAL SPECIFICATIONS\n{bar}\n# Spec\n{bar}\n"
-    )
-    assert (artifacts / "confirmed_user_requirements.txt").read_text(encoding="utf-8") == (
-        f"REQUIREMENTS SUBMITTED BY THE USER\n{bar}\n[User]: Build X\n{bar}\n"
-    )
-
-
-def test_initial_prompt_keeps_blank_lines(tmp_path: Path) -> None:
-    entry.write_session_artifacts(str(tmp_path), {"user_prompts": ["a\n\n  \nb"]})
-    text = (tmp_path / "metrics_and_logging" / "initial_user_prompt.txt").read_text(encoding="utf-8")
-    assert text.split("\n")[2:6] == ["a", "", "", "b"]
 
 
 def test_subreq_results_exact(tmp_path: Path) -> None:
@@ -551,7 +407,7 @@ def test_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: p
         run_dir = tmp_path / "session"
 
     out_dir = tmp_path / "session" / "metrics_and_logging"
-    entry.report(PLANNED, "t", Workspace(), STOPPED.plan, STOPPED.terminal)
+    entry.report("t", Workspace(), "Build X", STOPPED)
     assert capsys.readouterr().out == (
         f"\n📁 Project: {ws}\n"
         f"📝 Reports: {out_dir}/\n"
@@ -563,18 +419,19 @@ def test_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: p
     )
     assert "2. " not in (out_dir / "subreq_results.txt").read_text()
     assert "could not run the tests" in (out_dir / "final_test_run.txt").read_text()
-    entry.report(SessionRun(values={"status": SessionStatus.FAILED}), "t", Workspace())
+    plan_file = tmp_path / "plans" / "a-b-c.md"
+    plan_file.parent.mkdir()
+    plan_file.write_text("# Plan so far\n")
+    entry.report("t", Workspace(), "Build X", DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=TddPlan(),
+                                                                 plan_file=str(plan_file)))
     out = capsys.readouterr().out
-    assert "\n⚠️  PIPELINE FINISHED WITH STATUS: 'failed'\n" in out and "Final test run" not in out
-    entry.report(PLANNED, "t", Workspace(), DONE.plan, Terminal.MODEL_ERROR)
+    assert f"\n📋  NO APPROVED PLAN: the session ended in plan mode.\n   The plan so far: {plan_file}\n" in out
+    assert "Final test run" not in out and not (out_dir / "approved_plan.md").exists()
+    entry.report("t", Workspace(), None, DevelopmentOutcome(terminal=Terminal.MODEL_ERROR, plan=DONE.plan))
     out = capsys.readouterr().out
     assert "DEVELOPMENT STOPPED: model_error" in out and "not done" not in out
     assert (out_dir / "token_usage.txt").exists()
     assert not list(tmp_path.glob("workspace_output_*"))
-    entry.report(SessionRun(values={}, paused_at={"type": "clarification"}), "t", Workspace())
-    assert "\n⏸️  Session paused at the analyst's question.\n" in capsys.readouterr().out
-    entry.report(SessionRun(values={}), "t", Workspace())
-    assert "STATUS: 'unknown'" in capsys.readouterr().out
 
 
 def test_the_final_test_run_is_the_projects_own_suite(python_workspace, tmp_path: Path) -> None:
@@ -630,9 +487,13 @@ def test_main_continues_a_thread_without_a_request(fake_session: dict[str, Any],
     monkeypatch.setattr(entry, "get_initial_user_prompt", lambda: pytest.fail("the menu must not be shown"))
     assert entry.main(["-p", "Build X", "--thread-id", "tdd-c"]) == 0
     capsys.readouterr()
-    # The thread exists, so no request and no menu are needed: it is reported as it stands.
+    # The thread exists, so no request and no menu are needed: its conversation is resumed.
     assert entry.main(["--thread-id", "tdd-c"]) == 0
     assert "PIPELINE COMPLETED SUCCESSFULLY" in capsys.readouterr().out
+    assert fake_session["developed"] == [("tdd-c", "Build X"), ("tdd-c", None)]
+    # On an existing session the prompt is the user's next message (`--resume <id> "<prompt>"`).
+    entry.main(["-p", "--thread-id", "tdd-c", "my answer"])
+    assert fake_session["developed"][-1] == ("tdd-c", None) and fake_session["prompts"][-1] == "my answer"
 
 
 def test_report_success_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -642,9 +503,9 @@ def test_report_success_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     class Workspace:
         root = tmp_path / "none"
 
-    entry.report(PLANNED, "t", Workspace(), DONE.plan, Terminal.COMPLETED)
+    entry.report("t", Workspace(), None, DONE)
     assert "\n\n✅  PIPELINE COMPLETED SUCCESSFULLY!\n\n🔑 Thread ID for this run: t\n" in capsys.readouterr().out
-    entry.report(PLANNED, "t", Workspace(), STOPPED.plan, Terminal.COMPLETED)
+    entry.report("t", Workspace(), None, DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=STOPPED.plan))
     assert "SUCCESSFULLY" not in capsys.readouterr().out
 
 
@@ -655,31 +516,6 @@ def test_menu_first_option(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.chdir(tmp_path)
     _scripted_input(monkeypatch, ["1"])
     assert entry.get_initial_user_prompt() == "the one"
-
-
-def test_format_dialogue_plain_lines_keep_hyphenated_words() -> None:
-    word = "-".join(["ab"] * 20)
-    assert entry.format_dialogue_text(f"x {word}", width=30) == f"x\n{word}"
-
-
-def test_prompt_wrapping_in_the_dialogue_artifact(tmp_path: Path) -> None:
-    fits = "a" * 84 + " b"           # "1. " + 86 characters = 89: one over the width
-    hyphenated = "-".join(["cd"] * 40)
-    entry.write_session_artifacts(str(tmp_path), {"user_prompts": [fits, hyphenated]})
-    text = (tmp_path / "metrics_and_logging" / "user_analyst_dialogue.txt").read_text(encoding="utf-8")
-    assert f"1. {'a' * 84}\n   b\n2. {hyphenated}\n" in text
-
-
-def test_artifacts_of_an_empty_session_are_exact(tmp_path: Path) -> None:
-    entry.write_session_artifacts(str(tmp_path), {})
-    artifacts = tmp_path / "metrics_and_logging"
-    bar = "=" * 80
-    assert (artifacts / "initial_user_prompt.txt").read_text() == (
-        f"INITIAL PROMPT SENT BY THE USER\n{bar}\n(empty)\n{bar}\n")
-    assert (artifacts / "engineer_specifications.txt").read_text() == (
-        f"ENGINEER'S TECHNICAL SPECIFICATIONS\n{bar}\n\n{bar}\n")
-    assert (artifacts / "confirmed_user_requirements.txt").read_text() == (
-        f"REQUIREMENTS SUBMITTED BY THE USER\n{bar}\n(empty)\n{bar}\n")
 
 
 def test_main_messages_are_exact(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
@@ -693,7 +529,6 @@ def test_main_messages_are_exact(fake_session: dict[str, Any], monkeypatch: pyte
     monkeypatch.setattr(entry, "get_initial_user_prompt", lambda: "")
     assert entry.main([]) == 1
     assert capsys.readouterr().err == "❌ The initial request cannot be empty.\n"
-    monkeypatch.setattr("builtins.input", lambda prompt: "/yes")
     entry.main(["Build Q"])
     assert "🚀  TDDAGENTS SESSION (INTERACTIVE)\n" in capsys.readouterr().out
 
@@ -705,3 +540,68 @@ def test_the_final_run_never_reports_files_as_uncollected_when_pytest_stopped(py
     python_workspace.write_file("tests/test_web.py", "import not_installed_anywhere\n\ndef test_w():\n    pass\n")
     summary = entry.write_final_test_run(str(tmp_path), python_workspace)
     assert summary.startswith("NOT passing (exit 2: test execution was interrupted") and "not collected" not in summary
+
+
+# ── the session's reports ────────────────────────────────────────────────────
+
+
+def _transcript(path: Path, *entries: dict[str, Any]) -> str:
+    import json
+
+    path.write_text("".join(json.dumps({"message": entry}) + "\n" for entry in entries), encoding="utf-8")
+    return str(path)
+
+
+def _msg(kind: str, content: Any, **data: Any) -> dict[str, Any]:
+    return {"type": kind, "data": {"content": content, **data}}
+
+
+def test_planning_dialogue_reads_the_planning_phase_from_the_transcript(tmp_path: Path) -> None:
+    path = _transcript(
+        tmp_path / "t.jsonl",
+        _msg("human", "Build a CPF API"),
+        _msg("human", "<system-reminder>plan mode</system-reminder>", additional_kwargs={"is_meta": True}),
+        _msg("ai", [{"type": "thinking", "thinking": ""}, {"type": "text", "text": "Which framework?"}]),
+        _msg("ai", "", tool_calls=[]),
+        _msg("tool", "User has answered your questions: FastAPI", name="AskUserQuestion"),
+        _msg("tool", "Exit plan mode? denied", name="ExitPlanMode"),
+        _msg("tool", "User has approved your plan. You can now start coding.", name="ExitPlanMode"),
+        _msg("ai", "Starting RED for item 1."),
+    )
+    assert entry.planning_dialogue(path) == (
+        "[User]: Build a CPF API\n\n[Analyst]: Which framework?\n\n"
+        "[User answers]: User has answered your questions: FastAPI\n\n[User]: approved the plan.")
+    assert entry.planning_dialogue(None) == "(empty)"
+    assert entry.planning_dialogue(str(tmp_path / "missing.jsonl")) == "(empty)"
+    assert entry.planning_dialogue(_transcript(tmp_path / "e.jsonl", _msg("ai", ""))) == "(empty)"
+
+
+def test_session_artifacts_hold_the_request_the_approved_plan_and_the_dialogue(tmp_path: Path) -> None:
+    plan_file = tmp_path / "plan.md"
+    plan_file.write_text("# Approved\n\n## Implementation Plan\n1. A\n", encoding="utf-8")
+    transcript = _transcript(tmp_path / "t.jsonl", _msg("human", "Build X"))
+    outcome = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=PLAN, plan_file=str(plan_file),
+                                 transcript_path=transcript)
+    artifacts = Path(entry.write_session_artifacts(str(tmp_path), "Build X " + "y" * 90, outcome))
+    bar = "=" * 80
+    assert artifacts == tmp_path / "metrics_and_logging"
+    assert (artifacts / "initial_user_prompt.txt").read_text(encoding="utf-8") == (
+        f"INITIAL PROMPT SENT BY THE USER\n{bar}\nBuild X {'y' * 72}\n{'y' * 18}\n{bar}\n")
+    assert (artifacts / "approved_plan.md").read_text(encoding="utf-8") == plan_file.read_text(encoding="utf-8")
+    assert (artifacts / "planning_dialogue.txt").read_text(encoding="utf-8") == (
+        f"PLANNING DIALOGUE (USER AND ANALYST)\n{bar}\n[User]: Build X\n{bar}\n")
+    for old in ("user_analyst_dialogue.txt", "engineer_specifications.txt", "planner.txt",
+                "confirmed_user_requirements.txt"):
+        assert not (artifacts / old).exists()
+
+
+def test_artifacts_of_a_resumed_or_unplanned_session(tmp_path: Path) -> None:
+    artifacts = Path(entry.write_session_artifacts(str(tmp_path), None, None))
+    assert list(artifacts.iterdir()) == []
+    unplanned = DevelopmentOutcome(terminal=None, plan=TddPlan(), plan_file=str(tmp_path / "p.md"))
+    (tmp_path / "p.md").write_text("draft")
+    entry.write_session_artifacts(str(tmp_path), "a\n\n  \nb", unplanned)
+    assert not (artifacts / "approved_plan.md").exists()
+    assert (artifacts / "planning_dialogue.txt").exists()
+    text = (artifacts / "initial_user_prompt.txt").read_text(encoding="utf-8")
+    assert text.split("\n")[2:6] == ["a", "", "", "b"]

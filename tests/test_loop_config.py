@@ -19,29 +19,24 @@ from app.query.config import Gates, RunConfig, build_run_config
 class TestBuildRunConfig:
     def test_the_run_id_is_the_callers(self):
         """Not minted here: K1 derives it from the spec so a run can be resumed."""
-        assert build_run_config("tdd-abc123", postgres_checkpointing=True).run_id == "tdd-abc123"
+        assert build_run_config("tdd-abc123").run_id == "tdd-abc123"
 
-    @pytest.mark.parametrize("live", [True, False])
-    def test_checkpointing_is_reported_by_the_caller_that_attempted_it(self, live):
-        config = build_run_config("r", postgres_checkpointing=live)
-        assert config.gates.postgres_checkpointing is live
-
-    def test_checkpointing_must_be_stated(self):
+    def test_the_run_id_must_be_stated(self):
         with pytest.raises(TypeError):
-            build_run_config("r")  # type: ignore[call-arg]
+            build_run_config()  # type: ignore[call-arg]
 
 
 class TestTheSnapshotIsImmutable:
     def test_the_config_is_frozen(self):
-        config = build_run_config("r", postgres_checkpointing=True)
+        config = build_run_config("r")
         with pytest.raises(FrozenInstanceError):
             config.run_id = "other"  # type: ignore[misc]
 
     def test_the_gates_are_frozen(self):
         """A gate that could flip mid-run would defeat the reason for snapshotting it."""
-        gates = Gates(postgres_checkpointing=True, coordinator_mode=False)
+        gates = Gates(coordinator_mode=False)
         with pytest.raises(FrozenInstanceError):
-            gates.postgres_checkpointing = False  # type: ignore[misc]
+            gates.coordinator_mode = True  # type: ignore[misc]
 
 
 class TestNoCeilings:
@@ -51,10 +46,10 @@ class TestNoCeilings:
             "permission_mode", "settings_path", "dangerously_skip_permissions"]
 
     def test_permission_inputs_are_upstreams_startup_flags_and_default_unset(self):
-        config = build_run_config("r", postgres_checkpointing=False)
+        config = build_run_config("r")
         assert (config.permission_mode, config.settings_path, config.dangerously_skip_permissions) == (
             None, None, False)
-        given = build_run_config("r", postgres_checkpointing=False, permission_mode="plan",
+        given = build_run_config("r", permission_mode="plan",
                                  settings_path="/s.json", dangerously_skip_permissions=True)
         assert (given.permission_mode, given.settings_path, given.dangerously_skip_permissions) == (
             "plan", "/s.json", True)
@@ -66,7 +61,7 @@ class TestNoCeilings:
         """
         from app.services.api.with_retry import DEFAULT_MAX_RETRIES
 
-        config = build_run_config("r", postgres_checkpointing=True)
+        config = build_run_config("r")
         assert config.max_retries == DEFAULT_MAX_RETRIES
         numeric = [f.name for f in fields(RunConfig)
                    if isinstance(getattr(config, f.name), int) and not isinstance(getattr(config, f.name), bool)]
@@ -74,7 +69,7 @@ class TestNoCeilings:
 
     def test_the_model_is_resolved_once_from_config(self):
 
-        config = build_run_config("r", postgres_checkpointing=True)
+        config = build_run_config("r")
         assert config.model == Config.MODEL
         assert config.fallback_model is None
 
@@ -83,6 +78,6 @@ class TestNoCeilings:
         Gates are facts about the environment. The moment one is an int it is a budget,
         and this record is where a ceiling would most plausibly be re-added by accident.
         """
-        gates = build_run_config("r", postgres_checkpointing=True).gates
+        gates = build_run_config("r").gates
         for field_ in fields(Gates):
             assert isinstance(getattr(gates, field_.name), bool), field_.name

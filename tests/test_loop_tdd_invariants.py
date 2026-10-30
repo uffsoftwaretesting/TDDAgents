@@ -241,7 +241,7 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
         ctx = tool_context_for(store, workspace=FakeWorkspace())
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
         terminated: Terminated | None = None
-        async for ev in run_loop(state, build_run_config("test-p2", postgres_checkpointing=False), deps):
+        async for ev in run_loop(state, build_run_config("test-p2"), deps):
             if isinstance(ev, Terminated):
                 terminated = ev
         assert terminated is not None
@@ -259,7 +259,7 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
             store = AppStateStore()
             ctx = tool_context_for(store)
             state = initial_loop_state((HumanMessage(content="task"),), ctx)
-            config = build_run_config("test-p2", postgres_checkpointing=False)
+            config = build_run_config("test-p2")
 
             terminated: Terminated | None = None
             async for ev in run_loop(state, config, deps):

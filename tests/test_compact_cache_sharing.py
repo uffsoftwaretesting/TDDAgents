@@ -115,7 +115,7 @@ def test_the_production_fork_is_one_main_loop_model_call_over_the_main_threads_s
     monkeypatch.setattr(summarizer_module, "stream_call_model", fake_stream)
     ctx = _ctx()
     state = initial_loop_state((HumanMessage(content="old"),), tool_context=ctx)
-    config = build_run_config(run_id="r1", postgres_checkpointing=False)
+    config = build_run_config(run_id="r1")
     request = HumanMessage(content="summarize")
     reply = _run(build_forked_compact_summarizer(state, config)(HISTORY, request, ctx))
     (fork_state, fork_config), = seen
@@ -142,7 +142,7 @@ def test_both_production_compactions_try_the_fork_first(monkeypatch):
     monkeypatch.setattr(deps, "compact_conversation", fake_compact)
     monkeypatch.setattr(deps, "build_forked_compact_summarizer", lambda state, config: ("fork", state, config))
     state = initial_loop_state((HumanMessage(content="old"),), tool_context=_ctx())
-    config = build_run_config(run_id="r1", postgres_checkpointing=False)
+    config = build_run_config(run_id="r1")
     _run(deps.production_autocompact(state.messages, state, config))
     _run(deps.production_compact(state, config))
     assert seen == [("fork", state, config)] * 2

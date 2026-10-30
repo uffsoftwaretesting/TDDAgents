@@ -19,7 +19,6 @@ from typing import Any
 
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("E2B_API_KEY", "test-e2b-key")
-os.environ.setdefault("POSTGRES_URL", "postgresql://test:test@localhost:5432/test")
 
 # Allows `pytest tests/` from the repo root without an installed package.
 REPO_ROOT = Path(__file__).resolve().parent.parent

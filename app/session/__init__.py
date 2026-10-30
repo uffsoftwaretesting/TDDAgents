@@ -1,4 +1,4 @@
 """
-The session shell (§3.4 and Part K): LangGraph reduced to checkpointing, the analyst's
-`interrupt()` and plan-item iteration, each item one loop run.
+The session's entry-point side: the driver (`driver.py`) and the development prompts
+(`prompts.py`). Planning is plan mode, inside the conversation (the Analyst).
 """

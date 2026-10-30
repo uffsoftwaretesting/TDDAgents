@@ -15,7 +15,7 @@ module is the parser and the help text; `app/screens/repl.py` runs them.
 | `/plan move <id> <position>` | Reorder |
 | `/pause` | Let the agents stop after the current turn, without finishing the plan |
 | `/resume` | Undo `/pause` and continue the plan |
-| `/requirements <request>` | Re-run the analyst, the engineer and the planner with a new request |
+| `/requirements <request>` | Enter plan mode and plan the new request (upstream's `/plan <description>`) |
 | `/help` | This list |
 | `/exit`, `/quit` | Leave (the session can be continued with `--thread-id`) |
 
@@ -42,7 +42,7 @@ HELP_TEXT = """Commands:
   /plan move <id> <position>    move a sub-requirement
   /pause                        let the agents stop after the current turn
   /resume                       continue the plan
-  /requirements <request>       re-run the analyst, engineer and planner
+  /requirements <request>       enter plan mode and plan a new request
   /help                         this list
   /exit, /quit                  leave (continue later with --thread-id)
 Anything else is a message to the agents; Esc interrupts them."""

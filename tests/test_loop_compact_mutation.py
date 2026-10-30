@@ -76,7 +76,7 @@ from tests.conftest import FakeWorkspace
 from tests.hook_doubles import ScriptedDispatcher
 
 MODEL = "o4-mini"  # 200k window, 32k max output -> 180k effective, 167k autocompact threshold
-CONFIG = build_run_config("r1", postgres_checkpointing=False)
+CONFIG = build_run_config("r1")
 _ENV = ("TDDAGENTS_DISABLE_COMPACT", "TDDAGENTS_DISABLE_AUTO_COMPACT", "TDDAGENTS_AUTOCOMPACT_PCT_OVERRIDE",
         "TDDAGENTS_BLOCKING_LIMIT_OVERRIDE")
 

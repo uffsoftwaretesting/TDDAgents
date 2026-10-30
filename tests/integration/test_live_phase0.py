@@ -70,7 +70,7 @@ def test_live_model_call_yields_whole_messages(real_openai_key: str, python_work
     state = initial_loop_state((prompt,), ctx)
 
     async def collect() -> list:
-        return [m async for m in stream_call_model(state, build_run_config("live-msg", postgres_checkpointing=False))]
+        return [m async for m in stream_call_model(state, build_run_config("live-msg"))]
 
     messages = asyncio.run(collect())
     assert messages and all(not isinstance(m, AIMessageChunk) for m in messages)

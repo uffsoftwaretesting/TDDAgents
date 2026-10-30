@@ -768,7 +768,7 @@ def test_run_permission_context_threads_every_input(tmp_path):
     (tmp_path / "ws" / "inner").mkdir(parents=True)
     write(project / ".tddagents/settings.json",
           {"permissions": {"additionalDirectories": [str(tmp_path / "ws" / "inner")]}})
-    config = build_run_config("r", postgres_checkpointing=False, permission_mode="plan",
+    config = build_run_config("r", permission_mode="plan",
                               settings_path=str(flag), dangerously_skip_permissions=True)
     perm = run_permission_context(config, SimpleNamespace(root=str(tmp_path / "ws")), project, home, etc)
     assert perm.mode == PermissionMode.BYPASS_PERMISSIONS
@@ -777,7 +777,7 @@ def test_run_permission_context_threads_every_input(tmp_path):
     assert [r.rule_content for r in perm.always_ask_rules] == ["from-flag"]
     assert [r.rule_content for r in perm.always_allow_rules] == ["from-policy"]
     assert perm.additional_working_directories == ()  # inside the workspace root: skipped
-    plan = run_permission_context(build_run_config("r", postgres_checkpointing=False, permission_mode="plan"),
+    plan = run_permission_context(build_run_config("r", permission_mode="plan"),
                                   SimpleNamespace(root=str(tmp_path / "ws")), project, home, etc)
     assert (plan.mode, plan.is_bypass_permissions_mode_available) == (PermissionMode.PLAN, False)
 
@@ -795,7 +795,7 @@ def test_run_permission_context_defaults_to_cwd_and_etc(tmp_path, monkeypatch):
         return ToolPermissionContext()
 
     monkeypatch.setattr("app.cli.print.build_tool_permission_context", spy)
-    run_permission_context(build_run_config("r", postgres_checkpointing=False), object())
+    run_permission_context(build_run_config("r"), object())
     assert seen["args"] == (tmp_path, None)
     assert seen["managed_dir"] == "/etc/tddagents"
     assert seen["working_dir"] is None

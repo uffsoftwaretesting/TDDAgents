@@ -10,15 +10,11 @@ if not os.getenv("OPENAI_API_KEY"):
 # E2B_API_KEY is optional: runs use a local workspace, and the sandbox adapter checks the
 # key only when a sandbox is actually requested (`app/sandbox/adapter.py`).
 
-# POSTGRES_URL is optional too: the session shell checkpoints to it by default and falls
-# back to an in-memory checkpointer when it cannot connect (`app/session/checkpointer.py`).
-
 
 class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
     E2B_API_KEY = os.getenv("E2B_API_KEY")
-    POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://tdd_user:tdd_password@localhost:5432/tdd_db")
 
     # Claude Haiku 5.5 (user decision, 2026-10-29; gpt-5-mini before). The small fast model
     # is upstream's default Haiku 4.5 (`app/utils/model/model.py::get_default_haiku_model`).

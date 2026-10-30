@@ -31,7 +31,7 @@ from app.types.permissions import ToolPermissionContext
 from app.utils.messages import HookBlockingError
 from tests.hook_doubles import ScriptedDispatcher
 
-CONFIG = build_run_config("sites", postgres_checkpointing=False)
+CONFIG = build_run_config("sites")
 
 #: The first TDD-state announcement a fresh run attaches after the prompt (Phase 5).
 
@@ -539,7 +539,7 @@ def test_stop_failure_hooks_are_fire_and_forget_but_finish_before_the_run_ends()
         from app.query.deps import get_production_deps
 
         deps = dataclasses.replace(get_production_deps(), call_model=model)
-        terminal = await drain(run_loop(state, build_run_config("r", postgres_checkpointing=False), deps))
+        terminal = await drain(run_loop(state, build_run_config("r"), deps))
         assert terminal.reason == Terminal.MODEL_ERROR
         assert dispatcher.finished is False  # the turn did not wait for it
         await dispatcher.drain_background()

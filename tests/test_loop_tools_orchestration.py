@@ -43,7 +43,7 @@ def run_tools_sync(calls, tools):
 def make_config() -> RunConfig:
     return RunConfig(
         run_id="test_run",
-        gates=Gates(postgres_checkpointing=False, coordinator_mode=False),
+        gates=Gates(coordinator_mode=False),
     )
 
 

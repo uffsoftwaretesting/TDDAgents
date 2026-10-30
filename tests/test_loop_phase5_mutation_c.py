@@ -36,7 +36,7 @@ from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.utils import tokens
 from tests.test_loop_engine import FakeModel, make_fake_deps
 
-CONFIG = build_run_config("budget-run", postgres_checkpointing=False)
+CONFIG = build_run_config("budget-run")
 
 
 def foreign(**attrs: Any) -> Any:

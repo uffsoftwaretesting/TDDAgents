@@ -13,6 +13,11 @@ Ported from `reference/claude-code/src/components/permissions/`:
   during this session (`filesystem.ts` -> `generateSuggestions`) / No.
 * `ExitPlanModePermissionRequest/` for `UpdatePlan` — the plan change is approved or
   rejected, never remembered.
+* `ExitPlanModePermissionRequest/` -> `buildPlanApprovalOptions` for `ExitPlanMode` — the
+  keep-context choices: "Yes, and bypass permissions" (when bypass is available) or "Yes,
+  auto-accept edits", "Yes, manually approve edits", "No, keep planning". Not ported: the
+  clear-context choices (`showClearContextOnPlanAccept`, off by default), the auto-mode choice
+  (plan mode with auto is not ported) and Ultraplan.
 
 The "always" options are hidden under `allowManagedPermissionRulesOnly`
 (`shouldShowAlwaysAllowOptions`). Every "No" takes feedback. Not ported, all UI: the editable
@@ -31,6 +36,7 @@ from app.tdd.tdd_plan_tool.tdd_plan_tool import UPDATE_PLAN_TOOL_NAME
 from app.tools.bash_tool.bash_permissions import BASH_TOOL_NAME
 from app.types.permissions import (
     PermissionBehavior,
+    PermissionMode,
     PermissionRuleSource,
     ToolPermissionContext,
 )
@@ -68,6 +74,28 @@ class PermissionOption:
 
 YES = PermissionOption("yes", "Yes")
 NO = PermissionOption("no", "No", reject=True)
+
+EXIT_PLAN_MODE_TOOL_NAME = "ExitPlanMode"
+
+
+def _set_mode(mode: PermissionMode) -> tuple[PermissionUpdate, ...]:
+    return (PermissionUpdate("setMode", PermissionRuleSource.SESSION, mode=mode),)
+
+
+def exit_plan_mode_options(context: ToolPermissionContext) -> list[PermissionOption]:
+    """`buildPlanApprovalOptions`, keep-context slots: each "Yes" sets the mode work goes on in."""
+    elevated = (
+        PermissionOption("yes-accept-edits-keep-context", "Yes, and bypass permissions",
+                         _set_mode(PermissionMode.BYPASS_PERMISSIONS))
+        if context.is_bypass_permissions_mode_available
+        else PermissionOption("yes-accept-edits-keep-context", "Yes, auto-accept edits",
+                              _set_mode(PermissionMode.ACCEPT_EDITS))
+    )
+    return [
+        elevated,
+        PermissionOption("yes-default-keep-context", "Yes, manually approve edits", _set_mode(PermissionMode.DEFAULT)),
+        PermissionOption("no", "No, keep planning", reject=True),
+    ]
 
 
 def should_show_always_allow_options(context: ToolPermissionContext) -> bool:
@@ -174,6 +202,8 @@ def permission_options(
     show_always = should_show_always_allow_options(context)
     if tool_name == UPDATE_PLAN_TOOL_NAME:
         return [YES, NO]
+    if tool_name == EXIT_PLAN_MODE_TOOL_NAME:
+        return exit_plan_mode_options(context)
     if tool_name == BASH_TOOL_NAME:
         return bash_tool_use_options(suggestions, show_always, cwd)
     operation = FILE_TOOL_OPERATIONS.get(tool_name)

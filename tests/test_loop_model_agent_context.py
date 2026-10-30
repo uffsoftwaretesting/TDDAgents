@@ -26,7 +26,7 @@ from app.services.api.claude import (
 from app.state.app_state_store import AppStateStore
 from app.tool import tool_context_for
 
-CONFIG = build_run_config("run-ctx", postgres_checkpointing=False)
+CONFIG = build_run_config("run-ctx")
 
 
 @pytest.fixture(autouse=True)

@@ -24,7 +24,7 @@ from app.cli.print import (
     submit_prompt,
 )
 from app.query.transitions import Terminal
-from app.session.prompts import development_resume_prompt, development_start_prompt
+from app.session.prompts import development_resume_prompt
 from app.tdd.plan import ItemStatus, TddPlan, load_plan, plan_path, save_plan
 from app.tdd.suite_fingerprint import fingerprint_test_files
 from app.types.permissions import PermissionMode, ToolPermissionContext
@@ -87,13 +87,14 @@ def test_headless_works_through_the_whole_plan_in_one_conversation(python_worksp
         *cycle("tests/test_sub.py", SUB_TEST, SUB_IMPL, 2), [AIMessage(content="sub done")],
     ]
     seen: list[Any] = []
-    outcome = asyncio.run(run_headless("s1", "# Calculator", ["add", "sub"], workspace=python_workspace,
+    # An approved plan, saved: the session develops it instead of planning (plan mode).
+    save_plan(plan_path(session_run_id("s1"), str(python_workspace.root)), TddPlan.from_texts(["add", "sub"]))
+    outcome = asyncio.run(run_headless("s1", "# Calculator", workspace=python_workspace,
                                        **options(tmp_path, scripted(turns, seen))))
-    assert outcome == DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=outcome.plan)
+    assert (outcome.terminal, outcome.question) == (Terminal.COMPLETED, None)
     assert outcome.completed is True
     assert [i.status for i in outcome.plan.items] == [ItemStatus.DONE, ItemStatus.DONE]
-    first_prompt = seen[0].messages[0].content
-    assert first_prompt == development_start_prompt("# Calculator", TddPlan.from_texts(["add", "sub"]))
+    assert seen[0].messages[0].content == "# Calculator"
     # The second item was announced inside the same conversation.
     later = [str(m.content) for m in seen[-1].messages if isinstance(m, HumanMessage)]
     assert any("Next sub-requirement (2 of 2): 2. sub" in text for text in later)
@@ -104,7 +105,8 @@ def test_headless_works_through_the_whole_plan_in_one_conversation(python_worksp
 def test_headless_stops_at_the_first_unfinished_item(python_workspace, tmp_path):
     # Both claims are sent back (Phase 12); the script then runs out while the hook still refuses.
     turns = [[AIMessage(content="I am done")], [AIMessage(content="really done")]]
-    outcome = asyncio.run(run_headless("s2", "spec", ["add", "sub"], workspace=python_workspace,
+    save_plan(plan_path(session_run_id("s2"), str(python_workspace.root)), TddPlan.from_texts(["add", "sub"]))
+    outcome = asyncio.run(run_headless("s2", "spec", workspace=python_workspace,
                                        **options(tmp_path, scripted(turns, []))))
     assert outcome.terminal == Terminal.MODEL_ERROR
     assert outcome.completed is False
@@ -187,14 +189,8 @@ def test_with_a_transcript_the_conversation_is_resumed_with_the_resume_prompt(py
 
 
 @pytest.mark.parametrize("plan", [TddPlan(), TddPlan.from_texts(["a"])])
-def test_development_prompts_state_the_plan(plan: TddPlan):
-    start = development_start_prompt("SPEC", plan)
-    assert "## Technical specification\n\nSPEC" in start
-    assert start.endswith("Start with sub-requirement 1: a." if plan.items
-                          else "Start with sub-requirement (none: every sub-requirement is done).")
-    assert development_start_prompt("  ", plan).count("(none)") >= 1
-    resume = development_resume_prompt(plan)
-    assert resume.startswith("The session was resumed.")
+def test_the_resume_prompt_states_the_plan(plan: TddPlan):
+    assert development_resume_prompt(plan).startswith("The session was resumed.")
 
 
 def test_an_interactive_run_can_prompt_and_holds_its_can_use_tool(python_workspace, tmp_path):

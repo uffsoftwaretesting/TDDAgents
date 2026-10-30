@@ -38,13 +38,8 @@ from app.services.api.with_retry import DEFAULT_MAX_RETRIES
 class Gates:
     """
     Environment facts frozen at entry, because a mid-run flip would be invisible.
-
-    `postgres_checkpointing` records whether the run is actually persisting to Postgres or
-    fell back to an in-memory checkpointer (`app/session/checkpointer.py`). As a gate it is a
-    fact the run can be judged against afterwards — a resumable run and an unresumable one are not the same experiment.
     """
 
-    postgres_checkpointing: bool
     #: Upstream `isCoordinatorMode()` (`CLAUDE_CODE_COORDINATOR_MODE`), here
     #: `TDDAGENTS_COORDINATOR_MODE`: the main thread orchestrates workers (Phase 7).
     coordinator_mode: bool
@@ -55,9 +50,9 @@ class RunConfig:
     """
     Identity plus gates. Deliberately small.
 
-    `run_id` is supplied by the caller rather than generated here: the session shell of
-    Part K1 derives it from the specification so a run can be resumed from its checkpoint,
-    and a config object that minted its own id would quietly break that.
+    `run_id` is supplied by the caller rather than generated here: the entry point derives it
+    from the session's thread id so a session can be resumed from its transcript, and a config
+    object that minted its own id would quietly break that.
     """
 
     run_id: str
@@ -84,7 +79,6 @@ class RunConfig:
 def build_run_config(
     run_id: str,
     *,
-    postgres_checkpointing: bool,
     permission_mode: str | None = None,
     settings_path: str | None = None,
     dangerously_skip_permissions: bool = False,
@@ -92,23 +86,16 @@ def build_run_config(
     """
     The one place a `RunConfig` is resolved from the environment.
 
-    The two gates are resolved differently on purpose. Web tool availability is a fact
-    about configuration, so it is read here from the single constant that holds it and no
-    caller can contradict it. Whether Postgres checkpointing is live is a fact about an
-    attempted connection, which only the caller that made the attempt can know, so it is
-    passed in — inventing it here would mean guessing.
-
     The model is resolved here for the same reason: `Config.MODEL` is the single place it
     is named, and reading it once means every turn of a run is answered by the same model
     even if the constant were reloaded underneath.
 
     The permission inputs are upstream's startup flags and are passed in, because a flag is
-    the caller's to give: the session shell's entry point (Phase 9) is where they come from.
+    the caller's to give: the entry point is where they come from.
     """
     return RunConfig(
         run_id=run_id,
         gates=Gates(
-            postgres_checkpointing=postgres_checkpointing,
             coordinator_mode=os.environ.get("TDDAGENTS_COORDINATOR_MODE", "").strip().lower()
             in ("1", "true", "yes", "on"),
         ),

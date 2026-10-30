@@ -369,7 +369,6 @@ def test_runner_isolates_the_verifier_context():
     rule = ctx.get_app_state().tool_permission_context.always_allow_rules[-1]
     assert rule.rule_content == "//tr/x.jsonl"
     assert config.run_id == ctx.agent_id and config.run_id.startswith("hook-agent-")
-    assert config.gates.postgres_checkpointing is False
     # Aborting the request (here: by the structured output arriving) cancels the verifier.
     assert ctx.cancel.cancelled is True
     assert request.abort.signal.reason == "structured_output"

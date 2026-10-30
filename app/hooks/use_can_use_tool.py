@@ -20,17 +20,26 @@ answer here can open a phase-forbidden write.
 `AskUserQuestionPermissionRequest`: the user answers each question (`ask_questions`) and the
 call is allowed with the answers in its input; declining aborts the turn (`onReject`).
 
+`ExitPlanMode` has its own too, as upstream's `ExitPlanModePermissionRequest`: the plan is shown
+with upstream's choices; a "Yes" sets the mode the work goes on in (`onAllow` with a `setMode`
+update, through `set_permission_mode` so the plan-mode flags move as upstream's do); "No, keep
+planning" with feedback sends it to the model; `/edit` (upstream's ctrl-g) opens the plan in the
+user's editor and asks again, and an approved edit reaches the tool as `input["plan"]`
+(`planEditedLocally`).
+
 Divergences: the hooks run before the question, not in a race with it; an accept-with-feedback
 input, the classifier pre-check and the bridge/channel relays are not ported.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.components.permissions.permission_options import (
+    EXIT_PLAN_MODE_TOOL_NAME,
     PermissionOption,
     permission_options,
 )
@@ -40,6 +49,7 @@ from app.tools.ask_user_question_tool.ask_user_question_tool import (
 from app.types.permissions import PermissionBehavior, PermissionResult
 from app.utils.messages import REJECT_MESSAGE, REJECT_MESSAGE_WITH_REASON_PREFIX
 from app.utils.permissions.filesystem import permission_cwd
+from app.utils.permissions.permission_setup import set_permission_mode
 from app.utils.permissions.permissions import (
     extract_permission_context,
     persist_permissions,
@@ -69,6 +79,11 @@ class PermissionAnswer:
 
 
 AskUser = Callable[[PermissionPrompt], Awaitable[PermissionAnswer]]
+#: The plan text in, the edited text out, or `None` and why there is none (`edit_text_in_editor`).
+EditPlan = Callable[[str], tuple[str | None, str]]
+
+#: What the user types at the plan approval to edit the plan in their editor (upstream's ctrl-g).
+EDIT_PLAN_COMMAND = "/edit"
 #: `AskUserQuestion`'s questions in, the answers out (question text -> answer); `None` declines.
 AskQuestions = Callable[[tuple[dict[str, Any], ...]], Awaitable[dict[str, str] | None]]
 #: `CanUseToolFn`: the gate's 'ask', resolved — (tool, input, ask, context, tool_use_id) -> decision.
@@ -86,8 +101,66 @@ def _chosen(options: Sequence[PermissionOption], value: str) -> PermissionOption
     return next((o for o in options if o.value == value), PermissionOption(value, value, reject=True))
 
 
-def build_interactive_can_use_tool(ask_user: AskUser, ask_questions: AskQuestions | None = None) -> CanUseTool:
-    """The REPL's `canUseTool`, asking through `ask_user` (and `ask_questions` for `AskUserQuestion`)."""
+def plan_approval_message(plan: str, notice: str = "") -> str:
+    """The plan as the approval shows it (upstream's "Ready to code?" dialog)."""
+    lines = ["Here is the plan:", "", plan.rstrip(), "", "Would you like to proceed?",
+             f"(Type {EDIT_PLAN_COMMAND} to edit the plan in your editor.)"]
+    if notice:
+        lines.append(notice)
+    return "\n".join(lines)
+
+
+def _default_edit_plan(text: str) -> tuple[str | None, str]:
+    from app.utils.prompt_editor import edit_text_in_editor
+
+    return edit_text_in_editor(text, "plan")
+
+
+async def approve_plan(
+    tool: Any, input_args: dict[str, Any], context: Any, ask_user: AskUser, edit_plan: EditPlan
+) -> PermissionResult:
+    """`ExitPlanModePermissionRequest`: the plan, upstream's choices, and `/edit`."""
+    perm = extract_permission_context(context)
+    options = permission_options(tool.name, input_args, None, perm, permission_cwd(context))
+    plans = getattr(context, "session_plans", None)
+    plan = plans.read(getattr(context, "agent_id", None)) if plans is not None else None
+    edited: str | None = None
+    notice = ""
+    while True:
+        answer = await ask_user(PermissionPrompt(
+            tool_name=tool.name,
+            description=tool.description(input_args),
+            message=plan_approval_message(edited if edited is not None else plan or "", notice),
+            input=input_args,
+            options=tuple(options),
+            agent=getattr(context, "agent_type", None),
+        ))
+        choice = _chosen(options, answer.value)
+        feedback = (answer.feedback or "").strip() or None
+        if choice.reject and feedback == EDIT_PLAN_COMMAND:
+            text, notice = await asyncio.to_thread(edit_plan, edited if edited is not None else plan or "")
+            if text is not None:
+                edited = text
+            continue
+        if choice.reject:
+            if feedback is None:
+                context.cancel.cancel()
+            return rejection(feedback)
+        mode = next((u.mode for u in choice.updates if u.type == "setMode" and u.mode is not None), None)
+        if mode is not None:
+            context.set_app_state(lambda state, to=mode: set_permission_mode(state, to))
+        updated = {**input_args, "plan": edited} if edited is not None else input_args
+        return PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input=updated,
+                                decision_reason={"type": "user", "option": choice.value})
+
+
+def build_interactive_can_use_tool(
+    ask_user: AskUser, ask_questions: AskQuestions | None = None, edit_plan: EditPlan | None = None
+) -> CanUseTool:
+    """
+    The REPL's `canUseTool`, asking through `ask_user` (`ask_questions` for `AskUserQuestion`,
+    `edit_plan` for `/edit` at the plan approval).
+    """
 
     async def can_use_tool(
         tool: Any, input_args: dict[str, Any], result: PermissionResult, context: Any, tool_use_id: str
@@ -100,6 +173,8 @@ def build_interactive_can_use_tool(ask_user: AskUser, ask_questions: AskQuestion
         )
         if hooked is not None:
             return hooked
+        if tool.name == EXIT_PLAN_MODE_TOOL_NAME:
+            return await approve_plan(tool, input_args, context, ask_user, edit_plan or _default_edit_plan)
         if tool.name == ASK_USER_QUESTION_TOOL_NAME and ask_questions is not None:
             answers = await ask_questions(tuple(input_args.get("questions") or ()))
             if answers is None:

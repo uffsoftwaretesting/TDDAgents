@@ -76,15 +76,19 @@ from app.tdd.suite_fingerprint import fingerprint_test_files
 from app.tool import CancelToken, Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.tools.tools import assemble_tool_pool
-from app.types.permissions import ToolPermissionContext
+from app.types.permissions import PermissionMode, ToolPermissionContext
 from app.utils.hooks.hooks import HookDispatcher
 from app.utils.message_queue_manager import CommandQueue, QueuedCommand
+from app.utils.permissions.permission_setup import set_permission_mode
+from app.utils.plans import load_session_plans
 from app.utils.session_storage import TranscriptStore
 from app.utils.settings.settings import (
     SettingsLocations,
     build_tool_permission_context,
+    load_settings,
 )
 from app.utils.task.framework import get_running_tasks, is_background_task
+from app.utils.tool_result_storage import config_home
 from app.workspace.local import LocalWorkspace
 
 logger = logging.getLogger("loop_runner")
@@ -136,6 +140,7 @@ def main_thread_tools(
     *,
     skill_registry: Any = None,
     mcp_tools: Sequence[Tool] = (),
+    coordinator_filter: bool = True,
 ) -> list[Tool]:
     """
     The main thread's roster: the built-ins plus the Agent tool, as upstream's main thread
@@ -148,8 +153,11 @@ def main_thread_tools(
     The Skill tool, given the run's
     `skill_registry`, joins both rosters, as upstream's base tools hold it. The run's
     `mcp_tools` join the workers' roster here; the main thread's arrive through
-    `assemble_tool_pool(mcp_tools=…)`. In coordinator mode the main thread keeps only the
-    orchestration tools (`applyCoordinatorToolFilter`).
+    `assemble_tool_pool(mcp_tools=…)`. `EnterPlanMode` and `ExitPlanMode` are the main thread's
+    (upstream's `ALL_AGENT_DISALLOWED_TOOLS`). In coordinator mode the main thread keeps only the
+    orchestration tools (`applyCoordinatorToolFilter`) unless `coordinator_filter` is off: the
+    planning phase runs with the whole roster, since the coordinator's filter would leave the
+    Analyst neither the read-only tools nor ExitPlanMode.
     """
     from app.tdd.tdd_plan_tool.tdd_plan_tool import build_update_plan_tool
     from app.tools.agent_tool.agent_tool import build_agent_tool
@@ -158,6 +166,12 @@ def main_thread_tools(
     )
     from app.tools.ask_user_question_tool.ask_user_question_tool import (
         build_ask_user_question_tool,
+    )
+    from app.tools.enter_plan_mode_tool.enter_plan_mode_tool import (
+        build_enter_plan_mode_tool,
+    )
+    from app.tools.exit_plan_mode_tool.exit_plan_mode_tool import (
+        build_exit_plan_mode_tool,
     )
     from app.tools.send_message_tool.send_message_tool import build_send_message_tool
     from app.tools.task_output_tool.task_output_tool import build_task_output_tool
@@ -179,9 +193,10 @@ def main_thread_tools(
     )
     tools: list[Tool] = [
         *built_ins, agent_tool, build_task_output_tool(), build_task_stop_tool(), send_message,
-        build_update_plan_tool(), build_ask_user_question_tool(),
+        build_update_plan_tool(), build_ask_user_question_tool(), build_enter_plan_mode_tool(),
+        build_exit_plan_mode_tool(),
     ]
-    return apply_coordinator_tool_filter(tools) if coordinator else tools
+    return apply_coordinator_tool_filter(tools) if coordinator and coordinator_filter else tools
 
 
 def coordinator_context(config: RunConfig) -> dict[str, Any]:
@@ -319,12 +334,12 @@ async def open_session_run(
     home: Path | None = None,
     managed_dir: Path | str | None = None,
     hook_dispatcher: HookDispatcher | None = None,
-    postgres_checkpointing: bool = False,
     permission_mode: str | None = None,
     settings_path: str | None = None,
     dangerously_skip_permissions: bool = False,
     plan_index: int = 0,
     can_use_tool: Any = None,
+    planning: bool = False,
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -332,8 +347,7 @@ async def open_session_run(
     for as many turns as the caller submits, and tear it down: SessionEnd (`other`), background
     hooks finalized, run memory discarded, the memoized session context reset, MCP closed.
 
-    `postgres_checkpointing` is whether the session shell's checkpointer really persists
-    (`Gates.postgres_checkpointing`); `permission_mode`, `settings_path` and
+    `permission_mode`, `settings_path` and
     `dangerously_skip_permissions` are upstream's startup flags, given by the entry point.
     `project_root` overrides where the project settings, skills, agents, MCP servers and hooks
     are read from; by default that is the workspace root, the session's project (Phase 13,
@@ -344,7 +358,9 @@ async def open_session_run(
 
     The plan is saved beside the transcript (`app/tdd/plan.py`); when that file already exists
     the session is being resumed and its saved plan wins, so done items stay done. The ledger
-    is never restored.
+    is never restored. With `planning`, a session whose plan has no sub-requirements opens in
+    plan mode (the Analyst, `app/utils/permissions/permission_setup.py`), its configured mode
+    kept as `prePlanMode` for `ExitPlanMode` to restore; its plan file is `ctx.session_plans`.
     """
     if deps is None:
         from app.query.deps import get_production_deps
@@ -352,7 +368,6 @@ async def open_session_run(
         deps = get_production_deps()
     config = build_run_config(
         run_id,
-        postgres_checkpointing=postgres_checkpointing,
         permission_mode=permission_mode,
         settings_path=settings_path,
         dangerously_skip_permissions=dangerously_skip_permissions,
@@ -368,30 +383,36 @@ async def open_session_run(
     skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
     mcp = await connect_mcp_servers(root_dir, run_settings_locations(config, root_dir, home, managed_dir))
     try:
-        ledger = store.get().phase_ledger
+        coordinator = is_coordinator_mode(config)
         built_ins = main_thread_tools(
             config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools
         )
+        planning_tools = (
+            main_thread_tools(config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools,
+                              coordinator_filter=False)
+            if coordinator else built_ins
+        )
         # `mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included.
-        main_mcp = apply_coordinator_tool_filter(mcp.tools) if is_coordinator_mode(config) else list(mcp.tools)
-        pool_cache: dict[str, Any] = {
-            "phase": ledger.phase,
-            "tools": assemble_tool_pool(built_ins, main_mcp, phase_ledger=ledger),
-        }
+        main_mcp = apply_coordinator_tool_filter(mcp.tools) if coordinator else list(mcp.tools)
+        pool_cache: dict[str, Any] = {"key": None, "tools": ()}
 
         def refresh_tools() -> tuple[Tool, ...]:
             """
             `refreshTools` for this loop: re-derive the phase-filtered pool when, and only
-            when, the phase has moved.
+            when, the phase or plan mode has changed.
 
             The cached tuple is returned unchanged otherwise, because the engine compares by
             identity — a fresh but equal tuple would rebuild the serialized tool block every
             turn and break the prompt cache for no reason.
             """
-            current = store.get().phase_ledger
-            if current.phase != pool_cache["phase"]:
-                pool_cache["phase"] = current.phase
-                pool_cache["tools"] = assemble_tool_pool(built_ins, main_mcp, phase_ledger=current)
+            state = store.get()
+            current = state.phase_ledger
+            in_plan = state.tool_permission_context.mode == PermissionMode.PLAN
+            key = (current.phase, in_plan)
+            if key != pool_cache["key"]:
+                pool_cache["key"] = key
+                tools, extra = (planning_tools, list(mcp.tools)) if in_plan else (built_ins, main_mcp)
+                pool_cache["tools"] = assemble_tool_pool(tools, extra, phase_ledger=current)
             tools_now: tuple[Tool, ...] = pool_cache["tools"]
             return tools_now
 
@@ -433,11 +454,20 @@ async def open_session_run(
         ctx.can_use_tool = can_use_tool
         saved_plan_path = plan_path(run_id, cwd)
         ctx.tdd_plan_path = str(saved_plan_path)
+        ctx.session_plans = load_session_plans(
+            saved_plan_path.parent,
+            load_settings(run_settings_locations(config, root_dir, home, managed_dir)),
+            root_dir,
+            config_home(),
+        )
         saved = load_plan(saved_plan_path)
         if saved is not None:
             store.update(lambda s: replace(s, tdd_plan=saved))
         else:
             save_plan(saved_plan_path, plan)
+        if planning and not store.get().tdd_plan.items:
+            store.update(lambda s: set_permission_mode(s, PermissionMode.PLAN))
+            ctx.tools = refresh_tools()
         # The current sub-requirement starts here (or restarts, on resume: the ledger is never
         # restored), so its tests are fingerprinted as RED's baseline (Phase 12).
         baseline = fingerprint_test_files(workspace)
@@ -644,6 +674,23 @@ async def begin_session(run: DevelopmentRun, fresh_prompt: str, resume_prompt: s
     return await _submit(run, session.messages, prompt_text, first)
 
 
+async def restore_session(run: DevelopmentRun) -> bool:
+    """
+    A resumed conversation loaded without a turn, as upstream's `--resume` with no prompt waits
+    for the user: the history (SessionStart `resume` included) becomes the engine's, and the next
+    `submit_prompt` continues it. `False` when there is no transcript to resume.
+    """
+    from app.utils.conversation_recovery import load_conversation_for_resume
+    from app.utils.session_start import process_session_start_hooks
+
+    resumed = load_conversation_for_resume(run.transcript.path)
+    if resumed is None or not resumed.messages:
+        return False
+    session = await process_session_start_hooks(run.ctx.hook_dispatcher, "resume", model=run.config.model)
+    run.engine.mutable_messages = [*resumed.messages, *session.messages]
+    return True
+
+
 async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal:
     """A later turn of the same conversation: the user's prompt after everything said so far."""
     return await _submit(run, run.engine.mutable_messages, prompt_text)
@@ -657,38 +704,77 @@ class DevelopmentOutcome:
     plan: TddPlan
     #: The questions the session stopped on, with nobody to answer them (`awaiting_user_answer`).
     question: tuple[dict[str, Any], ...] | None = None
+    #: The session's plan file (`app/utils/plans.py`) and transcript, for the reports.
+    plan_file: str | None = None
+    transcript_path: str | None = None
+
+    @property
+    def planned(self) -> bool:
+        """The user approved a plan: the session has sub-requirements (`ExitPlanMode`)."""
+        return bool(self.plan.items)
 
     @property
     def completed(self) -> bool:
-        """Every sub-requirement was observed Red -> Green and the loop ended `completed`."""
-        return self.terminal == Terminal.COMPLETED and self.plan.is_complete
+        """
+        There is an approved plan, every sub-requirement was observed Red -> Green -> Refactor and
+        the loop ended `completed`. A session that only planned has nothing completed.
+        """
+        return self.planned and self.terminal == Terminal.COMPLETED and self.plan.is_complete
+
+
+def first_prompts(plan: TddPlan, request: str | None, prompt: str | None) -> tuple[str, str | None]:
+    """
+    The session's first turn: `request` for a new session (it opens in plan mode, the Analyst);
+    on resume, `prompt` (the user's next message, upstream's `--resume <id> "<prompt>"`), else the
+    development resume prompt when the session has an approved plan, else nothing (`None`).
+    """
+    from app.session.prompts import development_resume_prompt
+
+    resume = prompt or (development_resume_prompt(plan) if plan.items else None)
+    return request or "", resume
+
+
+async def start_session(run: DevelopmentRun, request: str | None, prompt: str | None) -> Terminal | None:
+    """
+    `begin_session` for a session that may still be planning: a resumed session with nothing to
+    say is only loaded (`restore_session`) and its turn waits for the user; `None` then.
+    """
+    fresh, resume = first_prompts(run.store.get().tdd_plan, request, prompt)
+    if resume is None and not fresh and await restore_session(run):
+        return None
+    return await begin_session(run, fresh, resume)
+
+
+def outcome_of(run: DevelopmentRun, terminal: Terminal | None, **extra: Any) -> DevelopmentOutcome:
+    """How the session ended: its terminal, its plan, and where its plan file and transcript are."""
+    plans = run.ctx.session_plans
+    return DevelopmentOutcome(
+        terminal=terminal, plan=run.store.get().tdd_plan,
+        plan_file=str(plans.file_path()) if plans is not None else None,
+        transcript_path=str(run.transcript.path), **extra,
+    )
 
 
 async def run_headless(
-    session_id: str, specification: str, plan_texts: Sequence[str], *, workspace: Any, prompt: str | None = None,
-    **run_options: Any,
+    session_id: str, request: str | None, *, workspace: Any, prompt: str | None = None, **run_options: Any,
 ) -> DevelopmentOutcome:
     """
-    `runHeadless` for the development phase (Phase 11): one conversation over the whole plan
-    with nobody to ask, so a permission 'ask' (a plan change among them) is denied and the
-    session ends at the first turn that ends without the plan done (user decision 2026-10-27).
-    A question the model asks (`AskUserQuestion`) is denied too, and the session stops there
-    with it (`DevelopmentOutcome.question`). `prompt` continues a resumed conversation — the
-    user's answer — as upstream's `claude -p --resume <id> "<prompt>"`.
+    `runHeadless`: one conversation with nobody to ask. A new session opens in plan mode with
+    `request` (the Analyst); as upstream's `-p`, its `ExitPlanMode` is denied, so it plans and
+    stops there unplanned. A permission 'ask' is denied, and the session ends at the first turn
+    that ends without the plan done (user decision 2026-10-27). A question the model asks
+    (`AskUserQuestion`) is denied too, and the session stops there with it
+    (`DevelopmentOutcome.question`). `prompt` continues a resumed conversation — the user's answer —
+    as upstream's `claude -p --resume <id> "<prompt>"`.
     """
-    from app.session.prompts import development_resume_prompt, development_start_prompt
     from app.tools.ask_user_question_tool.ask_user_question_tool import (
         awaiting_user_answer,
     )
 
-    async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan.from_texts(list(plan_texts)),
-                                workspace=workspace, **run_options) as run:
-        plan = run.store.get().tdd_plan
-        reason = await begin_session(
-            run, development_start_prompt(specification, plan), prompt or development_resume_prompt(plan)
-        )
-        return DevelopmentOutcome(terminal=reason, plan=run.store.get().tdd_plan,
-                                  question=awaiting_user_answer(run.engine.mutable_messages))
+    async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan(), workspace=workspace,
+                                planning=True, **run_options) as run:
+        reason = await start_session(run, request, prompt)
+        return outcome_of(run, reason, question=awaiting_user_answer(run.engine.mutable_messages))
 
 
 __all__ = [
@@ -697,17 +783,21 @@ __all__ = [
     "begin_session",
     "build_builtin_tools",
     "coordinator_context",
+    "first_prompts",
     "load_initial_messages",
     "main_thread_tools",
     "next_main_thread_command",
     "open_session_run",
+    "outcome_of",
     "project_root_of",
+    "restore_session",
     "run_agent_memory_store",
     "run_headless",
     "run_permission_context",
     "run_settings_locations",
     "session_run_id",
     "session_workspace",
+    "start_session",
     "submit_prompt",
     "wait_for_background_work",
 ]

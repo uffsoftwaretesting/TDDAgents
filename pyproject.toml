@@ -40,8 +40,8 @@ disallow_any_generics = false
 
 [[tool.mypy.overrides]]
 # The seam modules (CLAUDE.md "Exempt: the seam modules"): the LLM provider factory, its
-# token callback and the session shell's LLM agents.
-module = ["app.utils.chat_model_factory", "app.utils.token_metrics", "app.session.agents.*"]
+# token callback.
+module = ["app.utils.chat_model_factory", "app.utils.token_metrics"]
 ignore_errors = true
 
 [tool.mutmut]
@@ -56,7 +56,6 @@ do_not_mutate = [
     "app/sandbox/*",
     "app/utils/chat_model_factory.py",
     "app/utils/token_metrics.py",
-    "app/session/agents/*",
     "app/config/*",
     "app/screens/terminal_io.py",
 ]

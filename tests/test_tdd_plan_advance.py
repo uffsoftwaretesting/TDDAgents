@@ -40,7 +40,7 @@ from app.tool import tool_context_for
 from tests.conftest import FakeWorkspace
 
 CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
-CONFIG = build_run_config("advance", postgres_checkpointing=False)
+CONFIG = build_run_config("advance")
 
 
 def state_for(store: AppStateStore, *, stop_hook_active: bool | None = None, plan_file: Path | None = None) -> Any:

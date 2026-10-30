@@ -17,7 +17,7 @@ from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.tool import tool_context_for
 
-CONFIG = build_run_config("r1", postgres_checkpointing=False)
+CONFIG = build_run_config("r1")
 
 
 def _state(**app: Any):

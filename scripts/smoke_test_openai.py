@@ -141,7 +141,6 @@ async def main() -> None:
 
     config = build_run_config(
         run_id="live-smoke-test",
-        postgres_checkpointing=False,
     )
 
     print("   Starting run_loop...")

@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 
-from app.cli.print import DevelopmentOutcome, open_session_run, run_headless
+from app.cli.print import open_session_run, run_headless, session_run_id
 from app.hooks.use_can_use_tool import (
     PermissionAnswer,
     PermissionPrompt,
@@ -29,7 +29,7 @@ from app.screens.repl import Repl, parse_question_answer, render_question
 from app.services.tools.tool_execution import run_tool_use
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger
-from app.tdd.plan import ItemStatus, TddPlan
+from app.tdd.plan import ItemStatus, TddPlan, plan_path, save_plan
 from app.tdd.stop_hook import ASK_THE_USER, tdd_phase_incomplete_hook
 from app.tool import tool_context_for
 from app.tools.ask_user_question_tool.ask_user_question_tool import (
@@ -65,7 +65,7 @@ MULTI: dict[str, Any] = {
         {"label": "perf", "description": "timing"},
     ],
 }
-CONFIG = build_run_config("ask-test", postgres_checkpointing=False)
+CONFIG = build_run_config("ask-test")
 
 
 def ask(cid: str = "q1", *questions: dict[str, Any]) -> AIMessage:
@@ -94,6 +94,11 @@ def test_the_tool_is_upstreams():
         "- Use multiSelect: true to allow multiple answers to be selected for a question\n"
         "- If you recommend a specific option, make that the first option in the list and add "
         "\"(Recommended)\" at the end of the label\n\n"
+        "Plan mode note: In plan mode, use this tool to clarify requirements or choose between approaches BEFORE "
+        "finalizing your plan. Do NOT use this tool to ask \"Is my plan ready?\" or \"Should I proceed?\" - use "
+        "ExitPlanMode for plan approval. IMPORTANT: Do not reference \"the plan\" in your questions (e.g., \"Do you "
+        "have feedback about the plan?\", \"Does the plan look good?\") because the user cannot see the plan in the "
+        "UI until you call ExitPlanMode. If you need plan approval, use ExitPlanMode instead.\n\n"
         "TDD plan note: Do NOT use this tool to ask \"Should I proceed?\" or whether to start the next "
         "sub-requirement — the plan advances on its own once a cycle is complete. Use it only for decisions "
         "the plan, the specification and the code cannot answer."
@@ -423,17 +428,17 @@ def headless_options(tmp_path: Path, model: Model) -> dict[str, Any]:
 
 
 def test_headless_stops_on_the_question_and_resumes_with_the_answer(python_workspace, tmp_path):
+    save_plan(plan_path(session_run_id("ask1"), str(python_workspace.root)), TddPlan.from_texts(["perf test"]))
     asking = Model([[ask("q1")], [AIMessage(content="I need your decision on the size.")]])
-    outcome = asyncio.run(run_headless("ask1", "spec", ["perf test"], workspace=python_workspace,
+    outcome = asyncio.run(run_headless("ask1", None, workspace=python_workspace,
                                        **headless_options(tmp_path, asking)))
-    assert outcome == DevelopmentOutcome(terminal=Terminal.STOP_HOOK_PREVENTED, plan=outcome.plan,
-                                         question=(QUESTION,))
-    assert outcome.completed is False and outcome.plan.done_count == 0
+    assert (outcome.terminal, outcome.question) == (Terminal.STOP_HOOK_PREVENTED, (QUESTION,))
+    assert outcome.planned and outcome.completed is False and outcome.plan.done_count == 0
     (result,) = [m for m in asking.seen[1].messages if isinstance(m, ToolMessage)]
     assert result.content == auto_reject_message("AskUserQuestion")
 
     resumed = Model([[AIMessage(content="stop")]])
-    resumed_outcome = asyncio.run(run_headless("ask1", "spec", ["perf test"], workspace=python_workspace,
+    resumed_outcome = asyncio.run(run_headless("ask1", None, workspace=python_workspace,
                                                prompt="Moderate (Recommended)",
                                                **headless_options(tmp_path, _with_esc(resumed))))
     human = [m for m in resumed.seen[0].messages
@@ -462,10 +467,8 @@ def _with_esc(model: Model) -> Model:
 
 
 def test_waiting_text():
-    assert waiting_text("tdd-1", [QUESTION], headless=True, persistent=True) == (
+    assert waiting_text("tdd-1", [QUESTION], headless=True) == (
         "\n❓ The agents are waiting for your answer:\n" + render_questions([QUESTION])
         + "\n\n   Answer with: python -m app.main -p --thread-id tdd-1 \"<your answer>\"")
-    assert waiting_text("tdd-1", [QUESTION], headless=False, persistent=True).endswith(
+    assert waiting_text("tdd-1", [QUESTION], headless=False).endswith(
         "python -m app.main --thread-id tdd-1 \"<your answer>\"")
-    assert waiting_text("tdd-1", [QUESTION], headless=True, persistent=False).endswith(
-        "\n\n   This session checkpointed in memory, so it cannot be resumed with the answer.")

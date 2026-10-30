@@ -76,7 +76,7 @@ def _open_with(monkeypatch, provider: str):
         SystemMessage(content="joined"), HumanMessage(content="hi")])
     monkeypatch.setattr(model_mod, "request_system_texts", lambda state, config: ["static", "dynamic"])
     state = initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
-    model_mod.open_model_stream(state, build_run_config("r", postgres_checkpointing=False), RetryContext(model="m"))
+    model_mod.open_model_stream(state, build_run_config("r"), RetryContext(model="m"))
     return seen
 
 
@@ -117,7 +117,7 @@ def test_the_request_sends_stored_history_as_is(monkeypatch, tmp_path):
         HumanMessage(content="t3"),
     )
     state = initial_loop_state(history, tool_context_for(AppStateStore()))
-    request = build_request_messages(state, build_run_config("r", postgres_checkpointing=False))
+    request = build_request_messages(state, build_run_config("r"))
     assert isinstance(request[0], SystemMessage)
     sent = [m for m in request[1:] if not str(m.content).startswith("<system-reminder>\nAs you answer")]
     assert [m.content for m in sent] == [m.content for m in history]
@@ -144,7 +144,7 @@ def test_the_runs_cost_tracker_rides_on_the_model_call(monkeypatch):
     monkeypatch.setattr(model_mod, "get_chat_model", lambda *a, **k: FakeModel())
     monkeypatch.setattr(model_mod, "build_request_messages", lambda state, config: [HumanMessage(content="hi")])
     monkeypatch.setattr(model_mod, "request_system_texts", lambda state, config: [])
-    run = build_run_config("r", postgres_checkpointing=False)
+    run = build_run_config("r")
     tracker = CostTracker(model="m")
     ctx = tool_context_for(AppStateStore(), cost_tracker=tracker)
     model_mod.open_model_stream(initial_loop_state((HumanMessage(content="hi"),), ctx), run, RetryContext(model="m"))
@@ -179,7 +179,7 @@ def test_the_provider_follows_the_requested_model(monkeypatch):
     monkeypatch.setattr(model_mod, "build_request_messages", lambda state, config: [HumanMessage(content="hi")])
     monkeypatch.setattr(model_mod, "request_system_texts", lambda state, config: ["s"])
     state = initial_loop_state((HumanMessage(content="hi"),), tool_context_for(AppStateStore()))
-    run_config = build_run_config("r", postgres_checkpointing=False)
+    run_config = build_run_config("r")
     model_mod.open_model_stream(state, run_config, RetryContext(model="claude-sonnet-4-6"))
     model_mod.open_model_stream(state, run_config, RetryContext(model="mystery"))
     assert asked == [("anthropic", "claude-sonnet-4-6"), ("openai", "mystery")]
@@ -224,7 +224,7 @@ def test_stream_call_model_passes_the_runs_retry_options(monkeypatch, caplog):
         return empty()
 
     monkeypatch.setattr(model_mod, "with_retry", fake_with_retry)
-    config = dataclasses.replace(build_run_config("r", postgres_checkpointing=False), max_retries=3,
+    config = dataclasses.replace(build_run_config("r"), max_retries=3,
                                  fallback_model="fb")
     state = _stream_state()
     _drain_stream(state, config)
@@ -272,7 +272,7 @@ def test_a_failure_on_the_first_frame_is_retried(monkeypatch):
 
     monkeypatch.setattr(model_mod, "open_model_stream", fake_open)
     monkeypatch.setattr(model_mod, "with_retry", with_retry_no_sleep)
-    out = _drain_stream(_stream_state(), build_run_config("r", postgres_checkpointing=False))
+    out = _drain_stream(_stream_state(), build_run_config("r"))
     assert len(attempts) == 2
     assert [m.content for m in out] == ["hello"]
 
@@ -298,7 +298,7 @@ def test_a_model_without_a_config_kwarg_still_gets_the_cache_kwargs(monkeypatch)
     monkeypatch.setattr(model_mod, "build_request_messages", lambda state, config: [
         SystemMessage(content="s"), HumanMessage(content="hi")])
     monkeypatch.setattr(model_mod, "request_system_texts", lambda state, config: ["s"])
-    model_mod.open_model_stream(_stream_state(), build_run_config("r", postgres_checkpointing=False),
+    model_mod.open_model_stream(_stream_state(), build_run_config("r"),
                                 RetryContext(model="claude-sonnet-4-6"))
     assert calls[-1] == {"cache_control": {"type": "ephemeral"}}
 
@@ -322,7 +322,7 @@ def test_a_main_loop_model_override_is_the_requests_model(monkeypatch):
         return empty()
 
     monkeypatch.setattr(model_mod, "with_retry", fake_with_retry)
-    config = build_run_config("r", postgres_checkpointing=False)
+    config = build_run_config("r")
     state = _stream_state()
     state = dataclasses.replace(state, tool_context=dataclasses.replace(state.tool_context, main_loop_model="o3"))
     _drain_stream(state, config)

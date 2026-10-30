@@ -23,12 +23,13 @@ input: a request builder must drop it (`normalizeMessagesForAPI` drops system re
 
 *Divergences:* `FileState` carries no timestamp, so "most recently read" is the read-state's
 insertion order, newest last; an attachment's share of the restore budget is the rough token
-estimate of its messages, where upstream estimates its JSON record. Not ported: the forked
-prompt-cache-sharing summary path and its streaming retry (GrowthBook, default off for the
-retry; the summary request goes through the injected `CompactSummarizer`), plan / plan-mode /
-invoked-skill / async-agent / deferred-tools attachments (no such subsystems yet; the deltas
-arrive through `post_compact_attachments`), session-memory and partial compaction, analytics,
-transcript re-append and cache-break notifications.
+estimate of its messages, where upstream estimates its JSON record. The plan file and, in plan
+mode, the full plan-mode reminder follow the restored files (`createPlanAttachmentIfNeeded`,
+`createPlanModeAttachmentIfNeeded`). Not ported: the summary request's streaming retry
+(GrowthBook, default off; the forked summary is `summarizer.py`'s), invoked-skill /
+async-agent / deferred-tools attachments (no such subsystems yet; the deltas arrive through
+`post_compact_attachments`), session-memory and partial compaction, analytics, transcript
+re-append and cache-break notifications.
 """
 
 from __future__ import annotations
@@ -347,6 +348,35 @@ async def _generate_file_attachment(filename: str, context: Any, index: int) -> 
     ]
 
 
+def create_plan_attachment_if_needed(context: Any) -> list[Message]:
+    """`createPlanAttachmentIfNeeded`: the session's plan file and its contents, when it has any."""
+    from app.utils.attachments import Attachment, create_attachment_messages
+
+    plans = getattr(context, "session_plans", None)
+    if plans is None:
+        return []
+    agent_id = getattr(context, "agent_id", None)
+    content = plans.read(agent_id)
+    if not content:
+        return []
+    return create_attachment_messages(Attachment("plan_file_reference", {
+        "planFilePath": str(plans.file_path(agent_id)), "planContent": content}))
+
+
+def create_plan_mode_attachment_if_needed(context: Any) -> list[Message]:
+    """`createPlanModeAttachmentIfNeeded`: in plan mode, the full reminder, so planning goes on."""
+    from app.types.permissions import PermissionMode
+    from app.utils.attachments import Attachment, create_attachment_messages
+
+    plans = getattr(context, "session_plans", None)
+    if plans is None or context.get_app_state().tool_permission_context.mode != PermissionMode.PLAN:
+        return []
+    agent_id = getattr(context, "agent_id", None)
+    return create_attachment_messages(Attachment("plan_mode", {
+        "reminderType": "full", "isSubAgent": bool(agent_id), "planFilePath": str(plans.file_path(agent_id)),
+        "planExists": plans.read(agent_id) is not None}))
+
+
 async def create_post_compact_file_attachments(
     read_file_state: dict[str, Any], context: Any, max_files: int
 ) -> list[Message]:
@@ -438,6 +468,8 @@ async def compact_conversation(
     attachments = await create_post_compact_file_attachments(
         pre_compact_read_state, context, POST_COMPACT_MAX_FILES_TO_RESTORE
     )
+    attachments.extend(create_plan_attachment_if_needed(context))
+    attachments.extend(create_plan_mode_attachment_if_needed(context))
     attachments.extend(post_compact_attachments(context))
 
     session = await process_session_start_hooks(dispatcher, "compact", model=model)

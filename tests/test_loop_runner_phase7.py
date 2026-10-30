@@ -174,7 +174,7 @@ def test_the_agent_tool_sees_project_and_user_agents(tmp_path, monkeypatch):
     monkeypatch.delenv(COORDINATOR_MODE_ENV, raising=False)
     _agent_file(tmp_path / "proj" / ".tddagents" / "agents", "projector")
     _agent_file(tmp_path / "home" / ".tddagents" / "agents", "homer")
-    config = build_run_config("r", postgres_checkpointing=False)
+    config = build_run_config("r")
     tools = main_thread_tools(config, get_production_deps(), tmp_path / "proj", tmp_path / "home")
     prompt = _agent_tool(tools).prompt
     assert "- projector: projector agent" in prompt and "- homer: homer agent" in prompt
@@ -190,7 +190,7 @@ def test_the_coordinators_agent_tool_has_the_coordinator_prompt(tmp_path, monkey
     from app.tools.agent_tool.prompt import get_prompt
 
     monkeypatch.setenv(COORDINATOR_MODE_ENV, "1")
-    config = build_run_config("r", postgres_checkpointing=False)
+    config = build_run_config("r")
     tools = main_thread_tools(config, get_production_deps(), tmp_path, tmp_path / "home")
     assert sorted(t.name for t in tools) == ["Agent", "SendMessage", "TaskStop"]
     (tool,) = [t for t in tools if t.name == "Agent"]

@@ -126,6 +126,9 @@ class ToolPermissionContext:
     """
 
     mode: PermissionMode = PermissionMode.DEFAULT
+    #: Upstream `prePlanMode`: the mode plan mode was entered from, restored by `ExitPlanMode`
+    #: (`prepareContextForPlanMode`); `None` outside plan mode, or when entered at startup.
+    pre_plan_mode: PermissionMode | None = None
     always_allow_rules: tuple[PermissionRule, ...] = ()
     always_deny_rules: tuple[PermissionRule, ...] = ()
     always_ask_rules: tuple[PermissionRule, ...] = ()

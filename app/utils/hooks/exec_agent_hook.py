@@ -402,7 +402,7 @@ def build_agent_hook_runner(call_model_factory: CallModelFactory | None = None) 
             agent_id=hook_agent_id,
         )
         state = initial_loop_state((first,), context)
-        config = replace(build_run_config(hook_agent_id, postgres_checkpointing=False), model=request.model)
+        config = replace(build_run_config(hook_agent_id), model=request.model)
 
         async def compact(s: Any, c: Any) -> CompactionResult:
             return CompactionResult(compacted=False, messages=s.messages, tracking=s.compaction_tracking)

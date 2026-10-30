@@ -20,24 +20,27 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
 * **Slash commands** (`app/commands.py`): never run mid-turn, as upstream's queue processor;
   the immediate ones (`/help`, `/plan`, `/pause`, `/exit`) do.
 
-The TDD plan is the session's (`app/tdd/plan.py`): the loop moves through it by the ledger,
-the user edits it with `/plan` and the model with `UpdatePlan` (asked here). `/requirements`
-re-runs the analyst, engineer and planner (`rescope`) and the new plan replaces the pending
-items. The REPL keeps running after the plan is done, so the user can add more.
+The session opens in plan mode (the Analyst): the model plans, asks with `AskUserQuestion`, and
+asks for the plan's approval with `ExitPlanMode`, which `ask_permission` shows with upstream's
+choices and `/edit`. The TDD plan is the session's (`app/tdd/plan.py`): the approved plan's
+sub-requirements, which the loop moves through by the ledger; the user edits it with `/plan` and
+the model with `UpdatePlan` (asked here). `/requirements <request>` is upstream's
+`/plan <description>`: plan mode again, with the request; its approval replaces the pending items.
+The REPL keeps running after the plan is done, so the user can add more.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
-from app.cli.print import DevelopmentRun, begin_session, submit_prompt
+from app.cli.print import DevelopmentRun, start_session, submit_prompt
 from app.commands import (
     HELP_TEXT,
     CommandError,
@@ -48,12 +51,11 @@ from app.commands import (
 from app.components.permissions.permission_options import PermissionOption
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt
 from app.query.transitions import Terminal
-from app.session.prompts import (
-    development_continue_prompt,
-    development_replanned_prompt,
-)
+from app.session.prompts import development_continue_prompt
 from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
+from app.types.permissions import PermissionMode
 from app.utils.message_queue_manager import QueuedCommand
+from app.utils.permissions.permission_setup import set_permission_mode
 
 logger = logging.getLogger("TDDOrchestrator.REPL")
 
@@ -61,9 +63,8 @@ PROMPT = "❯ "
 #: How much of a tool result the conversation view shows.
 RESULT_PREVIEW_CHARS = 200
 
-#: `/requirements`: the request in, the new (specification, plan) out — `None` when the analysis
-#: did not reach a plan (the user left the analyst's question, or it failed).
-Rescope = Callable[[str], Awaitable[tuple[str, list[str]] | None]]
+#: Upstream's plan-mode indicator (`⏸ plan mode on`).
+PLAN_MODE_ON = "⏸ plan mode on"
 
 
 class ReplIO(Protocol):
@@ -196,12 +197,9 @@ def turn_end_text(terminal: Terminal, plan: TddPlan, paused: bool) -> str:
 class Repl:
     """One development session at the terminal."""
 
-    def __init__(self, run: DevelopmentRun, io: ReplIO, *, specification: str = "",
-                 rescope: Rescope | None = None) -> None:
+    def __init__(self, run: DevelopmentRun, io: ReplIO) -> None:
         self.run = run
         self.io = io
-        self.specification = specification
-        self.rescope = rescope
         self.turn: asyncio.Task[None] | None = None
         self.deferred: list[SlashCommand] = []
         self.pending: PendingAnswer | None = None
@@ -262,17 +260,19 @@ class Repl:
 
     # ── turns ──────────────────────────────────────────────────────────────
 
-    def _start(self, turn: Coroutine[Any, Any, Terminal]) -> None:
+    def _start(self, turn: Coroutine[Any, Any, Terminal | None]) -> None:
         self.turn = asyncio.create_task(self._run_turn(turn))
 
-    async def _run_turn(self, turn: Coroutine[Any, Any, Terminal]) -> None:
+    async def _run_turn(self, turn: Coroutine[Any, Any, Terminal | None]) -> None:
+        """Run one turn; `None` is a resumed session that was only loaded, and reports nothing."""
         try:
             terminal = await turn
         except Exception:  # a crashed turn is reported, and the session goes on
             logger.exception("Turn crashed")
             terminal = Terminal.MODEL_ERROR
-        self.last_terminal = terminal
-        self.io.write(turn_end_text(terminal, self.plan, self.run.store.get().tdd_paused))
+        if terminal is not None:
+            self.last_terminal = terminal
+            self.io.write(turn_end_text(terminal, self.plan, self.run.store.get().tdd_paused))
         deferred, self.deferred = self.deferred, []
         self.turn = None
         for command in deferred:
@@ -354,27 +354,25 @@ class Repl:
         self.io.write(render_plan(updated))
 
     async def _requirements(self, request: str) -> None:
-        if self.rescope is None:
-            self.io.write("/requirements is not available in this session.")
-            return
+        """Upstream's `/plan <description>`: plan mode again (its approval re-plans), then the request."""
         if not request:
             self.io.write("Usage: /requirements <what to change>")
             return
-        outcome = await self.rescope(request)
-        if outcome is None:
-            self.io.write("The requirements were not changed.")
-            return
-        self.specification, texts = outcome
-        updated = update_tdd_plan(self.run.ctx, lambda plan: plan.replace_pending(texts))
-        self.io.write(f"New plan:\n{render_plan(updated)}")
-        self._start(submit_prompt(self.run, development_replanned_prompt(self.specification, updated)))
+        self.run.store.update(lambda state: set_permission_mode(state, PermissionMode.PLAN))
+        self.io.write(PLAN_MODE_ON)
+        self._start(submit_prompt(self.run, request))
 
     # ── the session ────────────────────────────────────────────────────────
 
-    async def run_session(self, fresh_prompt: str, resume_prompt: str | None = None) -> Terminal | None:
-        """Start (or resume) the conversation and read the user's lines until they leave."""
-        self.io.write(f"TDD plan:\n{render_plan(self.plan)}\n\n{HELP_TEXT}")
-        self._start(begin_session(self.run, fresh_prompt, resume_prompt))
+    async def run_session(self, request: str | None, prompt: str | None = None) -> Terminal | None:
+        """
+        Start the conversation with `request`, or resume it (with `prompt`, the user's next message),
+        and read the user's lines until they leave. A resumed session with nothing to say waits.
+        """
+        in_plan = self.run.store.get().tool_permission_context.mode == PermissionMode.PLAN
+        header = PLAN_MODE_ON if in_plan else f"TDD plan:\n{render_plan(self.plan)}"
+        self.io.write(f"{header}\n\n{HELP_TEXT}")
+        self._start(start_session(self.run, request, prompt))
         while not self.exiting:
             line = await self.io.read_line(PROMPT)
             if line is None:

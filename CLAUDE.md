@@ -32,7 +32,7 @@ snake_case: `src/tools/BashTool/bashPermissions.ts` is `app/tools/bash_tool/bash
 directory share a name, the file's code is `<name>/<name>.py` (`query.ts` →
 `app/query/query.py`, beside `query/deps.py`). To find our port of an upstream file, translate
 its path; to find what a module ports, read its docstring's `Ported from` lines. Everything
-TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
+TDDAgents adds lives in **`app/tdd/`**, and the session driver in `app/session/`.
 
 | Path (`app/`) | Upstream | Ships |
 |---|---|---|
@@ -64,7 +64,8 @@ TDDAgents adds lives in **`app/tdd/`**, and the session shell in `app/session/`.
 | `utils/attachments.py` | `utils/attachments.ts` | `getAttachments` / `getAttachmentMessages` and every ported source (the TDD source is in `app/tdd/`) |
 | `utils/` (rest) | `utils/*.ts` | `messages.py`, `message_queue_manager.py`, `claudemd.py` (memory files), `session_storage.py` + `session_storage_portable.py` + `conversation_recovery.py` (transcripts, resume), `session_start.py`, `tokens.py`, `tool_result_storage.py`, `tool_errors.py`, `ripgrep.py`, `file.py`, `glob.py`, `file_state_cache.py`, `abort_controller.py`, `argument_substitution.py`, `frontmatter_parser.py`, `mcp_validation.py`, `shell_command.py`, `bash/commands.py`, `shell/read_only_command_validation.py`, `model/model.py` (model aliases) |
 | **`tdd/`** | — (TDDAgents) | `ledger.py` (`PhaseLedger`, the single source of truth), `run_tests_tool/` (`RunTests`, the only observation writer), `phase_permissions.py` + `bash_phase_permissions.py` (barrier 2), `stop_hook.py` (barrier 3), `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py` (`events.jsonl`); `plan.py` (`TddPlan`, the `tdd-plan.json` sidecar, `update_tdd_plan`), `plan_advance.py` (the ledger-driven advance), `tdd_plan_tool/` (`UpdatePlan`); `coverage_gate.py` (REFACTOR's coverage threshold and reading), `collection_gate.py` (uncollected test files), `suite_fingerprint.py` (RED's evidence: the test files' fingerprint and the item baseline) |
-| `session/` | — (TDDAgents) | The LangGraph session shell: `analyst ⇄ analyst_review → engineer → planner` (ends `PLANNED`), checkpointing, resume, `rescope`; `driver.py` hands over to `develop_interactive` / `develop_headless`; `session/agents/` are its LLM seams |
+| `session/` | — (TDDAgents) | `driver.py`: thread ids, `SessionOptions`, `develop_interactive` (the REPL) / `develop_headless` (`-p`); `prompts.py`: the development prompts (approved, resume, continue) |
+| `utils/plans.py`, `utils/words.py`, `utils/plan_mode_v2.py`, `utils/permissions/permission_setup.py`, `tools/{enter,exit}_plan_mode_tool/` | `utils/plans.ts`, `utils/words.ts`, `utils/planModeV2.ts`, `utils/permissions/permissionSetup.ts`, `tools/{Enter,ExitPlanModeV2}Tool/` | Plan mode, the Analyst: the session plan file and its slug, the workflow switches, the mode transitions (`prePlanMode`), `EnterPlanMode` / `ExitPlanMode` |
 | `workspace/`, `sandbox/` | — (TDDAgents) | The `Workspace` protocol, `LocalWorkspace` (`workspaces_root()`, `for_run` → `<root>/<thread>/project`), `project.py` (`prepare_project`: git init, ignore file, seeded settings), `pyenv.py` (the project's `.venv`), `E2BWorkspace` over the E2B adapter |
 | `prompts/` | `constants/prompts.ts`, bundled agents and skills | System sections, the TDD agents (`AGENT.md` + `references/`), bundled skills, compact / permission / session prompts, specs. Tool prompts live beside their tools |
 
@@ -1694,6 +1695,81 @@ editor). At the user's direction TDDAgents does the same:
 - feedback re-runs the agent instead of continuing a conversation;
 - `getExternalEditor` is not memoized and has no Windows fallback.
 
+### The Analyst is upstream's Plan Mode (2026-10-30)
+
+The analyst, engineer and planner were three model calls in a LangGraph shell, each with its own
+review. At the user's direction one Analyst now owns planning end to end, and it is Claude Code's
+Plan Mode, ported into the loop: the main thread in permission mode `plan`, with a plan file and
+`EnterPlanMode` / `ExitPlanMode`. The same conversation then develops the approved plan. This
+supersedes the Phase 9 shell notes and "The user reviews the specification and the plan" above.
+Decisions are recorded in `~/.claude/plans/make-the-fixes-i-imperative-wreath.md`.
+
+- **The plan file** (`app/utils/plans.py`, `plans.ts`):
+  - `<plans dir>/<slug>.md`, workers' `<slug>-agent-<id>.md`;
+  - the directory is the `plansDirectory` setting when it stays inside the project, else
+    `<config home>/plans`;
+  - the slug is `generateWordSlug` (`app/utils/words.py`, upstream's lists verbatim), saved in the
+    `plan-slug` sidecar beside `tdd-plan.json` so a resumed session reuses it;
+  - `ToolContext.session_plans` carries it, and workers inherit it.
+- **The mode** (`permission_setup.py`): `ToolPermissionContext.pre_plan_mode`,
+  `prepare_context_for_plan_mode`, `transition_permission_mode`, and `handle_plan_mode_transition`'s
+  `AppState` flags (`has_exited_plan_mode`, `needs_plan_mode_exit_attachment`). `set_permission_mode`
+  is the one way a mode changes.
+- **The gate:** the session plan file is writable and readable in every mode (step 1.5,
+  `checkEditableInternalPath` / `checkReadableInternalPath`), after the deny rules. The TDD phase
+  tier exempts it, as it exempts agent memory. Every other write in `plan` takes upstream's default
+  path: an ask, denied headless.
+- **The tools:** `EnterPlanMode` and `ExitPlanMode` are upstream's, main thread only, with their
+  external prompts verbatim.
+  - `ExitPlanMode` always asks "Exit plan mode?" and needs a person.
+  - Its call reads the plan (an edited `input["plan"]` is written back and labelled "(edited by
+    user)"), restores `prePlanMode`, and returns upstream's approved-plan text.
+  - *TDD addition:* the plan's `## Implementation Plan` numbered items (`parse_implementation_plan`:
+    any heading level, wrapped and nested lines join their item, a sub-heading closes it) become the
+    sub-requirements through `update_tdd_plan(replace_pending)`, so done items stay done and the
+    ledger restarts in RED. The result ends with the development prompt. A plan without such items
+    fails `validate_input`, so the model keeps planning.
+- **The approval** (`approve_plan`, `exit_plan_mode_options`): upstream's keep-context choices.
+  "Yes, auto-accept edits" (or "Yes, and bypass permissions" when bypass is available) and "Yes,
+  manually approve edits" set the mode; "No, keep planning" with feedback reaches the model, and a
+  plain No ends the turn. `/edit` opens the plan in the editor and asks again.
+- **Attachments:** `plan_mode` (full on the first turn and every fifth reminder, sparse in between,
+  every 5 human turns; the sub-agent text for a worker), `plan_mode_reentry` and `plan_mode_exit`,
+  with `messages.ts`' texts verbatim. Both workflows are ported: the 5-phase default and the
+  interview workflow (`TDDAGENTS_PLAN_MODE_INTERVIEW_PHASE`). `TDDAGENTS_PLAN_V2_AGENT_COUNT` /
+  `..._EXPLORE_AGENT_COUNT` keep upstream's defaults (1 / 3). After a compaction the plan file
+  (`plan_file_reference`) and, in plan mode, the full reminder are re-attached
+  (`createPlanAttachmentIfNeeded`, `createPlanModeAttachmentIfNeeded`).
+- **The barriers while planning:** in mode `plan` the stop hooks skip the plan advance and the TDD
+  hook, so a planning turn ends as upstream's does. The TDD contract states how a plan runs (the
+  Implementation Plan items, one observed cycle each, RunTests' collection report). The pool is
+  cached per (phase, plan mode); in coordinator mode the Analyst keeps the whole roster, since the
+  coordinator filter would leave it neither the read-only tools nor ExitPlanMode.
+- **The session** (`app/cli/print.py`, `app/session/driver.py`, `app/main.py`):
+  - a session whose plan has no items opens in `plan`, its configured mode kept as `prePlanMode`;
+    the request is the first prompt;
+  - resume is upstream's: the transcript, the `tdd-plan.json` sidecar and the plan slug. A session
+    with nothing new to say is loaded and waits for the user (`restore_session`);
+  - `/requirements <request>` is upstream's `/plan <description>`: plan mode, then the request;
+  - **headless follows `-p`:** `ExitPlanMode` is denied, so the session plans, ends unplanned, and
+    exits 1;
+  - the reports are `approved_plan.md` and `planning_dialogue.txt` (the planning phase's user and
+    assistant text, from the transcript).
+- **Removed:** the LangGraph shell (`app/session/{shell,analyst,engineer,planning,review,state,
+  checkpointer,llm}.py`, `app/session/agents/`), the analyst/engineer/planner prompts, Postgres
+  (`Config.POSTGRES_URL`, `Gates.postgres_checkpointing`, `docker-compose.yaml`, `--checkpoint`),
+  and the `langchain`, `langgraph*`, `ormsgpack` and `psycopg*` pins. `run_sync` moved to
+  `app/utils/run_sync.py`. `AskUserQuestion`'s prompt carries upstream's plan-mode note again,
+  before the TDD plan note.
+
+*Divergences, recorded:*
+- no teammates, team-lead approval, `allowedPrompts` rules, Ultraplan or clear-context options;
+- the approval is typed (`/edit`, an option number), not a selection dialog;
+- the `Implementation Plan` parse is TDDAgents', as is refusing a plan without items;
+- `EnterPlanMode` has no KAIROS-channels gate;
+- the plan-mode text names our tools (`ReadFile`, `WriteFile`) and `getReadOnlyToolNames` is fixed
+  to `ReadFile, Glob, Grep` (no project `allowedTools`).
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
@@ -1787,7 +1863,6 @@ an external service rather than something sitting behind one:
 |---|---|
 | `app/sandbox/adapter.py` | the E2B SDK |
 | `app/utils/chat_model_factory.py` | the LLM provider |
-| `app/session/agents/*` | the LLM itself (the session shell's analyst, engineer and planner) |
 | `app/screens/terminal_io.py` | the terminal (`prompt_toolkit` reading a real TTY) |
 
 `app/utils/token_metrics.py` (the LangChain usage callback) and `app/config/` (environment
@@ -2054,7 +2129,7 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
   testing is what surfaced it. Where output and input can share text, make them differ:
   `tests/test_hook_dispatcher.py::script_hook` puts the hook body in a file so its command
   and its output have nothing in common.
-- `tests/conftest.py` seeds `OPENAI_API_KEY` / `E2B_API_KEY` / `POSTGRES_URL` before any
+- `tests/conftest.py` seeds `OPENAI_API_KEY` / `E2B_API_KEY` before any
   `app.*` import, because `config.py` raises at import time without them.
 - **Live tests never run by accident.** Tests marked `@pytest.mark.live` call a real provider and
   run only with `RUN_LIVE_LLM_TESTS=1`; the key comes from the repo's gitignored `.env` via
@@ -2073,9 +2148,9 @@ codec aliases, case flips with no letters, unreachable branches upstream also ha
 
 ## What this is
 
-TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green–Refactor phases of TDD (since Phase 12: robust tests, then code, then a mandatory coverage-checked refactor). Agent-generated code is written and executed in a **per-session project folder outside TDDAgents' own** (since Phase 13: `~/.tddagents/workspaces/<thread_id>/project`, `TDDAGENTS_WORKSPACES_DIR` overrides), a git working tree with its own Python virtualenv (`project/.venv`; pip, pytest and pytest-cov pinned), never inside TDDAgents' environment. The session's reports go beside it, in `<thread_id>/metrics_and_logging/`. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* State is checkpointed to PostgreSQL (`POSTGRES_URL`), with an in-memory fallback.
+TDDAgents is a research prototype (UFF / SBES 2026): a multi-agent system that turns a natural-language problem description into tested Python code by driving the Red–Green–Refactor phases of TDD (since Phase 12: robust tests, then code, then a mandatory coverage-checked refactor). Agent-generated code is written and executed in a **per-session project folder outside TDDAgents' own** (since Phase 13: `~/.tddagents/workspaces/<thread_id>/project`, `TDDAGENTS_WORKSPACES_DIR` overrides), a git working tree with its own Python virtualenv (`project/.venv`; pip, pytest and pytest-cov pinned), never inside TDDAgents' environment. The session's reports go beside it, in `<thread_id>/metrics_and_logging/`. *(Changed 2026-10-08 at the user's direction: it used to run only in the E2B sandbox. The runner takes a `Workspace`, so E2B can be bound again later; `E2B_API_KEY` is optional and checked only when a sandbox is requested.)* A session is resumed from its transcript and sidecars, as upstream's `--resume`.
 
-It is **claude-code's loop with a LangGraph session shell around it**: each plan item is one loop run, and LangGraph only checkpoints the session, asks the user (`interrupt()`) and iterates the plan. See [The architecture](#the-architecture--claude-codes-loop-laid-out-like-its-source).
+It is **claude-code's loop**, one conversation per session: plan mode (the Analyst) writes and gets approval for the plan, then the same conversation develops it item by item. See [The architecture](#the-architecture--claude-codes-loop-laid-out-like-its-source).
 
 `pytest`, `flake8`, `mypy` and `mutmut` apply to **`app/` itself**, not only to the generated workspaces. `tests/` holds an offline suite for `app/` that needs no API keys, no sandbox and no database, and runs in about a minute; `setup.cfg` and `pyproject.toml` configure the four tools. See [Quality gate](#quality-gate-mandatory) for the mandatory procedure and the current baseline.
 
@@ -2087,25 +2162,25 @@ Coverage is deliberately partial. The suite covers the modules that can be exerc
 
 ```bash
 # Setup
-cp .env.example .env          # then fill OPENAI_API_KEY, E2B_API_KEY, POSTGRES_URL
-docker compose up -d          # PostgreSQL checkpoint store on :5432
+cp .env.example .env          # then fill ANTHROPIC_API_KEY, OPENAI_API_KEY (E2B_API_KEY optional)
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
 # Run the pipeline (interactive; must be run from the repo root)
 python -m app.main
 
-# Headless (upstream `claude -p`): no questions; exit 0 only if every item completed Red→Green
+# Headless (upstream `claude -p`): no questions, so ExitPlanMode is denied: the session plans and exits 1.
+# A session with an approved plan (resumed) develops it; exit 0 only if every item completed its cycle
 python -m app.main -p --spec app/prompts/specs/<file>.txt
 echo "Build a calculator" | python -m app.main -p
 
-# Continue a session from its checkpoint (an unfinished plan item resumes its transcript)
+# Continue a session (its transcript, TDD plan and plan file); a prompt is its next message
 python -m app.main --thread-id "tdd-<hash>"
 
 # Force a brand-new run instead of the request-derived thread_id
 python -m app.main --fresh
 
-# Flags: --checkpoint memory|<uri> (default POSTGRES_URL, memory fallback), --permission-mode,
+# Flags: --permission-mode,
 # --settings <file>, --dangerously-skip-permissions, --coordinator
 ```
 
@@ -2128,7 +2203,7 @@ $P/mutmut run && $P/python scripts/mutmut_score.py      # mutation testing; see 
 
 The full procedure and its pass criteria are in [Quality gate](#quality-gate-mandatory).
 
-Without `-p`, `app.main` is interactive: it prints a menu built from `app/prompts/specs/*.txt` (unless a prompt, `--spec` or `--thread-id` is given), then answers the analyst's interrupts from stdin. Type `/yes` to approve a pending checklist and advance to the Engineer; anything else is feedback; `/exit` (or `/quit`) leaves with the session paused at its checkpoint. After the planner the terminal becomes the development REPL (`app/screens/repl.py`): type to the agents at any time, Esc interrupts, `/help` lists `/plan`, `/pause`, `/resume`, `/requirements` and `/exit`. Because the menu resolves `Path("app/prompts/specs")` relatively, the CWD must be the repo root.
+Without `-p`, `app.main` is interactive: it prints a menu built from `app/prompts/specs/*.txt` (unless a prompt, `--spec` or `--thread-id` is given), then opens the REPL (`app/screens/repl.py`) in plan mode (`⏸ plan mode on`): the Analyst explores, asks through AskUserQuestion and writes the plan file, and `ExitPlanMode` shows the plan with upstream's choices (a "Yes", "No, keep planning" with feedback, or `/edit`). After the approval the same conversation develops the plan; `/exit` (or `/quit`) leaves, resumable with `--thread-id`. Type to the agents at any time, Esc interrupts, `/help` lists `/plan`, `/pause`, `/resume`, `/requirements` and `/exit`. Because the menu resolves `Path("app/prompts/specs")` relatively, the CWD must be the repo root.
 
 ### Experiment tooling (post-hoc analysis of generated workspaces)
 
@@ -2220,15 +2295,14 @@ is absent from the shipped build.
 The module map is [The architecture](#the-architecture--claude-codes-loop-laid-out-like-its-source)
 above; this section is the runtime path through it.
 
-### One session graph, driven by `app/main.py`
+### One conversation, driven by `app/main.py`
 
-`app/main.py` → `app/session/driver.py` (`build_session_shell`, `drive_session`) →
-`app/session/shell.py`: one checkpointed LangGraph thread, state `SessionState`:
-`analyst ⇄ analyst_review → engineer ⇄ engineer_review → planner ⇄ planner_review` (each review
-an interrupt), ending `PLANNED` once the user approves the plan. The driver
-then hands the plan to `develop_interactive` (the REPL) or `develop_headless` (`-p`), and
-`app/main.py` writes each item's outcome to `metrics_and_logging/subreq_results.txt`. See
-[What Phase 11 changed](#what-phase-11-changed-2026-10-27).
+`app/main.py` → `app/session/driver.py` → `develop_interactive` (the REPL) or `develop_headless`
+(`-p`). The session opens in plan mode (the Analyst) until the user approves a plan through
+`ExitPlanMode`, and the same conversation then develops it. `app/main.py` writes
+`approved_plan.md`, `planning_dialogue.txt` and each item's outcome
+(`metrics_and_logging/subreq_results.txt`). See
+[The Analyst is upstream's Plan Mode](#the-analyst-is-upstreams-plan-mode-2026-10-30).
 
 ### One development session
 
@@ -2250,14 +2324,13 @@ loop moves through the plan without a new turn.
 ### State and config
 
 `app/config/config.py` holds `Config`: the provider and model (`CHAT_MODEL = "anthropic"`,
-`MODEL = "claude-haiku-5-5"` since 2026-10-29; `gpt-5-mini` before), the Postgres URL and the E2B sandbox constants. It **raises at import
-time** if `OPENAI_API_KEY` is unset (`E2B_API_KEY` and `POSTGRES_URL` are optional), so
+`MODEL = "claude-haiku-5-5"` since 2026-10-29; `gpt-5-mini` before) and the E2B sandbox constants. It **raises at import
+time** if `OPENAI_API_KEY` is unset (`E2B_API_KEY` is optional), so
 importing anything under `app/` without a `.env` fails immediately. A run's own settings are
 snapshotted once into `RunConfig` (`app/query/config.py`).
 
-Postgres is not required: `build_checkpointer` falls back to `MemorySaver` when it cannot
-connect (logged, and recorded in `Gates.postgres_checkpointing`), losing cross-restart
-resumability. Each sub-requirement is its own loop session with a fresh context window.
+There is no checkpoint store: a session resumes from its transcript and sidecars, as upstream's
+`--resume` does (since 2026-10-30).
 
 ## Conventions and gotchas
 

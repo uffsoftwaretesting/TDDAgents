@@ -164,19 +164,21 @@ def check_tdd_phase_permission(
     ledger: PhaseLedger,
     *,
     agent_memory: bool = False,
+    plan_file: bool = False,
 ) -> tuple[bool, str]:
     """
     Check if a tool call is permitted by the current TDD phase.
     Returns (permitted: bool, reason: str).
     RunTests is always permitted, and so is a file tool's write to this run's agent memory
-    (`agent_memory`): a note outside the project is neither a test nor production code.
+    (`agent_memory`) or to the session's plan file (`plan_file`, plan mode): a note outside the
+    project is neither a test nor production code.
 
     `Bash` is checked through its write targets rather than a path argument
     (`tdd/bash_phase_permissions.py`): without that, `echo code > calculator.py` would write production code
     in RED through a tool the path check cannot see, and barrier 2 would be bypassable by
     rephrasing the request.
     """
-    if tool.name == "RunTests" or (agent_memory and tool.name in GENERIC_WRITER_TOOL_NAMES):
+    if tool.name == "RunTests" or ((agent_memory or plan_file) and tool.name in GENERIC_WRITER_TOOL_NAMES):
         return True, ""
 
     if tool.name == BASH_TOOL_NAME:

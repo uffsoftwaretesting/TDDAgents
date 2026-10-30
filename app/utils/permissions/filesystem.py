@@ -364,13 +364,15 @@ def check_write_permission_for_tool(
     cwd: str,
     *,
     agent_memory: bool = False,
+    plan_file: bool = False,
 ) -> PermissionResult:
     """
     `checkWritePermissionForTool`, the `checkPermissions` of `WriteFile` and `Edit`.
 
     1. A deny rule on the path (or its resolved form) denies.
-    1.5. `checkEditableInternalPath`, reduced to the one editable internal store this loop has:
-       this run's agent memory (`agent_memory`, upstream's `isAgentMemoryPath`) allows.
+    1.5. `checkEditableInternalPath`, reduced to the editable internal stores this loop has: the
+       session's plan file (`plan_file`, upstream's `isSessionPlanFile`) and this run's agent
+       memory (`agent_memory`, upstream's `isAgentMemoryPath`) allow.
     2. The safety check asks — and the gate keeps that ask even in bypass mode.
     3. An ask rule asks.
     4. `acceptEdits` allows writes inside the working directories.
@@ -388,6 +390,12 @@ def check_write_permission_for_tool(
                 decision_reason={"type": "rule", "rule": deny_rule},
             )
 
+    if plan_file:
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "other", "reason": "Plan files for current session are allowed for writing"},
+        )
     if agent_memory:
         return PermissionResult(
             behavior=PermissionBehavior.ALLOW,
@@ -522,14 +530,22 @@ def get_bundled_skills_root() -> str:
 
 
 def check_readable_internal_path(
-    absolute_path: str, input_args: dict[str, Any], cwd: str, *, agent_memory: bool = False
+    absolute_path: str, input_args: dict[str, Any], cwd: str, *, agent_memory: bool = False,
+    plan_file: bool = False,
 ) -> PermissionResult:
     """
     `checkReadableInternalPath`, reduced to the internal stores this loop has: the project
-    directory, this run's agent memory (`agent_memory`, upstream's `isAgentMemoryPath`) and the
-    extracted bundled skill files (`get_bundled_skills_root`). Session memory, plan files,
-    scratchpad, temp, memdir, tasks and teams have no equivalent here.
+    directory, the session's plan file (`plan_file`, upstream's `isSessionPlanFile`), this run's
+    agent memory (`agent_memory`, upstream's `isAgentMemoryPath`) and the extracted bundled skill
+    files (`get_bundled_skills_root`). Session memory, scratchpad, temp, memdir, tasks and teams
+    have no equivalent here.
     """
+    if plan_file:
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "other", "reason": "Plan files for current session are allowed for reading"},
+        )
     if agent_memory:
         return PermissionResult(
             behavior=PermissionBehavior.ALLOW,
@@ -561,6 +577,7 @@ def check_read_permission_for_tool(
     cwd: str,
     *,
     agent_memory: bool = False,
+    plan_file: bool = False,
 ) -> PermissionResult:
     """
     `checkReadPermissionForTool`, the `check_permissions` of `ReadFile`, `Glob` and `Grep`.
@@ -625,7 +642,8 @@ def check_read_permission_for_tool(
             updated_input=input_args,
             decision_reason={"type": "mode", "mode": PermissionMode.DEFAULT},
         )
-    internal = check_readable_internal_path(absolute, input_args, cwd, agent_memory=agent_memory)
+    internal = check_readable_internal_path(absolute, input_args, cwd, agent_memory=agent_memory,
+                                            plan_file=plan_file)
     if internal.behavior != PermissionBehavior.PASSTHROUGH:
         return internal
     allow_rule = matching_rule_for_input(absolute, context, "read", "allow", cwd)
@@ -728,6 +746,7 @@ def check_file_write_permissions() -> Any:
         cwd = permission_cwd(context)
         raw = path_from_tool_input(input_args)
         from app.tools.agent_tool.agent_memory import agent_memory_target
+        from app.utils.plans import session_plan_target
 
         return check_write_permission_for_tool(
             workspace_absolute_path(raw, cwd),
@@ -735,6 +754,7 @@ def check_file_write_permissions() -> Any:
             extract_permission_context(context),
             cwd,
             agent_memory=agent_memory_target(context, raw) is not None,
+            plan_file=session_plan_target(context, raw) is not None,
         )
 
     return check
@@ -752,10 +772,12 @@ def check_file_read_permissions(path_key: str) -> Any:
         cwd = permission_cwd(context)
         raw = str(input_args.get(path_key) or "")
         from app.tools.agent_tool.agent_memory import agent_memory_target
+        from app.utils.plans import session_plan_target
 
         target = workspace_absolute_path(raw, cwd) if raw else cwd
         return check_read_permission_for_tool(target, input_args, extract_permission_context(context), cwd,
-                                              agent_memory=bool(raw) and agent_memory_target(context, raw) is not None)
+                                              agent_memory=bool(raw) and agent_memory_target(context, raw) is not None,
+                                              plan_file=bool(raw) and session_plan_target(context, raw) is not None)
 
     return check
 

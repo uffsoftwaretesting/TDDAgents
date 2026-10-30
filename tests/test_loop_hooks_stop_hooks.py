@@ -42,7 +42,7 @@ from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
 from app.utils.messages import HookBlockingError
 from tests.hook_doubles import ScriptedDispatcher
 
-CONFIG = build_run_config("stop-test", postgres_checkpointing=False)
+CONFIG = build_run_config("stop-test")
 RED = PhaseLedger(phase=TddPhase.RED)
 DONE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 BLOCK = HookBlockingError(blocking_error="lint first", command="lint.sh")

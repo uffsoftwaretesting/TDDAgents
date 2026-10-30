@@ -63,6 +63,12 @@ class AppState:
     #: (Phase 12, `app/tdd/suite_fingerprint.py`): RunTests ends RED only once they changed.
     #: `None` when it could not be taken.
     tdd_item_test_baseline: str | None = None
+    #: Upstream `STATE.hasExitedPlanMode` (`bootstrap/state.ts`), per run here: plan mode was left
+    #: this session, so re-entering it attaches `plan_mode_reentry`.
+    has_exited_plan_mode: bool = False
+    #: Upstream `STATE.needsPlanModeExitAttachment`: plan mode was just left, so the next turn
+    #: attaches `plan_mode_exit` once.
+    needs_plan_mode_exit_attachment: bool = False
 
 
 @dataclass(slots=True)

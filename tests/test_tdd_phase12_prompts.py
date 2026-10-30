@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.context import _file_section
-from app.session.prompts import development_start_prompt
+from app.session.prompts import development_approved_prompt
 from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB, TDD_PROMPT_VARS
 from app.tdd.plan import TddPlan
 
@@ -41,7 +41,7 @@ def test_no_prompt_states_the_old_red_rule(path):
 def test_the_rule_of_thumb_is_named_once_in_code_and_filled_into_the_prompts():
     assert TDD_PROMPT_VARS == {"COVERAGE_RULE_OF_THUMB": "90"}
     contract = _file_section("tdd-contract.md")()
-    start = development_start_prompt("S", TddPlan.from_texts(["a"]))
+    start = development_approved_prompt(TddPlan.from_texts(["a"]))
     for text in (contract, start):
         assert "{{" not in text
         assert f"{COVERAGE_RULE_OF_THUMB:.0f}% is a good rule of thumb" in text

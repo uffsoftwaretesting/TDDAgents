@@ -38,10 +38,7 @@ from app.screens.repl import (
     render_permission_prompt,
     turn_end_text,
 )
-from app.session.prompts import (
-    development_continue_prompt,
-    development_replanned_prompt,
-)
+from app.session.prompts import development_continue_prompt
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.plan import ItemStatus, PlanError, TddPlan
 from app.types.permissions import PermissionMode, ToolPermissionContext
@@ -246,8 +243,23 @@ def deps_for(model: Model) -> Any:
     return dataclasses.replace(get_production_deps(), call_model=model)
 
 
+def plan_document(*items: str) -> str:
+    """A plan file as the Analyst writes it: a specification and the Implementation Plan."""
+    numbered = "\n".join(f"{n}. {item}" for n, item in enumerate(items, start=1))
+    return f"# Plan\n\n## Context\nA calculator.\n\n## Implementation Plan\n{numbered}\n\n## Verification\nRunTests.\n"
+
+
+def planning_turns(*items: str) -> list[Any]:
+    """Plan mode: write the session's plan file, then ask for its approval (`ExitPlanMode`)."""
+    async def write_plan(state: Any) -> list[Any]:
+        path = state.tool_context.session_plans.file_path()
+        return [call("WriteFile", "plan-w", file_path=str(path), content=plan_document(*items))]
+
+    return [write_plan, [call("ExitPlanMode", "plan-x")]]
+
+
 async def session(workspace: Any, tmp_path: Path, model: Model, plan: TddPlan,
-                  script: Callable[[Repl, FakeIO], Any], *, rescope: Any = None,
+                  script: Callable[[Repl, FakeIO], Any], *,
                   mode: PermissionMode = PermissionMode.ACCEPT_EDITS) -> tuple[Terminal | None, Repl, FakeIO]:
     io = FakeIO()
     holder: dict[str, Repl] = {}
@@ -260,7 +272,7 @@ async def session(workspace: Any, tmp_path: Path, model: Model, plan: TddPlan,
                                 deps=deps_for(model), permission_context=perm, project_root=tmp_path,
                                 home=tmp_path / "home", managed_dir=tmp_path / "etc",
                                 can_use_tool=build_interactive_can_use_tool(ask)) as run:
-        repl = Repl(run, io, specification="SPEC", rescope=rescope)
+        repl = Repl(run, io)
         holder["repl"] = repl
         runner = asyncio.create_task(repl.run_session("start", "resume"))
         await script(repl, io)
@@ -433,49 +445,34 @@ def test_resume_while_busy_only_unpauses(python_workspace, tmp_path):
     assert repl.run.store.get().tdd_paused is False
 
 
-def test_requirements_replans_and_continues(python_workspace, tmp_path):
-    asked: list[str] = []
-
-    async def rescope(request: str) -> tuple[str, list[str]] | None:
-        asked.append(request)
-        return ("SPEC 2", ["X", "Y"]) if request == "add X" else None
-
-    model = Model([[AIMessage(content="a")], [AIMessage(content="b")], [AIMessage(content="c")]])
+def test_requirements_plans_again_and_its_approval_replaces_the_pending_items(python_workspace, tmp_path):
+    """`/requirements <request>` is upstream's `/plan <description>`: plan mode, then the request."""
+    model = Model([[AIMessage(content="a")], *planning_turns("X", "Y"), [AIMessage(content="on it")]])
 
     async def script(repl: Repl, io: FakeIO) -> None:
         await until(lambda: not repl.busy and repl.last_terminal is not None)
         io.lines.put_nowait("/requirements")
         await until(lambda: "Usage: /requirements <what to change>" in io.out)
-        io.lines.put_nowait("/requirements nothing")
-        await until(lambda: "The requirements were not changed." in io.out)
         io.lines.put_nowait("/requirements add X")
-        await until(lambda: len(model.seen) >= 2)
-        await until(lambda: not repl.busy)
+        await until(lambda: repl.pending is not None)
+        assert repl.run.store.get().tool_permission_context.mode == PermissionMode.PLAN
+        io.lines.put_nowait("1")
+        await until(lambda: not repl.busy and len(model.seen) >= 4)
         io.lines.put_nowait("/exit")
 
-    done = TddPlan.from_texts(["A", "B"]).complete_current(CYCLE)
-    _, repl, io = asyncio.run(session(python_workspace, tmp_path, model, done, script, rescope=rescope))
-    assert asked == ["nothing", "add X"]
+    # A finished plan, so the first turn may end on "a" (the stop hook has nothing to send back).
+    done = TddPlan.from_texts(["A"]).complete_current(CYCLE)
+    _, repl, io = asyncio.run(session(python_workspace, tmp_path, model, done, script))
     assert [(i.text, i.status) for i in repl.plan.items] == [
         ("A", ItemStatus.DONE), ("X", ItemStatus.PENDING), ("Y", ItemStatus.PENDING)]
-    assert repl.specification == "SPEC 2"
-    assert "New plan:\n✔ 1. A\n▶ 2. X\n· 3. Y" in io.out
-    texts = [str(m.content) for state in model.seen for m in state.messages if isinstance(m, HumanMessage)]
-    assert development_replanned_prompt("SPEC 2", repl.plan) in texts
-
-
-def test_requirements_without_a_rescope_is_unavailable(python_workspace, tmp_path):
-    model = Model([[AIMessage(content="a")]])
-
-    async def script(repl: Repl, io: FakeIO) -> None:
-        await until(lambda: not repl.busy and repl.last_terminal is not None)
-        io.lines.put_nowait("/requirements x")
-        await until(lambda: "/requirements is not available in this session." in io.out)
-        io.lines.put_nowait(None)
-
-    terminal, _, _ = asyncio.run(session(python_workspace, tmp_path, model,
-                                         TddPlan.from_texts(["A"]).complete_current(CYCLE), script))
-    assert terminal == Terminal.COMPLETED
+    assert "⏸ plan mode on" in io.out
+    state = repl.run.store.get()
+    # Approved with "Yes, auto-accept edits": the mode work goes on in.
+    assert state.tool_permission_context.mode == PermissionMode.ACCEPT_EDITS
+    texts = [str(m.content) for state_ in model.seen for m in state_.messages if isinstance(m, HumanMessage)]
+    assert "add X" in texts
+    approval = next(t for t in io.out if "Permission needed: ExitPlanMode" in t)
+    assert "Here is the plan:\n\n# Plan" in approval and "1. Yes, auto-accept edits" in approval
 
 
 def test_exit_while_busy_interrupts_first(python_workspace, tmp_path):
@@ -504,7 +501,7 @@ def test_a_crashed_turn_is_reported_and_the_session_goes_on(python_workspace, tm
     async def broken(run: Any, *a: Any) -> Terminal:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(repl_mod, "begin_session", broken)
+    monkeypatch.setattr(repl_mod, "start_session", broken)
     model = Model([])
 
     async def script(repl: Repl, io: FakeIO) -> None:
@@ -518,50 +515,29 @@ def test_a_crashed_turn_is_reported_and_the_session_goes_on(python_workspace, tm
 
 # ── develop_interactive ──────────────────────────────────────────────────────
 
-def test_develop_interactive_runs_the_repl_and_rescopes_through_the_shell(python_workspace, tmp_path):
-    from app.session.driver import (
-        MEMORY_CHECKPOINT,
-        SessionOptions,
-        build_session_shell,
-        develop_interactive,
-        drive_session,
-    )
+def test_develop_interactive_plans_then_develops_the_approved_plan(python_workspace, tmp_path):
+    from app.session.driver import SessionOptions, develop_interactive
 
-    def checklist(user_input: str, history: str) -> dict[str, Any]:
-        return {"response": "Checklist. Proceed?", "needs_clarification": False, "has_checklist": True}
-
-    def planner(spec: str, completed: Any, *_: Any) -> list[str]:
-        return ["more"] if completed else ["first"]
-
-    options = SessionOptions(checkpoint=MEMORY_CHECKPOINT, permission_mode="acceptEdits")
-    shell, _ = build_session_shell("t-i", options, workspace_factory=lambda t: python_workspace,
-                                   analyzer_fn=checklist, engineer_fn=lambda *_: "SPEC", planner_fn=planner)
-    run = drive_session(shell, "t-i", "req", lambda p: "/yes")
-    model = Model([*cycle_turns(), [AIMessage(content="ok")]])
+    model = Model([*planning_turns("first"), *cycle_turns(), [AIMessage(content="ok")]])
     io = FakeIO()
 
     async def typist() -> None:
-        loop_io = io
-        while "Every sub-requirement is done" not in loop_io.text():
+        while not any("Permission needed: ExitPlanMode" in line for line in io.out):
             await asyncio.sleep(0.01)
-        loop_io.lines.put_nowait("/requirements add more")
-        # The analyst's checklist, then the reviews of the specification and of the plan.
-        for header in ("Requirements Analyst", "[Engineer]", "[Planner]"):
-            while not any(header in line for line in loop_io.out):
-                await asyncio.sleep(0.01)
-            loop_io.lines.put_nowait("/yes")
-        while not any(line.startswith("New plan:") for line in loop_io.out):
+        io.lines.put_nowait("1")  # "Yes, auto-accept edits": development writes without asking
+        while "Every sub-requirement is done" not in io.text():
             await asyncio.sleep(0.01)
-        loop_io.lines.put_nowait("/exit")
+        io.lines.put_nowait("/exit")
 
     def factory(on_interrupt: Any) -> FakeIO:
         asyncio.get_running_loop().create_task(typist())
         return io
 
-    outcome = develop_interactive(shell, "t-i", run.values, python_workspace, options, io_factory=factory,
-                                  deps=deps_for(model), project_root=tmp_path, home=tmp_path / "home",
-                                  managed_dir=tmp_path / "etc")
-    assert [(i.text, i.status) for i in outcome.plan.items] == [
-        ("first", ItemStatus.DONE), ("more", ItemStatus.PENDING)]
-    assert shell.get_state("t-i").values["plan"] == ["more"]
-    assert outcome.completed is False
+    perm = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS, should_avoid_permission_prompts=False)
+    outcome = develop_interactive("t-i", "build a calculator", python_workspace, SessionOptions(),
+                                  io_factory=factory, deps=deps_for(model), permission_context=perm,
+                                  project_root=tmp_path, home=tmp_path / "home", managed_dir=tmp_path / "etc")
+    assert io.out[0].startswith("⏸ plan mode on")
+    assert [(i.text, i.status) for i in outcome.plan.items] == [("first", ItemStatus.DONE)]
+    assert outcome.planned and outcome.plan_file is not None
+    assert model.seen[0].messages[0].content == "build a calculator"

@@ -60,4 +60,40 @@ def edit_file_in_editor(path: Path, editor: str | None = None) -> EditorResult:
     return EditorResult(path.read_text(encoding="utf-8"))
 
 
-__all__ = ["EDITOR_OVERRIDES", "FALLBACK_EDITORS", "EditorResult", "edit_file_in_editor", "get_external_editor"]
+def edit_text_in_editor(
+    text: str, name: str, edit: Callable[[Path], EditorResult] = edit_file_in_editor
+) -> tuple[str | None, str]:
+    """
+    `text` in a draft file (`<TDDAgents temp dir>/<name>-*.md`, deleted afterwards), opened in the
+    user's editor: the edited text, or `None` and why there is none (no editor, a failed editor,
+    no change).
+    """
+    import tempfile
+
+    from app.utils.permissions.filesystem import get_tddagents_temp_dir
+
+    directory = Path(get_tddagents_temp_dir())
+    directory.mkdir(parents=True, exist_ok=True)
+    fd, draft = tempfile.mkstemp(prefix=f"{name}-", suffix=".md", dir=directory)
+    path = Path(draft)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text if text.endswith("\n") else f"{text}\n")
+        result = edit(path)
+    finally:
+        path.unlink(missing_ok=True)
+    if result.content is None:
+        return None, result.error or "No editor found: set $VISUAL or $EDITOR."
+    if result.content.strip() == text.strip():
+        return None, f"The {name} is unchanged."
+    return result.content, ""
+
+
+__all__ = [
+    "EDITOR_OVERRIDES",
+    "FALLBACK_EDITORS",
+    "EditorResult",
+    "edit_file_in_editor",
+    "edit_text_in_editor",
+    "get_external_editor",
+]

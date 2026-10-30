@@ -55,7 +55,7 @@ from app.utils.permissions.permissions import (
 from app.utils.session_start import process_session_start_hooks
 from tests.hook_doubles import ScriptedDispatcher
 
-CONFIG = build_run_config("mutation-a", postgres_checkpointing=False)
+CONFIG = build_run_config("mutation-a")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 COMPLETE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 
@@ -388,4 +388,4 @@ def test_a_stopped_prompt_reports_its_plan_item(monkeypatch, tmp_path):
                                   deps=loop_deps(Model([])), permission_context=ToolPermissionContext(),
                                   hook_dispatcher=d))
     assert (result.index, result.sub_requirement) == (7, "the spec")
-    assert d.payload("SessionStart")["model"] == build_run_config("x", postgres_checkpointing=False).model
+    assert d.payload("SessionStart")["model"] == build_run_config("x").model

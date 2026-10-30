@@ -506,6 +506,9 @@ class ToolContext:
     #: Where the session's TDD plan is saved (`app/tdd/plan.py`, Phase 11); `None` keeps it in
     #: memory only. A worker shares its parent's.
     tdd_plan_path: str | None = None
+    #: The session's plan file (`app/utils/plans.py`, plan mode): its directory and slug. A
+    #: worker shares its parent's, and writes `{slug}-agent-{id}.md`.
+    session_plans: Any = None
     #: Upstream `canUseTool` for an interactive session (`app/hooks/use_can_use_tool.py`, Phase
     #: 11): what a permission 'ask' becomes. `None` is a headless run, where the gate already
     #: turned every 'ask' into a deny. Never handed to a worker.

@@ -25,7 +25,7 @@ from app.state.app_state_store import AppStateStore
 from app.tool import tool_context_for
 from app.utils.messages import Message, ToolCall
 
-CONFIG = build_run_config("test-run-a4", postgres_checkpointing=False)
+CONFIG = build_run_config("test-run-a4")
 
 
 def sample_state() -> LoopState:

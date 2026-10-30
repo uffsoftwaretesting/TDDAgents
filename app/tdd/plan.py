@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -186,6 +187,49 @@ def render_plan(plan: TddPlan) -> str:
         mark = "✔" if item.status == ItemStatus.DONE else "▶" if item is current else "·"
         lines.append(f"{mark} {item.id}. {item.text}")
     return "\n".join(lines)
+
+
+#: The plan-file section whose numbered items become the sub-requirements (plan mode, the Analyst).
+IMPLEMENTATION_PLAN_HEADING = "Implementation Plan"
+
+_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+_NUMBERED = re.compile(r"^(\s*)\d+[.)]\s+(.*\S)\s*$")
+
+
+def parse_implementation_plan(plan_text: str) -> list[str]:
+    """
+    The sub-requirements of an approved plan file: the top-level numbered items of its
+    `Implementation Plan` section (any heading level, any case), up to the next heading of the
+    same or a higher level. Lines under an item (wrapped text, nested bullets) join its text; a
+    deeper heading inside the section closes the open item without joining it.
+    """
+    lines = plan_text.splitlines()
+    start, level = None, 0
+    for index, line in enumerate(lines):
+        heading = _HEADING.match(line)
+        if heading and heading.group(2).strip().lower() == IMPLEMENTATION_PLAN_HEADING.lower():
+            start, level = index + 1, len(heading.group(1))
+            break
+    if start is None:
+        return []
+    items: list[list[str]] = []
+    indent: int | None = None
+    item_open = False
+    for line in lines[start:]:
+        heading = _HEADING.match(line)
+        if heading:
+            if len(heading.group(1)) <= level:
+                break
+            item_open = False
+            continue
+        numbered = _NUMBERED.match(line)
+        if numbered and (indent is None or len(numbered.group(1)) <= indent):
+            indent = len(numbered.group(1))
+            items.append([numbered.group(2)])
+            item_open = True
+        elif item_open and line.strip():
+            items[-1].append(line.strip())
+    return [" ".join(part for part in item if part) for item in items]
 
 
 def plan_path(session_id: str, cwd: str | Path) -> Path:

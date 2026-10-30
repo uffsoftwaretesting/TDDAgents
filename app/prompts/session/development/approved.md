@@ -1,4 +1,4 @@
-Implement this project test-first, one sub-requirement at a time, following the TDD plan below.
+Implement the approved plan test-first, one sub-requirement at a time, following the TDD plan below.
 
 For each sub-requirement:
 
@@ -9,10 +9,6 @@ For each sub-requirement:
 When a sub-requirement's cycle has been observed, the system marks it done and gives you the next one; you cannot mark one done yourself. Work on the current sub-requirement only: its RED needs tests that are new or changed for it.
 
 The user may interrupt at any time to discuss the work or to change the plan. Use UpdatePlan to change sub-requirements, never to skip one.
-
-## Technical specification
-
-{{SPECIFICATION}}
 
 ## TDD plan
 

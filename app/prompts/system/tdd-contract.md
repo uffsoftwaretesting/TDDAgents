@@ -17,5 +17,11 @@ The loop enforces a structural Red -> Green -> Refactor cycle for every sub-requ
    - `RunTests` measures line and branch coverage of the production code on every run and lists the uncovered lines. Raise it as part of the work: {{COVERAGE_RULE_OF_THUMB}}% is a good rule of thumb, not a gate, and a test must assert behaviour, never only execute code to cover it. REFACTOR is done when a run passes.
    - Every test must keep passing; a failing run means REFACTOR is not done.
 
+**The plan**:
+   - The session starts in plan mode. The approved plan file's numbered items under its `## Implementation Plan` heading become the sub-requirements, in order.
+   - Each sub-requirement is completed, and marked done, by exactly one Red -> Green -> Refactor cycle that the RunTests tool observes: its tests are written and run (RED), its implementation makes them pass (GREEN), and a refactor keeps them passing (REFACTOR). A sub-requirement's tests and its implementation are therefore part of the same sub-requirement.
+   - RunTests runs pytest and reports the test files pytest does not collect. pytest's default discovery collects `test_*.py` and `*_test.py` files; a pytest configuration in the project can change that.
+   - The project folder has a Python virtual environment holding pytest; the project's own dependencies are installed by the plan.
+
 **Termination Rule**:
 The loop will refuse completion until the phase ledger shows the whole cycle for the current sub-requirement: tests written and run, every test passing, and a passing REFACTOR run.

@@ -237,7 +237,7 @@ def test_workers_draw_the_skill_tool_too(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agent_tool_mod, "build_agent_tool", spy)
     monkeypatch.delenv("TDDAGENTS_COORDINATOR_MODE", raising=False)
-    config = build_run_config("r", postgres_checkpointing=False)
+    config = build_run_config("r")
     registry = get_skill_registry(tmp_path, tmp_path / "home", tmp_path / "etc")
     main_thread_tools(config, get_production_deps(), tmp_path, tmp_path / "home", skill_registry=registry)
     assert "Skill" in [t.name for t in captured["worker_tools"]]

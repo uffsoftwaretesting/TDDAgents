@@ -24,13 +24,13 @@ def _tool(name: str):
 
 def test_the_mode_is_an_env_gate_frozen_at_entry(monkeypatch):
     monkeypatch.delenv(COORDINATOR_MODE_ENV, raising=False)
-    off = build_run_config("r", postgres_checkpointing=False)
+    off = build_run_config("r")
     assert off.gates.coordinator_mode is False and is_coordinator_mode(off) is False
     monkeypatch.setenv(COORDINATOR_MODE_ENV, "1")
-    on = build_run_config("r", postgres_checkpointing=False)
+    on = build_run_config("r")
     assert on.gates.coordinator_mode is True and is_coordinator_mode(on) is True
     monkeypatch.setenv(COORDINATOR_MODE_ENV, "0")
-    assert build_run_config("r", postgres_checkpointing=False).gates.coordinator_mode is False
+    assert build_run_config("r").gates.coordinator_mode is False
 
 
 def test_the_coordinator_keeps_only_orchestration_tools():

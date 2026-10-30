@@ -14,7 +14,7 @@ the queued commands.
 Sources not ported, each because this build has no subsystem for it: `at_mentioned_files`,
 `mcp_resources`, `agent_mentions`, `skill_discovery`, `dynamic_skill` (no skill discovery or
 nested skill dirs), `deferred_tools_delta` (no deferred tools), `ultrathink_effort` (no reasoning-effort
-control), `companion_intro`, `plan_mode`/`plan_mode_exit` (no plan mode in a headless run),
+control), `companion_intro`,
 `auto_mode_exit` (no mode transition sets its flag), `teammate_mailbox`, `team_context`,
 `critical_system_reminder` (no context field carries one),
 `compaction_reminder` and `context_efficiency` (feature-gated off), `ide_selection`,
@@ -172,7 +172,7 @@ import logging
 import os
 import posixpath
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -247,6 +247,8 @@ async def get_attachments(
         ("changed_files", get_changed_files),
         ("nested_memory", get_nested_memory_source),
         ("skill_listing", get_skill_listing_attachments),
+        ("plan_mode", get_plan_mode_attachments),
+        ("plan_mode_exit", get_plan_mode_exit_attachment),
         ("auto_mode", get_auto_mode_attachments),
         ("todo_reminders", get_todo_reminder_attachments),
         ("agent_pending_messages", get_agent_pending_message_attachments),
@@ -455,6 +457,17 @@ def normalize_attachment_for_api(attachment: Attachment) -> list[str]:
         ]
     if kind == "todo_reminder":
         return _todo_reminder(data)
+    if kind == "plan_mode":
+        return [plan_mode_instructions(data)]
+    if kind == "plan_file_reference":
+        return [
+            (f"A plan file exists from plan mode at: {data['planFilePath']}\n\nPlan contents:\n\n{data['planContent']}"
+             "\n\nIf this plan is relevant to the current work and not already complete, continue working on it.")
+        ]
+    if kind == "plan_mode_reentry":
+        return [plan_mode_reentry_text(data)]
+    if kind == "plan_mode_exit":
+        return [plan_mode_exit_text(data)]
     if kind == "auto_mode":
         return [AUTO_MODE_SPARSE_INSTRUCTIONS if data.get("reminderType") == "sparse" else AUTO_MODE_FULL_INSTRUCTIONS]
     if kind == "agent_listing_delta":
@@ -1027,6 +1040,337 @@ def count_auto_mode_attachments_since_last_exit(messages: Sequence[Message]) -> 
         if kind == "auto_mode":
             count += 1
     return count
+
+
+#: `PLAN_MODE_ATTACHMENT_CONFIG`.
+PLAN_MODE_ATTACHMENT_CONFIG = SimpleNamespace(TURNS_BETWEEN_ATTACHMENTS=5, FULL_REMINDER_EVERY_N_ATTACHMENTS=5)
+
+_ASK = "AskUserQuestion"
+_EXIT_PLAN = "ExitPlanMode"
+_EDIT = "Edit"
+_WRITE = "WriteFile"
+_EXPLORE_AGENT = "Explore"
+_PLAN_AGENT = "Plan"
+#: `getReadOnlyToolNames`, external build (no embedded search tools, no project allowlist).
+_READ_ONLY_TOOL_NAMES = "ReadFile, Glob, Grep"
+
+_PLAN_MODE_ACTIVE = (
+    "Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any "
+    "edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing "
+    "configs or making commits), or otherwise make any changes to the system. This supercedes any other "
+    "instructions you have received."
+)
+
+#: `PLAN_PHASE4_CONTROL` (`getPlanPhase4Section`'s control arm, the external default).
+PLAN_PHASE4_CONTROL = """### Phase 4: Final Plan
+Goal: Write your final plan to the plan file (the only file you can edit).
+- Begin with a **Context** section: explain why this change is being made — the problem or need it addresses, what prompted it, and the intended outcome
+- Include only your recommended approach, not all alternatives
+- Ensure that the plan file is concise enough to scan quickly, but detailed enough to execute effectively
+- Include the paths of critical files to be modified
+- Reference existing functions and utilities you found that should be reused, with their file paths
+- Include a verification section describing how to test the changes end-to-end (run the code, use MCP tools, run tests)"""  # noqa: E501
+
+
+def _plan_file_info(data: Mapping[str, Any], *, if_needed: bool = False) -> str:
+    suffix = " if you need to" if if_needed else ""
+    if data.get("planExists"):
+        return (f"A plan file already exists at {data['planFilePath']}. You can read it and make incremental edits "
+                f"using the {_EDIT} tool{suffix}.")
+    return (f"No plan file exists yet. You should create your plan at {data['planFilePath']} using the {_WRITE} "
+            f"tool{suffix}.")
+
+
+#: The multiple-agents guidance inside Phase 2, when more than one Plan agent may run.
+PLAN_MODE_MULTIPLE_AGENTS_TEMPLATE = """- **Multiple agents**: Use up to {agents} agents for complex tasks that benefit from different perspectives
+
+Examples of when to use multiple agents:
+- The task touches multiple parts of the codebase
+- It's a large refactor or architectural change
+- There are many edge cases to consider
+- You'd benefit from exploring different approaches
+
+Example perspectives by task type:
+- New feature: simplicity vs performance vs maintainability
+- Bug fix: root cause vs workaround vs prevention
+- Refactoring: minimal change vs clean architecture
+"""  # noqa: E501
+
+
+PLAN_MODE_V2_TEMPLATE = """{active}
+
+## Plan File Info:
+{plan_file_info}
+You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
+
+## Plan Workflow
+
+### Phase 1: Initial Understanding
+Goal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the {explore_agent} subagent type.
+
+1. Focus on understanding the user's request and the code associated with their request. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.
+
+2. **Launch up to {explore} {explore_agent} agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.
+   - Use 1 agent when the task is isolated to known files, the user provided specific file paths, or you're making a small targeted change.
+   - Use multiple agents when: the scope is uncertain, multiple areas of the codebase are involved, or you need to understand existing patterns before planning.
+   - Quality over quantity - {explore} agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)
+   - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigating testing patterns
+
+### Phase 2: Design
+Goal: Design an implementation approach.
+
+Launch {plan_agent} agent(s) to design the implementation based on the user's intent and your exploration results from Phase 1.
+
+You can launch up to {agents} agent(s) in parallel.
+
+**Guidelines:**
+- **Default**: Launch at least 1 Plan agent for most tasks - it helps validate your understanding and consider alternatives
+- **Skip agents**: Only for truly trivial tasks (typo fixes, single-line changes, simple renames)
+{multiple}
+In the agent prompt:
+- Provide comprehensive background context from Phase 1 exploration including filenames and code path traces
+- Describe requirements and constraints
+- Request a detailed implementation plan
+
+### Phase 3: Review
+Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.
+1. Read the critical files identified by agents to deepen your understanding
+2. Ensure that the plans align with the user's original request
+3. Use {ask} to clarify any remaining questions with the user
+
+{phase4}
+
+### Phase 5: Call {exit_plan}
+At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call {exit_plan} to indicate to the user that you are done planning.
+This is critical - your turn should only end with either using the {ask} tool OR calling {exit_plan}. Do not stop unless it's for these 2 reasons
+
+**Important:** Use {ask} ONLY to clarify requirements or choose between approaches. Use {exit_plan} to request plan approval. Do NOT ask about plan approval in any other way - no text questions, no AskUserQuestion. Phrases like "Is this plan okay?", "Should I proceed?", "How does this plan look?", "Any changes before we start?", or similar MUST use {exit_plan}.
+
+NOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications using the {ask} tool. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins."""  # noqa: E501
+
+
+def plan_mode_v2_instructions(data: Mapping[str, Any]) -> str:
+    """`getPlanModeV2Instructions`: the 5-phase workflow (the interview workflow when it is on)."""
+    from app.utils.plan_mode_v2 import (
+        get_plan_mode_v2_agent_count,
+        get_plan_mode_v2_explore_agent_count,
+        is_plan_mode_interview_phase_enabled,
+    )
+
+    if is_plan_mode_interview_phase_enabled():
+        return plan_mode_interview_instructions(data)
+    agents = get_plan_mode_v2_agent_count()
+    explore = get_plan_mode_v2_explore_agent_count()
+    multiple = (
+        PLAN_MODE_MULTIPLE_AGENTS_TEMPLATE.format(agents=agents)
+        if agents > 1 else ""
+    )
+    return PLAN_MODE_V2_TEMPLATE.format(
+        active=_PLAN_MODE_ACTIVE, plan_file_info=_plan_file_info(data), explore_agent=_EXPLORE_AGENT,
+        explore=explore, plan_agent=_PLAN_AGENT, agents=agents, multiple=multiple, ask=_ASK,
+        phase4=PLAN_PHASE4_CONTROL, exit_plan=_EXIT_PLAN,
+    )
+
+
+PLAN_MODE_INTERVIEW_TEMPLATE = """{active}
+
+## Plan File Info:
+{plan_file_info}
+
+## Iterative Planning Workflow
+
+You are pair-planning with the user. Explore the code to build context, ask the user questions when you hit decisions you can't make alone, and write your findings into the plan file as you go. The plan file (above) is the ONLY file you may edit — it starts as a rough skeleton and gradually becomes the final plan.
+
+### The Loop
+
+Repeat this cycle until the plan is complete:
+
+1. **Explore** — Use {read_only_tools} to read code. Look for existing functions, utilities, and patterns to reuse. You can use the {explore_agent} agent type to parallelize complex searches without filling your context, though for straightforward queries direct tools are simpler.
+2. **Update the plan file** — After each discovery, immediately capture what you learned. Don't wait until the end.
+3. **Ask the user** — When you hit an ambiguity or decision you can't resolve from code alone, use {ask}. Then go back to step 1.
+
+### First Turn
+
+Start by quickly scanning a few key files to form an initial understanding of the task scope. Then write a skeleton plan (headers and rough notes) and ask the user your first round of questions. Don't explore exhaustively before engaging the user.
+
+### Asking Good Questions
+
+- Never ask what you could find out by reading the code
+- Batch related questions together (use multi-question {ask} calls)
+- Focus on things only the user can answer: requirements, preferences, tradeoffs, edge case priorities
+- Scale depth to the task — a vague feature request needs many rounds; a focused bug fix may need one or none
+
+### Plan File Structure
+Your plan file should be divided into clear sections using markdown headers, based on the request. Fill out these sections as you go.
+- Begin with a **Context** section: explain why this change is being made — the problem or need it addresses, what prompted it, and the intended outcome
+- Include only your recommended approach, not all alternatives
+- Ensure that the plan file is concise enough to scan quickly, but detailed enough to execute effectively
+- Include the paths of critical files to be modified
+- Reference existing functions and utilities you found that should be reused, with their file paths
+- Include a verification section describing how to test the changes end-to-end (run the code, use MCP tools, run tests)
+
+### When to Converge
+
+Your plan is ready when you've addressed all ambiguities and it covers: what to change, which files to modify, what existing code to reuse (with file paths), and how to verify the changes. Call {exit_plan} when the plan is ready for approval.
+
+### Ending Your Turn
+
+Your turn should only end by either:
+- Using {ask} to gather more information
+- Calling {exit_plan} when the plan is ready for approval
+
+**Important:** Use {exit_plan} to request plan approval. Do NOT ask about plan approval via text or AskUserQuestion."""  # noqa: E501
+
+
+def plan_mode_interview_instructions(data: Mapping[str, Any]) -> str:
+    """`getPlanModeInterviewInstructions`: the iterative, pair-planning workflow."""
+    return PLAN_MODE_INTERVIEW_TEMPLATE.format(
+        active=_PLAN_MODE_ACTIVE, plan_file_info=_plan_file_info(data), read_only_tools=_READ_ONLY_TOOL_NAMES,
+        explore_agent=_EXPLORE_AGENT, ask=_ASK, exit_plan=_EXIT_PLAN,
+    )
+
+
+def plan_mode_sparse_instructions(data: Mapping[str, Any]) -> str:
+    """`getPlanModeV2SparseInstructions`."""
+    from app.utils.plan_mode_v2 import is_plan_mode_interview_phase_enabled
+
+    workflow = (
+        "Follow iterative workflow: explore codebase, interview user, write to plan incrementally."
+        if is_plan_mode_interview_phase_enabled() else "Follow 5-phase workflow."
+    )
+    return (
+        f"Plan mode still active (see full instructions earlier in conversation). Read-only except plan file "
+        f"({data['planFilePath']}). {workflow} End turns with {_ASK} (for clarifications) or {_EXIT_PLAN} (for plan "
+        "approval). Never ask about plan approval via text or AskUserQuestion."
+    )
+
+
+PLAN_MODE_SUB_AGENT_TEMPLATE = """Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supercedes any other instructions you have received (for example, to make edits). Instead, you should:
+
+## Plan File Info:
+{plan_file_info}
+You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
+Answer the user's query comprehensively, using the {ask} tool if you need to ask the user clarifying questions. If you do use the {ask}, make sure to ask all clarifying questions you need to fully understand the user's intent before proceeding."""  # noqa: E501
+
+
+def plan_mode_sub_agent_instructions(data: Mapping[str, Any]) -> str:
+    """`getPlanModeV2SubAgentInstructions`."""
+    return PLAN_MODE_SUB_AGENT_TEMPLATE.format(plan_file_info=_plan_file_info(data, if_needed=True), ask=_ASK)
+
+
+def plan_mode_instructions(data: Mapping[str, Any]) -> str:
+    """`getPlanModeInstructions`: the sub-agent, sparse or full text for a `plan_mode` attachment."""
+    if data.get("isSubAgent"):
+        return plan_mode_sub_agent_instructions(data)
+    if data.get("reminderType") == "sparse":
+        return plan_mode_sparse_instructions(data)
+    return plan_mode_v2_instructions(data)
+
+
+PLAN_MODE_REENTRY_TEMPLATE = """## Re-entering Plan Mode
+
+You are returning to plan mode after having previously exited it. A plan file exists at {plan_file_path} from your previous planning session.
+
+**Before proceeding with any new planning, you should:**
+1. Read the existing plan file to understand what was previously planned
+2. Evaluate the user's current request against that plan
+3. Decide how to proceed:
+   - **Different task**: If the user's request is for a different task—even if it's similar or related—start fresh by overwriting the existing plan
+   - **Same task, continuing**: If this is explicitly a continuation or refinement of the exact same task, modify the existing plan while cleaning up outdated or irrelevant sections
+4. Continue on with the plan process and most importantly you should always edit the plan file one way or the other before calling {exit_plan}
+
+Treat this as a fresh planning session. Do not assume the existing plan is relevant without evaluating it first."""  # noqa: E501
+
+
+def plan_mode_reentry_text(data: Mapping[str, Any]) -> str:
+    """The `plan_mode_reentry` attachment's text (`normalizeAttachmentForAPI`)."""
+    return PLAN_MODE_REENTRY_TEMPLATE.format(plan_file_path=data['planFilePath'], exit_plan=_EXIT_PLAN)
+
+
+def plan_mode_exit_text(data: Mapping[str, Any]) -> str:
+    """The `plan_mode_exit` attachment's text (`normalizeAttachmentForAPI`)."""
+    reference = (f" The plan file is located at {data['planFilePath']} if you need to reference it."
+                 if data.get("planExists") else "")
+    return ("## Exited Plan Mode\n\nYou have exited plan mode. You can now make edits, run tools, and take "
+            f"actions.{reference}")
+
+
+def get_plan_mode_attachment_turn_count(messages: Sequence[Message]) -> tuple[int, bool]:
+    """`getPlanModeAttachmentTurnCount`: human turns since the last plan-mode reminder, and whether one exists."""
+    turns = 0
+    for i in range(len(messages) - 1, -1, -1):
+        message = messages[i]
+        kind = (attachment_of(message) or {}).get("type")
+        if kind in ("plan_mode", "plan_mode_reentry"):
+            return turns, True
+        if _is_human_turn(message):
+            turns += 1
+    return turns, False
+
+
+def count_plan_mode_attachments_since_last_exit(messages: Sequence[Message]) -> int:
+    """`countPlanModeAttachmentsSinceLastExit`."""
+    count = 0
+    for i in range(len(messages) - 1, -1, -1):
+        kind = (attachment_of(messages[i]) or {}).get("type")
+        if kind == "plan_mode_exit":
+            break
+        if kind == "plan_mode":
+            count += 1
+    return count
+
+
+def _session_plan(context: Any) -> tuple[str, bool] | None:
+    plans = getattr(context, "session_plans", None)
+    if plans is None:
+        return None
+    agent_id = getattr(context, "agent_id", None)
+    return str(plans.file_path(agent_id)), plans.read(agent_id) is not None
+
+
+def get_plan_mode_attachments(messages: Sequence[Message], context: Any) -> list[Attachment]:
+    """`getPlanModeAttachments`: in plan mode, the reminder on the first turn, then every 5 human turns."""
+    if _mode(context) != PermissionMode.PLAN:
+        return []
+    if messages:
+        turns, found = get_plan_mode_attachment_turn_count(messages)
+        if found and turns < PLAN_MODE_ATTACHMENT_CONFIG.TURNS_BETWEEN_ATTACHMENTS:
+            return []
+    plan = _session_plan(context)
+    if plan is None:
+        return []
+    path, exists = plan
+    out: list[Attachment] = []
+    if context.get_app_state().has_exited_plan_mode and exists:
+        out.append(Attachment("plan_mode_reentry", {"planFilePath": path}))
+        context.set_app_state(lambda state: replace(state, has_exited_plan_mode=False))
+    count = count_plan_mode_attachments_since_last_exit(messages) + 1
+    reminder = "full" if count % PLAN_MODE_ATTACHMENT_CONFIG.FULL_REMINDER_EVERY_N_ATTACHMENTS == 1 else "sparse"
+    out.append(Attachment("plan_mode", {
+        "reminderType": reminder,
+        "isSubAgent": bool(getattr(context, "agent_id", None)),
+        "planFilePath": path,
+        "planExists": exists,
+    }))
+    return out
+
+
+def get_plan_mode_exit_attachment(messages: Sequence[Message], context: Any) -> list[Attachment]:
+    """`getPlanModeExitAttachment`: once, right after plan mode was left."""
+    try:
+        needed = context.get_app_state().needs_plan_mode_exit_attachment
+    except Exception:  # noqa: BLE001 - a context without app state has left no plan mode
+        return []
+    if not needed:
+        return []
+    context.set_app_state(lambda state: replace(state, needs_plan_mode_exit_attachment=False))
+    if _mode(context) == PermissionMode.PLAN:
+        return []
+    plan = _session_plan(context)
+    if plan is None:
+        return []
+    path, exists = plan
+    return [Attachment("plan_mode_exit", {"planFilePath": path, "planExists": exists})]
 
 
 def _mode(context: Any) -> Any:

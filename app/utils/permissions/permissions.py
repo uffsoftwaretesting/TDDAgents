@@ -431,10 +431,13 @@ def tdd_phase_denial(tool: Tool, input_args: dict[str, Any], context: ToolContex
             return None
         from app.tdd.phase_permissions import check_tdd_phase_permission
         from app.tools.agent_tool.agent_memory import agent_memory_target
+        from app.utils.plans import session_plan_target
 
         raw_path = input_args.get("file_path") or input_args.get("path")
         memory = bool(raw_path) and agent_memory_target(context, str(raw_path)) is not None
-        permitted, reason = check_tdd_phase_permission(tool, input_args, ledger, agent_memory=memory)
+        plan_file = bool(raw_path) and session_plan_target(context, str(raw_path)) is not None
+        permitted, reason = check_tdd_phase_permission(tool, input_args, ledger, agent_memory=memory,
+                                                       plan_file=plan_file)
     except Exception as exc:
         logger.exception("TDD phase check failed for %s", tool.name)
         reason = f"TDD phase check failed for {tool.name}: {exc}"

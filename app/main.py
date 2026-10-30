@@ -1,28 +1,29 @@
 """
-The TDDAgents entry point (Phases 9 and 11).
+The TDDAgents entry point.
+
+A session is one conversation (`app/cli/print.py`) that opens in plan mode: the Analyst, Claude
+Code's Plan Mode ported, gathers the requirements, writes the plan file (the engineering
+specification and the `Implementation Plan` of sub-requirements) and asks for its approval with
+`ExitPlanMode`. Once approved, the same conversation develops the sub-requirements test-first.
 
 Two modes, as claude-code has them:
 
-* **Interactive** (default): the use-case menu picks the initial request, and the analyst's
-  questions and checklist are answered on the terminal (`/yes` approves a checklist;
-  `/exit` or `/quit` leaves, with the session paused at its checkpoint). Once planned, the
-  session is a REPL (`app/screens/repl.py`): the agents work through the plan while the user
-  talks to them, edits the plan (`/plan`), answers permission questions, re-scopes
-  (`/requirements`) or interrupts (Esc).
+* **Interactive** (default): the use-case menu picks the initial request, and the session is a
+  REPL (`app/screens/repl.py`): the user answers the Analyst's questions, approves the plan (or
+  keeps planning, or edits it with `/edit`), then talks to the agents while they work, edits the
+  plan (`/plan`), re-plans (`/requirements`) or interrupts (Esc).
 * **Headless** (`-p/--print`, upstream `claude -p` -> `runHeadless`): the request comes from
-  `--spec FILE`, the prompt argument or stdin, and nobody is asked anything. The analyst's
-  checklist is approved; a clarifying question fails the session; the plan is worked through
-  in one conversation and a permission 'ask' is denied. A question the agents ask
-  (`AskUserQuestion`) stops the session there, and `--thread-id <id> "<answer>"` continues it
-  with the answer as the next prompt, as upstream's `claude -p --resume <id> "<prompt>"`. The
-  exit code is 0 only when every sub-requirement completed its Red -> Green -> Refactor cycle.
+  `--spec FILE`, the prompt argument or stdin, and nobody is asked anything. As upstream's `-p`,
+  the plan's approval is denied, so a headless session plans and stops unplanned (exit 1). A
+  question the agents ask (`AskUserQuestion`) stops the session there too, and
+  `--thread-id <id> "<answer>"` continues it with the answer as the next prompt, as upstream's
+  `claude -p --resume <id> "<prompt>"`. The exit code is 0 only when there is an approved plan and
+  every sub-requirement completed its Red -> Green -> Refactor cycle.
 
-Either way the session is one LangGraph thread (`app/session/`): it checkpoints to
-`POSTGRES_URL` by default (`--checkpoint memory` opts out), and `--thread-id` continues a
-thread from its last checkpoint — and its development conversation from its transcript.
-Development runs in the thread's shared local workspace; `--permission-mode`, `--settings` and
-`--dangerously-skip-permissions` are upstream's startup flags for it, and `--coordinator` turns
-on coordinator mode (`TDDAGENTS_COORDINATOR_MODE`).
+`--thread-id` continues a session from its transcript, TDD plan and plan file. It runs in the
+thread's own project; `--permission-mode`, `--settings` and `--dangerously-skip-permissions` are
+upstream's startup flags for it, and `--coordinator` turns on coordinator mode
+(`TDDAGENTS_COORDINATOR_MODE`).
 """
 
 import argparse
@@ -42,19 +43,15 @@ if __package__ in (None, ""):
 
 from dotenv import load_dotenv
 
+from app.cli.print import DevelopmentOutcome
 from app.query.transitions import Terminal
-from app.session.checkpointer import is_persistent_checkpointer
 from app.session.driver import (
-    ReviewAnswer,
     SessionOptions,
-    SessionRun,
-    build_session_shell,
     derive_thread_id,
     develop_headless,
     develop_interactive,
-    drive_session,
     fresh_thread_id,
-    read_review_answer,
+    session_exists,
 )
 from app.tdd.plan import ItemStatus, TddPlan
 from app.tools.ask_user_question_tool.ask_user_question_tool import render_questions
@@ -146,62 +143,6 @@ def read_initial_request(args: argparse.Namespace) -> str | None:
     return None
 
 
-def interactive_answer(payload: dict[str, Any]) -> ReviewAnswer:
-    """Show what the session asks and read the user's answer; `None` when the user leaves."""
-
-    def read() -> str | None:
-        try:
-            return input("\n👤 [Your Response] (or '/exit'): ")
-        except (KeyboardInterrupt, EOFError):
-            return None
-
-    return read_review_answer(payload, read, print)
-
-
-def format_dialogue_text(dialogue: str, width: int = 88) -> str:
-    """Formats the dialogue for readability in a text file, with line wrapping."""
-    if not dialogue or not dialogue.strip():
-        return "(empty)"
-
-    formatted_lines: list[str] = []
-    speaker_prefixes = ("[User]:", "[Analyst]:")
-
-    for raw_line in dialogue.splitlines():
-        line = raw_line.strip()
-        if not line:
-            formatted_lines.append("")
-            continue
-
-        speaker = next((prefix for prefix in speaker_prefixes if line.startswith(prefix)), None)
-        if speaker:
-            content = line[len(speaker):].strip()
-            if not content:
-                formatted_lines.append(speaker)
-                continue
-
-            indent = " " * (len(speaker) + 1)
-            wrapped = textwrap.fill(
-                content,
-                width=width,
-                initial_indent=f"{speaker} ",
-                subsequent_indent=indent,
-                break_long_words=False,
-                break_on_hyphens=False,
-            )
-            formatted_lines.append(wrapped)
-            continue
-
-        wrapped = textwrap.fill(
-            line,
-            width=width,
-            break_long_words=False,
-            break_on_hyphens=False,
-        )
-        formatted_lines.append(wrapped)
-
-    return "\n".join(formatted_lines)
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return build_parser().parse_args(argv)
 
@@ -215,10 +156,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--spec", default=None, help="Read the initial request from this file.")
     parser.add_argument("--fresh", action="store_true", help="Forces a new run by generating a random thread_id.")
     parser.add_argument("--thread-id", default=None, help="Explicitly sets the thread_id (continues that session).")
-    parser.add_argument(
-        "--checkpoint", default=None,
-        help="Checkpointer URI, or 'memory'. Defaults to POSTGRES_URL, falling back to memory if it cannot connect.",
-    )
     parser.add_argument("--permission-mode", choices=[str(m) for m in PERMISSION_MODES], default=None)
     parser.add_argument("--settings", default=None, help="A settings file (upstream's flag settings).")
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
@@ -238,7 +175,6 @@ def resolve_thread_id(args: argparse.Namespace, initial_input: str | None) -> st
 def session_options(args: argparse.Namespace) -> SessionOptions:
     return SessionOptions(
         headless=bool(args.print),
-        checkpoint=args.checkpoint,
         permission_mode=args.permission_mode,
         settings_path=args.settings,
         dangerously_skip_permissions=bool(args.dangerously_skip_permissions),
@@ -277,50 +213,56 @@ def _write_text(path: str, title: str, body: str) -> None:
         f.write("=" * 80 + "\n")
 
 
-def write_session_artifacts(workspace_dir: str, values: dict[str, Any]) -> str:
-    """Write the session's dialogue, specification, plan and reports; return the artifacts dir."""
-    artifacts_dir = os.path.join(workspace_dir, "metrics_and_logging")
+def planning_dialogue(transcript_path: str | None) -> str:
+    """
+    The planning phase as the user saw it, read from the transcript: the user's messages, the
+    Analyst's text, the questions it asked with their answers, up to the approved `ExitPlanMode`.
+    """
+    import json
+
+    if not transcript_path or not os.path.exists(transcript_path):
+        return "(empty)"
+    lines: list[str] = []
+    with open(transcript_path, encoding="utf-8") as transcript:
+        for raw in transcript:
+            message = (json.loads(raw).get("message") or {})
+            data = message.get("data") or {}
+            content = data.get("content")
+            text = content if isinstance(content, str) else "\n".join(
+                str(block.get("text", "")) for block in content or []
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+            kind = message.get("type")
+            if kind == "human" and not (data.get("additional_kwargs") or {}).get("is_meta") and text.strip():
+                lines.append(f"[User]: {text.strip()}")
+            elif kind == "ai" and text.strip():
+                lines.append(f"[Analyst]: {text.strip()}")
+            elif kind == "tool" and data.get("name") == "AskUserQuestion" and text.strip():
+                lines.append(f"[User answers]: {text.strip()}")
+            elif kind == "tool" and data.get("name") == "ExitPlanMode" and text.startswith("User has approved"):
+                lines.append("[User]: approved the plan.")
+                break
+    return "\n\n".join(lines) or "(empty)"
+
+
+def write_session_artifacts(
+    session_directory: str, request: str | None, outcome: DevelopmentOutcome | None
+) -> str:
+    """The initial request, the approved plan and the planning dialogue; returns the artifacts dir."""
+    artifacts_dir = os.path.join(session_directory, "metrics_and_logging")
     os.makedirs(artifacts_dir, exist_ok=True)
-
-    user_prompts = list(values.get("user_prompts") or [])
-    formatted_requirements = format_dialogue_text(str(values.get("conversation_history") or ""))
-    numbered = "\n".join(
-        textwrap.fill(
-            prompt, width=88, initial_indent=f"{idx}. ", subsequent_indent=" " * len(f"{idx}. "),
-            break_long_words=False, break_on_hyphens=False,
-        )
-        for idx, prompt in enumerate(user_prompts, start=1)
-    )
-    _write_text(
-        os.path.join(artifacts_dir, "user_analyst_dialogue.txt"),
-        "PROMPTS SENT BY THE USER VIA TERMINAL",
-        numbered + "\n" + "=" * 80 + "\n\nFULL DIALOGUE BETWEEN USER AND ANALYST\n" + "=" * 80 + "\n"
-        + formatted_requirements,
-    )
-    initial_prompt = user_prompts[0] if user_prompts else ""
-    wrapped_initial = "\n".join(
-        textwrap.fill(line, width=80) if line.strip() else "" for line in (initial_prompt.splitlines() or [""])
-    )
-    _write_text(
-        os.path.join(artifacts_dir, "initial_user_prompt.txt"), "INITIAL PROMPT SENT BY THE USER",
-        wrapped_initial or "(empty)",
-    )
-
-    plan = list(values.get("plan") or [])
-    if plan:
-        _write_text(
-            os.path.join(artifacts_dir, "planner.txt"), "TDD SUB-REQUIREMENTS PLAN",
-            "\n".join(f"{i + 1}. {item}" for i, item in enumerate(plan)),
-        )
-    _write_text(
-        os.path.join(artifacts_dir, "engineer_specifications.txt"), "ENGINEER'S TECHNICAL SPECIFICATIONS",
-        str(values.get("specification") or ""),
-    )
-    _write_text(
-        os.path.join(artifacts_dir, "confirmed_user_requirements.txt"), "REQUIREMENTS SUBMITTED BY THE USER",
-        formatted_requirements,
-    )
-
+    if request:
+        wrapped = "\n".join(textwrap.fill(line, width=80) if line.strip() else "" for line in request.splitlines())
+        _write_text(os.path.join(artifacts_dir, "initial_user_prompt.txt"), "INITIAL PROMPT SENT BY THE USER",
+                    wrapped or "(empty)")
+    if outcome is not None:
+        if outcome.planned and outcome.plan_file and os.path.exists(outcome.plan_file):
+            with open(outcome.plan_file, encoding="utf-8") as plan_file:
+                plan_text = plan_file.read()
+            with open(os.path.join(artifacts_dir, "approved_plan.md"), "w", encoding="utf-8") as approved:
+                approved.write(plan_text)
+        _write_text(os.path.join(artifacts_dir, "planning_dialogue.txt"), "PLANNING DIALOGUE (USER AND ANALYST)",
+                    planning_dialogue(outcome.transcript_path))
     return artifacts_dir
 
 
@@ -397,40 +339,37 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
     return summary
 
 
-def waiting_text(thread_id: str, question: Sequence[dict[str, Any]], headless: bool, persistent: bool) -> str:
+def waiting_text(thread_id: str, question: Sequence[dict[str, Any]], headless: bool) -> str:
     """What the user is told when the agents stopped on a question nobody could answer."""
-    lines = ["\n❓ The agents are waiting for your answer:", render_questions(question)]
-    if persistent:
-        flag = "-p " if headless else ""
-        lines.append(f"\n   Answer with: python -m app.main {flag}--thread-id {thread_id} \"<your answer>\"")
-    else:
-        lines.append("\n   This session checkpointed in memory, so it cannot be resumed with the answer.")
-    return "\n".join(lines)
+    flag = "-p " if headless else ""
+    return "\n".join([
+        "\n❓ The agents are waiting for your answer:", render_questions(question),
+        f"\n   Answer with: python -m app.main {flag}--thread-id {thread_id} \"<your answer>\"",
+    ])
 
 
-def report(
-    run: SessionRun, thread_id: str, workspace: Any, plan: TddPlan | None = None, terminal: Terminal | None = None
-) -> None:
+def report(thread_id: str, workspace: Any, request: str | None, outcome: DevelopmentOutcome) -> None:
     """Write the reports beside the project, run its suite once more, then print the outcome."""
     target = session_dir(workspace, thread_id)
     os.makedirs(target, exist_ok=True)
-    artifacts_dir = write_session_artifacts(target, run.values)
-    write_subreq_results(artifacts_dir, plan, terminal)
+    artifacts_dir = write_session_artifacts(target, request, outcome)
+    write_subreq_results(artifacts_dir, outcome.plan, outcome.terminal)
     _write_token_report(artifacts_dir)
     print(f"\n📁 Project: {getattr(workspace, 'root', '?')}")
     print(f"📝 Reports: {artifacts_dir}/")
-    if run.planned:
+    if outcome.planned:
         print(f"🧪 Final test run: {write_final_test_run(artifacts_dir, workspace)}")
 
-    if run.paused_at is not None:
-        print("\n⏸️  Session paused at the analyst's question.")
-    elif not run.planned:
-        print(f"\n⚠️  PIPELINE FINISHED WITH STATUS: '{run.values.get('status', 'unknown')}'")
-    elif plan is not None and plan.is_complete and terminal == Terminal.COMPLETED:
+    plan = outcome.plan
+    if not outcome.planned:
+        print("\n📋  NO APPROVED PLAN: the session ended in plan mode.")
+        if outcome.plan_file and os.path.exists(outcome.plan_file):
+            print(f"   The plan so far: {outcome.plan_file}")
+    elif outcome.completed:
         print("\n✅  PIPELINE COMPLETED SUCCESSFULLY!")
     else:
-        print(f"\n⚠️  DEVELOPMENT STOPPED: {terminal}")
-        if plan is not None and plan.current is not None:
+        print(f"\n⚠️  DEVELOPMENT STOPPED: {outcome.terminal}")
+        if plan.current is not None:
             print(f"   • {plan.current.id}. {plan.current.text}: not done")
     print(f"\n🔑 Thread ID for this run: {thread_id}")
     print("   (To inspect the state or resume later, use --thread-id)\n")
@@ -455,8 +394,11 @@ def main(argv: list[str] | None = None) -> int:
 
     thread_id = resolve_thread_id(args, initial_input)
     logger.info("🔑 thread_id: %s", thread_id)
-    shell, workspace = build_session_shell(thread_id, session_options(args))
-    if not shell.has_session(thread_id) and not initial_input:
+    from app.cli.print import session_workspace
+
+    workspace = session_workspace(thread_id)
+    resuming = session_exists(thread_id, workspace)
+    if not resuming and not initial_input:
         print(f"❌ No session '{thread_id}' to continue, and no initial request to start one.", file=sys.stderr)
         return 1
 
@@ -473,22 +415,17 @@ def main(argv: list[str] | None = None) -> int:
         print("=" * 80)
         # On a session that already exists, the prompt is the user's next message (upstream's
         # `--resume <id> "<prompt>"`): the answer to the question the agents stopped on.
-        resumed_prompt = initial_input if shell.has_session(thread_id) else None
+        request = None if resuming else initial_input
+        resumed_prompt = initial_input if resuming else None
         try:
-            run = drive_session(shell, thread_id, initial_input, answer=None if args.print else interactive_answer)
-            if not run.planned:
-                report(run, thread_id, workspace)
-                return 1
             develop = develop_headless if args.print else develop_interactive
-            outcome = develop(shell, thread_id, run.values, workspace, session_options(args), prompt=resumed_prompt)
+            outcome = develop(thread_id, request, workspace, session_options(args), prompt=resumed_prompt)
         except KeyboardInterrupt:
             print(f"\n🛑 Interrupted. Continue later with --thread-id {thread_id}.")
             return 130
-        # `/requirements` may have re-planned the thread: report it as it now stands.
-        run = SessionRun(values=dict(shell.get_state(thread_id).values))
-        report(run, thread_id, workspace, outcome.plan, outcome.terminal)
+        report(thread_id, workspace, request, outcome)
         if outcome.question:
-            print(waiting_text(thread_id, outcome.question, args.print, is_persistent_checkpointer(shell.checkpointer)))
+            print(waiting_text(thread_id, outcome.question, args.print))
         return 0 if outcome.completed else 1
     finally:
         logging.getLogger().removeHandler(file_handler)

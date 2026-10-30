@@ -53,7 +53,7 @@ from app.tdd.ledger import PhaseLedger
 from app.tool import tool_context_for
 from app.utils.messages import Message, ToolCall
 
-CONFIG = build_run_config("tdd-test", postgres_checkpointing=False)
+CONFIG = build_run_config("tdd-test")
 
 
 def asks_for(tool: str, call_id: str) -> AIMessage:

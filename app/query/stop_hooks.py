@@ -117,8 +117,20 @@ async def handle_stop_hooks(
     return StopHookResult(blocking_errors=tuple(blocking))
 
 
+def _in_plan_mode(state: LoopState) -> bool:
+    from app.types.permissions import PermissionMode
+
+    try:
+        return bool(state.tool_context.get_app_state().tool_permission_context.mode == PermissionMode.PLAN)
+    except Exception:  # noqa: BLE001 - a context without permissions is not planning
+        return False
+
+
 def build_stop_hooks_runner() -> StopHooks:
-    """The `LoopDeps.stop_hooks` of a production run: the TDD hook, then configured hooks."""
+    """
+    The `LoopDeps.stop_hooks` of a production run: the TDD hook, then configured hooks. In plan
+    mode the plan advance and the TDD hook are skipped (there is no sub-requirement yet).
+    """
     # Imported here: the TDD modules return this module's `StopHookResult`.
     from app.tdd.plan_advance import advance_plan
     from app.tdd.stop_hook import tdd_phase_incomplete_hook
@@ -134,10 +146,13 @@ def build_stop_hooks_runner() -> StopHooks:
                 # The model asked the user and nobody could answer: the turn ends and waits,
                 # as upstream's `-p` ends when the model stops after the denial.
                 return StopHookResult(prevent_continuation=True)
-            advanced = advance_plan(state)
-            tdd = advanced if advanced is not None else await tdd_phase_incomplete_hook(state, config)
-            if tdd.prevent_continuation:
-                return tdd
+            if not _in_plan_mode(state):
+                # Plan mode (the Analyst) has no sub-requirement to finish yet: a planning turn
+                # ends as upstream's does, on AskUserQuestion or ExitPlanMode.
+                advanced = advance_plan(state)
+                tdd = advanced if advanced is not None else await tdd_phase_incomplete_hook(state, config)
+                if tdd.prevent_continuation:
+                    return tdd
         configured = await handle_stop_hooks(state, state.messages, bool(state.stop_hook_active))
         if configured.prevent_continuation:
             return configured
