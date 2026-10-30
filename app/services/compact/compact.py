@@ -97,6 +97,15 @@ class CompactSummarizer(Protocol):
     ) -> Awaitable[Message]: ...
 
 
+class ForkCompactSummarizer(Protocol):
+    """
+    `streamCompactSummary`'s cache-sharing path (`runForkedAgent` with the main loop's
+    `cacheSafeParams`): the messages exactly as the main loop sends them, then the request.
+    """
+
+    def __call__(self, messages: Sequence[Message], summary_request: Message, context: Any) -> Awaitable[Message]: ...
+
+
 #: What the engine re-attaches after the boundary (TDD state, deltas), given the context.
 PostCompactAttachments = Callable[[Any], Sequence[Message]]
 
@@ -169,6 +178,28 @@ def _text_of(message: Any) -> str:
             str(block.get("text", "")) for block in content if isinstance(block, dict) and block.get("type") == "text"
         )
     return ""
+
+
+async def _forked_summary(
+    fork: ForkCompactSummarizer | None, messages: Sequence[Message], summary_request: Message, context: Any
+) -> Message | None:
+    """
+    `streamCompactSummary`'s cache-sharing branch (`tengu_compact_cache_prefix`, default true
+    for third-party builds): the fork's reply when it has text and is no API error, else `None`
+    so the caller falls back to the regular path, as upstream does after logging.
+    """
+    if fork is None:
+        return None
+    try:
+        reply = await fork(messages, summary_request, context)
+    except Exception:  # upstream logs the error and falls back to the streaming path
+        logger.exception("Compact cache sharing failed; falling back to the regular summary request")
+        return None
+    kwargs = getattr(reply, "additional_kwargs", None) or {}
+    if _text_of(reply) and not kwargs.get("is_api_error_message"):
+        return reply
+    logger.warning("Compact cache sharing: no text in response, falling back")
+    return None
 
 
 def _strip_media(blocks: list[Any]) -> tuple[list[Any], bool]:
@@ -358,6 +389,7 @@ async def compact_conversation(
     custom_instructions: str | None = None,
     suppress_follow_up_questions: bool = True,
     transcript_path: str | None = None,
+    fork_summarizer: ForkCompactSummarizer | None = None,
 ) -> CompactionResult:
     """`compactConversation`: summarize everything; rebuild the context after the boundary."""
     from app.utils.hooks.hooks import (
@@ -381,8 +413,12 @@ async def compact_conversation(
     to_summarize = list(messages)
     attempts = 0
     while True:
-        prepared = strip_images_from_messages(get_messages_after_compact_boundary(to_summarize))
-        response = await summarizer(prepared, summary_request, context, max_output_tokens=max_output_tokens)
+        # `streamCompactSummary`: the cache-sharing fork first, the regular path on its failure.
+        # Both get the PTL-truncated set (upstream threads it through `forkContextMessages`).
+        response = await _forked_summary(fork_summarizer, to_summarize, summary_request, context)
+        if response is None:
+            prepared = strip_images_from_messages(get_messages_after_compact_boundary(to_summarize))
+            response = await summarizer(prepared, summary_request, context, max_output_tokens=max_output_tokens)
         summary = _text_of(response)
         if not summary.startswith(PROMPT_TOO_LONG_ERROR_MESSAGE):
             break

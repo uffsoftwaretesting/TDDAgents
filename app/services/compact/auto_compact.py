@@ -38,6 +38,7 @@ from typing import Any
 from app.services.compact.compact import (
     CompactionResult,
     CompactSummarizer,
+    ForkCompactSummarizer,
     PostCompactAttachments,
     compact_conversation,
 )
@@ -163,6 +164,7 @@ async def auto_compact_if_needed(
     query_source: str | None = None,
     snip_tokens_freed: int = 0,
     transcript_path: str | None = None,
+    fork_summarizer: ForkCompactSummarizer | None = None,
 ) -> AutoCompactOutcome:
     """`autoCompactIfNeeded`: compact when over the threshold, behind the circuit breaker."""
     if _env_truthy("TDDAGENTS_DISABLE_COMPACT"):
@@ -183,6 +185,7 @@ async def auto_compact_if_needed(
             custom_instructions=None,
             suppress_follow_up_questions=True,
             transcript_path=transcript_path,
+            fork_summarizer=fork_summarizer,
         )
     except Exception:
         logger.exception("Autocompact failed")

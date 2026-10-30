@@ -40,7 +40,10 @@ from app.services.compact.compact import (
     compact_conversation,
 )
 from app.services.compact.micro_compact import microcompact_messages
-from app.services.compact.summarizer import build_compact_summarizer
+from app.services.compact.summarizer import (
+    build_compact_summarizer,
+    build_forked_compact_summarizer,
+)
 from app.services.tools.tool_orchestration import run_tools
 from app.tdd.tdd_state_attachment import create_tdd_state_attachment_message
 from app.utils.messages import Message, ToolCall
@@ -176,6 +179,7 @@ async def production_autocompact(
         post_compact_attachments=post_compact_attachments,
         query_source=query_source_of(state.tool_context),
         transcript_path=state.tool_context.transcript_path,
+        fork_summarizer=build_forked_compact_summarizer(state, config),
     )
 
 
@@ -195,6 +199,7 @@ async def production_compact(state: LoopState, config: RunConfig) -> CompactionR
             post_compact_attachments=post_compact_attachments,
             model=config.model,
             transcript_path=state.tool_context.transcript_path,
+            fork_summarizer=build_forked_compact_summarizer(state, config),
         )
     except Exception:  # noqa: BLE001 - upstream logs a failed compaction and carries on
         return CompactionResult(compacted=False, messages=state.messages, tracking=state.compaction_tracking)
