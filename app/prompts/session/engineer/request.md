@@ -1,16 +1,7 @@
-Act as the Technical Specification Engineer.
+Validated requirements and the history of their gathering:
 
-Analyze the following requirements-gathering history consolidated by the Analyst:
-
-📚 HISTORY AND REQUIREMENTS:
 """
 {{REQUIREMENTS}}
 """
 
-🎯 YOUR TASK:
-Convert this raw data into the Final Technical Specification in Markdown.
-
-Execution Rules:
-1. Rigorously follow the "REQUIRED OUTPUT FORMAT" structure established in your System Prompt.
-2. Make sure to extract all edge cases and validations, since the Quality Engineer (Tester) will use your document as the ONLY source of truth for writing the test suite.
-3. Do not include any greeting or text outside the Markdown.
+Write the technical specification for them.

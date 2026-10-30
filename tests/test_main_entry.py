@@ -51,7 +51,7 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
         return build_session_shell(
             thread_id, SessionOptions(headless=options.headless, checkpoint="memory"),
             workspace_factory=lambda t: Workspace(), analyzer_fn=checklist,
-            engineer_fn=lambda r, h: "# Spec", planner_fn=lambda s, c: ["Item A"],
+            engineer_fn=lambda *_: "# Spec", planner_fn=lambda *_: ["Item A"],
         )
 
     def fake_develop(shell: Any, thread_id: str, values: Any, workspace: Any, options: Any,

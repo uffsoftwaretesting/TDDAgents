@@ -32,6 +32,9 @@ from app.session.shell import (
     create_session_graph,
     route_after_analyst,
     route_after_engineer,
+    route_after_engineer_review,
+    route_after_planner,
+    route_after_planner_review,
     route_after_review,
 )
 from app.session.state import SessionState, SessionStatus
@@ -50,12 +53,25 @@ def direct(user_input: str, history: str) -> dict[str, Any]:
     return {"response": "All clear.", "needs_clarification": False, "has_checklist": False}
 
 
-def engineer(requirements: str, history: str) -> str:
-    return f"SPEC({history})"
+def engineer(requirements: str, history: str, previous: str = "", feedback: str = "") -> str:
+    return f"SPEC({history})" if not feedback else f"{previous}+{feedback}"
 
 
-def planner(spec: str, completed: Any = ()) -> list[str]:
-    return ["Item A", "Item B"]
+def planner(spec: str, completed: Any = (), plan: Any = (), feedback: str = "") -> list[str]:
+    return ["Item A", "Item B"] if not feedback else [*plan, feedback]
+
+
+def approve(shell: SessionShell, thread_id: str, *expected: str) -> dict[str, Any]:
+    """Answer `/yes` to each pending review in turn (`expected` names their types)."""
+    result: dict[str, Any] = {}
+    for kind in expected:
+        assert shell.pending_interrupts(thread_id)[0]["type"] == kind
+        result = shell.resume(thread_id, "/yes")
+    return result
+
+
+#: The two reviews after the analyst's checklist (2026-10-29).
+REVIEWS = ("specification_approval", "plan_approval")
 
 
 def make_shell(analyzer: Any = checklist, **kwargs: Any) -> SessionShell:
@@ -286,24 +302,38 @@ class TestAnalystReview:
 
 class TestEngineerNode:
     def test_writes_the_specification(self) -> None:
-        seen: list[tuple[str, str]] = []
+        seen: list[tuple[str, str, str, str]] = []
 
-        def eng(requirements: str, history: str) -> str:
-            seen.append((requirements, history))
+        def eng(requirements: str, history: str, previous: str, feedback: str) -> str:
+            seen.append((requirements, history, previous, feedback))
             return "  # Spec  "
 
-        state: SessionState = {"requirements": "R", "conversation_history": "H", "audit_log": ["[Init]"]}
+        state: SessionState = {"requirements": "R", "conversation_history": "H", "audit_log": ["[Init]"],
+                               "specification": "# Old"}
         out = node_engineer(state, engineer_fn=eng)
-        assert seen == [("R", "H")]
-        assert out == {"specification": "# Spec", "status": SessionStatus.PLANNING,
+        # Without feedback the previous specification is not passed on.
+        assert seen == [("R", "H", "", "")]
+        assert out == {"specification": "# Spec", "engineer_feedback": "", "status": SessionStatus.SPECIFIED,
                        "audit_log": ["[Init]", "[Engineer] Specification ready (6 characters)."]}
 
+    def test_rewrites_the_specification_from_the_users_feedback(self) -> None:
+        seen: list[tuple[str, ...]] = []
+
+        def eng(*args: str) -> str:
+            seen.append(args)
+            return "# New"
+
+        out = node_engineer({"requirements": "R", "conversation_history": "H", "specification": "# Old",
+                             "engineer_feedback": "add a CLI"}, engineer_fn=eng)
+        assert seen == [("R", "H", "# Old", "add a CLI")]
+        assert (out["specification"], out["engineer_feedback"]) == ("# New", "")
+
     def test_empty_specification_fails(self) -> None:
-        out = node_engineer({}, engineer_fn=lambda r, h: "   ")
+        out = node_engineer({}, engineer_fn=lambda r, h, *_: "   ")
         assert out == {"status": SessionStatus.FAILED, "audit_log": ["[Engineer] Empty specification."]}
 
     def test_error_fails(self, caplog: pytest.LogCaptureFixture) -> None:
-        def broken(r: str, h: str) -> str:
+        def broken(r: str, h: str, *_: str) -> str:
             raise RuntimeError("boom")
 
         with caplog.at_level(logging.ERROR):
@@ -313,13 +343,13 @@ class TestEngineerNode:
 
     def test_logs_the_size(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO):
-            node_engineer({}, engineer_fn=lambda r, h: "abc")
+            node_engineer({}, engineer_fn=lambda r, h, *_: "abc")
         assert "Specification generated: 3 characters." in caplog.text
 
     def test_default_seam_is_the_engineer_agent(self) -> None:
         with patch("app.session.agents.engineer.generate_specification", return_value="S") as seam:
             out = node_engineer({"requirements": "R", "conversation_history": "H"})
-        seam.assert_called_once_with("R", "H")
+        seam.assert_called_once_with("R", "H", "", "")
         assert out["specification"] == "S"
 
 
@@ -348,7 +378,7 @@ class TestPlannerNode:
     def test_planner_plans_from_the_specification_only(self) -> None:
         seen: list[str] = []
 
-        def capturing_planner(spec: str, completed: Any) -> list[str]:
+        def capturing_planner(spec: str, completed: Any, *_: Any) -> list[str]:
             seen.append(spec)
             return ["Item 1"]
 
@@ -360,15 +390,15 @@ class TestPlannerNode:
         assert seen == ["The spec"]
 
     def test_planner_appends_to_the_audit_log(self) -> None:
-        out = node_plan({"specification": "S", "audit_log": ["[Init]"]}, planner_fn=lambda s, c: ["A"])
+        out = node_plan({"specification": "S", "audit_log": ["[Init]"]}, planner_fn=lambda s, c, *_: ["A"])
         assert out["audit_log"] == ["[Init]", "[Planner] Generated plan with 1 items:\n1. A"]
-        failed = node_plan({"specification": "S", "audit_log": ["[Init]"]}, planner_fn=lambda s, c: [])
+        failed = node_plan({"specification": "S", "audit_log": ["[Init]"]}, planner_fn=lambda s, c, *_: [])
         assert failed["audit_log"] == ["[Init]", "[Planner] Planner returned an empty plan."]
 
     def test_planner_retries_a_retryable_error(self, no_retry_sleep: list[float]) -> None:
         calls: list[str] = []
 
-        def flaky(spec: str, completed: Any) -> list[str]:
+        def flaky(spec: str, completed: Any, *_: Any) -> list[str]:
             calls.append(spec)
             if len(calls) == 1:
                 raise RetryableError("overloaded")
@@ -380,7 +410,7 @@ class TestPlannerNode:
         assert len(no_retry_sleep) == 1
 
     def test_planner_exception_fails(self) -> None:
-        def crashing_planner(spec: str, completed: Any) -> list[str]:
+        def crashing_planner(spec: str, completed: Any, *_: Any) -> list[str]:
             raise ValueError("Planner timeout")
 
         state: SessionState = {"specification": "Build app"}
@@ -391,7 +421,7 @@ class TestPlannerNode:
 
     def test_planner_empty_list_fails(self) -> None:
         state: SessionState = {"specification": "Build app"}
-        out = node_plan(state, planner_fn=lambda s, c: [])
+        out = node_plan(state, planner_fn=lambda s, c, *_: [])
         assert out["status"] == SessionStatus.PLAN_FAILED
         assert out["audit_log"] == ["[Planner] Planner returned an empty plan."]
         assert out["plan"] == []
@@ -399,17 +429,17 @@ class TestPlannerNode:
     def test_planner_successful_plan(self) -> None:
         items = ["Step 1: Core", "Step 2: CLI", "Step 3: Docs"]
         state: SessionState = {"specification": "Build complete app"}
-        out = node_plan(state, planner_fn=lambda s, c: items)
-        assert out["status"] == SessionStatus.PLANNED
+        out = node_plan(state, planner_fn=lambda s, c, *_: items)
+        assert out["status"] == SessionStatus.PLAN_PROPOSED
         assert out["plan"] == items
-        assert set(out) == {"plan", "status", "audit_log"}
+        assert set(out) == {"plan", "planner_feedback", "status", "audit_log"}
         expected_log = "[Planner] Generated plan with 3 items:\n1. Step 1: Core\n2. Step 2: CLI\n3. Step 3: Docs"
         assert out["audit_log"] == [expected_log]
 
     def test_the_planner_is_told_what_is_already_done(self) -> None:
         seen: list[Any] = []
 
-        def capturing(spec: str, completed: Any) -> list[str]:
+        def capturing(spec: str, completed: Any, *_: Any) -> list[str]:
             seen.append(completed)
             return ["C"]
 
@@ -418,16 +448,31 @@ class TestPlannerNode:
         assert seen == [[], ["A", "B"]]
 
     def test_a_rescope_with_nothing_left_is_planned_not_failed(self) -> None:
-        out = node_plan({"specification": "S", "completed_items": ["A"]}, planner_fn=lambda s, c: [])
-        assert (out["status"], out["plan"]) == (SessionStatus.PLANNED, [])
+        out = node_plan({"specification": "S", "completed_items": ["A"]}, planner_fn=lambda s, c, *_: [])
+        assert (out["status"], out["plan"]) == (SessionStatus.PLAN_PROPOSED, [])
+
+    def test_replans_from_the_users_feedback(self) -> None:
+        seen: list[tuple[Any, ...]] = []
+
+        def capturing(*args: Any) -> list[str]:
+            seen.append(args)
+            return ["New"]
+
+        state: SessionState = {"specification": "S", "plan": ["Old"], "completed_items": ["A"],
+                               "planner_feedback": "split it"}
+        out = node_plan(state, planner_fn=capturing)
+        assert seen == [("S", ["A"], ["Old"], "split it")]
+        assert (out["plan"], out["planner_feedback"]) == (["New"], "")
+        node_plan({"specification": "S", "plan": ["Old"]}, planner_fn=capturing)
+        assert seen[-1] == ("S", [], [], "")
 
     def test_planner_logging(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO):
-            node_plan({"specification": "Build app"}, planner_fn=lambda s, c: ["A", "B"])
+            node_plan({"specification": "Build app"}, planner_fn=lambda s, c, *_: ["A", "B"])
         assert "Generated plan with 2 sub-requirements." in caplog.text
 
     def test_planner_error_logging(self, caplog: pytest.LogCaptureFixture) -> None:
-        def crashing(s: str, c: Any) -> list[str]:
+        def crashing(s: str, c: Any, *_: Any) -> list[str]:
             raise RuntimeError("Planner dead")
 
         with caplog.at_level(logging.ERROR):
@@ -466,8 +511,24 @@ class TestRoutersAndState:
         assert route_after_review({"status": SessionStatus.FAILED}) == END
 
     def test_route_after_engineer(self) -> None:
-        assert route_after_engineer({"status": SessionStatus.PLANNING}) == "planner"
+        assert route_after_engineer({"status": SessionStatus.SPECIFIED}) == "engineer_review"
+        assert route_after_engineer({"status": SessionStatus.PLANNING}) == END
         assert route_after_engineer({"status": SessionStatus.FAILED}) == END
+
+    def test_route_after_engineer_review(self) -> None:
+        assert route_after_engineer_review({"status": SessionStatus.PLANNING}) == "planner"
+        assert route_after_engineer_review({"status": SessionStatus.SPECIFYING}) == "engineer"
+        assert route_after_engineer_review({"status": SessionStatus.SPECIFIED}) == "engineer_review"
+        assert route_after_engineer_review({"status": SessionStatus.FAILED}) == END
+
+    def test_route_after_planner(self) -> None:
+        assert route_after_planner({"status": SessionStatus.PLAN_PROPOSED}) == "planner_review"
+        assert route_after_planner({"status": SessionStatus.PLAN_FAILED}) == END
+
+    def test_route_after_planner_review(self) -> None:
+        assert route_after_planner_review({"status": SessionStatus.PLANNED}) == END
+        assert route_after_planner_review({"status": SessionStatus.PLANNING}) == "planner"
+        assert route_after_planner_review({"status": SessionStatus.PLAN_PROPOSED}) == "planner_review"
 
     def test_default_checkpointer_is_memory(self) -> None:
         shell = SessionShell()
@@ -476,7 +537,7 @@ class TestRoutersAndState:
 
     def test_graph_nodes(self) -> None:
         nodes = set(make_shell().graph.get_graph().nodes)
-        assert {"analyst", "analyst_review", "engineer", "planner"} <= nodes
+        assert {"analyst", "analyst_review", "engineer", "engineer_review", "planner", "planner_review"} <= nodes
         assert not {"execute_plan_item", "evaluator"} & nodes
 
 
@@ -489,13 +550,13 @@ class TestFullSessionFlow:
         (payload,) = shell.pending_interrupts("t")
         assert payload["type"] == "checklist_approval"
         assert payload["prompt"] == "Checklist: 1. Setup. Can I proceed?"
-        result = shell.resume("t", "/yes")
+        result = approve(shell, "t", "checklist_approval", *REVIEWS)
         assert result["status"] == SessionStatus.PLANNED
         assert result["specification"] == (
             "SPEC([User]: Build a payment gateway\n[Analyst]: Checklist: 1. Setup. Can I proceed?)"
         )
         assert result["plan"] == ["Item A", "Item B"]
-        assert result["user_prompts"] == ["Build a payment gateway", "/yes"]
+        assert result["user_prompts"] == ["Build a payment gateway", "/yes", "/yes", "/yes"]
         assert shell.is_finished("t")
         assert shell.pending_interrupts("t") == []
 
@@ -522,19 +583,18 @@ class TestFullSessionFlow:
         shell.run("req", "t")
         assert shell.pending_interrupts("t")[0]["type"] == "clarification"
         shell.resume("t", "EUR")
-        assert shell.pending_interrupts("t")[0]["type"] == "checklist_approval"
-        result = shell.resume("t", "/yes")
+        result = approve(shell, "t", "checklist_approval", *REVIEWS)
         assert result["status"] == SessionStatus.PLANNED
         assert result["conversation_history"].count("[User]:") == 2
         assert "[User]: EUR" in result["conversation_history"]
-        assert result["user_prompts"] == ["req", "EUR", "/yes"]
+        assert result["user_prompts"] == ["req", "EUR", "/yes", "/yes", "/yes"]
 
     def test_headless_runs_without_interrupts(self) -> None:
         shell = make_shell(headless=True)
         result = shell.run("req", "t")
         assert result["status"] == SessionStatus.PLANNED
         assert shell.pending_interrupts("t") == []
-        assert result["user_prompts"] == ["req", "/yes"]
+        assert result["user_prompts"] == ["req", "/yes", "/yes", "/yes"]
 
     def test_headless_fails_on_a_question(self) -> None:
         shell = make_shell(question, headless=True)
@@ -543,14 +603,15 @@ class TestFullSessionFlow:
         assert result["plan"] == []
 
     def test_engineer_failure_ends_the_session(self) -> None:
-        shell = make_shell(direct, engineer_fn=lambda r, h: "")
+        shell = make_shell(direct, engineer_fn=lambda r, h, *_: "")
         result = shell.run("req", "t")
         assert result["status"] == SessionStatus.FAILED
         assert result["plan"] == []
 
     def test_planner_failure_ends_the_session(self) -> None:
-        shell = make_shell(direct, planner_fn=lambda s, c: [])
-        assert shell.run("req", "t")["status"] == SessionStatus.PLAN_FAILED
+        shell = make_shell(direct, planner_fn=lambda s, c, *_: [])
+        shell.run("req", "t")
+        assert shell.resume("t", "/yes")["status"] == SessionStatus.PLAN_FAILED
 
     def test_a_restarted_process_continues_from_the_checkpoint(self) -> None:
         shared = MemorySaver()
@@ -558,7 +619,7 @@ class TestFullSessionFlow:
         shell_b = make_shell(checkpointer=shared)
         assert shell_b.pending_interrupts("t")[0]["type"] == "checklist_approval"
         assert shell_b.get_state("t").values["user_confirmed"] is False
-        assert shell_b.resume("t", "/yes")["status"] == SessionStatus.PLANNED
+        assert approve(shell_b, "t", "checklist_approval", *REVIEWS)["status"] == SessionStatus.PLANNED
 
     def test_an_interactive_pause_continued_headless_is_decided_by_the_shell(self) -> None:
         shared = MemorySaver()
@@ -569,7 +630,7 @@ class TestFullSessionFlow:
     def test_rescope_runs_the_analysis_again_and_passes_the_done_items(self) -> None:
         seen: list[Any] = []
 
-        def capturing(spec: str, completed: Any) -> list[str]:
+        def capturing(spec: str, completed: Any, *_: Any) -> list[str]:
             seen.append(completed)
             return ["C"]
 
@@ -581,22 +642,23 @@ class TestFullSessionFlow:
 
         shell = make_shell(analyzer, planner_fn=capturing)
         shell.run("req", "t")
-        result = shell.rescope("t", "add CSV export", ["Item A"])
+        approve(shell, "t", *REVIEWS)
+        shell.rescope("t", "add CSV export", ["Item A"])
+        result = approve(shell, "t", *REVIEWS)
         assert result["status"] == SessionStatus.PLANNED
         assert result["plan"] == ["C"]
         assert seen == [[], ["Item A"]]
         assert inputs == ["req", "add CSV export"]
-        assert result["user_prompts"] == ["req", "add CSV export"]
+        assert result["user_prompts"] == ["req", "/yes", "/yes", "add CSV export", "/yes", "/yes"]
         assert "[User]: add CSV export" in result["conversation_history"]
         assert result["completed_items"] == ["Item A"]
 
     def test_rescope_reaches_the_checklist_review_again(self) -> None:
         shell = make_shell()
         shell.run("req", "t")
-        shell.resume("t", "/yes")
+        approve(shell, "t", "checklist_approval", *REVIEWS)
         shell.rescope("t", "more", [])
-        assert shell.pending_interrupts("t")[0]["type"] == "checklist_approval"
-        assert shell.resume("t", "/yes")["status"] == SessionStatus.PLANNED
+        assert approve(shell, "t", "checklist_approval", *REVIEWS)["status"] == SessionStatus.PLANNED
 
     def test_unknown_thread(self) -> None:
         shell = make_shell()
@@ -615,7 +677,7 @@ class TestMutationDefensePhase9:
         assert out["status"] == SessionStatus.ANALYSIS_COMPLETE
         with patch("app.session.agents.planner.generate_plan", return_value=["A"]) as plan_seam:
             assert node_plan({"specification": "S"})["plan"] == ["A"]
-        plan_seam.assert_called_once_with("S", [])
+        plan_seam.assert_called_once_with("S", [], [], "")
 
     def test_run_records_the_thread_id(self) -> None:
         shell = make_shell(direct)
@@ -637,7 +699,7 @@ class TestMutationDefensePhase9:
     def test_engineer_missing_fields_are_empty(self) -> None:
         seen: list[tuple[str, str]] = []
 
-        def eng(r: str, h: str) -> str:
+        def eng(r: str, h: str, *_: str) -> str:
             seen.append((r, h))
             return "S"
 

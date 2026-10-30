@@ -41,23 +41,40 @@ def analyst_prompts(user_input: str, conversation_history: str = "") -> tuple[st
     return _system("analyst"), human.strip()
 
 
-def engineer_prompts(requirements: str, conversation_history: str = "") -> tuple[str, str]:
-    """The engineer's (system, human) prompts: the history when there is one, else the requirements."""
-    human = render_prompt(_read("engineer", "request.md"), {"REQUIREMENTS": conversation_history or requirements})
+def engineer_prompts(
+    requirements: str, conversation_history: str = "", *, specification: str = "", feedback: str = ""
+) -> tuple[str, str]:
+    """
+    The engineer's (system, human) prompts: the history when there is one, else the requirements.
+    With the user's review feedback (upstream's "No, keep planning"), the request carries the
+    previous specification and the feedback.
+    """
+    values = {"REQUIREMENTS": conversation_history or requirements}
+    if feedback:
+        human = render_prompt(_read("engineer", "feedback.md"),
+                              {**values, "SPECIFICATION": specification, "FEEDBACK": feedback})
+    else:
+        human = render_prompt(_read("engineer", "request.md"), values)
     return _system("engineer"), human.strip()
 
 
-def planner_prompts(specification: str, completed: Sequence[str] = ()) -> tuple[str, str]:
+def planner_prompts(
+    specification: str, completed: Sequence[str] = (), *, plan: Sequence[str] = (), feedback: str = ""
+) -> tuple[str, str]:
     """
     The planner's (system, human) prompts for the engineer's specification; on a re-scope
-    (`/requirements`, Phase 11) the sub-requirements already done are listed so they are not
-    planned again.
+    (`/requirements`, Phase 11) the sub-requirements already done are listed. With the user's
+    review feedback, the previous plan and the feedback follow.
     """
     human = render_prompt(_read("planner", "request.md"), {"SPECIFICATION": specification}).strip()
     if completed:
         done = render_prompt(_read("planner", "completed.md"),
                              {"COMPLETED": "\n".join(f"- {item}" for item in completed)}).strip()
         human = f"{human}\n\n{done}"
+    if feedback:
+        revise = render_prompt(_read("planner", "feedback.md"), {
+            "PLAN": "\n".join(f"{n}. {item}" for n, item in enumerate(plan, 1)), "FEEDBACK": feedback}).strip()
+        human = f"{human}\n\n{revise}"
     return _system("planner"), human
 
 

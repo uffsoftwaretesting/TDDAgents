@@ -18,12 +18,14 @@ logger = logging.getLogger(__name__)
 def node_plan(
     state: SessionState,
     *,
-    planner_fn: Callable[[str, Sequence[str]], list[str]] | None = None,
+    planner_fn: Callable[[str, Sequence[str], Sequence[str], str], list[str]] | None = None,
 ) -> dict[str, Any]:
     """
     Planning node: the engineer's specification becomes an ordered plan of sub-requirements
     (Part K3). On a re-scope the sub-requirements already done are passed on, so they are not
-    planned again. The call goes through the shell's `with_retry` (`app/session/llm.py`).
+    planned again. After the user's review asked for changes, the previous plan and that
+    feedback are passed on (`app/session/review.py`). The call goes through the shell's
+    `with_retry` (`app/session/llm.py`).
     """
     audit_log = list(state.get("audit_log") or [])
     spec = str(state.get("specification") or "").strip()
@@ -40,7 +42,9 @@ def node_plan(
         planner_fn = generate_plan
 
     try:
-        plan = call_with_retry(planner_fn, spec, list(state.get("completed_items") or []))
+        feedback = str(state.get("planner_feedback") or "")
+        previous = list(state.get("plan") or []) if feedback else []
+        plan = call_with_retry(planner_fn, spec, list(state.get("completed_items") or []), previous, feedback)
     except Exception as exc:  # noqa: BLE001 - any model failure is PLAN_FAILED
         logger.error("Planner execution error: %s", exc)
         return {
@@ -59,7 +63,8 @@ def node_plan(
     logger.info("Generated plan with %d sub-requirements.", len(plan))
     return {
         "plan": list(plan),
-        "status": SessionStatus.PLANNED,
+        "planner_feedback": "",
+        "status": SessionStatus.PLAN_PROPOSED,
         "audit_log": [
             *audit_log,
             f"[Planner] Generated plan with {len(plan)} items:\n"

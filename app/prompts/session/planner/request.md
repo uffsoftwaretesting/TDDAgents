@@ -1,13 +1,8 @@
-You received the following Technical Specification from the Client:
+Technical specification:
 
 📋 PROJECT SPECIFICATION:
 """
 {{SPECIFICATION}}
 """
 
-🎯 YOUR TASK:
-As Principal Architect, analyze the requirements above and structure the project.
-Take into account scalability, Separation of Concerns, and the most appropriate modern libraries for the Python ecosystem.
-
-Generate the sequential development plan (TDD Plan) using the required output structure (JSON).
-Each step of your plan will guide the QA and Development agents in iteratively building the software in the Sandbox.
+Write the TDD plan for it.

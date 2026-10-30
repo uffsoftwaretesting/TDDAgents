@@ -3,12 +3,14 @@ The session shell: requirements and planning, before development (§3.4 and Part
 `docs/transition_elaboration_plan.md`, Phases 9 and 11).
 
 ```
-START → analyst ⇄ analyst_review (interrupt) → engineer → planner → END
+START → analyst ⇄ analyst_review (interrupt) → engineer ⇄ engineer_review (interrupt)
+      → planner ⇄ planner_review (interrupt) → END
 ```
 
 LangGraph keeps what the loop has no answer for: checkpointing (so a session survives a
-restart and resumes by thread id) and the analyst's human-in-the-loop `interrupt()`. Once
-the planner has produced the plan the session is `planned`, and the sub-requirements are
+restart and resumes by thread id) and the human-in-the-loop `interrupt()`s: the analyst's
+checklist, then the user's review of the specification and of the plan (`app/session/review.py`,
+upstream's plan approval). Once the user approves the plan the session is `planned`, and the sub-requirements are
 worked on in one development conversation (`app/cli/print.py`), where the TDD barriers live.
 
 `rescope` (`/requirements`, Phase 11) runs the same graph again on the same thread: the
@@ -36,6 +38,7 @@ from app.session.analyst import node_analyst, node_analyst_review
 from app.session.checkpointer import build_checkpointer
 from app.session.engineer import node_engineer
 from app.session.planning import node_plan
+from app.session.review import node_engineer_review, node_planner_review
 from app.session.state import SessionState, SessionStatus
 
 logger = logging.getLogger(__name__)
@@ -91,15 +94,39 @@ def route_after_review(state: SessionState) -> str:
 
 
 def route_after_engineer(state: SessionState) -> str:
-    return "planner" if state.get("status") == SessionStatus.PLANNING else END
+    return "engineer_review" if state.get("status") == SessionStatus.SPECIFIED else END
+
+
+def route_after_engineer_review(state: SessionState) -> str:
+    status = state.get("status")
+    if status == SessionStatus.PLANNING:
+        return "planner"
+    if status == SessionStatus.SPECIFYING:
+        return "engineer"
+    if status == SessionStatus.SPECIFIED:
+        return "engineer_review"
+    return END
+
+
+def route_after_planner(state: SessionState) -> str:
+    return "planner_review" if state.get("status") == SessionStatus.PLAN_PROPOSED else END
+
+
+def route_after_planner_review(state: SessionState) -> str:
+    status = state.get("status")
+    if status == SessionStatus.PLANNING:
+        return "planner"
+    if status == SessionStatus.PLAN_PROPOSED:
+        return "planner_review"
+    return END
 
 
 def create_session_graph(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     *,
     analyzer_fn: Callable[[str, str], dict[str, Any]] | None = None,
-    engineer_fn: Callable[[str, str], str] | None = None,
-    planner_fn: Callable[[str, Sequence[str]], list[str]] | None = None,
+    engineer_fn: Callable[[str, str, str, str], str] | None = None,
+    planner_fn: Callable[[str, Sequence[str], Sequence[str], str], list[str]] | None = None,
     headless: bool = False,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build and compile the session graph (Parts K1, K2, K3)."""
@@ -120,16 +147,26 @@ def create_session_graph(
     def _planner_node(state: SessionState) -> dict[str, Any]:
         return node_plan(state, planner_fn=planner_fn)
 
+    def _engineer_review_node(state: SessionState) -> dict[str, Any]:
+        return node_engineer_review(state, headless=headless)
+
+    def _planner_review_node(state: SessionState) -> dict[str, Any]:
+        return node_planner_review(state, headless=headless)
+
     workflow.add_node("analyst", _analyst_node)
     workflow.add_node("analyst_review", _review_node)
     workflow.add_node("engineer", _engineer_node)
     workflow.add_node("planner", _planner_node)
+    workflow.add_node("engineer_review", _engineer_review_node)
+    workflow.add_node("planner_review", _planner_review_node)
 
     workflow.add_edge(START, "analyst")
     workflow.add_conditional_edges("analyst", route_after_analyst)
     workflow.add_conditional_edges("analyst_review", route_after_review)
     workflow.add_conditional_edges("engineer", route_after_engineer)
-    workflow.add_edge("planner", END)
+    workflow.add_conditional_edges("engineer_review", route_after_engineer_review)
+    workflow.add_conditional_edges("planner", route_after_planner)
+    workflow.add_conditional_edges("planner_review", route_after_planner_review)
 
     return workflow.compile(checkpointer=checkpointer)
 
@@ -147,8 +184,8 @@ class SessionShell:
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         *,
         analyzer_fn: Callable[[str, str], dict[str, Any]] | None = None,
-        engineer_fn: Callable[[str, str], str] | None = None,
-        planner_fn: Callable[[str, Sequence[str]], list[str]] | None = None,
+        engineer_fn: Callable[[str, str, str, str], str] | None = None,
+        planner_fn: Callable[[str, Sequence[str], Sequence[str], str], list[str]] | None = None,
         headless: bool = False,
     ) -> None:
         self._checkpointer = checkpointer or build_checkpointer()
@@ -191,8 +228,11 @@ class SessionShell:
         }
         return self._graph.invoke(update, config=build_session_run_config(thread_id))
 
-    def resume(self, thread_id: str, user_response: str) -> dict[str, Any]:
-        """Answer the pending interrupt of `thread_id` (`Command(resume=…)`)."""
+    def resume(self, thread_id: str, user_response: str | dict[str, str]) -> dict[str, Any]:
+        """
+        Answer the pending interrupt of `thread_id` (`Command(resume=…)`): the user's text, or
+        `{"edited": text}` for an edit made in the editor (`app/session/review.py`).
+        """
         return self._graph.invoke(Command(resume=user_response), config=build_session_run_config(thread_id))
 
     def continue_session(self, thread_id: str) -> dict[str, Any]:

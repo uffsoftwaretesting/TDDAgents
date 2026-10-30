@@ -19,15 +19,21 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import tempfile
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.config.config import Config
 from app.session.checkpointer import build_checkpointer, is_persistent_checkpointer
+from app.session.review import EDITED
 from app.session.shell import SessionShell
 from app.session.state import SessionStatus
+from app.utils.permissions.filesystem import get_tddagents_temp_dir
+from app.utils.prompt_editor import EditorResult, edit_file_in_editor
 
 if TYPE_CHECKING:
     from app.cli.print import DevelopmentOutcome
@@ -83,8 +89,8 @@ def build_session_shell(
     *,
     workspace_factory: Callable[[str], Any] | None = None,
     analyzer_fn: Callable[[str, str], dict[str, Any]] | None = None,
-    engineer_fn: Callable[[str, str], str] | None = None,
-    planner_fn: Callable[[str, Sequence[str]], list[str]] | None = None,
+    engineer_fn: Callable[[str, str, str, str], str] | None = None,
+    planner_fn: Callable[[str, Sequence[str], Sequence[str], str], list[str]] | None = None,
 ) -> tuple[SessionShell, Any]:
     """The session's shell and its shared workspace, where development will run."""
     from app.cli.print import session_workspace
@@ -137,7 +143,7 @@ def drive_session(
     shell: SessionShell,
     thread_id: str,
     initial_input: str | None,
-    answer: Callable[[dict[str, Any]], str | None] | None = None,
+    answer: Callable[[dict[str, Any]], ReviewAnswer] | None = None,
 ) -> SessionRun:
     """
     Start `thread_id` from `initial_input`, or continue it from its checkpoint, then answer
@@ -162,8 +168,44 @@ def drive_session(
 EXIT_COMMANDS = ("/exit", "/quit")
 
 
-def analyst_review_text(payload: dict[str, Any]) -> str:
-    """The analyst's answer and the tip on how to reply to it."""
+#: The answer that opens the reviewed specification or plan in the user's editor.
+EDIT_COMMAND = "/edit"
+
+#: The reviews whose text `/edit` opens, and what that text is called.
+EDITABLE_REVIEWS = {"specification_approval": "specification", "plan_approval": "plan"}
+
+#: A review answer: the user's text, an edit (`{"edited": text}`), or `None` to leave.
+ReviewAnswer = str | dict[str, str] | None
+
+
+def review_text(payload: dict[str, Any]) -> str:
+    """What the user is shown at an interrupt, and the tip on how to reply to it."""
+    kind = payload.get("type")
+    if kind == "specification_approval":
+        return "\n".join([
+            f"\n🛠️  [Engineer] Technical Specification:\n{payload.get('prompt', '')}\n",
+            "💡 TIP: Review the specification.",
+            "   - Type '/yes' to proceed to Planning.",
+            f"   - Type '{EDIT_COMMAND}' to change it in your editor.",
+            "   - Or type the changes you'd like the Engineer to make.",
+        ])
+    if kind == "plan_approval":
+        lines = [f"\n🗺️  [Planner] TDD Plan:\n{payload.get('prompt', '')}\n"]
+        if payload.get("error"):
+            lines.append(f"⚠ {payload['error']}\n")
+        return "\n".join([
+            *lines,
+            "💡 TIP: Review the plan.",
+            "   - Type '/yes' to proceed to Development.",
+            ("   - Type '/plan add <text>', '/plan edit <id> <text>', '/plan remove <id>' or "
+             "'/plan move <id> <position>' to change an item."),
+            f"   - Type '{EDIT_COMMAND}' to change it in your editor, one item per line.",
+            "   - Or type the changes you'd like the Planner to make.",
+        ])
+    return _analyst_review_text(payload)
+
+
+def _analyst_review_text(payload: dict[str, Any]) -> str:
     lines = [f"\n🤖 [Requirements Analyst]:\n{payload.get('prompt', '')}\n"]
     if payload.get("has_checklist"):
         lines += [
@@ -176,8 +218,61 @@ def analyst_review_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def edit_review(
+    payload: dict[str, Any], edit: Callable[[Path], EditorResult] = edit_file_in_editor
+) -> tuple[dict[str, str] | None, str]:
+    """
+    `/edit` (upstream's ctrl-g at the plan approval): the reviewed text goes to a draft file, the
+    user's editor opens it, and the edited text comes back as `{"edited": text}`. Otherwise
+    `None` and the reason, shown before the user is asked again.
+    """
+    kind = EDITABLE_REVIEWS.get(str(payload.get("type")))
+    if kind is None:
+        return None, f"{EDIT_COMMAND} works on the specification and on the plan."
+    text = "\n".join(payload.get("plan") or []) if kind == "plan" else str(payload.get("prompt") or "")
+    directory = Path(get_tddagents_temp_dir())
+    directory.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=f"{kind}-", suffix=".md", dir=directory)
+    path = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as draft:
+            draft.write(f"{text}\n")
+        result = edit(path)
+    finally:
+        path.unlink(missing_ok=True)
+    if result.content is None:
+        return None, result.error or "No editor found: set $VISUAL or $EDITOR."
+    if result.content.strip() == text.strip():
+        return None, f"The {kind} is unchanged."
+    return {EDITED: result.content}, ""
+
+
+def read_review_answer(
+    payload: dict[str, Any],
+    read: Callable[[], str | None],
+    write: Callable[[str], None],
+    edit: Callable[[dict[str, Any]], tuple[dict[str, str] | None, str]] = edit_review,
+) -> ReviewAnswer:
+    """
+    Show `payload` and read the user's answer: `None` when they leave, an edit when `/edit`
+    produced one, else their text. A failed `/edit` says why and asks again.
+    """
+    write(review_text(payload))
+    while True:
+        line = read()
+        if line is None or line.strip().lower() in EXIT_COMMANDS:
+            return None
+        reply = line.strip()
+        if reply != EDIT_COMMAND or payload.get("type") not in EDITABLE_REVIEWS:
+            return reply
+        edited, message = edit(payload)
+        if edited is not None:
+            return edited
+        write(message)
+
+
 def answer_interrupts(
-    shell: SessionShell, thread_id: str, answer: Callable[[dict[str, Any]], str | None] | None
+    shell: SessionShell, thread_id: str, answer: Callable[[dict[str, Any]], ReviewAnswer] | None
 ) -> SessionRun:
     """Answer `thread_id`'s interrupts until none is pending or `answer` returns `None`."""
     while answer is not None:
@@ -196,7 +291,7 @@ def rescope_session(
     thread_id: str,
     request: str,
     completed_items: Sequence[str],
-    answer: Callable[[dict[str, Any]], str | None] | None,
+    answer: Callable[[dict[str, Any]], ReviewAnswer] | None,
 ) -> SessionRun:
     """`/requirements`: the analyst, the engineer and the planner again, with `request`."""
     shell.rescope(thread_id, request, completed_items)
@@ -256,12 +351,12 @@ async def _develop_interactive(
         io = io_factory(lambda: holder["repl"].interrupt())
         loop = asyncio.get_running_loop()
 
-        def answer(payload: dict[str, Any]) -> str | None:
-            io.write(analyst_review_text(payload))
-            line = asyncio.run_coroutine_threadsafe(io.read_line("👤 "), loop).result()
-            if line is None or line.strip().lower() in EXIT_COMMANDS:
-                return None
-            return str(line)
+        def answer(payload: dict[str, Any]) -> ReviewAnswer:
+            def read() -> str | None:
+                line: str | None = asyncio.run_coroutine_threadsafe(io.read_line("👤 "), loop).result()
+                return line
+
+            return read_review_answer(payload, read, io.write)
 
         async def rescope(request: str) -> tuple[str, list[str]] | None:
             done = [item.text for item in run.store.get().tdd_plan.items if item.status == ItemStatus.DONE]
@@ -281,11 +376,13 @@ async def _develop_interactive(
 
 
 __all__ = [
+    "EDITABLE_REVIEWS",
+    "EDIT_COMMAND",
     "EXIT_COMMANDS",
     "MEMORY_CHECKPOINT",
+    "ReviewAnswer",
     "SessionOptions",
     "SessionRun",
-    "analyst_review_text",
     "answer_interrupts",
     "build_session_shell",
     "checkpoint_uri",
@@ -294,6 +391,9 @@ __all__ = [
     "develop_interactive",
     "development_run_options",
     "drive_session",
+    "edit_review",
     "fresh_thread_id",
+    "read_review_answer",
     "rescope_session",
+    "review_text",
 ]

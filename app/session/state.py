@@ -19,9 +19,16 @@ class SessionStatus(StrEnum):
     GATHERING_REQUIREMENTS = "gathering_requirements"
     AWAITING_INPUT = "awaiting_input"
     ANALYSIS_COMPLETE = "analysis_complete"
+    #: The specification is written and waits for the user's review (`app/session/review.py`).
+    SPECIFIED = "specified"
+    #: The user asked for changes: the engineer writes the specification again.
+    SPECIFYING = "specifying"
+    #: The specification is approved (or the user asked for plan changes): the planner plans.
     PLANNING = "planning"
+    #: The plan is written and waits for the user's review.
+    PLAN_PROPOSED = "plan_proposed"
     PLAN_FAILED = "plan_failed"
-    #: The plan exists: the session moves on to development.
+    #: The user approved the plan: the session moves on to development.
     PLANNED = "planned"
     FAILED = "failed"
 
@@ -47,5 +54,10 @@ class SessionState(TypedDict, total=False):
     #: On `/requirements` (Phase 11): the sub-requirements already done, which the planner must
     #: not plan again.
     completed_items: list[str]
+    #: The user's feedback on the specification or the plan, for the next engineer or planner call.
+    engineer_feedback: str
+    planner_feedback: str
+    #: Why the last `/plan` command at the plan review could not apply (shown with the plan).
+    review_error: str
     status: str
     audit_log: list[str]

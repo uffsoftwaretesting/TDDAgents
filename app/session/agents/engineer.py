@@ -15,12 +15,17 @@ from app.session.prompts import engineer_prompts
 from app.utils.chat_model_factory import get_chat_model
 
 
-def generate_specification(requirements: str, conversation_history: str = "") -> str:
-    """The technical specification, in Markdown, from the confirmed requirements."""
+def generate_specification(
+    requirements: str, conversation_history: str = "", specification: str = "", feedback: str = ""
+) -> str:
+    """The technical specification, in Markdown, from the confirmed requirements (and the user's feedback)."""
     llm = get_chat_model(provider=Config.CHAT_MODEL, model=Config.MODEL, temperature=Config.TEMPERATURE)
-    system_prompt, human_prompt = engineer_prompts(requirements, conversation_history)
+    system_prompt, human_prompt = engineer_prompts(
+        requirements, conversation_history, specification=specification, feedback=feedback)
     response = llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_prompt),
     ])
-    return str(response.content).strip()
+    # `.text` joins the text blocks only: a Claude reply's content is a list that also holds
+    # thinking blocks, whose `str()` is not a specification.
+    return response.text.strip()

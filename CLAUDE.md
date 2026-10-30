@@ -488,7 +488,8 @@ Context assembly, attachments and compaction, ported test-first. The user's dire
 - Not ported:
   - session-memory and partial compaction;
   - cached microcompact;
-  - the forked prompt-cache-sharing path;
+  - the forked prompt-cache-sharing path *(ported 2026-10-29; see "Compaction shares the main
+    thread's request")*;
   - plan, skill and async-agent post-compact attachments (no subsystems);
   - the global cache scope;
   - the attachment sources whose subsystems this build lacks.
@@ -1331,7 +1332,9 @@ specification said documentation must not be implemented. At the user's directio
   build has neither).
 - The planner and engineer prompts (TDDAgents-authored) carry the same rule: specify and plan only
   what was asked, with no documentation, README, CI, packaging or release steps unless asked, and
-  nothing the requirements say must not be implemented.
+  nothing the requirements say must not be implemented. *(Superseded 2026-10-29: the prompts follow
+  upstream's Plan agent and the user reviews the specification and the plan; see "The user reviews
+  the specification and the plan".)*
 - Env-gated tests (`SKIP_HEAVY_TESTS`) are left to the prompts, as upstream steers behaviour:
   the ported "no feature flags" rule and RunTests' "never gated behind environment variables".
   There is no heuristic scanner (user decision).
@@ -1619,6 +1622,77 @@ way upstream does it:
   fires earlier than the model's 1M window requires;
 - `Config` still requires `OPENAI_API_KEY` at import;
 - `DEFAULT_MODEL_ALIAS` (unused) still names `gpt-5-mini`.
+
+### Compaction shares the main thread's request, as upstream (2026-10-29)
+
+The live CPF run on Claude Haiku 5.5 (30/30 items, final run passing at 100% coverage) never
+compacted. Haiku 5.5 binds each thinking block to its conversation: the system prompt, the tools
+and the earlier messages. Our summarizer sent the history under its own system prompt with no
+tools, and the API refused it ("Invalid `signature` in `thinking` block. The block is bound to a
+different conversation"). Three failures tripped the circuit breaker. The run went on in Haiku
+5.5's 1M window, with prompts up to 865K tokens, 153 of 177 calls above the 100K price tier.
+
+At the user's direction the fix is upstream's own: `streamCompactSummary`'s **cache-sharing path**
+(`tengu_compact_cache_prefix`, default true for third-party builds), which Phase 5 had recorded as
+not ported.
+- `build_forked_compact_summarizer` (`app/services/compact/summarizer.py`) is `runForkedAgent` with
+  the main loop's `cacheSafeParams`: one main-loop model call (`stream_call_model`) over the
+  messages the loop was about to send plus the summary request. The system prompt, tools, model
+  and prefix are the main thread's, so thinking blocks stay valid and the prompt cache is shared.
+  Its tool calls are never run (`maxTurns: 1`, `createCompactCanUseTool` refusing them), and only
+  its text is the summary.
+- `compact_conversation` tries it first on the raw messages (`forkContextMessages`). An exception,
+  no text or an API-error reply falls back to the regular summary request (`build_compact_summarizer`)
+  on the prepared messages, as upstream does after logging. A prompt-too-long retry threads the
+  truncated set through both.
+- Both production compactions (`production_autocompact`, `production_compact`) pass it.
+
+*Limit, recorded:* the regular fallback still sends thinking blocks under its own prompt, as
+upstream's does; on a model that binds them it fails too, so a failed fork still means no summary.
+
+### The user reviews the specification and the plan (2026-10-29)
+
+The engineer and planner prompts carried TDDAgents-written scope rules ("no documentation, README,
+CI, packaging … unless the requirements ask", "the gold standard of the Python ecosystem", "The
+first step … MUST ALWAYS be environment setup", sample items). They misfired both ways: a
+2026-10-28 plan added a README and CI the spec excluded, and the 2026-10-29 Haiku 5.5 CPF plan
+dropped the Dockerfile, docker-compose, CI and README the spec asked for. Upstream steers planning
+differently: its Plan agent (`tools/AgentTool/built-in/planAgent.ts`) has a role line, a process
+and a required output, and no scope rule, and the user holds scope at the plan approval
+(`ExitPlanModeV2Tool`: approve, "No, keep planning" with feedback, or edit the plan file in the
+editor). At the user's direction TDDAgents does the same:
+
+- **Prompts** (`app/prompts/session/{engineer,planner}/`) have `planAgent.ts`'s shape:
+  - a role line, `## Your Process` and `## Required Output`;
+  - the planner adds `## How TDDAgents runs the plan`, which states facts, not commands: one item
+    is one Red→Green→Refactor cycle RunTests observes, RunTests reports uncollected test files
+    (pytest's default discovery), and the dependencies come from Core Dependencies;
+  - every scope rule and sample item is gone, and no generic scope line replaces them (the Plan
+    agent has none). `tests/test_doing_tasks_prompt.py` pins their absence.
+- **Two reviews join the shell graph** (`app/session/review.py`), each its own node, as the
+  analyst's is:
+  - `engineer_review` and `planner_review` interrupt with the specification or the numbered plan.
+  - `/yes` approves.
+  - `/edit` opens the text in the user's editor: `app/utils/prompt_editor.py` ports
+    `editFileInEditor`, `getExternalEditor` and `EDITOR_OVERRIDES`. The draft lives in
+    `get_tddagents_temp_dir()` and is deleted afterwards; the plan is edited one item per line.
+  - For the plan, `/plan add|edit|remove|move` reuses `apply_plan_command`, and a command that
+    cannot apply is shown with the plan.
+  - Any other text is feedback. The engineer or planner writes its output again from its previous
+    output and the feedback (`feedback.md`, worded after upstream's "To tell you how to proceed,
+    the user said:").
+  - A headless session approves both, as it approves the checklist.
+  - The terminal side is `review_text` and `read_review_answer` (`app/session/driver.py`), shared
+    by `app/main.py` and the REPL's `/requirements`.
+- **Fixed on the way:** the engineer seam returned `str(response.content)`. On Claude the content
+  is a list holding thinking blocks, so the CPF run's stored specification was a Python list's
+  `repr`, thinking signature included. It now returns LangChain's `.text`.
+
+*Divergences, recorded:*
+- `/yes` and `/edit` are typed commands, not a selection menu;
+- the review is between the session shell's agents, not a tool call;
+- feedback re-runs the agent instead of continuing a conversation;
+- `getExternalEditor` is not memoized and has no Windows fallback.
 
 ### The three things that changed most
 
@@ -2150,7 +2224,8 @@ above; this section is the runtime path through it.
 
 `app/main.py` → `app/session/driver.py` (`build_session_shell`, `drive_session`) →
 `app/session/shell.py`: one checkpointed LangGraph thread, state `SessionState`:
-`analyst ⇄ analyst_review (interrupt) → engineer → planner`, ending `PLANNED`. The driver
+`analyst ⇄ analyst_review → engineer ⇄ engineer_review → planner ⇄ planner_review` (each review
+an interrupt), ending `PLANNED` once the user approves the plan. The driver
 then hands the plan to `develop_interactive` (the REPL) or `develop_headless` (`-p`), and
 `app/main.py` writes each item's outcome to `metrics_and_logging/subreq_results.txt`. See
 [What Phase 11 changed](#what-phase-11-changed-2026-10-27).

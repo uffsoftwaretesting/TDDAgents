@@ -530,12 +530,12 @@ def test_develop_interactive_runs_the_repl_and_rescopes_through_the_shell(python
     def checklist(user_input: str, history: str) -> dict[str, Any]:
         return {"response": "Checklist. Proceed?", "needs_clarification": False, "has_checklist": True}
 
-    def planner(spec: str, completed: Any) -> list[str]:
+    def planner(spec: str, completed: Any, *_: Any) -> list[str]:
         return ["more"] if completed else ["first"]
 
     options = SessionOptions(checkpoint=MEMORY_CHECKPOINT, permission_mode="acceptEdits")
     shell, _ = build_session_shell("t-i", options, workspace_factory=lambda t: python_workspace,
-                                   analyzer_fn=checklist, engineer_fn=lambda r, h: "SPEC", planner_fn=planner)
+                                   analyzer_fn=checklist, engineer_fn=lambda *_: "SPEC", planner_fn=planner)
     run = drive_session(shell, "t-i", "req", lambda p: "/yes")
     model = Model([*cycle_turns(), [AIMessage(content="ok")]])
     io = FakeIO()
@@ -545,9 +545,11 @@ def test_develop_interactive_runs_the_repl_and_rescopes_through_the_shell(python
         while "Every sub-requirement is done" not in loop_io.text():
             await asyncio.sleep(0.01)
         loop_io.lines.put_nowait("/requirements add more")
-        while not any("Requirements Analyst" in line for line in loop_io.out):
-            await asyncio.sleep(0.01)
-        loop_io.lines.put_nowait("/yes")
+        # The analyst's checklist, then the reviews of the specification and of the plan.
+        for header in ("Requirements Analyst", "[Engineer]", "[Planner]"):
+            while not any(header in line for line in loop_io.out):
+                await asyncio.sleep(0.01)
+            loop_io.lines.put_nowait("/yes")
         while not any(line.startswith("New plan:") for line in loop_io.out):
             await asyncio.sleep(0.01)
         loop_io.lines.put_nowait("/exit")

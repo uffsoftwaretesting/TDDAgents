@@ -70,15 +70,30 @@ def test_the_section_is_upstreams_verbatim():
     assert read_system_prompt_file("doing-tasks.md").rstrip("\n") == expected
 
 
-@pytest.mark.parametrize("prompt", ["planner/system.md", "engineer/system.md"])
-def test_the_session_prompts_plan_only_what_was_asked(prompt: str):
+@pytest.mark.parametrize("prompt", ["planner/system.md", "planner/request.md", "engineer/system.md",
+                                    "engineer/request.md"])
+def test_the_session_prompts_carry_no_scope_rules(prompt: str):
+    """
+    Upstream's Plan agent (`planAgent.ts`) has no scope rule; the user's review holds scope
+    (2026-10-29). The rules the 2026-10-28 prompts carried are gone.
+    """
     text = (SESSION / prompt).read_text(encoding="utf-8")
-    assert "no documentation, README, CI, packaging" in text
-    assert "must not be implemented" in text
+    for rule in ("unless", "README", " CI", "packaging", "MUST ALWAYS", "gold standard",
+                 "Python ecosystem", "must not be implemented", "PHASE 0"):
+        assert rule not in text, rule
 
 
-def test_the_planner_names_test_files_pytest_collects():
+@pytest.mark.parametrize("prompt", ["planner/system.md", "engineer/system.md"])
+def test_the_session_prompts_have_the_plan_agents_shape(prompt: str):
+    text = (SESSION / prompt).read_text(encoding="utf-8")
+    assert text.startswith("You are a ")
+    assert "## Your Process" in text and "## Required Output" in text
+
+
+def test_the_planner_is_told_which_test_files_pytest_collects():
     """Two live palindrome plans named `tests/tests_*.py`, which pytest never collects (2026-10-28)."""
     text = (SESSION / "planner" / "system.md").read_text(encoding="utf-8")
-    assert "use pytest's default discovery pattern (`test_*.py` or `*_test.py`, e.g. `tests/test_core.py`)" in text
+    assert ("RunTests runs pytest and reports the test files pytest does not collect. pytest's default "
+            "discovery collects `test_*.py` and `*_test.py` files") in text
+    assert "exactly one Red -> Green -> Refactor cycle that the RunTests tool observes" in text
     assert "tests_" not in text

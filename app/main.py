@@ -45,16 +45,16 @@ from dotenv import load_dotenv
 from app.query.transitions import Terminal
 from app.session.checkpointer import is_persistent_checkpointer
 from app.session.driver import (
-    EXIT_COMMANDS,
+    ReviewAnswer,
     SessionOptions,
     SessionRun,
-    analyst_review_text,
     build_session_shell,
     derive_thread_id,
     develop_headless,
     develop_interactive,
     drive_session,
     fresh_thread_id,
+    read_review_answer,
 )
 from app.tdd.plan import ItemStatus, TddPlan
 from app.tools.ask_user_question_tool.ask_user_question_tool import render_questions
@@ -146,16 +146,16 @@ def read_initial_request(args: argparse.Namespace) -> str | None:
     return None
 
 
-def interactive_answer(payload: dict[str, Any]) -> str | None:
-    """Show the analyst's answer and read the user's; `None` when the user leaves."""
-    print(analyst_review_text(payload))
-    try:
-        reply = input("\n👤 [Your Response] (or '/exit'): ").strip()
-    except (KeyboardInterrupt, EOFError):
-        return None
-    if reply.lower() in EXIT_COMMANDS:
-        return None
-    return reply
+def interactive_answer(payload: dict[str, Any]) -> ReviewAnswer:
+    """Show what the session asks and read the user's answer; `None` when the user leaves."""
+
+    def read() -> str | None:
+        try:
+            return input("\n👤 [Your Response] (or '/exit'): ")
+        except (KeyboardInterrupt, EOFError):
+            return None
+
+    return read_review_answer(payload, read, print)
 
 
 def format_dialogue_text(dialogue: str, width: int = 88) -> str:

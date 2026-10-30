@@ -43,7 +43,7 @@ def build(options: SessionOptions, analyzer: Any = checklist, planner: Any = Non
     workspace = object()
     shell, ws = build_session_shell(
         "t", options, workspace_factory=lambda thread_id: workspace, analyzer_fn=analyzer,
-        engineer_fn=lambda r, h: "SPEC", planner_fn=planner or (lambda s, c: ["A"]),
+        engineer_fn=lambda *_: "SPEC", planner_fn=planner or (lambda *_: ["A"]),
     )
     assert ws is workspace
     return shell, ws
@@ -126,9 +126,9 @@ def test_interactive_drive_answers_interrupts() -> None:
         return "/yes"
 
     run = drive_session(shell, "t", "req", answer)
-    assert [p["type"] for p in asked] == ["checklist_approval"]
+    assert [p["type"] for p in asked] == ["checklist_approval", "specification_approval", "plan_approval"]
     assert run.planned and run.paused_at is None
-    assert run.values["user_prompts"] == ["req", "/yes"]
+    assert run.values["user_prompts"] == ["req", "/yes", "/yes", "/yes"]
     assert run.values["plan"] == ["A"]
 
 
@@ -139,7 +139,7 @@ def test_answer_none_pauses_and_a_later_drive_continues() -> None:
     assert run.values["status"] == SessionStatus.AWAITING_INPUT
     run = drive_session(shell, "t", None, lambda payload: "/yes")
     assert run.planned
-    assert run.values["user_prompts"] == ["req", "/yes"]
+    assert run.values["user_prompts"] == ["req", "/yes", "/yes", "/yes"]
 
 
 def test_a_paused_thread_driven_headless_is_decided_by_the_shell() -> None:
@@ -154,7 +154,7 @@ def test_a_paused_thread_driven_headless_is_decided_by_the_shell() -> None:
 def test_a_finished_thread_is_reported_as_it_stands(caplog: pytest.LogCaptureFixture) -> None:
     calls: list[str] = []
 
-    def planner(spec: str, completed: Any) -> list[str]:
+    def planner(spec: str, completed: Any, *_: Any) -> list[str]:
         calls.append(spec)
         return ["A"]
 
@@ -214,7 +214,7 @@ def test_answer_interrupts_without_an_answer_reports_the_state() -> None:
 def test_rescope_session_reruns_the_analysis_and_answers_its_review() -> None:
     seen: list[Any] = []
 
-    def planner(spec: str, completed: Any) -> list[str]:
+    def planner(spec: str, completed: Any, *_: Any) -> list[str]:
         seen.append(completed)
         return ["B"]
 
@@ -228,7 +228,7 @@ def test_rescope_session_reruns_the_analysis_and_answers_its_review() -> None:
 
     run = rescope_session(shell, "t", "add B", ["A"], answer)
     assert run.planned and run.values["plan"] == ["B"]
-    assert asked == ["checklist_approval"]
+    assert asked == ["checklist_approval", "specification_approval", "plan_approval"]
     assert seen[-1] == ["A"]
 
 
@@ -259,7 +259,7 @@ def test_a_headless_session_end_to_end_through_development(python_workspace: Any
     options = SessionOptions(headless=True, checkpoint=MEMORY_CHECKPOINT, permission_mode="acceptEdits")
     shell, _ = build_session_shell(
         "tdd-e2e", options, workspace_factory=lambda thread_id: python_workspace, analyzer_fn=checklist,
-        engineer_fn=lambda r, h: "# Spec: add", planner_fn=lambda s, c: ["add two numbers"],
+        engineer_fn=lambda *_: "# Spec: add", planner_fn=lambda *_: ["add two numbers"],
     )
     run = drive_session(shell, "tdd-e2e", "Build a calculator")
     assert run.planned

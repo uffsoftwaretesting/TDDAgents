@@ -69,6 +69,23 @@ class TestPrompts:
         assert human.startswith(plain + "\n\n✅ ALREADY DONE:\n")
         assert human.endswith("- A\n- B")
 
+    def test_engineer_feedback_carries_the_previous_specification(self) -> None:
+        _, human = engineer_prompts("REQ", "HIST", specification="# Old", feedback="add a CLI")
+        assert human.startswith('Validated requirements and the history of their gathering:\n\n"""\nHIST\n"""')
+        assert 'The specification you wrote for them:\n\n"""\n# Old\n"""' in human
+        # Upstream's reject wording: "To tell you how to proceed, the user said:".
+        assert "To tell you how to proceed, the user said:\nadd a CLI\n\nWrite the revised" in human
+        _, plain = engineer_prompts("REQ", "HIST", specification="# Old")
+        assert "# Old" not in plain
+
+    def test_planner_feedback_follows_the_request_and_the_done_items(self) -> None:
+        _, base = planner_prompts("# Spec", ["A"])
+        _, human = planner_prompts("# Spec", ["A"], plan=["one", "two"], feedback="split two")
+        assert human.startswith(base + "\n\n📝 YOUR PREVIOUS PLAN:\n1. one\n2. two\n\n")
+        assert human.endswith("To tell you how to proceed, the user said:\nsplit two\n\nWrite the revised TDD plan.")
+        _, unchanged = planner_prompts("# Spec", ["A"], plan=["one"])
+        assert unchanged == base
+
     def test_values_are_not_rescanned(self) -> None:
         """A placeholder inside user text survives verbatim: substitution is one pass."""
         _, human = analyst_prompts("{{CONVERSATION_HISTORY}}", "")
@@ -76,7 +93,7 @@ class TestPrompts:
 
     def test_planner_names_the_dependencies_section(self) -> None:
         system, _ = planner_prompts("s")
-        assert '"Core Dependencies" section' in system
+        assert "the specification's Core Dependencies" in system
         assert "Section 6" not in system
         assert "## 5. Core Dependencies" in _file("engineer", "system.md")
 
