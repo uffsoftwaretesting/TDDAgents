@@ -11,6 +11,15 @@ a typed `/<skill> args` expands into the turn
 prompts and skills, the remote/bridge filters, availability requirements (no auth types) and the
 memoized command cache (the list is built from the run's skill registry each time).
 
+`/context` is ported from `reference/claude-code/src/commands/context/index.ts` ->
+`contextNonInteractive` and `context-noninteractive.ts` -> `collectContextData`, `call`,
+`formatContextAsMarkdownTable`: the Markdown report, which upstream's interactive build replaces
+with a coloured grid (`context.tsx`, `components/ContextVisualization.tsx`, React/Ink, not
+ported). `collect_context_data` is also what the SDK's `get_context_usage` control request
+answers with (`cli/print.ts`). Upstream keeps it in `src/commands/context/`; here `commands` is a
+module, not a package, so it lives in this module. Not ported: the context-collapse status
+(`CONTEXT_COLLAPSE`, off in the external build) and the `[ANT-ONLY]` tables.
+
 | Command | What it does |
 |---|---|
 | `/plan` | Show the TDD plan |
@@ -21,6 +30,7 @@ memoized command cache (the list is built from the run's skill registry each tim
 | `/pause` | Let the agents stop after the current turn, without finishing the plan |
 | `/resume` | Undo `/pause` and continue the plan |
 | `/requirements <request>` | Enter plan mode and plan the new request (upstream's `/plan <description>`) |
+| `/context` | Show current context usage |
 | `/help` | This list |
 | `/exit`, `/quit` | Leave (the session can be continued with `--thread-id`) |
 
@@ -30,13 +40,28 @@ the turn to end. `/help`, `/plan` (showing), `/pause` and `/exit` are immediate.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from app.services.compact.compact import get_messages_after_compact_boundary
+from app.services.compact.micro_compact import microcompact_messages
 from app.tdd.plan import PlanError, TddPlan
+from app.tool import Tool
+from app.utils.analyze_context import (
+    FREE_SPACE_NAME,
+    RESERVED_CATEGORY_NAME,
+    ContextData,
+    TokenCounter,
+    analyze_context_usage,
+    rough_count_tokens,
+)
+from app.utils.format import format_tokens
+from app.utils.messages import Message
+from app.utils.settings.constants import get_source_display_name
 
-COMMANDS = ("plan", "pause", "resume", "requirements", "help", "exit", "quit")
+COMMANDS = ("plan", "pause", "resume", "requirements", "context", "help", "exit", "quit")
 
 #: Commands that run even while a turn is in flight (upstream's `immediate`).
 IMMEDIATE = frozenset({"help", "pause", "exit", "quit"})
@@ -50,6 +75,7 @@ HELP_TEXT = """Commands:
   /pause                        let the agents stop after the current turn
   /resume                       continue the plan
   /requirements <request>       enter plan mode and plan a new request
+  /context                      show current context usage
   /help                         this list
   /exit, /quit                  leave (continue later with --thread-id)
 Anything else is a message to the agents; Esc interrupts them."""
@@ -78,6 +104,8 @@ BUILT_IN_DESCRIPTIONS: dict[str, str] = {
     "pause": "Let the agents stop after the current turn",
     "resume": "Continue the plan",
     "requirements": "Enter plan mode and plan a new request",
+    #: `contextNonInteractive.description`.
+    "context": "Show current context usage",
     "help": "Show the commands",
     "exit": "Leave (continue later with --thread-id)",
 }
@@ -213,3 +241,108 @@ def apply_plan_command(plan: TddPlan, args: str) -> TddPlan:
     except PlanError as exc:
         raise CommandError(str(exc)) from None
     raise CommandError("Usage: /plan [add <text> | edit <id> <text> | remove <id> | move <id> <position>]")
+
+
+# ── /context ──────────────────────────────────────────────────────────────────
+
+async def collect_context_data(
+    messages: Sequence[Message],
+    *,
+    main_loop_model: str,
+    tools: Sequence[Tool],
+    agent_definitions: Mapping[str, Any] | Iterable[Any],
+    tool_context: Any,
+    custom_system_prompt: str | None = None,
+    append_system_prompt: str | None = None,
+    count_tokens: TokenCounter = rough_count_tokens,
+) -> ContextData:
+    """
+    `collectContextData`: the shared path of `/context` and the SDK's `get_context_usage`. It
+    applies the request's transforms first (from the last compact boundary on, then
+    microcompact), so the count is what the model sees; the messages before microcompact give
+    the API usage. `tool_context` is the run's main-thread `ToolContext` (`analyze_context_usage`).
+    """
+    api_view = get_messages_after_compact_boundary(messages)
+    compacted = microcompact_messages(api_view, is_main_thread=True).messages
+    return await analyze_context_usage(
+        compacted, main_loop_model, tools, agent_definitions, tool_context,
+        custom_system_prompt=custom_system_prompt, append_system_prompt=append_system_prompt,
+        original_messages=api_view, count_tokens=count_tokens)
+
+
+#: `formatContextAsMarkdownTable`'s agent-source switch (`Policy` here, not `Managed`).
+AGENT_SOURCE_DISPLAY: dict[str, str] = {
+    "projectSettings": "Project",
+    "userSettings": "User",
+    "localSettings": "Local",
+    "flagSettings": "Flag",
+    "policySettings": "Policy",
+    "plugin": "Plugin",
+    "built-in": "Built-in",
+}
+
+
+def _percent(tokens: int, total: int) -> str:
+    """`((tokens / total) * 100).toFixed(1)`: a tie rounds up, as `toFixed` does."""
+    return str(Decimal(tokens / total * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+
+
+def format_context_as_markdown_table(data: ContextData) -> str:
+    """`formatContextAsMarkdownTable`: the report `/context` prints outside the interactive grid."""
+    raw_max = data["rawMaxTokens"]
+    categories = data["categories"]
+    output = "## Context Usage\n\n"
+    output += f"**Model:** {data['model']}  \n"
+    output += f"**Tokens:** {format_tokens(data['totalTokens'])} / {format_tokens(raw_max)} ({data['percentage']}%)\n"
+    output += "\n"
+
+    visible = [c for c in categories
+               if c["tokens"] > 0 and c["name"] not in (FREE_SPACE_NAME, RESERVED_CATEGORY_NAME)]
+    if visible:
+        output += "### Estimated usage by category\n\n"
+        output += "| Category | Tokens | Percentage |\n"
+        output += "|----------|--------|------------|\n"
+        for cat in visible:
+            output += f"| {cat['name']} | {format_tokens(cat['tokens'])} | {_percent(cat['tokens'], raw_max)}% |\n"
+        for name in (FREE_SPACE_NAME, RESERVED_CATEGORY_NAME):
+            found = next((c for c in categories if c["name"] == name), None)
+            if found is not None and found["tokens"] > 0:
+                output += f"| {name} | {format_tokens(found['tokens'])} | {_percent(found['tokens'], raw_max)}% |\n"
+        output += "\n"
+
+    if data["mcpTools"]:
+        output += "### MCP Tools\n\n"
+        output += "| Tool | Server | Tokens |\n"
+        output += "|------|--------|--------|\n"
+        for tool in data["mcpTools"]:
+            output += f"| {tool['name']} | {tool['serverName']} | {format_tokens(tool['tokens'])} |\n"
+        output += "\n"
+
+    if data["agents"]:
+        output += "### Custom Agents\n\n"
+        output += "| Agent Type | Source | Tokens |\n"
+        output += "|------------|--------|--------|\n"
+        for agent in data["agents"]:
+            source = AGENT_SOURCE_DISPLAY.get(agent["source"], str(agent["source"]))
+            output += f"| {agent['agentType']} | {source} | {format_tokens(agent['tokens'])} |\n"
+        output += "\n"
+
+    if data["memoryFiles"]:
+        output += "### Memory Files\n\n"
+        output += "| Type | Path | Tokens |\n"
+        output += "|------|------|--------|\n"
+        for memory_file in data["memoryFiles"]:
+            output += f"| {memory_file['type']} | {memory_file['path']} | {format_tokens(memory_file['tokens'])} |\n"
+        output += "\n"
+
+    skills = data.get("skills")
+    if skills is not None and skills["tokens"] > 0 and skills["skillFrontmatter"]:
+        output += "### Skills\n\n"
+        output += "| Skill | Source | Tokens |\n"
+        output += "|-------|--------|--------|\n"
+        for skill in skills["skillFrontmatter"]:
+            output += (f"| {skill['name']} | {get_source_display_name(skill['source'])} | "
+                       f"{format_tokens(skill['tokens'])} |\n")
+        output += "\n"
+
+    return output
