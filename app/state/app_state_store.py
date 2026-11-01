@@ -12,9 +12,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.bootstrap.state import SessionBootstrap
 from app.tdd.ledger import PhaseLedger, TestRunRecord
 from app.tdd.plan import TddPlan
 from app.types.permissions import ToolPermissionContext
+from app.utils.file_history import FileHistoryState
 from app.utils.permissions.denial_tracking import DenialTrackingState
 
 
@@ -72,6 +74,13 @@ class AppState:
     #: Upstream `STATE.needsPlanModeExitAttachment`: plan mode was just left, so the next turn
     #: attaches `plan_mode_exit` once.
     needs_plan_mode_exit_attachment: bool = False
+    #: Upstream `appState.fileHistory` (`utils/fileHistory.ts`): the session's file checkpoints,
+    #: a snapshot per user prompt and the files tracked since. Written only through
+    #: `update_file_history_state_for` (a worker's updater is the no-op stub).
+    file_history: FileHistoryState = field(default_factory=FileHistoryState)
+    #: Upstream's process-wide `STATE` reads (`getSessionId`, `getOriginalCwd`,
+    #: `getIsNonInteractiveSession`), per run here: set once when the run is opened.
+    bootstrap: SessionBootstrap = field(default_factory=SessionBootstrap)
 
 
 @dataclass(slots=True)

@@ -67,8 +67,14 @@ the others back after the group's last on-chain member.
 
 Not ported: the >5 MB pre-boundary skip and chain-walk-before-parse (allocation optimizations
 with the same result), legacy progress bridging, preserved-segment relinks and snip removals
-(no subsystems here), and the session metadata entries (titles, tags, PR links, file-history
-and attribution snapshots, content replacements, context-collapse records).
+(no subsystems here), and the session metadata entries (titles, tags, PR links, attribution
+snapshots, content replacements, context-collapse records).
+
+File history (`utils/fileHistory.ts`, `app/utils/file_history.py`): `recordFileHistorySnapshot`
+/ `Project.insertFileHistorySnapshot` append a `file-history-snapshot` entry (always appended,
+buffered like any entry until the session file exists), and `loadTranscriptFile` collects them by
+`messageId` (the last one wins) for `buildFileHistorySnapshotChain`, which orders them along the
+loaded conversation, an update (`isSnapshotUpdate`) replacing the snapshot it updates.
 """
 
 from __future__ import annotations
@@ -81,7 +87,7 @@ import subprocess
 import time
 import uuid as uuid_module
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -89,6 +95,7 @@ from typing import Any
 from langchain_core.messages import ToolMessage, message_to_dict, messages_from_dict
 
 from app.services.compact.compact import BOUNDARY_KEY, is_compact_boundary_message
+from app.utils.file_history import FileHistorySnapshot, snapshot_from_json, snapshot_to_json
 from app.utils.messages import ATTACHMENT_KEY, Message, tool_calls_in
 from app.utils.session_storage_portable import (
     get_agent_transcript_path,
@@ -96,6 +103,9 @@ from app.utils.session_storage_portable import (
 )
 
 UUID_KEY = "uuid"
+
+#: `FileHistorySnapshotMessage.type`.
+FILE_HISTORY_SNAPSHOT_TYPE = "file-history-snapshot"
 
 #: `getUserType()` in the external build.
 USER_TYPE = "external"
@@ -351,6 +361,26 @@ class TranscriptStore:
             parent = uid
         return parent
 
+    def record_file_history_snapshot(
+        self, message_id: str, snapshot: FileHistorySnapshot, is_snapshot_update: bool
+    ) -> None:
+        """`recordFileHistorySnapshot` -> `Project.insertFileHistorySnapshot`."""
+        self._append_metadata_entry({
+            "type": FILE_HISTORY_SNAPSHOT_TYPE,
+            "messageId": message_id,
+            "snapshot": snapshot_to_json(snapshot),
+            "isSnapshotUpdate": is_snapshot_update,
+        })
+
+    def _append_metadata_entry(self, entry: dict[str, Any]) -> None:
+        """`appendEntry` for an entry that is not a message: no dedup, always appended."""
+        if self._skip_persistence():
+            return
+        if not self._materialized:
+            self._pending.append((self.path, entry))
+            return
+        self._write(self.path, entry)
+
     def _remember_tool_calls(self, message: Message, uid: str) -> None:
         for call in tool_calls_in(message):
             call_id = call.get("id")
@@ -429,6 +459,8 @@ class LoadedTranscript:
     messages: dict[str, Entry]
     leaf_uuids: frozenset[str]
     chain: list[Entry]
+    #: `LogOption.fileHistorySnapshots`: `buildFileHistorySnapshotChain` over `chain`.
+    file_history_snapshots: list[FileHistorySnapshot] = field(default_factory=list)
 
 
 def _parse_time(timestamp: Any) -> float | None:
@@ -454,7 +486,8 @@ def _find_latest(entries: Iterable[Entry], predicate: Callable[[Entry], bool]) -
     return latest
 
 
-def _read_entries(path: str | Path) -> dict[str, Entry]:
+def _read_entries(path: str | Path, file_history_snapshots: dict[str, Entry] | None = None) -> dict[str, Entry]:
+    """The message entries by uuid; `file-history-snapshot` entries by `messageId` into the given map."""
     messages: dict[str, Entry] = {}
     try:
         text = Path(path).read_text(encoding="utf-8")
@@ -465,12 +498,16 @@ def _read_entries(path: str | Path) -> dict[str, Entry]:
             entry = json.loads(line)
         except ValueError:
             continue
-        if (
-            isinstance(entry, dict)
-            and entry.get("type") in TRANSCRIPT_MESSAGE_TYPES
-            and isinstance(entry.get("uuid"), str)
-        ):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") in TRANSCRIPT_MESSAGE_TYPES and isinstance(entry.get("uuid"), str):
             messages[entry["uuid"]] = entry
+        elif (
+            file_history_snapshots is not None
+            and entry.get("type") == FILE_HISTORY_SNAPSHOT_TYPE
+            and isinstance(entry.get("messageId"), str)
+        ):
+            file_history_snapshots[entry["messageId"]] = entry
     return messages
 
 
@@ -497,12 +534,43 @@ def _main_leaf(messages: Mapping[str, Entry], leaves: frozenset[str]) -> Entry |
 
 
 def load_transcript_file(path: str | Path) -> LoadedTranscript:
-    """`loadTranscriptFile`: entries by uuid, the chain tips, and the main conversation."""
-    messages = _read_entries(path)
+    """
+    `loadTranscriptFile`: entries by uuid, the chain tips, the main conversation, and the file
+    history snapshots along it.
+    """
+    snapshot_entries: dict[str, Entry] = {}
+    messages = _read_entries(path, snapshot_entries)
     leaves = _leaf_uuids(messages)
     tip = _main_leaf(messages, leaves)
     chain = build_conversation_chain(messages, tip) if tip is not None else []
-    return LoadedTranscript(messages=messages, leaf_uuids=leaves, chain=chain)
+    return LoadedTranscript(messages=messages, leaf_uuids=leaves, chain=chain,
+                            file_history_snapshots=build_file_history_snapshot_chain(snapshot_entries, chain))
+
+
+def build_file_history_snapshot_chain(
+    file_history_snapshots: Mapping[str, Entry], conversation: Sequence[Entry]
+) -> list[FileHistorySnapshot]:
+    """
+    `buildFileHistorySnapshotChain`: the snapshots recorded at the conversation's messages, in
+    its order; an update (`isSnapshotUpdate`) replaces the snapshot of the message it updates.
+    """
+    snapshots: list[FileHistorySnapshot] = []
+    # messageId -> its index in `snapshots`, for an update.
+    index_by_message_id: dict[str, int] = {}
+    for message in conversation:
+        snapshot_message = file_history_snapshots.get(message["uuid"])
+        if snapshot_message is None:
+            continue
+        snapshot = snapshot_from_json(snapshot_message.get("snapshot"))
+        if snapshot is None:
+            continue
+        existing = index_by_message_id.get(snapshot.message_id) if snapshot_message.get("isSnapshotUpdate") else None
+        if existing is None:
+            index_by_message_id[snapshot.message_id] = len(snapshots)
+            snapshots.append(snapshot)
+        else:
+            snapshots[existing] = snapshot
+    return snapshots
 
 
 def build_conversation_chain(messages: Mapping[str, Entry], leaf: Entry) -> list[Entry]:
@@ -618,6 +686,7 @@ def get_agent_transcript(path: str | Path, agent_id: str | None = None) -> list[
 
 
 __all__ = [
+    "FILE_HISTORY_SNAPSHOT_TYPE",
     "SAVE_HOOK_ADDITIONAL_CONTEXT_ENV",
     "SKIP_PROMPT_HISTORY_ENV",
     "TRANSCRIPT_MESSAGE_TYPES",
@@ -627,6 +696,7 @@ __all__ = [
     "LoadedTranscript",
     "TranscriptStore",
     "build_conversation_chain",
+    "build_file_history_snapshot_chain",
     "build_entry",
     "ensure_message_uuid",
     "entry_to_message",
