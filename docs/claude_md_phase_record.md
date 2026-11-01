@@ -866,9 +866,10 @@ interview (recorded in the plan's Phase 9 outcome).
   `reset_session_context(run_id)` after every item.
 
 *Divergences, all recorded:*
-- the interrupted-turn auto-resume is always on (upstream gates it on
-  `CLAUDE_CODE_RESUME_INTERRUPTED_TURN`; the shell's restart is the gateway restart that
-  variable exists for);
+- ~~the interrupted-turn auto-resume is always on~~ — since 2026-11-01 it is gated as upstream
+  gates it (`TDDAGENTS_RESUME_INTERRUPTED_TURN` for `CLAUDE_CODE_RESUME_INTERRUPTED_TURN`): with
+  upstream's `[Request interrupted by user]` message now written on every abort, an always-on
+  resume would submit that text as the prompt (user decision);
 - a resumed item with no interrupted turn submits its sub-requirement again as the new
   prompt (the shell is the SDK caller that supplies the prompt);
 - run ids keep the `loop-` prefix before the uuid hex;
@@ -1426,8 +1427,9 @@ the user's direction they are now upstream's text verbatim (external build, our 
   compares every section when the reference snapshot is present.
 
 *Divergences, recorded:*
-- The Bash prompt has no `run_in_background` note or background sleep items, because our Bash
-  has no such parameter. Its sandbox section is empty, as upstream's is without a sandbox.
+- The Bash prompt's sandbox section is empty, as upstream's is without a sandbox. (Its
+  `run_in_background` note and background sleep items arrived with the background shells,
+  2026-11-01.)
 - `RunTests` and `Agent` guidance left `tools.md`. The TDD contract covers `RunTests`, and
   upstream puts the Agent guidance in a session-specific section, outside this one.
 
@@ -1778,6 +1780,83 @@ Decisions are recorded in `~/.claude/plans/make-the-fixes-i-imperative-wreath.md
 - `EnterPlanMode` has no KAIROS-channels gate;
 - the plan-mode text names our tools (`ReadFile`, `WriteFile`) and `getReadOnlyToolNames` is fixed
   to `ReadFile, Glob, Grep` (no project `allowedTools`).
+
+### Live-run fixes and the upstream ports (2026-11-01)
+
+The md→pdf FastAPI live run (thread `tdd-e88f2d3314364346`, 2026-10-31) finished its 9 items but
+surfaced four problems. Each was traced to claude-code v2.1.88 and fixed its way, and the user
+asked for a set of upstream files to be ported alongside. Plan:
+`~/.claude/plans/plan-this-thorugly-zany-sloth.md`; branch `feat/live-run-fixes`, one commit per part.
+
+- **`cd X && nohup … &` hung Bash for its whole timeout** (part 1). `LocalWorkspace.execute` used
+  `subprocess.run(capture_output=True)`, which waits for pipe EOF that a backgrounded grandchild
+  never sends. Upstream's exec model is ported:
+  - `app/utils/shell/shell.py` (`Shell.ts` `exec`) and `app/utils/shell_command.py`
+    (`ShellCommand`, `ExecResult`, the timeout path, exit codes 137/143/144/145): output goes to
+    `<task dir>/<id>.output` and completion is the shell's **exit**, never pipe EOF.
+    `LocalWorkspace.execute` is rebuilt on the same file + wait model and kills the process group.
+  - The workspace seam gains `spawn` (`LocalShellProcess`; `E2BShellProcess` over the adapter's
+    `start_background`).
+  - `run_in_background` and `LocalShellTask` (`app/tasks/local_shell_task/`): `local_bash` tasks
+    addressable by `TaskOutput` / `TaskStop`, the `<task-notification>` summaries, the 45 s stall
+    watchdog, a foreground command moved to the background on timeout (unless it starts with
+    `sleep`), `PROGRESS_THRESHOLD_MS`, `MAX_TASK_OUTPUT_BYTES`. A worker's shells are killed when it
+    ends, and the session's at teardown. `TDDAGENTS_DISABLE_BACKGROUND_TASKS` removes the parameter.
+  - **Cwd tracking** (`app/bootstrap/state.py`, `app/utils/cwd.py`): `pwd -P >| <cwd file>` after
+    each command, read back into the tracked cwd, which Bash, its path checks, the phase tier's
+    redirect resolution and the file tools' `expand_path` now use. A cwd that leaves the project is
+    reset with upstream's "Shell cwd was reset to …" (`TDDAGENTS_BASH_MAINTAIN_PROJECT_WORKING_DIR`).
+    RunTests keeps the project root.
+  - The Bash prompt gains upstream's background note and the two sleep items; the divergence in
+    "Every static system section and the Bash prompt are upstream's" is gone.
+- **`pkill -f "port 8765"` killed its own shell** (part 1). Nothing beyond upstream: the
+  actions-with-care prompt, and stopping one's own processes by task id (`TaskStop`).
+- **RED persisted after the last item** (part 2). The TDD phase tier now applies only while
+  `tdd_plan.current is not None`: `tdd_phase_denial` returns `None` otherwise, the pools carry no
+  phase rules, and `phase_on_spawn` does nothing. RunTests says the phase rules are off
+  (`NO_CURRENT_ITEM_LEDGER`), and `/plan add` brings them back. RunTests is still the only ledger
+  writer.
+- **Approval prompts showed `2 >& 1` and doubled quotes** (part 3). Upstream builds the same text
+  but never shows it. The REPL now renders upstream's dialogs (`app/components/permissions/`): the
+  full command verbatim, the file diff for Edit/Write, `name(key: value)` plus " (MCP)" for the
+  fallback, WebFetch's url, and `PermissionRuleExplanation` (nothing for subcommand results). Tools
+  gain `user_facing_name` and `render_tool_use_message`. UpdatePlan keeps its diff.
+- **Settings deny rules hide tools** (part 4): `filter_tools_by_deny_rules` (`tools.ts`) runs on
+  the main thread's and every worker's pool; the cache keys include the deny rules.
+- **Auto memory** (part 5, `app/memdir/`, all eight files): the memory prompt section, MEMORY.md as
+  `AutoMem` (and `TeamMem`), the filesystem carve-outs and TDD exemption, ReadFile's freshness
+  note, and the relevant-memories prefetch.
+- **Prompt history** (part 6, `app/history.py`): `<config home>/history.jsonl`, the REPL's ↑ over
+  the current project with this session's entries first (`TDDAGENTS_SKIP_PROMPT_HISTORY`).
+- **The command registry** (part 7, `app/commands.py`): `get_commands` lists the skills, then the
+  local built-ins, with `find_command`, `has_command`, `get_command` and `help_text`. A typed
+  `/<skill> args` is a prompt command (`getMessagesForPromptSlashCommand`), and an unknown `/name`
+  gets "Unknown skill: …".
+
+*Divergences, recorded (user decisions 2026-10-31 / 11-01 unless noted):*
+- **Auto memory is opt-in** (Part I5): on only with `TDDAGENTS_ENABLE_AUTO_MEMORY`,
+  `TDDAGENTS_DISABLE_AUTO_MEMORY` defined falsy, or `autoMemoryEnabled: true`. The relevance
+  search (`TDDAGENTS_MEMORY_RELEVANCE`, upstream `tengu_moth_copse`), the past-context search
+  (`TDDAGENTS_MEMORY_SEARCH_PAST_CONTEXT`) and team memory (`TDDAGENTS_TEAM_MEMORY`, upstream
+  `TEAMMEM` + `tengu_herring_clock`) sit behind env opt-ins in place of their remote flags.
+- **Agent memory follows upstream's gate for every scope**: an agent gets its memory prompt only
+  when auto memory is on, so by default the built-in agents (`memory: run`) get none. This
+  supersedes "Run memory is per sub-requirement" (Phase 5) and the run-memory notes of "Agent
+  memory reachable" where they assume memory is always on; the `run` and `session` scopes stay
+  TDDAgents' additions.
+- Not ported: the nine `context/*.tsx` providers (React/Ink UI), `state/selectors.ts`,
+  `onChangeAppState` and the `AppState.tsx` hooks and live settings reload (only the `AppState`
+  fields this work needed were added), history's pasted-content references,
+  `getTimestampedHistory` and `removeLastFromHistory`, the destructive-command warning (behind the
+  default-off `tengu_destructive_command_warning`), the sed-edit dialog, the `/permissions` and
+  `/hooks` hints, Ctrl+B `backgroundAll`, KAIROS and the Monitor task kind, and the memdir
+  KAIROS/Cowork/remote paths.
+- E2B shells have no cwd tracking (the sandbox's cwd file is never read back); a shell's stdin is
+  `/dev/null`; a history entry is appended at once under a file lock (upstream buffers and
+  flushes); the relevant-memories prefetch is discarded, not aborted, when the turn ends early.
+- The REPL runs its own local commands (`/plan`, `/pause`, …); the slash path that reaches the
+  engine knows only the skills. A typed skill that is not user-invocable gets upstream's
+  refusal with "TDDAgents" for "Claude".
 
 ### The three things that changed most
 

@@ -417,7 +417,8 @@ def permission_mode_from_string(value: str) -> PermissionMode:
     return PermissionMode(value) if value in PERMISSION_MODES else PermissionMode.DEFAULT
 
 
-def _bypass_disabled(settings: Mapping[str, Any]) -> bool:
+def is_bypass_permissions_mode_disabled(settings: Mapping[str, Any]) -> bool:
+    """`isBypassPermissionsModeDisabled`: `permissions.disableBypassPermissionsMode` is `disable`."""
     permissions = settings.get("permissions")
     return isinstance(permissions, dict) and permissions.get("disableBypassPermissionsMode") == "disable"
 
@@ -433,7 +434,7 @@ def initial_permission_mode_from_cli(
     mode, then `permissions.defaultMode` from settings, skipping `bypassPermissions` when
     settings disable it. Returns the mode and an optional notification.
     """
-    disabled = _bypass_disabled(settings)
+    disabled = is_bypass_permissions_mode_disabled(settings)
     ordered: list[PermissionMode] = []
     if dangerously_skip_permissions:
         ordered.append(PermissionMode.BYPASS_PERMISSIONS)
@@ -497,7 +498,7 @@ def initialize_tool_permission_context(
     settings = load_settings(locations)
     is_bypass_available = (
         permission_mode == PermissionMode.BYPASS_PERMISSIONS or allow_dangerously_skip_permissions
-    ) and not _bypass_disabled(settings)
+    ) and not is_bypass_permissions_mode_disabled(settings)
 
     cli_rules: list[PermissionRule] = []
     for spec in parse_tool_list_from_cli(allowed_tools_cli):
@@ -595,6 +596,7 @@ def build_tool_permission_context(
 
 
 __all__ = [
+    "is_bypass_permissions_mode_disabled",
     "LEGACY_TOOL_NAME_ALIASES",
     "LOCAL_SETTINGS_FILENAME",
     "MANAGED_DIR",

@@ -43,7 +43,7 @@ if __package__ in (None, ""):
 
 from dotenv import load_dotenv
 
-from app.cli.print import DevelopmentOutcome
+from app.cli.print import DevelopmentOutcome, HeadlessOptions
 from app.query.transitions import Terminal
 from app.session.driver import (
     SessionOptions,
@@ -56,6 +56,7 @@ from app.session.driver import (
 from app.tdd.plan import ItemStatus, TddPlan
 from app.tools.ask_user_question_tool.ask_user_question_tool import render_questions
 from app.types.permissions import PERMISSION_MODES
+from app.utils.claudemd import is_env_truthy
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -138,7 +139,7 @@ def read_initial_request(args: argparse.Namespace) -> str | None:
         return Path(args.spec).read_text(encoding="utf-8").strip()
     if args.prompt:
         return str(args.prompt).strip()
-    if args.print and not sys.stdin.isatty():
+    if args.print and args.input_format != "stream-json" and not sys.stdin.isatty():
         return sys.stdin.read().strip() or None
     return None
 
@@ -161,7 +162,60 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
     parser.add_argument("--coordinator", action="store_true", help="Run development in coordinator mode.")
     parser.add_argument("--verbose", action="store_true", help="Override verbose mode setting from config")
+    # `main.tsx`'s SDK options (only with --print).
+    parser.add_argument("--output-format", choices=OUTPUT_FORMATS, default=None,
+                        help='Output format (only works with --print): "text" (default), "json" (single result), '
+                             'or "stream-json" (realtime streaming)')
+    parser.add_argument("--input-format", default=None,
+                        help='Input format (only works with --print): "text" (default), or "stream-json" '
+                             '(realtime streaming input)')
+    parser.add_argument("--include-partial-messages", action="store_true",
+                        help="Include partial message chunks as they arrive (only works with --print and "
+                             "--output-format=stream-json)")
+    parser.add_argument("--include-hook-events", action="store_true",
+                        help="Include all hook lifecycle events in the output stream (only works with "
+                             "--output-format=stream-json)")
+    parser.add_argument("--replay-user-messages", action="store_true",
+                        help="Re-emit user messages from stdin back on stdout for acknowledgment (only works with "
+                             "--input-format=stream-json and --output-format=stream-json)")
+    parser.add_argument("--permission-prompt-tool", default=None, help=argparse.SUPPRESS)
     return parser
+
+
+#: `--output-format`'s choices.
+OUTPUT_FORMATS = ("text", "json", "stream-json")
+
+
+def validate_sdk_flags(args: argparse.Namespace) -> str | None:
+    """`main.tsx`'s checks on the SDK flags, in its order: the first error, or `None`."""
+    output_format = args.output_format or "text"
+    input_format = args.input_format
+    if input_format and input_format not in ("text", "stream-json"):
+        return f'Error: Invalid input format "{input_format}".'
+    if input_format == "stream-json" and output_format != "stream-json":
+        return "Error: --input-format=stream-json requires output-format=stream-json."
+    if args.replay_user_messages and (input_format != "stream-json" or output_format != "stream-json"):
+        return "Error: --replay-user-messages requires both --input-format=stream-json and --output-format=stream-json."
+    partial = args.include_partial_messages or is_env_truthy(os.environ.get("TDDAGENTS_INCLUDE_PARTIAL_MESSAGES"))
+    if partial and (not args.print or output_format != "stream-json"):
+        return "Error: --include-partial-messages requires --print and --output-format=stream-json."
+    if args.print and output_format == "stream-json" and not args.verbose:
+        return "Error: When using --print, --output-format=stream-json requires --verbose"
+    return None
+
+
+def headless_options(args: argparse.Namespace) -> HeadlessOptions:
+    """The `-p` run's output and input options."""
+    return HeadlessOptions(
+        output_format=args.output_format or "text",
+        input_format=args.input_format or "text",
+        verbose=bool(args.verbose),
+        include_partial_messages=bool(args.include_partial_messages)
+        or is_env_truthy(os.environ.get("TDDAGENTS_INCLUDE_PARTIAL_MESSAGES")),
+        replay_user_messages=bool(args.replay_user_messages),
+        include_hook_events=bool(args.include_hook_events),
+        permission_prompt_tool=args.permission_prompt_tool,
+    )
 
 
 def resolve_thread_id(args: argparse.Namespace, initial_input: str | None) -> str:
@@ -180,6 +234,7 @@ def session_options(args: argparse.Namespace) -> SessionOptions:
         settings_path=args.settings,
         dangerously_skip_permissions=bool(args.dangerously_skip_permissions),
         verbose=bool(args.verbose),
+        headless_options=headless_options(args) if args.print else None,
     )
 
 
@@ -380,9 +435,39 @@ def report(thread_id: str, workspace: Any, request: str | None, outcome: Develop
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     args = parse_args(argv)
+    error = validate_sdk_flags(args)
+    if error is not None:
+        print(error, file=sys.stderr)
+        return 1
     if args.coordinator:
         os.environ["TDDAGENTS_COORDINATOR_MODE"] = "1"
+    if not args.print:
+        return run_main(args)
+    # `-p`: stdout carries only what `runHeadless` writes; everything else goes to stderr.
+    from contextlib import redirect_stdout
 
+    from app.utils.stream_json_stdout_guard import (
+        install_stream_json_stdout_guard,
+        uninstall_stream_json_stdout_guard,
+    )
+
+    stdout: Any = install_stream_json_stdout_guard() if args.output_format == "stream-json" else sys.stdout
+
+    def write_stdout(text: str) -> None:
+        stdout.write(text)
+        stdout.flush()
+
+    try:
+        with redirect_stdout(sys.stderr):
+            return run_main(args, write_stdout=write_stdout)
+    finally:
+        if args.output_format == "stream-json":
+            uninstall_stream_json_stdout_guard()
+
+
+def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
+    """The session `main` opens, its reports, and the exit code."""
+    stream_input = args.print and args.input_format == "stream-json"
     initial_input = read_initial_request(args)
     if initial_input is None and not args.thread_id and not args.print:
         try:
@@ -390,7 +475,11 @@ def main(argv: list[str] | None = None) -> int:
         except (KeyboardInterrupt, EOFError):
             print("\n👋 Operation cancelled by the user.")
             return 0
-    if not args.thread_id and not initial_input:
+    if not args.thread_id and not initial_input and not stream_input:
+        if args.print:
+            print("Error: Input must be provided either through stdin or as a prompt argument when using --print",
+                  file=sys.stderr)
+            return 1
         print("❌ The initial request cannot be empty.", file=sys.stderr)
         return 1
 
@@ -400,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
 
     workspace = session_workspace(thread_id)
     resuming = session_exists(thread_id, workspace)
-    if not resuming and not initial_input:
+    if not resuming and not initial_input and not stream_input:
         print(f"❌ No session '{thread_id}' to continue, and no initial request to start one.", file=sys.stderr)
         return 1
 
@@ -420,14 +509,22 @@ def main(argv: list[str] | None = None) -> int:
         request = None if resuming else initial_input
         resumed_prompt = initial_input if resuming else None
         try:
-            develop = develop_headless if args.print else develop_interactive
-            outcome = develop(thread_id, request, workspace, session_options(args), prompt=resumed_prompt)
+            if args.print:
+                outcome = develop_headless(thread_id, request, workspace, session_options(args),
+                                           prompt=resumed_prompt, write_stdout=write_stdout)
+            else:
+                outcome = develop_interactive(thread_id, request, workspace, session_options(args),
+                                              prompt=resumed_prompt)
         except KeyboardInterrupt:
             print(f"\n🛑 Interrupted. Continue later with --thread-id {thread_id}.")
             return 130
         report(thread_id, workspace, request, outcome)
         if outcome.question:
             print(waiting_text(thread_id, outcome.question, args.print))
+        if args.print:
+            # `gracefulShutdownSync(lastMessage?.type === 'result' && lastMessage?.is_error ? 1 : 0)`; no
+            # result at all is upstream's thrown 'No messages returned'.
+            return 1 if outcome.result is None or outcome.result.get("is_error") else 0
         return 0 if outcome.completed else 1
     finally:
         logging.getLogger().removeHandler(file_handler)

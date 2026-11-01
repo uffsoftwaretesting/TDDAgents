@@ -21,7 +21,7 @@ import logging
 import uuid as uuid_module
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
-from typing import Literal
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,9 @@ class QueuedCommand:
     skip_slash_commands: bool = False
     #: `isMeta`: a system-generated prompt, model-visible but hidden from the user.
     is_meta: bool = False
+    #: An SDK prompt's content blocks before its last text block (images, documents): upstream's
+    #: `value` is `string | ContentBlockParam[]`; here `value` is the text and these the rest.
+    content_blocks: tuple[dict[str, Any], ...] = ()
 
 
 def _priority(command: QueuedCommand) -> int:

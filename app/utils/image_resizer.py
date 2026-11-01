@@ -16,7 +16,9 @@ from __future__ import annotations
 import base64
 import io
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from PIL import Image
 
@@ -173,6 +175,30 @@ def maybe_resize_and_downsample_image_buffer(image_buffer: bytes, original_size:
         ) from exc
 
 
+@dataclass(frozen=True, slots=True)
+class ImageBlockWithDimensions:
+    """`ImageBlockWithDimensions`."""
+
+    block: dict[str, Any]
+    dimensions: ImageDimensions | None = None
+
+
+def maybe_resize_and_downsample_image_block(image_block: Mapping[str, Any]) -> ImageBlockWithDimensions:
+    """`maybeResizeAndDownsampleImageBlock`: a base64 Anthropic image block resized; any other source as is."""
+    source = image_block.get("source") or {}
+    if source.get("type") != "base64":
+        return ImageBlockWithDimensions(dict(image_block))
+    buffer = base64.b64decode(str(source.get("data") or ""))
+    media_type = str(source.get("media_type") or "")
+    ext = media_type.split("/")[1] if "/" in media_type and media_type.split("/")[1] else "png"
+    resized = maybe_resize_and_downsample_image_buffer(buffer, len(buffer), ext)
+    return ImageBlockWithDimensions(
+        {"type": "image", "source": {"type": "base64", "media_type": f"image/{resized.media_type}",
+                                     "data": base64.b64encode(resized.buffer).decode("ascii")}},
+        resized.dimensions,
+    )
+
+
 #: `applyFormatOptimizations`.
 _FORMAT_OPTIMIZATIONS: dict[str, dict[str, object]] = {
     "png": {"palette": True}, "jpeg": {"quality": 80}, "webp": {"quality": 80},
@@ -262,8 +288,10 @@ def create_image_metadata_text(dims: ImageDimensions, source_path: str | None = 
 
 __all__ = [
     "CompressedImageResult",
+    "ImageBlockWithDimensions",
     "ImageDimensions",
     "ImageResizeError",
+    "maybe_resize_and_downsample_image_block",
     "ResizeResult",
     "compress_image_buffer",
     "compress_image_buffer_with_token_limit",

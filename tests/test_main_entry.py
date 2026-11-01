@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import os
 from pathlib import Path
@@ -18,10 +19,13 @@ from app.tdd.plan import TddPlan
 
 CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 PLAN = TddPlan.from_texts(["Item A"])
-DONE = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=PLAN.complete_current(CYCLE))
-STOPPED = DevelopmentOutcome(terminal=Terminal.STOP_HOOK_PREVENTED, plan=PLAN)
-#: A session that ended in plan mode: no approved plan, nothing developed.
-UNPLANNED = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=TddPlan())
+#: `-p`'s exit code is the last result's `is_error` (upstream's `runHeadless`), never the plan.
+SUCCESS = {"type": "result", "subtype": "success", "is_error": False, "result": "done"}
+ERROR = {"type": "result", "subtype": "error_during_execution", "is_error": True}
+DONE = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=PLAN.complete_current(CYCLE), result=SUCCESS)
+STOPPED = DevelopmentOutcome(terminal=Terminal.STOP_HOOK_PREVENTED, plan=PLAN, result=ERROR)
+#: A session that ended in plan mode: no approved plan, nothing developed, a successful last turn.
+UNPLANNED = DevelopmentOutcome(terminal=Terminal.COMPLETED, plan=TddPlan(), result=SUCCESS)
 
 
 @pytest.fixture
@@ -46,7 +50,7 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
         return Workspace()
 
     def fake_develop(thread_id: str, request: str | None, workspace: Any, options: Any,
-                     prompt: str | None = None) -> DevelopmentOutcome:
+                     prompt: str | None = None, **kwargs: Any) -> DevelopmentOutcome:
         holder["developed"].append((thread_id, request))
         holder["options"].append(options)
         holder["prompts"].append(prompt)
@@ -87,7 +91,8 @@ def test_parse_args_rejects_an_unknown_mode() -> None:
 def test_session_options() -> None:
     args = entry.parse_args(["-p", "--permission-mode", "plan", "--settings", "f", "--dangerously-skip-permissions"])
     assert entry.session_options(args) == SessionOptions(
-        headless=True, permission_mode="plan", settings_path="f", dangerously_skip_permissions=True)
+        headless=True, permission_mode="plan", settings_path="f", dangerously_skip_permissions=True,
+        headless_options=entry.headless_options(args))
     assert entry.session_options(entry.parse_args([])) == SessionOptions()
 
 
@@ -139,7 +144,10 @@ def test_headless_run_succeeds(fake_session: dict[str, Any], tmp_path: Path,
     assert (out_dir / "metrics_and_logging" / "execution_logs.txt").exists()
     assert (out_dir / "metrics_and_logging" / "token_usage.txt").exists()
     assert (out_dir / "metrics_and_logging" / "final_test_run.txt").exists()
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    # `-p`: stdout is runHeadless's alone; TDDAgents' own report goes to stderr.
+    assert captured.out == ""
+    out = captured.err
     assert "PIPELINE COMPLETED SUCCESSFULLY" in out and thread_id in out and "(HEADLESS)" in out
     assert fake_session["developed"] == [(thread_id, "Build X")]
     assert "1. [DONE   ] Item A" in (out_dir / "metrics_and_logging" / "subreq_results.txt").read_text()
@@ -148,17 +156,21 @@ def test_headless_run_succeeds(fake_session: dict[str, Any], tmp_path: Path,
 def test_headless_failure_exits_one(fake_session: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
     fake_session["outcome"] = STOPPED
     assert entry.main(["-p", "Build X"]) == 1
-    out = capsys.readouterr().out
+    out = capsys.readouterr().err
     assert "DEVELOPMENT STOPPED: stop_hook_prevented" in out
     assert "   • 1. Item A: not done" in out
 
 
-def test_a_session_without_an_approved_plan_exits_one(fake_session: dict[str, Any],
-                                                      capsys: pytest.CaptureFixture[str]) -> None:
-    """Headless, as upstream's `-p`: the plan's approval is denied, so the session ends in plan mode."""
+def test_a_session_without_an_approved_plan_exits_on_its_result(
+    fake_session: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """
+    Headless, as upstream's `-p`: the plan's approval is denied, so the session ends in plan mode; the
+    exit code is the last result's `is_error` (user decision 2026-11-01), not whether a plan was approved.
+    """
     fake_session["outcome"] = UNPLANNED
-    assert entry.main(["-p", "Build X"]) == 1
-    out = capsys.readouterr().out
+    assert entry.main(["-p", "Build X"]) == 0
+    out = capsys.readouterr().err
     assert "\n📋  NO APPROVED PLAN: the session ended in plan mode.\n" in out and "Final test run" not in out
 
 
@@ -170,7 +182,8 @@ def test_headless_without_a_request_exits_one(fake_session: dict[str, Any], monk
 
     monkeypatch.setattr("sys.stdin", Tty(""))
     assert entry.main(["-p"]) == 1
-    assert "cannot be empty" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "Error: Input must be provided either through stdin or as a prompt argument when using --print\n")
     assert fake_session["options"] == []
 
 
@@ -214,7 +227,7 @@ def test_keyboard_interrupt_during_the_drive(
 
     monkeypatch.setattr(entry, "develop_headless", interrupted)
     assert entry.main(["-p", "Build X", "--thread-id", "tdd-k"]) == 130
-    assert "--thread-id tdd-k" in capsys.readouterr().out
+    assert "--thread-id tdd-k" in capsys.readouterr().err
 
 
 def test_coordinator_flag_sets_the_switch(fake_session: dict[str, Any]) -> None:
@@ -338,6 +351,17 @@ def test_parser_help_and_metadata() -> None:
         "dangerously_skip_permissions": None,
         "coordinator": "Run development in coordinator mode.",
         "verbose": "Override verbose mode setting from config",
+        "output_format": 'Output format (only works with --print): "text" (default), "json" (single result), '
+                         'or "stream-json" (realtime streaming)',
+        "input_format": 'Input format (only works with --print): "text" (default), or "stream-json" '
+                        '(realtime streaming input)',
+        "include_partial_messages": "Include partial message chunks as they arrive (only works with --print and "
+                                    "--output-format=stream-json)",
+        "include_hook_events": "Include all hook lifecycle events in the output stream (only works with "
+                               "--output-format=stream-json)",
+        "replay_user_messages": "Re-emit user messages from stdin back on stdout for acknowledgment (only works "
+                                "with --input-format=stream-json and --output-format=stream-json)",
+        "permission_prompt_tool": argparse.SUPPRESS,
     }
     flags = {action.dest: tuple(action.option_strings) for action in parser._actions}
     assert flags["print"] == ("-p", "--print")
@@ -461,7 +485,7 @@ def test_main_output_and_log_file(fake_session: dict[str, Any], tmp_path: Path,
                                   capsys: pytest.CaptureFixture[str]) -> None:
     assert entry.main(["-p", "Build X", "--fresh"]) == 0
     (thread_id,) = fake_session["threads"]
-    out = capsys.readouterr().out
+    out = capsys.readouterr().err
     assert out.startswith("\n" + "=" * 80 + "\n🚀  TDDAGENTS SESSION (HEADLESS)\n" + "=" * 80 + "\n")
     log_file = tmp_path / "session" / "metrics_and_logging" / "execution_logs.txt"
     assert " [INFO] TDDMain: 📊 Token Usage — total: " in log_file.read_text()

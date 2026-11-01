@@ -259,7 +259,7 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
         ),
     )
 
-    async for message in frame_content_blocks(opened):
+    async for message in frame_content_blocks(opened, getattr(state.tool_context, "on_stream_chunk", None)):
         yield message
 
 
@@ -369,9 +369,13 @@ class BlockAccumulator:
         self._key, self._chunk = None, None
 
 
-async def frame_content_blocks(stream: AsyncIterable[Any]) -> AsyncIterator[BaseMessage]:
+async def frame_content_blocks(
+    stream: AsyncIterable[Any], on_chunk: Callable[[AIMessageChunk | None], None] | None = None
+) -> AsyncIterator[BaseMessage]:
     """
-    Turn a provider stream into complete assistant messages, one per content block.
+    Turn a provider stream into complete assistant messages, one per content block. `on_chunk`
+    sees every raw chunk as it arrives, then `None` when the stream ends (the SDK's partial
+    messages, `stream_event`).
 
     A non-chunk `BaseMessage` arriving mid-stream closes the open block before it is passed
     through, so ordering is never rearranged. Anything that is neither is ignored, as
@@ -387,6 +391,8 @@ async def frame_content_blocks(stream: AsyncIterable[Any]) -> AsyncIterator[Base
 
     async for item in stream:
         if isinstance(item, AIMessageChunk):
+            if on_chunk is not None:
+                on_chunk(item)
             for message in accumulator.add(item):
                 yield stamped(message)
             continue
@@ -394,6 +400,8 @@ async def frame_content_blocks(stream: AsyncIterable[Any]) -> AsyncIterator[Base
             for message in accumulator.flush():
                 yield stamped(message)
             yield item
+    if on_chunk is not None:
+        on_chunk(None)
     for message in accumulator.flush():
         yield stamped(message)
 

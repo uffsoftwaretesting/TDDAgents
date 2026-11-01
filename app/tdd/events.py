@@ -45,6 +45,8 @@ class TransitionEventRecorder:
         self.path = path
         self.plan_index = plan_index
         self.log = EventLog(session_id=session_id)
+        #: Every entry as it is recorded (the stream-json runner's `tdd_transition` / `tdd_plan`).
+        self.on_entry: Any = None
         self._turn = 1
         # Items already done when the run opened (a resumed session) were logged by their own run.
         self._logged_done = {item.id for item in store.get().tdd_plan.items if item.completed_by is not None}
@@ -110,6 +112,8 @@ class TransitionEventRecorder:
         self._write(entry)
 
     def _write(self, entry: Any) -> None:
+        if self.on_entry is not None:
+            self.on_entry(entry)
         if self.path is None:
             return
         try:

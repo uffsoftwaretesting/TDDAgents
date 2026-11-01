@@ -104,6 +104,20 @@ class PermissionUpdate:
         return [permission_rule_value_to_string(name, content) for name, content in self.rules]
 
 
+def permission_update_to_json(update: PermissionUpdate) -> dict[str, Any]:
+    """The update as upstream's `PermissionUpdate` JSON (`parse_permission_update`'s inverse)."""
+    data: dict[str, Any] = {"type": update.type, "destination": str(update.destination)}
+    if update.type in RULE_UPDATE_TYPES:
+        data["rules"] = [{"toolName": name, **({"ruleContent": content} if content is not None else {})}
+                         for name, content in update.rules]
+        data["behavior"] = str(update.behavior)
+    elif update.type == "setMode":
+        data["mode"] = str(update.mode)
+    else:
+        data["directories"] = list(update.directories)
+    return data
+
+
 def create_read_rule_suggestion(
     dir_path: str, destination: PermissionRuleSource = PermissionRuleSource.SESSION
 ) -> PermissionUpdate | None:
@@ -384,6 +398,7 @@ __all__ = [
     "DIRECTORY_UPDATE_TYPES",
     "PERSISTABLE_DESTINATIONS",
     "RULE_UPDATE_TYPES",
+    "permission_update_to_json",
     "UPDATE_DESTINATIONS",
     "UPDATE_TYPES",
     "PermissionUpdate",

@@ -37,6 +37,8 @@ class SessionOptions:
     dangerously_skip_permissions: bool = False
     #: `--verbose`: the REPL expands collapsed searches and reads, call by call.
     verbose: bool = False
+    #: `-p`'s output and input options (`app/cli/print.py`); `None` interactively.
+    headless_options: Any = None
 
 
 def derive_thread_id(initial_input: str) -> str:
@@ -81,6 +83,7 @@ def develop_headless(
     from app.utils.run_sync import run_sync
 
     return run_sync(run_headless(thread_id, request, workspace=workspace, prompt=prompt,
+                                 options=options.headless_options,
                                  **{**development_run_options(options), **run_options}))
 
 

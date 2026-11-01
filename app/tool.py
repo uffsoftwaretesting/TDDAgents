@@ -531,11 +531,32 @@ class CancelToken:
     #: `AbortSignal.reason`: why the token fired (`'interrupt'` is a message the user submitted
     #: while the turn ran), kept from the first `cancel`.
     reason: str | None = None
+    #: `AbortSignal`'s `'abort'` listeners, each called once, on the first `cancel`.
+    _listeners: list[Callable[[], None]] = field(default_factory=list)
 
     def cancel(self, reason: str | None = None) -> None:
-        if not self.cancelled:
-            self.reason = reason
+        if self.cancelled:
+            return
+        self.reason = reason
         self.cancelled = True
+        listeners, self._listeners = self._listeners, []
+        for listener in listeners:
+            listener()
+
+    def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """
+        `signal.addEventListener('abort', listener, { once: true })`; returns the
+        `removeEventListener`. A token already cancelled calls nothing (as an abort event that
+        already fired).
+        """
+        if not self.cancelled:
+            self._listeners.append(listener)
+
+        def remove() -> None:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
+
+        return remove
 
 
 @dataclass(slots=True)
@@ -671,6 +692,9 @@ class ToolContext:
     #: (`HOOK_PROMPTS`). Only the REPL sets it, and only with `TDDAGENTS_HOOK_PROMPTS`; a
     #: worker never has it (`createSubagentContext` does not copy it).
     request_prompt: Callable[[str, str | None], Callable[[Any], Awaitable[Any]]] | None = None
+    #: Every raw model chunk of the main thread, then `None` at the stream's end: the SDK's
+    #: `--include-partial-messages` (`stream_event`). Only the stream-json runner sets it.
+    on_stream_chunk: Callable[[Any], None] | None = None
 
 
 @dataclass

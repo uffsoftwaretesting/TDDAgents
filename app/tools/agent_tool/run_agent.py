@@ -261,6 +261,7 @@ def run_agent(
             request_prompt=None,
             on_progress=None,
             set_has_interruptible_tool_in_progress=None,
+            on_stream_chunk=None,
             agent_id=agent_id,
             agent_type=agent_type,
             # `createSubagentContext`: the worker's model is its own (`worker_config`).
