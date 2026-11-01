@@ -58,6 +58,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from app.bootstrap.state import SessionBootstrap
 from app.coordinator.coordinator_mode import (
     apply_coordinator_tool_filter,
     get_coordinator_system_prompt,
@@ -79,6 +80,12 @@ from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.tools.tools import assemble_tool_pool
 from app.types.permissions import PermissionMode, ToolPermissionContext
 from app.utils.claudemd import is_env_truthy
+from app.utils.conversation_recovery import ConversationForResume
+from app.utils.file_history import (
+    copy_file_history_for_resume,
+    handle_rewind_files,
+    update_file_history_state_for,
+)
 from app.utils.hooks.hooks import HookDispatcher
 from app.utils.message_queue_manager import CommandQueue, QueuedCommand
 from app.utils.permissions.permission_setup import set_permission_mode
@@ -384,8 +391,11 @@ async def open_session_run(
     perm = permission_context or run_permission_context(
         config, workspace, project_root, home, managed_dir, interactive=can_use_tool is not None
     )
-    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan))
     root_dir = project_root_of(workspace, project_root)
+    cwd = str(getattr(workspace, "root", None) or root_dir)
+    # Upstream's `STATE` for this run: its session id, original directory and interactivity.
+    bootstrap = SessionBootstrap(session_id=run_id, original_cwd=cwd, is_interactive=can_use_tool is not None)
+    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan, bootstrap=bootstrap))
     from app.skills.load_skills_dir import get_skill_registry
 
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
@@ -431,7 +441,6 @@ async def open_session_run(
 
         run_dir = getattr(workspace, "run_dir", None)
         transcript_dir = Path(run_dir) if run_dir is not None else None
-        cwd = str(getattr(workspace, "root", None) or root_dir)
         transcript = TranscriptStore(run_id, cwd)
 
         if hook_dispatcher is None:
@@ -465,6 +474,8 @@ async def open_session_run(
             **coordinator_context(config),
         )
         ctx.can_use_tool = can_use_tool
+        # `updateFileHistoryState` over the run's store (`QueryEngine.ts` / `REPL.tsx`).
+        ctx.update_file_history_state = update_file_history_state_for(store.update)
         saved_plan_path = plan_path(run_id, cwd)
         ctx.tdd_plan_path = str(saved_plan_path)
         ctx.session_plans = load_session_plans(
@@ -629,6 +640,20 @@ def _prompt_text(message: Any) -> str:
 RESUME_INTERRUPTED_TURN_ENV = "TDDAGENTS_RESUME_INTERRUPTED_TURN"
 
 
+async def restore_resumed_state(ctx: Any, transcript: TranscriptStore, resumed: ConversationForResume) -> None:
+    """
+    What a resume restores besides the messages: `copyFileHistoryForResume` (the backups of a
+    previous session id, linked into this one's directory; `conversationRecovery.ts`) and
+    `restoreSessionStateFromLog` (the file history state, `sessionRestore.ts`), as `print.ts`'s
+    `loadInitialMessages` does after `loadConversationForResume`.
+    """
+    from app.utils.session_restore import restore_session_state_from_log
+
+    bootstrap = ctx.get_app_state().bootstrap
+    await copy_file_history_for_resume(resumed, bootstrap, transcript.record_file_history_snapshot)
+    restore_session_state_from_log(resumed.file_history_snapshots, ctx.set_app_state, bootstrap)
+
+
 async def load_initial_messages(
     ctx: Any, transcript: TranscriptStore, sub_req: str, model: str, *, resume_prompt: str | None = None
 ) -> tuple[Any, str]:
@@ -651,6 +676,7 @@ async def load_initial_messages(
     resumed = load_conversation_for_resume(transcript.path)
     if resumed is None or not resumed.messages:
         return await process_session_start_hooks(ctx.hook_dispatcher, "startup", model=model), sub_req
+    await restore_resumed_state(ctx, transcript, resumed)
     history: list[Any] = list(resumed.messages)
     prompt = resume_prompt if resume_prompt is not None else sub_req
     interruption = resumed.turn_interruption_state
@@ -732,6 +758,7 @@ async def restore_session(run: DevelopmentRun) -> bool:
     resumed = load_conversation_for_resume(run.transcript.path)
     if resumed is None or not resumed.messages:
         return False
+    await restore_resumed_state(run.ctx, run.transcript, resumed)
     session = await process_session_start_hooks(run.ctx.hook_dispatcher, "resume", model=run.config.model)
     run.messages[:] = [*resumed.messages, *session.messages]
     seed_read_file_state(run, run.messages)
@@ -824,6 +851,40 @@ async def run_headless(
         return outcome_of(run, reason, question=awaiting_user_answer(run.messages))
 
 
+async def run_rewind_files(
+    session_id: str,
+    user_message_id: str,
+    *,
+    workspace: Any,
+    write_out: Callable[[str], Any],
+    write_err: Callable[[str], Any],
+    **run_options: Any,
+) -> int:
+    """
+    `print.ts`'s `--rewind-files <user-message-id>`: a standalone operation on a resumed session.
+    The session is loaded as for a turn (`loadInitialMessages`, its file history restored), the
+    files are put back as they were when that user message was sent (`handleRewindFiles`), and
+    the exit code is returned: 0 when rewound, 1 otherwise, with upstream's messages.
+    """
+    from app.utils.session_storage import entry_type_of, message_uuid
+
+    async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan(), workspace=workspace,
+                                **run_options) as run:
+        await restore_session(run)
+        # File history snapshots are only created for user messages, so the target must be one.
+        target = next((m for m in run.messages if message_uuid(m) == user_message_id), None)
+        if target is None or entry_type_of(target) != "user":
+            write_err(f"Error: --rewind-files requires a user message UUID, but {user_message_id} is not a user "
+                      "message in this session\n")
+            return 1
+        result = await handle_rewind_files(user_message_id, run.store.get(), run.store.update, False)
+        if not result.can_rewind:
+            write_err(f"Error: {result.error or 'Unexpected error'}\n")
+            return 1
+        write_out(f"Files rewound to state at message {user_message_id}\n")
+        return 0
+
+
 __all__ = [
     "DevelopmentOutcome",
     "DevelopmentRun",
@@ -842,7 +903,9 @@ __all__ = [
     "restore_session",
     "run_agent_memory_store",
     "run_headless",
+    "restore_resumed_state",
     "run_permission_context",
+    "run_rewind_files",
     "run_settings_locations",
     "seed_read_file_state",
     "session_run_id",

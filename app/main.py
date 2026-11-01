@@ -20,6 +20,11 @@ Two modes, as claude-code has them:
   `claude -p --resume <id> "<prompt>"`. The exit code is 0 only when there is an approved plan and
   every sub-requirement completed its Red -> Green -> Refactor cycle.
 
+`-p --thread-id <id> --rewind-files <user-message-id>` (upstream's hidden `--rewind-files`) puts
+the session's files back as they were when that user message was sent, then exits; it needs
+`TDDAGENTS_ENABLE_SDK_FILE_CHECKPOINTING`, as file checkpointing in any headless run does
+(`app/utils/file_history.py`).
+
 `--thread-id` continues a session from its transcript, TDD plan and plan file. It runs in the
 thread's own project; `--permission-mode`, `--settings` and `--dangerously-skip-permissions` are
 upstream's startup flags for it, and `--coordinator` turns on coordinator mode
@@ -51,6 +56,7 @@ from app.session.driver import (
     develop_headless,
     develop_interactive,
     fresh_thread_id,
+    rewind_files_headless,
     session_exists,
 )
 from app.tdd.plan import ItemStatus, TddPlan
@@ -161,6 +167,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
     parser.add_argument("--coordinator", action="store_true", help="Run development in coordinator mode.")
     parser.add_argument("--verbose", action="store_true", help="Override verbose mode setting from config")
+    # `main.tsx`: "Restore files to state at the specified user message and exit (requires --resume)",
+    # hidden from the help (`.hideHelp()`).
+    parser.add_argument("--rewind-files", default=None, metavar="<user-message-id>", help=argparse.SUPPRESS)
     return parser
 
 
@@ -377,6 +386,25 @@ def report(thread_id: str, workspace: Any, request: str | None, outcome: Develop
     print("   (To inspect the state or resume later, use --thread-id)\n")
 
 
+def rewind_files(args: argparse.Namespace, initial_input: str | None) -> int:
+    """
+    `print.ts`'s `--rewind-files` (print mode only, as upstream): restore the session's files to
+    their state at a user message, then exit. It needs the session (`--thread-id`, upstream's
+    `--resume`) and is a standalone operation, so a prompt is refused.
+    """
+    if not args.thread_id:
+        sys.stderr.write("Error: --rewind-files requires --thread-id\n")
+        return 1
+    if initial_input:
+        sys.stderr.write("Error: --rewind-files is a standalone operation and cannot be used with a prompt\n")
+        return 1
+    from app.cli.print import session_workspace
+
+    thread_id = str(args.thread_id)
+    return rewind_files_headless(thread_id, str(args.rewind_files), session_workspace(thread_id),
+                                 session_options(args))
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     args = parse_args(argv)
@@ -384,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["TDDAGENTS_COORDINATOR_MODE"] = "1"
 
     initial_input = read_initial_request(args)
+    if args.rewind_files and args.print:
+        return rewind_files(args, initial_input)
     if initial_input is None and not args.thread_id and not args.print:
         try:
             initial_input = get_initial_user_prompt()
