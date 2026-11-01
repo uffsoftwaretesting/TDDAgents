@@ -393,7 +393,9 @@ def test_control_requests_without_a_turn(python_workspace: Any, tmp_path: Path) 
         control("r", "stop_task", task_id="t-missing"),
         control("s", "apply_flag_settings", settings={"model": "claude-flag", "x": 1, "y": None}),
         control("t", "get_settings"), control("u", "seed_read_state", path="missing.py", mtime=1),
-        control("v", "set_proactive", enabled=True),
+        control("v", "set_proactive", enabled=True), control("ctx", "get_context_usage"),
+        control("rw", "rewind_files", user_message_id="u-x"),
+        control("rd", "rewind_files", user_message_id="u-x", dry_run=True),
         control("w", "end_session"), control("x", "interrupt"),
     )
     written: list[str] = []
@@ -429,6 +431,12 @@ def test_control_requests_without_a_turn(python_workspace: Any, tmp_path: Path) 
     assert {"source": "flagSettings", "settings": {"model": "claude-flag", "x": 1}} in settings["sources"]
     assert got["u"]["subtype"] == "success"
     assert got["v"]["error"] == "Unsupported control request subtype: set_proactive"
+    usage = got["ctx"]["response"]
+    assert got["ctx"]["subtype"] == "success" and {"categories", "totalTokens", "model"} <= set(usage)
+    # File history is off in a headless run without TDDAGENTS_ENABLE_SDK_FILE_CHECKPOINTING.
+    assert got["rw"]["error"] == "File rewinding is not enabled."
+    assert got["rd"] == {"subtype": "success", "request_id": "rd",
+                         "response": {"canRewind": False, "error": "File rewinding is not enabled."}}
     assert got["w"]["subtype"] == "success" and "x" not in got
     assert outcome.result is None
 

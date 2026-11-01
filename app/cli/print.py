@@ -360,6 +360,7 @@ async def open_session_run(
     planning: bool = False,
     custom_system_prompt: str | None = None,
     append_system_prompt: str | None = None,
+    interactive: bool | None = None,
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -398,7 +399,9 @@ async def open_session_run(
     root_dir = project_root_of(workspace, project_root)
     cwd = str(getattr(workspace, "root", None) or root_dir)
     # Upstream's `STATE` for this run: its session id, original directory and interactivity.
-    bootstrap = SessionBootstrap(session_id=run_id, original_cwd=cwd, is_interactive=can_use_tool is not None)
+    # `getIsNonInteractiveSession`: every `-p` run is non-interactive, a host answering its asks or not.
+    is_interactive = interactive if interactive is not None else can_use_tool is not None
+    bootstrap = SessionBootstrap(session_id=run_id, original_cwd=cwd, is_interactive=is_interactive)
     store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan, bootstrap=bootstrap))
     from app.skills.load_skills_dir import get_skill_registry
 
@@ -904,7 +907,8 @@ async def run_headless(
     host_asks = stream_input or options.permission_prompt_tool == "stdio"
     can_use_tool = sio.create_can_use_tool() if host_asks else None
     async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan(), workspace=workspace,
-                                planning=True, can_use_tool=can_use_tool, **run_options) as run:
+                                planning=True, can_use_tool=can_use_tool, interactive=False,
+                                **run_options) as run:
         streaming = HeadlessStreaming(sio, run, options)
         await streaming.load_initial_messages(request, prompt, stream_input=stream_input)
         needs_full_array = options.output_format == "json" and options.verbose
@@ -1576,6 +1580,33 @@ class HeadlessStreaming:
 
     async def _control_mcp_status(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         self.respond(message, {"mcpServers": build_mcp_server_statuses(self.run_.ctx.mcp_clients)})
+
+    async def _control_get_context_usage(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        """`collectContextData` over the conversation, the main loop model and the current tool pool."""
+        from app.commands import collect_context_data
+        from app.utils.model.model import parse_user_specified_model
+
+        run = self.run_
+        ctx = run.ctx
+        model = parse_user_specified_model(run.user_specified_model) if run.user_specified_model else run.config.model
+        data = await collect_context_data(
+            run.messages, main_loop_model=model, tools=ctx.refresh_tools() if ctx.refresh_tools else ctx.tools,
+            agent_definitions=self.agent_definitions(), tool_context=ctx,
+            custom_system_prompt=ctx.custom_system_prompt, append_system_prompt=ctx.append_system_prompt)
+        self.respond(message, dict(data))
+
+    async def _control_rewind_files(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        """`handleRewindFiles`; a refused rewind answers its error unless it was a dry run."""
+        from app.utils.file_history import handle_rewind_files
+
+        dry_run = bool(request.get("dry_run", False))
+        run = self.run_
+        result = await handle_rewind_files(str(request.get("user_message_id")), run.store.get(), run.store.update,
+                                           dry_run, workspace=run.ctx.workspace)
+        if result.can_rewind or dry_run:
+            self.respond(message, result.to_json())
+        else:
+            self.respond_error(message, result.error or "Unexpected error")
 
     async def _control_cancel_async_message(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         target = request.get("message_uuid")
