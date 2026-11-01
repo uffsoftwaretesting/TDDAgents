@@ -122,7 +122,7 @@ def test_a_later_turn_continues_the_same_conversation(python_workspace, tmp_path
     turns = [[AIMessage(content="first")], [AIMessage(content="second")]]
     seen: list[Any] = []
 
-    async def go() -> tuple[Terminal, Terminal]:
+    async def go() -> tuple[Terminal | None, Terminal | None]:
         async with open_session_run(run_id="loop-turns", plan=FINISHED, workspace=python_workspace,
                                     **options(tmp_path, scripted(turns, seen))) as run:
             first = await begin_session(run, "hello")

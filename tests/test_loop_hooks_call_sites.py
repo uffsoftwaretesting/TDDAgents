@@ -372,8 +372,9 @@ def test_runner_places_hook_messages_around_the_prompt(monkeypatch, tmp_path):
         reminder("SessionStart hook additional context: session ctx"),
         "hello",
         "build it",
-        reminder("UserPromptSubmit hook additional context: prompt ctx"),
+        # `processUserInput`: the user-input attachments, then what the hooks added.
         initial_tdd_state("build it"),
+        reminder("UserPromptSubmit hook additional context: prompt ctx"),
     ]
     assert model.seen[0].tool_context.messages == first
     assert d.payload("SessionStart")["source"] == "startup"

@@ -74,7 +74,7 @@ from app.tasks.local_shell_task.kill_shell_tasks import kill_all_shell_tasks
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
 from app.tdd.suite_fingerprint import fingerprint_test_files
-from app.tool import CancelToken, Tool, tool_context_for
+from app.tool import Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.tools.tools import assemble_tool_pool
 from app.types.permissions import PermissionMode, ToolPermissionContext
@@ -480,7 +480,7 @@ async def open_session_run(
         recorder = TransitionEventRecorder(store, events_path(run_id, cwd), session_id=run_id, plan_index=plan_index)
         engine = QueryEngine(
             config, replace(deps, emit_event=_both(recorder, deps.emit_event)), transcript=transcript,
-            session_id=run_id, cost_tracker=ctx.cost_tracker,
+            session_id=run_id, cost_tracker=ctx.cost_tracker, context=ctx,
         )
         try:
             yield DevelopmentRun(
@@ -566,7 +566,7 @@ async def wait_for_background_work(
                 return
             await asyncio.sleep(WAITING_FOR_AGENTS_POLL_SECONDS)
             continue
-        messages: tuple[Any, ...] = (*engine.mutable_messages, HumanMessage(content=command.value))
+        messages: tuple[Any, ...] = (*engine.get_messages(), HumanMessage(content=command.value))
         messages = (*messages, *await get_attachment_messages(ctx, messages, user_input=command.value))
         turn_ctx = replace(ctx, messages=messages)
         logger.info("Delivering queued %s as a new turn", command.mode)
@@ -629,40 +629,26 @@ async def load_initial_messages(
 
 
 async def _submit(
-    run: DevelopmentRun, history: Sequence[Any], prompt_text: str, prefix: Sequence[Any] = (),
-    user_messages: Sequence[Any] | None = None, modify_context: Callable[[Any], Any] | None = None,
-) -> Terminal:
+    run: DevelopmentRun, history: Sequence[Any], prompt_text: str, prefix: Sequence[Any] = ()
+) -> Terminal | None:
     """
-    One user turn: UserPromptSubmit, the user-input attachments, the loop, then any background
-    work (`print.ts`'s `ask` and its wait). A UserPromptSubmit hook that blocks or says
-    `continue: false` stops the turn before the model is called: `hook_stopped`.
+    One user turn: `QueryEngine.submit_message` (`processUserInput`, then the loop), then any
+    background work (`print.ts`'s `ask` and its wait). A turn that does not query ends
+    `hook_stopped` when a UserPromptSubmit hook stopped it, else with no terminal (`None`: an
+    unknown command, answered by the result's text).
     """
-    from app.utils.attachments import get_attachment_messages
-    from app.utils.session_start import process_user_prompt_submit_hooks
-
-    mode = str(run.store.get().tool_permission_context.mode)
-    prompt = await process_user_prompt_submit_hooks(run.ctx, prompt_text, mode)
-    if not prompt.should_query:
-        # A stopped UserPromptSubmit always carries one of the two messages.
-        run.stopped_reason = prompt.blocked_message or prompt.stopped_message
-        logger.info("Turn of %s not started: UserPromptSubmit hook stopped it: %s", run.run_id, run.stopped_reason)
-        return Terminal.HOOK_STOPPED
-    said = tuple(user_messages) if user_messages is not None else (HumanMessage(content=prompt_text),)
-    messages: tuple[Any, ...] = (*history, *prefix, *said, *prompt.messages)
-    # `processUserInput`: the user-input attachments (the TDD state among them), persisted into
-    # the history the loop starts from.
-    messages = (*messages, *await get_attachment_messages(run.ctx, messages, user_input=prompt_text))
-    if run.ctx.cancel.cancelled:
-        # A fresh abort signal per turn, as upstream creates an `AbortController` per query: the
-        # Esc that ended the last turn must not end this one.
-        run.ctx.cancel = CancelToken()
-    turn_ctx = replace(run.ctx, messages=messages)
-    if modify_context is not None:
-        turn_ctx = modify_context(turn_ctx)
+    run.engine.mutable_messages = list(history)
     try:
-        async for event in run.engine.submit(initial_loop_state(messages, turn_ctx)):
+        async for event in run.engine.submit_message(prompt_text, prefix=prefix):
             if run.on_message is not None:
                 run.on_message(event)
+        processed = run.engine.input_result
+        if processed is not None and not processed.should_query:
+            if processed.stopped_reason is None:
+                return None
+            run.stopped_reason = processed.stopped_reason
+            logger.info("Turn of %s not started: UserPromptSubmit hook stopped it: %s", run.run_id, run.stopped_reason)
+            return Terminal.HOOK_STOPPED
         await wait_for_background_work(run.engine, run.ctx, run.store, run.on_message)
         reason = run.engine.terminal.reason if run.engine.terminal is not None else Terminal.MODEL_ERROR
     except Exception:
@@ -673,7 +659,9 @@ async def _submit(
     return reason
 
 
-async def begin_session(run: DevelopmentRun, fresh_prompt: str, resume_prompt: str | None = None) -> Terminal:
+async def begin_session(
+    run: DevelopmentRun, fresh_prompt: str, resume_prompt: str | None = None
+) -> Terminal | None:
     """
     The first turn: SessionStart and `fresh_prompt`, or — with a transcript on disk — the
     resumed conversation, continued with the interrupted prompt or else `resume_prompt`.
@@ -702,37 +690,9 @@ async def restore_session(run: DevelopmentRun) -> bool:
     return True
 
 
-async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal:
+async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal | None:
     """A later turn of the same conversation: the user's prompt after everything said so far."""
-    return await _submit(run, run.engine.mutable_messages, prompt_text)
-
-
-async def submit_prompt_command(run: DevelopmentRun, name: str, args: str) -> Terminal:
-    """
-    A typed `/<skill> args` (`processSlashCommand` -> `getMessagesForPromptSlashCommand`): the
-    command's messages open the turn, and its `allowed-tools` and `model` apply to it.
-    """
-    from app.tools.skill_tool.skill_tool import (
-        context_with_allowed_tools,
-        resolve_skill_model_override,
-    )
-    from app.utils.process_user_input.process_slash_command import (
-        get_messages_for_prompt_slash_command,
-    )
-
-    command = run.ctx.skill_registry.find_command(name)
-    turn = get_messages_for_prompt_slash_command(command, args, session_id=run.run_id,
-                                                 coordinator=run.config.gates.coordinator_mode)
-
-    def modify(ctx: Any) -> Any:
-        modified = context_with_allowed_tools(ctx, turn.allowed_tools)
-        if turn.model:
-            current = ctx.main_loop_model or run.config.model
-            modified = replace(modified, main_loop_model=resolve_skill_model_override(turn.model, current))
-        return modified
-
-    raw = f"/{name} {args}".rstrip()
-    return await _submit(run, run.engine.mutable_messages, raw, user_messages=turn.messages, modify_context=modify)
+    return await _submit(run, run.engine.get_messages(), prompt_text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -813,7 +773,7 @@ async def run_headless(
     async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan(), workspace=workspace,
                                 planning=True, **run_options) as run:
         reason = await start_session(run, request, prompt)
-        return outcome_of(run, reason, question=awaiting_user_answer(run.engine.mutable_messages))
+        return outcome_of(run, reason, question=awaiting_user_answer(run.engine.get_messages()))
 
 
 __all__ = [
@@ -838,6 +798,5 @@ __all__ = [
     "session_workspace",
     "start_session",
     "submit_prompt",
-    "submit_prompt_command",
     "wait_for_background_work",
 ]

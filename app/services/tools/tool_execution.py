@@ -224,6 +224,8 @@ async def _run_tool_use(
         # phase-forbidden call cannot reach this question.
         permission = await context.can_use_tool(tool, resolved.input, permission, context, call_id)
     if permission.behavior != "allow":
+        if context.record_permission_denial is not None:
+            context.record_permission_denial(tool.name, call_id, resolved.input)
         denied_msg = permission.message
         if pre.prevent_continuation and not denied_msg:
             denied_msg = "Execution stopped by PreToolUse hook" + (f": {pre.stop_reason}" if pre.stop_reason else "")

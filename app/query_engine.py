@@ -21,14 +21,24 @@ headless path's wrapper around `query()`. It owns what the loop deliberately doe
 
 The loop's events pass through unchanged, `Terminated` included; the `ResultMessage` is
 the last thing yielded, as upstream's `result` is.
+
+`submit_message` is upstream's entry point: the prompt goes through `processUserInput`
+(`app/utils/process_user_input/process_user_input.py`) — a typed skill, the user-input
+attachments, the UserPromptSubmit hooks — and a turn that does not query (an unknown command, a
+hook that stopped it) is recorded and answered with a result, never a loop. Every call whose
+permission ends other than `allow` is kept for the result (`permissionDenials`, upstream's
+`wrappedCanUseTool`), in the run's and its workers' calls alike. `interrupt` aborts the turn and
+`get_messages` is the conversation. Not ported: `setModel`, `getReadFileState` and the one-shot
+`ask()` wrapper, which only the SDK's control requests and per-prompt engines use; one engine
+serves the whole session here (Phase 6).
 """
 
 from __future__ import annotations
 
 import time
 import uuid as uuid_module
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator, Callable, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -36,12 +46,16 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from app.query.config import RunConfig
 from app.query.deps import LoopDeps
 from app.query.query import run_loop
-from app.query.state import LoopState
+from app.query.state import LoopState, initial_loop_state
 from app.query.transitions import Terminated
 from app.services.compact.compact import is_compact_boundary_message
 from app.utils.attachments import attachment_of
 from app.utils.conversation_recovery import NO_RESPONSE_REQUESTED
 from app.utils.messages import Message
+from app.utils.process_user_input.process_user_input import (
+    ProcessUserInputResult,
+    process_user_input,
+)
 
 #: OpenAI's `finish_reason` in upstream's `stop_reason` vocabulary.
 _FINISH_REASONS = {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}
@@ -81,6 +95,8 @@ class ResultMessage:
     uuid: str
     result: str | None = None
     errors: tuple[str, ...] = ()
+    #: `permission_denials`: `{tool_name, tool_use_id, tool_input}` for every call not allowed.
+    permission_denials: tuple[dict[str, Any], ...] = ()
     type: Literal["result"] = field(default="result")
 
 
@@ -150,6 +166,7 @@ class QueryEngine:
         transcript: TranscriptRecorder,
         session_id: str,
         cost_tracker: Any = None,
+        context: Any = None,
         persist_session: bool = True,
         now: Callable[[], float] = time.time,
         uuid: Callable[[], str] = lambda: str(uuid_module.uuid4()),
@@ -167,6 +184,72 @@ class QueryEngine:
         #: Upstream `mutableMessages`: the conversation as recorded, kept across submits so a
         #: follow-up turn (a task notification, Phase 8) continues it; restarted at a boundary.
         self.mutable_messages: list[Message] = []
+        #: Upstream's `permissionDenials`, kept for the engine's whole life.
+        self.permission_denials: list[dict[str, Any]] = []
+        #: The run's `ToolContext` (upstream's config: tools, `canUseTool`, app state, abort).
+        self.context = context
+        #: What `processUserInput` made of the last prompt `submit_message` took.
+        self.input_result: ProcessUserInputResult | None = None
+        if context is not None:
+            context.record_permission_denial = self._record_denial
+
+    def _record_denial(self, tool_name: str, tool_use_id: str, tool_input: Any) -> None:
+        self.permission_denials.append({"tool_name": tool_name, "tool_use_id": tool_use_id, "tool_input": tool_input})
+
+    def interrupt(self) -> None:
+        """`interrupt`: abort the turn in flight."""
+        self.context.cancel.cancel()
+
+    def get_messages(self) -> list[Message]:
+        """`getMessages`: the conversation as recorded."""
+        return self.mutable_messages
+
+    async def submit_message(
+        self, prompt: str, *, prefix: Sequence[Message] = (), user_messages: Sequence[Message] | None = None
+    ) -> AsyncIterator[Any]:
+        """
+        `submitMessage`: `processUserInput` on `prompt` after the conversation (and `prefix`, a
+        first turn's SessionStart output), then the loop when it queries, else a result at once.
+        `user_messages` replace the plain user message (an interrupted turn resumed).
+        """
+        from app.tool import CancelToken
+        from app.tools.skill_tool.skill_tool import (
+            context_with_allowed_tools,
+            resolve_skill_model_override,
+        )
+
+        ctx = self.context
+        if ctx.cancel.cancelled:
+            # A fresh abort signal per turn, as upstream creates an `AbortController` per query: the
+            # Esc that ended the last turn must not end this one.
+            ctx.cancel = CancelToken()
+        start = self._now()
+        history = [*self.mutable_messages, *prefix]
+        mode = str(ctx.get_app_state().tool_permission_context.mode)
+        result = await process_user_input(
+            prompt, ctx, history, permission_mode=mode, user_messages=user_messages, session_id=self.session_id,
+            coordinator=self.config.gates.coordinator_mode,
+        )
+        self.input_result = result
+        messages = [*history, *result.messages]
+        if not result.should_query:
+            self.mutable_messages = messages
+            self._record(messages)
+            self.terminal = None
+            self.result = ResultMessage(
+                subtype="success", is_error=False, duration_ms=round((self._now() - start) * 1000),
+                duration_api_ms=0, num_turns=len(messages) - 1, stop_reason=None, session_id=self.session_id,
+                total_cost_usd=0.0, usage=dict(_EMPTY_USAGE), model_usage={}, terminal_reason="",
+                uuid=self._uuid(), result=result.result_text or "", permission_denials=tuple(self.permission_denials),
+            )
+            yield self.result
+            return
+        turn_ctx = context_with_allowed_tools(replace(ctx, messages=tuple(messages)), result.allowed_tools)
+        if result.model:
+            current = ctx.main_loop_model or self.config.model
+            turn_ctx = replace(turn_ctx, main_loop_model=resolve_skill_model_override(result.model, current))
+        async for event in self.submit(initial_loop_state(tuple(messages), turn_ctx)):
+            yield event
 
     def _record(self, messages: list[Message]) -> None:
         if self.persist_session:
@@ -217,6 +300,7 @@ class QueryEngine:
             "model_usage": dict(tracker.model_usage()) if tracker is not None else {},
             "terminal_reason": str(self.terminal.reason) if self.terminal is not None else "",
             "uuid": self._uuid(),
+            "permission_denials": tuple(self.permission_denials),
         }
         if not is_result_successful(result, stop_reason):
             result_type = "undefined" if result is None else "assistant" if isinstance(result, AIMessage) else "user"

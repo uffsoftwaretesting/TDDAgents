@@ -554,6 +554,9 @@ class ToolContext:
     #: 11): what a permission 'ask' becomes. `None` is a headless run, where the gate already
     #: turned every 'ask' into a deny. Never handed to a worker.
     can_use_tool: Callable[..., Any] | None = None
+    #: `QueryEngine`'s `wrappedCanUseTool` bookkeeping: called with (tool name, tool use id,
+    #: input) for every call whose permission ends other than `allow`. A worker shares it.
+    record_permission_denial: Callable[[str, str, Any], None] | None = None
 
 
 @dataclass

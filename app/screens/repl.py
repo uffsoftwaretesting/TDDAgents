@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
@@ -45,7 +44,6 @@ from app.cli.print import (
     DevelopmentRun,
     start_session,
     submit_prompt,
-    submit_prompt_command,
 )
 from app.commands import (
     HELP_TEXT,
@@ -61,16 +59,13 @@ from app.commands import (
 from app.components.permissions.permission_options import PermissionOption
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt
 from app.query.transitions import Terminal
+from app.query_engine import ResultMessage
 from app.session.prompts import development_continue_prompt
 from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
 from app.types.permissions import PermissionMode
 from app.utils.message_queue_manager import QueuedCommand
 from app.utils.permissions.permission_setup import set_permission_mode
-from app.utils.process_user_input.process_slash_command import (
-    looks_like_command,
-    parse_slash_input,
-    unknown_skill_message,
-)
+from app.utils.process_user_input.process_slash_command import parse_slash_input
 
 logger = logging.getLogger("TDDOrchestrator.REPL")
 
@@ -94,6 +89,9 @@ class ReplIO(Protocol):
 
 def render_message(event: Any) -> str | None:
     """How a conversation event reads on the terminal; `None` for what the user need not see."""
+    if isinstance(event, ResultMessage):
+        # A turn that never queried (an unknown command) is answered by its result's text.
+        return None if event.terminal_reason else (event.result or None)
     if not isinstance(event, BaseMessage) or event.additional_kwargs.get("is_meta"):
         return None
     if isinstance(event, AIMessage):
@@ -306,7 +304,7 @@ class Repl:
         if self.pending is not None and not self.pending.future.done():
             self.pending.future.set_result(self.pending.cancelled)
         if self.busy:
-            self.run.ctx.cancel.cancel()
+            self.run.engine.interrupt()
 
     async def _stop_turn(self) -> None:
         if self.busy:
@@ -335,7 +333,7 @@ class Repl:
             await self.run_command(command)
             return
         text = line.strip()
-        if not text or self._unknown_skill(text):
+        if not text:
             return
         if self.busy:
             # `handlePromptSubmit` while busy: queued for the loop to hand over between tool rounds.
@@ -357,21 +355,11 @@ class Repl:
             return None
         return SlashCommand(name=command.name, args=parsed[1], kind="prompt")
 
-    def _unknown_skill(self, text: str) -> bool:
-        """
-        `processSlashCommand`'s unknown branch: `/name` that looks like a command but is none is
-        answered here ("Unknown skill: …") and never sent; `/usr/bin/x` is a path, so it is a message.
-        """
-        parsed = parse_slash_input(text)
-        if parsed is None or not looks_like_command(parsed[0]) or os.path.exists(f"/{parsed[0]}"):
-            return False
-        self.io.write(unknown_skill_message(*parsed))
-        return True
-
     async def run_command(self, command: SlashCommand) -> None:
         name = command.name
         if command.kind == "prompt":
-            self._start(submit_prompt_command(self.run, command.name, command.args))
+            # `processUserInput` expands the skill (`processSlashCommand`).
+            self._start(submit_prompt(self.run, f"/{command.name} {command.args}".rstrip()))
         elif name == "help":
             self.io.write(help_text(self._commands()))
         elif name == "plan":
