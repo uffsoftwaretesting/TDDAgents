@@ -23,6 +23,7 @@ from app.tools.utils import (
     is_stale,
     read_text,
     record_write,
+    track_file_history_edit,
     write_text,
 )
 from app.utils.path import backfill_path
@@ -52,6 +53,8 @@ def build_write_file_tool() -> BuiltTool:
             return NO_WORKSPACE
 
         activate_conditional_skills(context, file_path)
+        # `fileHistoryTrackEdit` before the write: the backup holds the pre-edit content.
+        await track_file_history_edit(context, file_path)
         try:
             existing = read_text(ws, file_path, context)
             if is_stale(context, file_path, existing):

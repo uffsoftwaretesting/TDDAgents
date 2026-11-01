@@ -58,6 +58,7 @@ from app.types.permissions import (
     PermissionResult,
     ToolPermissionContext,
 )
+from app.utils.file_history import UpdateFileHistoryState, noop_update_file_history_state
 from app.utils.file_state_cache import FileState
 from app.utils.messages import Message
 from app.utils.permissions.denial_tracking import DenialTrackingState
@@ -695,6 +696,14 @@ class ToolContext:
     #: Every raw model chunk of the main thread, then `None` at the stream's end: the SDK's
     #: `--include-partial-messages` (`stream_event`). Only the stream-json runner sets it.
     on_stream_chunk: Callable[[Any], None] | None = None
+    #: Upstream `updateFileHistoryState` (`utils/fileHistory.ts`): how the file tools record a
+    #: backup before writing. The main thread's writes `AppState.file_history`
+    #: (`update_file_history_state_for`); anything else gets upstream's `() => {}` stub, which
+    #: `createSubagentContext` hands every worker.
+    update_file_history_state: UpdateFileHistoryState = noop_update_file_history_state
+    #: Upstream's `parentMessage` argument of `tool.call`: the assistant message whose tool call
+    #: is running. Set only on the copy the pipeline hands `tool.call` (as `tool_use_id`).
+    parent_message: Message | None = None
 
 
 @dataclass

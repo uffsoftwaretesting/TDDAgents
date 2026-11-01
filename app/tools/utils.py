@@ -54,14 +54,17 @@ Divergences, each forced by the `Workspace` protocol:
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from app.tool import ToolContext, ToolResult, ValidationResult
+from app.utils.file_history import file_history_enabled, file_history_track_edit
 from app.utils.file_state_cache import FileState
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 from app.utils.permissions.shell_rule_matching import match_wildcard_pattern
+from app.utils.session_storage import ensure_message_uuid
 from app.utils.tool_result_storage import TOOL_RESULTS_SUBDIR, config_home
 from app.workspace.base import WorkspaceNotFound, workspace_path
 
@@ -185,6 +188,44 @@ def write_text(ws: Any, path: str, content: str, context: ToolContext) -> None:
         return
     host.parent.mkdir(parents=True, exist_ok=True)
     host.write_text(content, encoding="utf-8")
+
+
+def file_history_path(context: ToolContext, path: str) -> str | None:
+    """
+    The absolute host path a write of `path` lands on, which file history backs up: the host
+    file (`host_path`), else the workspace file under its host root. `None` on a workspace with
+    no host root (E2B), whose files are not on this filesystem.
+    """
+    host = host_path(context, path)
+    if host is not None:
+        return str(host)
+    root = getattr(context.workspace, "root", None)
+    if root is None:
+        return None
+    relative = workspace_path(context.workspace, path)
+    return str(Path(str(root))) if relative == "." else str(Path(str(root)) / relative)
+
+
+async def track_file_history_edit(context: ToolContext, path: str) -> None:
+    """
+    `FileWriteTool` / `FileEditTool`: `if (fileHistoryEnabled()) await fileHistoryTrackEdit(
+    updateFileHistoryState, fullFilePath, parentMessage.uuid)`, before the write. The backup
+    captures the pre-edit content, so it is safe before the staleness check: a write refused
+    afterwards leaves an unused backup, never a corrupt state.
+
+    The assistant message's uuid is the one the transcript gives it (assigned here if it has none
+    yet). A call with no assistant message (one made outside the pipeline) is not tracked.
+    """
+    bootstrap = context.get_app_state().bootstrap
+    if not file_history_enabled(bootstrap):
+        return
+    full_file_path = file_history_path(context, path)
+    if full_file_path is None or context.parent_message is None:
+        return
+    message_id = ensure_message_uuid(context.parent_message, lambda: str(uuid.uuid4()))
+    store = context.transcript_store
+    record = getattr(store, "record_file_history_snapshot", None) if store is not None else None
+    await file_history_track_edit(context.update_file_history_state, full_file_path, message_id, bootstrap, record)
 
 
 def check_read_before_write(

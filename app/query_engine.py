@@ -32,6 +32,11 @@ permission ends other than `allow` is kept for the result (`permissionDenials`, 
 (print.ts): a new engine per prompt over the caller's conversation list (mutated in place), with
 the read-file cache cloned in and handed back after the turn; `set_model` changes the model of
 the turns that follow.
+
+**File history** (`utils/fileHistory.ts`): before the loop, each prompt the user wrote gets a file
+checkpoint (`fileHistoryMakeSnapshot`), which `--rewind-files` and the SDK's `rewind_files` go
+back to. Upstream takes it here for the SDK and in `handlePromptSubmit.ts` for the REPL; the REPL
+here submits through this engine, so this one site covers both.
 """
 
 from __future__ import annotations
@@ -44,6 +49,7 @@ from typing import Any, Literal, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from app.components.message_selector import selectable_user_messages_filter
 from app.query.config import RunConfig
 from app.query.deps import LoopDeps
 from app.query.query import run_loop
@@ -52,11 +58,13 @@ from app.query.transitions import Terminated
 from app.services.compact.compact import is_compact_boundary_message
 from app.utils.attachments import attachment_of
 from app.utils.conversation_recovery import NO_RESPONSE_REQUESTED
+from app.utils.file_history import file_history_enabled, file_history_make_snapshot
 from app.utils.messages import Message
 from app.utils.process_user_input.process_user_input import (
     ProcessUserInputResult,
     process_user_input,
 )
+from app.utils.session_storage import ensure_message_uuid
 
 #: OpenAI's `finish_reason` in upstream's `stop_reason` vocabulary.
 _FINISH_REASONS = {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}
@@ -271,6 +279,10 @@ class QueryEngine:
             )
             yield self.result
             return
+        # The prompt is on disk before its snapshot, as upstream records it before the loop.
+        self._record(messages)
+        if self.persist_session:
+            await self._make_file_history_snapshots(result.messages)
         turn_ctx = replace(ctx, messages=tuple(messages), read_file_state=self.read_file_state)
         if self.user_specified_model:
             # `parseUserSpecifiedModel(userSpecifiedModel)` is the turn's main-loop model.
@@ -281,6 +293,23 @@ class QueryEngine:
             turn_ctx = replace(turn_ctx, main_loop_model=resolve_skill_model_override(result.model, current))
         async for event in self.submit(initial_loop_state(tuple(messages), turn_ctx)):
             yield event
+
+    async def _make_file_history_snapshots(self, messages_from_user_input: Sequence[Message]) -> None:
+        """
+        `if (fileHistoryEnabled() && persistSession)`: a file history snapshot for every prompt the
+        user wrote (`selectableUserMessagesFilter`), keyed by the message's transcript uuid, so the
+        files can later be rewound to the state they were in when it was sent. Awaited here, where
+        upstream fires and forgets it, so the snapshot exists before the turn's first edit.
+        """
+        ctx = self.context
+        bootstrap = ctx.get_app_state().bootstrap
+        if not file_history_enabled(bootstrap):
+            return
+        record = getattr(self.transcript, "record_file_history_snapshot", None)
+        for message in messages_from_user_input:
+            if selectable_user_messages_filter(message):
+                message_id = ensure_message_uuid(message, lambda: str(uuid_module.uuid4()))
+                await file_history_make_snapshot(ctx.update_file_history_state, message_id, bootstrap, record)
 
     def _record(self, messages: list[Message]) -> None:
         if self.persist_session:

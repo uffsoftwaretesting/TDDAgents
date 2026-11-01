@@ -87,6 +87,21 @@ def develop_headless(
                                  **{**development_run_options(options), **run_options}))
 
 
+def rewind_files_headless(
+    thread_id: str, user_message_id: str, workspace: Any, options: SessionOptions,
+    write_out: Callable[[str], Any] | None = None,
+) -> int:
+    """`--rewind-files` (`print.ts`): the session's files put back at a user message; the exit code."""
+    import sys
+
+    from app.cli.print import run_rewind_files
+    from app.utils.run_sync import run_sync
+
+    return run_sync(run_rewind_files(thread_id, user_message_id, workspace=workspace,
+                                     write_out=write_out or sys.stdout.write,
+                                     write_err=sys.stderr.write, **development_run_options(options)))
+
+
 def develop_interactive(
     thread_id: str, request: str | None, workspace: Any, options: SessionOptions,
     *, io_factory: Callable[[Callable[[], None]], Any] | None = None, prompt: str | None = None,
@@ -150,6 +165,7 @@ __all__ = [
     "derive_thread_id",
     "develop_headless",
     "develop_interactive",
+    "rewind_files_headless",
     "development_run_options",
     "fresh_thread_id",
     "session_exists",

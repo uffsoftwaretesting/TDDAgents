@@ -362,6 +362,7 @@ def test_parser_help_and_metadata() -> None:
         "replay_user_messages": "Re-emit user messages from stdin back on stdout for acknowledgment (only works "
                                 "with --input-format=stream-json and --output-format=stream-json)",
         "permission_prompt_tool": argparse.SUPPRESS,
+        "rewind_files": argparse.SUPPRESS,
     }
     flags = {action.dest: tuple(action.option_strings) for action in parser._actions}
     assert flags["print"] == ("-p", "--print")

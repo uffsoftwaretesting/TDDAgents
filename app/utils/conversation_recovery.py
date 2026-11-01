@@ -37,7 +37,9 @@ Not ported: legacy attachment-type migration and `permissionMode` stripping (no 
 transcripts or per-message modes here), skill-state restore (no skills subsystem state),
 brief mode's terminal tool results (no such tool: `_is_terminal_tool_result` is the hook
 point), `checkResumeConsistency` (analytics only), and the session-id / most-recent lookup.
-SessionStart(`resume`) hooks need the run's dispatcher, so the caller runs them.
+SessionStart(`resume`) hooks need the run's dispatcher, so the caller runs them, and
+`copyFileHistoryForResume` needs the run's identity and transcript, so the caller runs it too
+(`app/cli/print.py`).
 """
 
 from __future__ import annotations
@@ -50,10 +52,12 @@ from typing import Any, Literal, TypeGuard
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.utils.messages import ATTACHMENT_KEY, Message
+from app.utils.file_history import FileHistorySnapshot
 from app.utils.session_storage import (
     UUID_KEY,
+    entry_to_message,
     entry_type_of,
-    load_messages_from_jsonl_path,
+    load_transcript_file,
 )
 
 #: `messages.ts` -> `NO_RESPONSE_REQUESTED`.
@@ -273,19 +277,41 @@ def remove_interrupted_message(messages: Sequence[Message], interrupted: Message
     return result
 
 
-def load_conversation_for_resume(path: str | Path) -> DeserializeResult | None:
+@dataclass(frozen=True)
+class ConversationForResume(DeserializeResult):
+    """
+    What `loadConversationForResume` returns beside the deserialized chain: the transcript's
+    file history snapshots (`fileHistorySnapshots: log?.fileHistorySnapshots`) and the session
+    that wrote the last message (`copyFileHistoryForResume`'s `lastMessage.sessionId`).
+    """
+
+    file_history_snapshots: tuple[FileHistorySnapshot, ...] = ()
+    session_id: str | None = None
+
+
+def load_conversation_for_resume(path: str | Path) -> ConversationForResume | None:
     """
     `loadConversationForResume(undefined, path)`: the main chain of a transcript file, ready
     for the loop. `None` when there is no such file (upstream's "not found").
     """
     if not Path(path).is_file():
         return None
-    return deserialize_messages_with_interrupt_detection(load_messages_from_jsonl_path(path))
+    loaded = load_transcript_file(path)
+    deserialized = deserialize_messages_with_interrupt_detection(
+        [m for m in (entry_to_message(e) for e in loaded.chain) if m is not None])
+    last_session = loaded.chain[-1].get("sessionId") if loaded.chain else None
+    return ConversationForResume(
+        messages=deserialized.messages,
+        turn_interruption_state=deserialized.turn_interruption_state,
+        file_history_snapshots=tuple(loaded.file_history_snapshots),
+        session_id=last_session if isinstance(last_session, str) else None,
+    )
 
 
 __all__ = [
     "CONTINUATION_MESSAGE",
     "NO_RESPONSE_REQUESTED",
+    "ConversationForResume",
     "DeserializeResult",
     "TurnInterruptionState",
     "deserialize_messages",

@@ -29,6 +29,7 @@ from app.tools.utils import (
     is_stale,
     read_text,
     record_write,
+    track_file_history_edit,
     write_text,
 )
 from app.utils.file import FILE_NOT_FOUND_CWD_NOTE
@@ -91,6 +92,8 @@ def build_edit_tool() -> BuiltTool:
             return NO_WORKSPACE
 
         activate_conditional_skills(context, file_path)
+        # `fileHistoryTrackEdit` before the write: the backup holds the pre-edit content.
+        await track_file_history_edit(context, file_path)
         try:
             original = read_text(ws, file_path, context)
             if is_stale(context, file_path, original):
