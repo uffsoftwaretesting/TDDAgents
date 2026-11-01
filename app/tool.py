@@ -664,6 +664,9 @@ class ToolContext:
     #: `setHasInterruptibleToolInProgress`: the streaming executor reports whether every executing
     #: tool would be cancelled by a new user message. Only the REPL sets it.
     set_has_interruptible_tool_in_progress: Callable[[bool], None] | None = None
+    #: `onProgress(toolUseID, data)`: a tool's progress while it runs (the Agent tool's worker
+    #: messages, `{"type": "agent_progress", "message", "prompt", "agentId"}`). Only the REPL sets it.
+    on_progress: Callable[[str, Mapping[str, Any]], None] | None = None
 
 
 @dataclass

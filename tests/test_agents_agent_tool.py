@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -571,3 +572,18 @@ def test_the_background_refusal_explains_itself():
     assert str(err.value) == (
         "Agent 'tester' declares TDD phase RED and cannot run in the background: a background worker's state "
         "changes are discarded, so its RunTests could not move the phase ledger. Run it in the foreground.")
+
+
+def test_a_foreground_worker_reports_each_message_as_progress(monkeypatch):
+    monkeypatch.setenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", "1")
+    _, ctx = _ctx()
+    reports: list[tuple[str, dict[str, Any]]] = []
+    ctx = replace(ctx, tool_use_id="call-9", on_progress=lambda tid, data: reports.append((tid, dict(data))))
+    _call(_tool(FakeModel([[AIMessage(content="found it")]])), {**ARGS, "subagent_type": "Explore"}, ctx)
+    assert reports and all(tid == "call-9" for tid, _ in reports)
+    first = reports[0][1]
+    assert (first["type"], first["prompt"]) == ("agent_progress", ARGS["prompt"])
+    assert first["agentId"] and any(d["message"].content == "found it" for _, d in reports)
+    unreported = replace(ctx, tool_use_id=None, on_progress=lambda tid, data: reports.append(("x", {})))
+    _call(_tool(FakeModel([[AIMessage(content="again")]])), {**ARGS, "subagent_type": "Explore"}, unreported)
+    assert all(tid == "call-9" for tid, _ in reports)

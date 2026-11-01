@@ -300,9 +300,14 @@ def build_agent_tool(
 
         messages: list[Message] = []
         error: Exception | None = None
+        report = context.on_progress
         try:
             async for message in worker():
                 messages.append(message)
+                if report is not None and context.tool_use_id:
+                    # `AgentTool.call`'s progress: each worker message, for the caller's display.
+                    report(context.tool_use_id, {"type": "agent_progress", "message": message,
+                                                 "prompt": str(args["prompt"]), "agentId": agent_id})
         except Exception as exc:  # noqa: BLE001 - upstream keeps partial progress (`syncAgentError`)
             error = exc
         if context.cancel.cancelled:
@@ -338,7 +343,7 @@ def build_agent_tool(
             task_id=agent_id, cancel=task.cancel, stream=worker(task.cancel), description=description,
             agent_type=agent.name, start_time=start, root_set_app_state=context.set_app_state,
             queue=context.command_queue, output_file=str(output_path), now=now,
-            tool_use_id=context.tool_use_id,
+            tool_use_id=context.tool_use_id, tools=context.tools, context=context,
         ))
         can_read = any(t.name in (FILE_READ_TOOL_NAME, BASH_TOOL_NAME) for t in context.tools)
         return ToolResult(

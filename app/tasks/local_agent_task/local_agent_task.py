@@ -4,7 +4,11 @@ Background agents (Phase 8).
 Ported from `reference/claude-code/src/tasks/LocalAgentTask/LocalAgentTask.tsx` ->
 `LocalAgentTaskState`, `registerAsyncAgent`, `queuePendingMessage`, `drainPendingMessages`,
 `enqueueAgentNotification`, `killAsyncAgent`, `completeAgentTask`, `failAgentTask`, and
-`tools/AgentTool/agentToolUtils.ts` -> `runAsyncAgentLifecycle`, `extractPartialResult`.
+`ToolActivity`, `AgentProgress`, `MAX_RECENT_ACTIVITIES`, `ProgressTracker`, `createProgressTracker`,
+`getTokenCountFromTracker`, `updateProgressFromMessage`, `getProgressUpdate`,
+`createActivityDescriptionResolver`, `updateAgentProgress`, and
+`tools/AgentTool/agentToolUtils.ts` -> `runAsyncAgentLifecycle` (progress updated per message),
+`extractPartialResult`.
 
 A background agent is a worker the Agent tool did not wait for. Its task record lives in
 `AppState.tasks` under the agent's own id (upstream registers the task with the `agentId`), is
@@ -15,8 +19,9 @@ written only through the root setter, and ends in exactly one `<task-notificatio
 async worker's app-state writes are discarded upstream (`shareSetAppState: !isAsync`), so a
 background tester's `RunTests` could never end RED.
 
-Not ported: progress tracking and summaries (UI), the panel/retain/eviction fields, the
-transcript-viewer message mirror, and `classifyHandoffIfNeeded`.
+Not ported: the periodic background summaries (`updateAgentSummary`), the SDK `task_progress`
+event, the panel/retain/eviction fields, the transcript-viewer message mirror, and
+`classifyHandoffIfNeeded`.
 """
 
 from __future__ import annotations
@@ -49,6 +54,124 @@ STATUS_TAG = "status"
 SUMMARY_TAG = "summary"
 
 
+@dataclass(frozen=True, slots=True)
+class ToolActivity:
+    """`ToolActivity`: one tool use, classified when it was recorded."""
+
+    tool_name: str
+    input: dict[str, Any]
+    #: `getActivityDescription` of the tool ("Reading src/foo.ts").
+    activity_description: str | None = None
+    is_search: bool | None = None
+    is_read: bool | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """The camel-cased shape `summarize_recent_activities` reads."""
+        return {"toolName": self.tool_name, "input": self.input, "activityDescription": self.activity_description,
+                "isSearch": self.is_search, "isRead": self.is_read}
+
+
+@dataclass(frozen=True, slots=True)
+class AgentProgress:
+    """`AgentProgress`."""
+
+    tool_use_count: int
+    token_count: int
+    last_activity: ToolActivity | None = None
+    recent_activities: tuple[ToolActivity, ...] = ()
+    summary: str | None = None
+
+
+#: `MAX_RECENT_ACTIVITIES`.
+MAX_RECENT_ACTIVITIES = 5
+
+
+@dataclass
+class ProgressTracker:
+    """
+    `ProgressTracker`: input tokens are cumulative per turn in the API, so the latest is kept;
+    output tokens are per turn, so they are summed.
+    """
+
+    tool_use_count: int = 0
+    latest_input_tokens: int = 0
+    cumulative_output_tokens: int = 0
+    recent_activities: list[ToolActivity] = field(default_factory=list)
+
+
+def create_progress_tracker() -> ProgressTracker:
+    """`createProgressTracker`."""
+    return ProgressTracker()
+
+
+def get_token_count_from_tracker(tracker: ProgressTracker) -> int:
+    """`getTokenCountFromTracker`."""
+    return tracker.latest_input_tokens + tracker.cumulative_output_tokens
+
+
+ActivityDescriptionResolver = Callable[[str, dict[str, Any]], str | None]
+
+
+def create_activity_description_resolver(tools: Sequence[Any], context: Any = None) -> ActivityDescriptionResolver:
+    """`createActivityDescriptionResolver`: the tool's `getActivityDescription`, by name."""
+    from app.tool import find_tool_by_name
+
+    def resolve(tool_name: str, tool_input: dict[str, Any]) -> str | None:
+        tool = find_tool_by_name(tools, tool_name)
+        return tool.get_activity_description(tool_input, context) if tool is not None else None
+
+    return resolve
+
+
+def update_progress_from_message(
+    tracker: ProgressTracker, message: Any, resolve_activity_description: ActivityDescriptionResolver | None = None,
+    tools: Sequence[Any] | None = None, context: Any = None,
+) -> None:
+    """`updateProgressFromMessage`: an assistant message's usage and its tool uses."""
+    if not isinstance(message, AIMessage):
+        return
+    usage: dict[str, Any] = dict(message.usage_metadata or {})
+    details: dict[str, Any] = dict(usage.get("input_token_details") or {})
+    tracker.latest_input_tokens = (int(usage.get("input_tokens", 0)) + int(details.get("cache_creation", 0) or 0)
+                                   + int(details.get("cache_read", 0) or 0))
+    tracker.cumulative_output_tokens += int(usage.get("output_tokens", 0))
+    for call in message.tool_calls:
+        tracker.tool_use_count += 1
+        name, tool_input = str(call.get("name")), dict(call.get("args") or {})
+        classification = None
+        if tools is not None:
+            from app.utils.collapse_read_search import get_tool_search_or_read_info
+
+            classification = get_tool_search_or_read_info(name, tool_input, tools, context)
+        tracker.recent_activities.append(ToolActivity(
+            tool_name=name, input=tool_input,
+            activity_description=(resolve_activity_description(name, tool_input)
+                                  if resolve_activity_description else None),
+            is_search=classification.is_search if classification else None,
+            is_read=classification.is_read if classification else None,
+        ))
+    del tracker.recent_activities[:-MAX_RECENT_ACTIVITIES]
+
+
+def get_progress_update(tracker: ProgressTracker) -> AgentProgress:
+    """`getProgressUpdate`."""
+    activities = tuple(tracker.recent_activities)
+    return AgentProgress(tool_use_count=tracker.tool_use_count, token_count=get_token_count_from_tracker(tracker),
+                         last_activity=activities[-1] if activities else None, recent_activities=activities)
+
+
+def update_agent_progress(task_id: str, progress: AgentProgress, set_app_state: SetAppState) -> None:
+    """`updateAgentProgress`: a running task's progress, keeping a summary it already has."""
+
+    def update(task: LocalAgentTaskState) -> LocalAgentTaskState:
+        if task.status != "running":
+            return task
+        summary = task.progress.summary if task.progress is not None else None
+        return replace(task, progress=replace(progress, summary=summary) if summary else progress)
+
+    update_task_state(task_id, set_app_state, update)
+
+
 @dataclass(frozen=True)
 class LocalAgentTaskState(TaskStateBase):
     """`LocalAgentTaskState`, the fields a headless run uses."""
@@ -64,6 +187,8 @@ class LocalAgentTaskState(TaskStateBase):
     is_backgrounded: bool = True
     #: Messages queued mid-turn by `SendMessage`, drained at the worker's tool-round boundaries.
     pending_messages: tuple[str, ...] = ()
+    #: `progress`: tool uses, tokens and the recent activities, while it runs.
+    progress: AgentProgress | None = None
 
 
 def register_async_agent(
@@ -230,6 +355,8 @@ async def run_async_agent_lifecycle(
     output_file: str,
     tool_use_id: str | None = None,
     now: Callable[[], float] = time.time,
+    tools: Sequence[Any] = (),
+    context: Any = None,
 ) -> None:
     """
     `runAsyncAgentLifecycle`: drive the worker, then complete, kill or fail its task and enqueue
@@ -239,6 +366,8 @@ async def run_async_agent_lifecycle(
     from app.tools.agent_tool.agent_tool import finalize_agent_tool
 
     messages: list[Message] = []
+    tracker = create_progress_tracker()
+    resolve_activity = create_activity_description_resolver(tools, context)
     notify = functools.partial(
         enqueue_agent_notification, queue=queue, task_id=task_id, description=description,
         set_app_state=root_set_app_state, output_file=output_file, tool_use_id=tool_use_id,
@@ -246,6 +375,8 @@ async def run_async_agent_lifecycle(
     try:
         async for message in stream:
             messages.append(message)
+            update_progress_from_message(tracker, message, resolve_activity, tools, context)
+            update_agent_progress(task_id, get_progress_update(tracker), root_set_app_state)
         if cancel.cancelled:
             kill_async_agent(task_id, root_set_app_state, now())
             notify(status="killed", final_message=extract_partial_result(messages))
@@ -277,15 +408,25 @@ def start_background_lifecycle(lifecycle: Coroutine[Any, Any, None]) -> asyncio.
 
 
 __all__ = [
+    "MAX_RECENT_ACTIVITIES",
+    "AgentProgress",
     "LocalAgentTaskState",
+    "ProgressTracker",
+    "ToolActivity",
     "complete_agent_task",
+    "create_activity_description_resolver",
+    "create_progress_tracker",
     "drain_pending_messages",
     "enqueue_agent_notification",
     "extract_partial_result",
     "fail_agent_task",
+    "get_progress_update",
+    "get_token_count_from_tracker",
     "kill_async_agent",
     "queue_pending_message",
     "register_async_agent",
     "run_async_agent_lifecycle",
     "start_background_lifecycle",
+    "update_agent_progress",
+    "update_progress_from_message",
 ]

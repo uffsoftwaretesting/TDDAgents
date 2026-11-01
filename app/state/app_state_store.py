@@ -90,8 +90,26 @@ class AppStateStore:
     def get(self) -> AppState:
         return self.state
 
+    #: `createStore`'s listeners, called after every change.
+    listeners: list[Callable[[], None]] = field(default_factory=list)
+
     def update(self, updater: Callable[[AppState], AppState]) -> None:
-        self.state = updater(self.state)
+        """`setState`: a replacement, and the listeners told when it changed anything."""
+        previous = self.state
+        self.state = updater(previous)
+        if self.state is not previous:
+            for listener in tuple(self.listeners):
+                listener()
+
+    def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """`subscribe`: `listener` runs after each change; the result unsubscribes."""
+        self.listeners.append(listener)
+
+        def unsubscribe() -> None:
+            if listener in self.listeners:
+                self.listeners.remove(listener)
+
+        return unsubscribe
 
 
 def discard_app_state_update(updater: Callable[[AppState], AppState]) -> None:

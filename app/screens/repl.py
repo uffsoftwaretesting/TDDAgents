@@ -65,7 +65,9 @@ from app.query.transitions import Terminal
 from app.query_engine import ResultMessage
 from app.session.prompts import development_continue_prompt
 from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
+from app.tools.agent_tool.ui import extract_last_tool_info
 from app.types.permissions import PermissionMode
+from app.utils.collapse_read_search import summarize_recent_activities
 from app.utils.message_queue_manager import QueuedCommand
 from app.utils.permissions.permission_setup import set_permission_mode
 from app.utils.process_user_input.process_slash_command import parse_slash_input
@@ -239,6 +241,44 @@ class Repl:
         self.has_interruptible_tool_in_progress = False
         run.on_message = self._show
         run.ctx.set_has_interruptible_tool_in_progress = self._set_interruptible
+        #: A foreground worker's messages so far, by its Agent call, and the line last shown for it.
+        self._agent_progress: dict[str, list[Any]] = {}
+        self._progress_shown: dict[str, str] = {}
+        run.ctx.on_progress = self._on_progress
+        store = getattr(run, "store", None)
+        if store is not None:
+            store.subscribe(self._on_state_change)
+
+    def _on_progress(self, tool_use_id: str, data: Mapping[str, Any]) -> None:
+        """
+        A foreground worker's progress (`AgentTool/UI.tsx` -> `extractLastToolInfo`): its last
+        finished tool, or its rolled-up searches and reads, under the Agent call.
+        """
+        if data.get("type") != "agent_progress":
+            return
+        messages = self._agent_progress.setdefault(tool_use_id, [])
+        messages.append(data.get("message"))
+        line = extract_last_tool_info(messages, getattr(self.run.ctx, "tools", ()) or (), self.run.ctx)
+        if line is not None and self._progress_shown.get(tool_use_id) != line:
+            self._progress_shown[tool_use_id] = line
+            self.io.write(f"  ⎿  {line}")
+
+    def _on_state_change(self) -> None:
+        """
+        A background agent's status (`summarizeRecentActivities`, else its last activity), shown
+        when it changes, as `<description>: <activity>`.
+        """
+        for task in self.run.store.get().tasks.values():
+            progress = getattr(task, "progress", None)
+            if task.type != "local_agent" or task.status != "running" or progress is None:
+                continue
+            activities = [a.as_dict() for a in progress.recent_activities]
+            last = progress.last_activity.activity_description if progress.last_activity is not None else None
+            activity = summarize_recent_activities(activities) or last
+            key = f"task:{task.id}"
+            if activity and self._progress_shown.get(key) != activity:
+                self._progress_shown[key] = activity
+                self.io.write(f"  ⎿  {task.description}: {activity}")
 
     def _set_interruptible(self, value: bool) -> None:
         self.has_interruptible_tool_in_progress = value
