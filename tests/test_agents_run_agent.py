@@ -138,6 +138,26 @@ def test_the_worker_pool_follows_the_phase_between_turns():
     assert after is not before and "SrcWriter" in [t.name for t in after]
 
 
+def test_the_worker_pool_drops_tools_its_deny_rules_name_and_follows_them():
+    from app.types.permissions import (
+        PermissionBehavior,
+        PermissionRule,
+        PermissionRuleSource,
+        ToolPermissionContext,
+    )
+
+    deny = PermissionRule(tool_name="Grep", rule_behavior=PermissionBehavior.DENY,
+                          source=PermissionRuleSource.USER_SETTINGS)
+    store = AppStateStore(AppState(tool_permission_context=ToolPermissionContext(always_deny_rules=(deny,))))
+    tools = (_tool("ReadFile"), _tool("Grep"))
+    allow_both = dataclasses.replace(TESTER, tools=("ReadFile", "Grep"))
+    model, _ = _run(definition=allow_both, tools=tools, parent=_parent(store))
+    refresh = model.seen[0].tool_context.refresh_tools
+    assert [t.name for t in refresh()] == ["ReadFile"]
+    store.update(lambda s: dataclasses.replace(s, tool_permission_context=ToolPermissionContext()))
+    assert [t.name for t in refresh()] == ["Grep", "ReadFile"]
+
+
 def test_the_worker_is_recorded_as_a_sidechain(tmp_path):
     store = TranscriptStore("sess", tmp_path, version="v", git_branch=None)
     _run(agent_id="a9", transcript=store)

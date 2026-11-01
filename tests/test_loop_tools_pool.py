@@ -174,3 +174,54 @@ class TestContentScopedDenyRules:
             source=PermissionRuleSource.PROJECT_SETTINGS,
         )
         assert [t.name for t in assemble_tool_pool([run_tests], deny_rules=[scoped])] == ["RunTests"]
+
+
+class TestFilterToolsByDenyRules:
+    """`filterToolsByDenyRules` / `assembleToolPool(permissionContext, …)`: settings denies hide tools."""
+
+    @staticmethod
+    def _ctx(*rules: PermissionRule):
+        from app.types.permissions import ToolPermissionContext
+
+        return ToolPermissionContext(always_deny_rules=rules)
+
+    @staticmethod
+    def _deny(name: str, content: str | None = None) -> PermissionRule:
+        return PermissionRule(tool_name=name, rule_behavior=PermissionBehavior.DENY, rule_content=content,
+                              source=PermissionRuleSource.USER_SETTINGS)
+
+    def test_a_blanket_deny_removes_the_tool_and_nothing_else(self):
+        from app.tools.tools import filter_tools_by_deny_rules
+
+        bash = build_tool(name="Bash", prompt="p", call=dummy_call)
+        bash_output = build_tool(name="BashOutput", prompt="p", call=dummy_call)
+        kept = filter_tools_by_deny_rules([bash, bash_output], self._ctx(self._deny("Bash")))
+        assert [t.name for t in kept] == ["BashOutput"]
+
+    def test_a_scoped_deny_keeps_the_tool(self):
+        from app.tools.tools import filter_tools_by_deny_rules
+
+        bash = build_tool(name="Bash", prompt="p", call=dummy_call)
+        assert filter_tools_by_deny_rules([bash], self._ctx(self._deny("Bash", "rm:*"))) == [bash]
+
+    def test_a_server_rule_removes_every_tool_on_that_server(self):
+        from app.tools.tools import filter_tools_by_deny_rules
+
+        one = build_tool(name="mcp__srv__one", prompt="p", call=dummy_call, is_mcp=True)
+        two = build_tool(name="mcp__srv__two", prompt="p", call=dummy_call, is_mcp=True)
+        other = build_tool(name="mcp__other__one", prompt="p", call=dummy_call, is_mcp=True)
+        for rule in ("mcp__srv", "mcp__srv__*"):
+            kept = filter_tools_by_deny_rules([one, two, other], self._ctx(self._deny(rule)))
+            assert [t.name for t in kept] == ["mcp__other__one"]
+
+    def test_the_pool_drops_denied_built_ins_and_mcp_tools_run_tests_included(self):
+        read = build_tool(name="ReadFile", prompt="p", call=dummy_call)
+        run_tests = build_tool(name="RunTests", prompt="p", call=dummy_call)
+        mcp = build_tool(name="mcp__srv__x", prompt="p", call=dummy_call, is_mcp=True)
+        ctx = self._ctx(self._deny("RunTests"), self._deny("mcp__srv"))
+        pool = assemble_tool_pool([read, run_tests], [mcp], permission_context=ctx)
+        assert [t.name for t in pool] == ["ReadFile"]
+
+    def test_without_a_permission_context_nothing_is_filtered(self):
+        read = build_tool(name="ReadFile", prompt="p", call=dummy_call)
+        assert [t.name for t in assemble_tool_pool([read])] == ["ReadFile"]

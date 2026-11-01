@@ -146,14 +146,21 @@ def _write_agent_metadata(store: Any, agent_id: str, agent_type: str, descriptio
 def _phase_filtered_pool(
     resolved: Sequence[Tool], get_app_state: Callable[[], AppState]
 ) -> Callable[[], tuple[Any, ...]]:
-    """The worker's `refresh_tools`: the resolved pool under the live phase, rebuilt only on a move."""
-    cache: dict[str, Any] = {"phase": None}
+    """
+    The worker's `refresh_tools`: the resolved pool under the live phase and the worker's deny
+    rules (`AgentTool`'s `assembleToolPool(workerPermissionContext, …)`), rebuilt only when
+    either moves.
+    """
+    cache: dict[str, Any] = {"key": None}
 
     def refresh() -> tuple[Any, ...]:
-        ledger = get_app_state().phase_ledger
-        if cache["phase"] != ledger.phase:
-            cache["phase"] = ledger.phase
-            cache["tools"] = assemble_tool_pool(resolved, phase_ledger=ledger)
+        state = get_app_state()
+        ledger = state.phase_ledger
+        permission_context = state.tool_permission_context
+        key = (ledger.phase, permission_context.always_deny_rules)
+        if cache["key"] != key:
+            cache["key"] = key
+            cache["tools"] = assemble_tool_pool(resolved, phase_ledger=ledger, permission_context=permission_context)
         tools: tuple[Any, ...] = cache["tools"]
         return tools
 

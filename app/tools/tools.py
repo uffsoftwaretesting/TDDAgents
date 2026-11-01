@@ -2,7 +2,7 @@
 Tool pool assembly with partition-sorting for prompt-cache stability (Parts B8 & D3).
 
 Ported from:
-- `reference/claude-code/src/tools.ts` -> `assembleToolPool`, `filterToolsByDenyRules`
+- `reference/claude-code/src/tools.ts` -> `assembleToolPool`, `filterToolsByDenyRules`, `getTools`'s deny filter
 - `reference/claude-code/src/utils/toolPool.ts` -> `mergeAndFilterTools`
 - §3.3 of `docs/transition_elaboration_plan.md` -> phase-derived deny rules feeding pool assembly
 """
@@ -18,7 +18,8 @@ from app.tdd.phase_permissions import (
     is_test_writing_tool,
 )
 from app.tool import Tool
-from app.types.permissions import PermissionRule
+from app.types.permissions import PermissionRule, ToolPermissionContext
+from app.utils.permissions.permissions import get_deny_rule_for_tool
 
 #: `mcpStringUtils.ts` -> `buildMcpToolName`'s namespace prefix.
 MCP_TOOL_PREFIX = "mcp__"
@@ -42,12 +43,25 @@ def is_tool_denied(tool: Tool, deny_rules: set[str]) -> bool:
     return False
 
 
+def filter_tools_by_deny_rules(
+    tools: Sequence[Tool], permission_context: ToolPermissionContext
+) -> list[Tool]:
+    """
+    `filterToolsByDenyRules`: drop every tool a blanket deny rule names, so the model never
+    sees a tool it may not call. `get_deny_rule_for_tool` without input content matches only
+    content-less rules (`toolMatchesRule`): `Bash` removes Bash, `Bash(rm:*)` does not, and
+    `mcp__server` or `mcp__server__*` removes every tool on that server.
+    """
+    return [tool for tool in tools if get_deny_rule_for_tool(permission_context, tool.name) is None]
+
+
 def assemble_tool_pool(
     built_in_tools: Sequence[Tool] = (),
     mcp_tools: Sequence[Tool] = (),
     *,
     deny_rules: Sequence[str | PermissionRule] | set[str] = (),
     phase_ledger: PhaseLedger | None = None,
+    permission_context: ToolPermissionContext | None = None,
 ) -> tuple[Tool, ...]:
     """
     Assemble the full tool pool with partition-sorting and TDD phase deny rules (Parts B8 & D3).
@@ -62,7 +76,14 @@ def assemble_tool_pool(
     4. Sort MCP tools alphabetically by name.
     5. Concatenate with built-ins as a contiguous prefix.
     6. Deduplicate by name, preserving insertion order (built-ins win on name conflicts).
+
+    `permission_context` is upstream's `assembleToolPool(permissionContext, mcpTools)`: its
+    deny rules filter built-ins (`getTools`) and MCP tools alike, RunTests included — a
+    settings deny is the user's word, unlike a phase rule.
     """
+    if permission_context is not None:
+        built_in_tools = filter_tools_by_deny_rules(built_in_tools, permission_context)
+        mcp_tools = filter_tools_by_deny_rules(mcp_tools, permission_context)
     deny_set: set[str] = set()
     for rule in deny_rules:
         if isinstance(rule, PermissionRule):

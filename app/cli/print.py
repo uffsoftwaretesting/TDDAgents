@@ -399,7 +399,8 @@ async def open_session_run(
         def refresh_tools() -> tuple[Tool, ...]:
             """
             `refreshTools` for this loop: re-derive the phase-filtered pool when, and only
-            when, the phase or plan mode has changed.
+            when, the phase, plan mode or the deny rules (`assembleToolPool`'s
+            `filterToolsByDenyRules`) have changed.
 
             The cached tuple is returned unchanged otherwise, because the engine compares by
             identity — a fresh but equal tuple would rebuild the serialized tool block every
@@ -407,12 +408,14 @@ async def open_session_run(
             """
             state = store.get()
             current = state.phase_ledger
-            in_plan = state.tool_permission_context.mode == PermissionMode.PLAN
-            key = (current.phase, in_plan)
+            permission_context = state.tool_permission_context
+            in_plan = permission_context.mode == PermissionMode.PLAN
+            key = (current.phase, in_plan, permission_context.always_deny_rules)
             if key != pool_cache["key"]:
                 pool_cache["key"] = key
                 tools, extra = (planning_tools, list(mcp.tools)) if in_plan else (built_ins, main_mcp)
-                pool_cache["tools"] = assemble_tool_pool(tools, extra, phase_ledger=current)
+                pool_cache["tools"] = assemble_tool_pool(
+                    tools, extra, phase_ledger=current, permission_context=permission_context)
             tools_now: tuple[Tool, ...] = pool_cache["tools"]
             return tools_now
 

@@ -125,6 +125,25 @@ def test_the_pool_is_cached_per_phase_and_mode(python_workspace, tmp_path):
     asyncio.run(go())
 
 
+def test_a_settings_deny_hides_the_tool_from_the_main_pool(python_workspace, tmp_path):
+    from app.types.permissions import PermissionBehavior, PermissionRule, PermissionRuleSource
+
+    deny = PermissionRule(tool_name="Grep", rule_behavior=PermissionBehavior.DENY,
+                          source=PermissionRuleSource.USER_SETTINGS)
+
+    def with_deny(state: AppState) -> AppState:
+        context = dataclasses.replace(state.tool_permission_context, always_deny_rules=(deny,))
+        return dataclasses.replace(state, tool_permission_context=context)
+
+    async def go() -> None:
+        async with _open(tmp_path, python_workspace, TddPlan(), planning=True, run_id="loop-p6") as run:
+            assert "Grep" in {t.name for t in run.ctx.refresh_tools()}
+            run.store.update(with_deny)
+            assert "Grep" not in {t.name for t in run.ctx.refresh_tools()}
+
+    asyncio.run(go())
+
+
 def test_in_coordinator_mode_the_analyst_keeps_the_whole_roster(python_workspace, tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_COORDINATOR_MODE", "1")
 
