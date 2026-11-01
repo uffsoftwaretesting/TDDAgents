@@ -103,6 +103,7 @@ class TestLoopDeps:
             "emit_event",
             "microcompact",
             "autocompact",
+            "query_haiku",
         ]
         assert field_names == expected
 

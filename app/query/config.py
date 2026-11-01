@@ -43,6 +43,9 @@ class Gates:
     #: Upstream `isCoordinatorMode()` (`CLAUDE_CODE_COORDINATOR_MODE`), here
     #: `TDDAGENTS_COORDINATOR_MODE`: the main thread orchestrates workers (Phase 7).
     coordinator_mode: bool
+    #: Upstream `emitToolUseSummaries` (`CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES`), here
+    #: `TDDAGENTS_EMIT_TOOL_USE_SUMMARIES`: label each tool batch with the small fast model.
+    emit_tool_use_summaries: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +100,8 @@ def build_run_config(
         run_id=run_id,
         gates=Gates(
             coordinator_mode=os.environ.get("TDDAGENTS_COORDINATOR_MODE", "").strip().lower()
+            in ("1", "true", "yes", "on"),
+            emit_tool_use_summaries=os.environ.get("TDDAGENTS_EMIT_TOOL_USE_SUMMARIES", "").strip().lower()
             in ("1", "true", "yes", "on"),
         ),
         model=Config.MODEL,

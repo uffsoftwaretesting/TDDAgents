@@ -32,6 +32,7 @@ def make_state(**overrides: Any) -> LoopState:
         "stop_hook_active": None,
         "turn_count": 1,
         "transition": None,
+        "pending_tool_use_summary": None,
     }
     base.update(overrides)
     return LoopState(**base)
@@ -105,6 +106,7 @@ class TestEveryFieldIsNamed:
             "stop_hook_active",
             "turn_count",
             "transition",
+            "pending_tool_use_summary",
         ]
 
 

@@ -36,8 +36,10 @@ how the engine recognises `hook_stopped_continuation` (upstream's `query.ts` che
 from __future__ import annotations
 
 import logging
+import uuid as uuid_module
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -348,9 +350,11 @@ __all__ = [
     "HookBlockingError",
     "Message",
     "ToolCall",
+    "ToolUseSummaryMessage",
     "async_hook_response_messages",
     "attachment_type_of",
     "create_attachment_message",
+    "create_tool_use_summary_message",
     "create_user_interruption_message",
     "is_attachment_message",
     "is_hook_stopped_continuation",
@@ -360,6 +364,26 @@ __all__ = [
     "tool_calls_in",
     "wrap_in_system_reminder",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolUseSummaryMessage:
+    """
+    `ToolUseSummaryMessage`: a label for a completed tool batch (`tool_use_summary`). Not a
+    conversation message: the loop yields it for SDK clients; the REPL and the transcript skip it.
+    """
+
+    summary: str
+    preceding_tool_use_ids: tuple[str, ...]
+    uuid: str
+    timestamp: str
+    type: str = "tool_use_summary"
+
+
+def create_tool_use_summary_message(summary: str, preceding_tool_use_ids: Sequence[str]) -> ToolUseSummaryMessage:
+    """`createToolUseSummaryMessage`."""
+    return ToolUseSummaryMessage(summary=summary, preceding_tool_use_ids=tuple(preceding_tool_use_ids),
+                                 uuid=str(uuid_module.uuid4()), timestamp=datetime.now(UTC).isoformat())
 
 
 #: `INTERRUPT_MESSAGE` / `INTERRUPT_MESSAGE_FOR_TOOL_USE` (`src/utils/messages.ts`).

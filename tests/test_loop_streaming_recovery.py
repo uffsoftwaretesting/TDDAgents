@@ -194,6 +194,7 @@ class TestWithholdGateSnapshot:
             stop_hook_active=None,
             turn_count=1,
             transition=Transition(reason=Continue.REACTIVE_COMPACT_RETRY),
+            pending_tool_use_summary=None,
         )
         gate_retry = take_withhold_gate_snapshot(state_retry, CONFIG)
         assert gate_retry.reactive_compact_enabled is False
@@ -293,6 +294,7 @@ def test_exhausted_413_surfaces_withheld_error() -> None:
             stop_hook_active=None,
             turn_count=1,
             transition=Transition(reason=Continue.REACTIVE_COMPACT_RETRY),
+            pending_tool_use_summary=None,
         )
 
         ptl_msg = AIMessage(content="cut", additional_kwargs={"api_error": "prompt_too_long"})

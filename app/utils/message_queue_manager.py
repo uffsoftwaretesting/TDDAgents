@@ -41,6 +41,8 @@ class QueuedCommand:
     #: The worker a notification is addressed to; `None` is the main thread.
     agent_id: str | None = None
     skip_slash_commands: bool = False
+    #: `isMeta`: a system-generated prompt, model-visible but hidden from the user.
+    is_meta: bool = False
 
 
 def _priority(command: QueuedCommand) -> int:

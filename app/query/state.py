@@ -32,12 +32,13 @@ recoverable from the transition history, which is where Part L2 reads it from an
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass
 
 from app.query.transitions import Transition
 from app.tdd.ledger import PhaseLedger
 from app.tool import ToolContext
-from app.utils.messages import Message
+from app.utils.messages import Message, ToolUseSummaryMessage
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +94,9 @@ class LoopState:
     stop_hook_active: bool | None
     turn_count: int
     transition: Transition | None
+    #: Upstream `pendingToolUseSummary`: the previous batch's label, started after its tools and
+    #: yielded during the next model call; `None` on every continue but `next_turn`.
+    pending_tool_use_summary: Awaitable[ToolUseSummaryMessage | None] | None
 
 
 def initial_loop_state(
@@ -125,4 +129,5 @@ def initial_loop_state(
         stop_hook_active=None,
         turn_count=1,
         transition=None,
+        pending_tool_use_summary=None,
     )

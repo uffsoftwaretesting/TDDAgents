@@ -14,13 +14,14 @@ All terminal reasons and continue sites are handled according to the closed voca
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from dataclasses import replace
 from typing import Any, TypeAlias
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.query.config import RunConfig
 from app.query.deps import LoopDeps
@@ -50,6 +51,8 @@ from app.utils.hooks.hooks import dispatcher_of, execute_stop_failure_hooks
 from app.utils.messages import (
     Message,
     ToolCall,
+    ToolUseSummaryMessage,
+    create_tool_use_summary_message,
     create_user_interruption_message,
     is_hook_stopped_continuation,
     tool_calls_in,
@@ -68,8 +71,53 @@ def abort_reason(tool_context: Any, turn_controller: Any = None) -> str | None:
     return reason
 
 
+def start_tool_use_summary(
+    config: RunConfig, tool_context: Any, tool_calls: Sequence[ToolCall], assistant_messages: Sequence[Message],
+    tool_results: Sequence[Message], turn_controller: Any, deps: LoopDeps,
+) -> Awaitable[ToolUseSummaryMessage | None] | None:
+    """
+    `query.ts`'s tool-use summary: when `emit_tool_use_summaries` is on, the batch had calls, the
+    turn was not aborted and this is the main thread (subagents never surface in the SDK's UI),
+    start labelling it without blocking the next model call; a failure is no label.
+    """
+    if (not config.gates.emit_tool_use_summaries or not tool_calls or tool_context.cancel.cancelled
+            or turn_controller.signal.aborted or getattr(tool_context, "agent_id", None)):
+        return None
+    from app.services.tool_use_summary.tool_use_summary_generator import (
+        ToolInfo,
+        generate_tool_use_summary,
+    )
+
+    last_text = None
+    if assistant_messages:
+        texts = [b for b in _text_blocks(assistant_messages[-1])]
+        last_text = texts[-1] if texts else None
+    results = {m.tool_call_id: m.content for m in tool_results if isinstance(m, ToolMessage)}
+    tools = [ToolInfo(name=str(c.get("name")), input=c.get("args") or {}, output=results.get(str(c.get("id"))))
+             for c in tool_calls]
+    ids = [str(c.get("id")) for c in tool_calls]
+
+    async def labelled() -> ToolUseSummaryMessage | None:
+        try:
+            summary = await generate_tool_use_summary(tools, deps.query_haiku(tool_context),
+                                                      last_assistant_text=last_text)
+        except Exception:  # noqa: BLE001 - upstream's `.catch(() => null)`
+            return None
+        return create_tool_use_summary_message(summary, ids) if summary else None
+
+    return asyncio.ensure_future(labelled())
+
+
+def _text_blocks(message: Message) -> list[str]:
+    """The text blocks of an assistant message, in order (a string content is one block)."""
+    content = message.content
+    if isinstance(content, str):
+        return [content] if content else []
+    return [str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text"]
+
+
 #: What a run emits: every message as it is produced, then exactly one `Terminated`.
-LoopEvent: TypeAlias = Message | Terminated
+LoopEvent: TypeAlias = Message | Terminated | ToolUseSummaryMessage
 
 #: `query.ts`'s repair text when a model fallback abandons a turn's tool calls.
 FALLBACK_REPAIR_MESSAGE = "Model fallback triggered"
@@ -413,6 +461,7 @@ async def run_loop(
                         stop_hook_active=None,
                         turn_count=state.turn_count,
                         transition=Transition(reason=Continue.REACTIVE_COMPACT_RETRY),
+                        pending_tool_use_summary=None,
                     )
                     deps.emit_event(state.transition)
                     continue
@@ -445,6 +494,7 @@ async def run_loop(
                     stop_hook_active=None,
                     turn_count=state.turn_count,
                     transition=Transition(reason=Continue.MAX_OUTPUT_TOKENS_RECOVERY),
+                    pending_tool_use_summary=None,
                 )
                 deps.emit_event(state.transition)
                 continue
@@ -459,6 +509,12 @@ async def run_loop(
             deps.emit_event(term)
             yield term
             return
+
+        # The previous batch's label, resolved during this model call.
+        if state.pending_tool_use_summary is not None:
+            summary = await state.pending_tool_use_summary
+            if summary is not None:
+                yield summary
 
         if not needs_follow_up:
             # The anti-spiral guard, `query.ts`:
@@ -499,6 +555,7 @@ async def run_loop(
                     stop_hook_active=True,
                     turn_count=state.turn_count,
                     transition=Transition(reason=Continue.STOP_HOOK_BLOCKING),
+                    pending_tool_use_summary=None,
                 )
                 deps.emit_event(state.transition)
                 continue
@@ -519,6 +576,11 @@ async def run_loop(
             ):
                 yield result
                 tool_results.append(result)
+
+        # The tool batch's label, generated while the next model call streams (`query.ts`).
+        next_pending_tool_use_summary = start_tool_use_summary(
+            config, state.tool_context, tool_calls, assistant_messages, tool_results, turn_controller, deps
+        )
 
         if state.tool_context.cancel.cancelled or turn_controller.signal.aborted:
             if abort_reason(state.tool_context, turn_controller) != "interrupt":
@@ -576,6 +638,7 @@ async def run_loop(
             stop_hook_active=state.stop_hook_active,
             turn_count=state.turn_count + 1,
             transition=Transition(reason=Continue.NEXT_TURN),
+            pending_tool_use_summary=next_pending_tool_use_summary,
         )
         deps.emit_event(state.transition)
 

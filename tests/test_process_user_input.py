@@ -286,7 +286,9 @@ def _run(engine: QueryEngine) -> Any:
 
     shown: list[Any] = []
     return SimpleNamespace(engine=engine, ctx=engine.context, store=None, run_id="r", stopped_reason=None,
-                           on_message=shown.append, shown=shown)
+                           on_message=shown.append, shown=shown, config=engine.config, deps=engine.deps,
+                           transcript=engine.transcript, messages=engine.mutable_messages,
+                           user_specified_model=None)
 
 
 def test_a_turn_a_hook_stopped_ends_hook_stopped_with_the_prompt_kept():

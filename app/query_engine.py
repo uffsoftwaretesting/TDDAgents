@@ -28,9 +28,10 @@ attachments, the UserPromptSubmit hooks — and a turn that does not query (an u
 hook that stopped it) is recorded and answered with a result, never a loop. Every call whose
 permission ends other than `allow` is kept for the result (`permissionDenials`, upstream's
 `wrappedCanUseTool`), in the run's and its workers' calls alike. `interrupt` aborts the turn and
-`get_messages` is the conversation. Not ported: `setModel`, `getReadFileState` and the one-shot
-`ask()` wrapper, which only the SDK's control requests and per-prompt engines use; one engine
-serves the whole session here (Phase 6).
+`get_messages` is the conversation. `ask()` is upstream's one-shot wrapper, used for every turn
+(print.ts): a new engine per prompt over the caller's conversation list (mutated in place), with
+the read-file cache cloned in and handed back after the turn; `set_model` changes the model of
+the turns that follow.
 """
 
 from __future__ import annotations
@@ -167,6 +168,9 @@ class QueryEngine:
         session_id: str,
         cost_tracker: Any = None,
         context: Any = None,
+        initial_messages: list[Message] | None = None,
+        read_file_cache: dict[str, Any] | None = None,
+        user_specified_model: str | None = None,
         persist_session: bool = True,
         now: Callable[[], float] = time.time,
         uuid: Callable[[], str] = lambda: str(uuid_module.uuid4()),
@@ -183,7 +187,11 @@ class QueryEngine:
         self.result: ResultMessage | None = None
         #: Upstream `mutableMessages`: the conversation as recorded, kept across submits so a
         #: follow-up turn (a task notification, Phase 8) continues it; restarted at a boundary.
-        self.mutable_messages: list[Message] = []
+        self.mutable_messages: list[Message] = initial_messages if initial_messages is not None else []
+        #: Upstream `readFileState`: what the file tools saw, this engine's own copy.
+        self.read_file_state: dict[str, Any] = read_file_cache if read_file_cache is not None else {}
+        #: Upstream `config.userSpecifiedModel`, which `setModel` replaces.
+        self.user_specified_model = user_specified_model
         #: Upstream's `permissionDenials`, kept for the engine's whole life.
         self.permission_denials: list[dict[str, Any]] = []
         #: The run's `ToolContext` (upstream's config: tools, `canUseTool`, app state, abort).
@@ -209,8 +217,21 @@ class QueryEngine:
         """`getMessages`: the conversation as recorded."""
         return self.mutable_messages
 
+    def get_read_file_state(self) -> dict[str, Any]:
+        """`getReadFileState`: the read-file cache as the turn left it."""
+        return self.read_file_state
+
+    def get_session_id(self) -> str:
+        """`getSessionId`."""
+        return self.session_id
+
+    def set_model(self, model: str) -> None:
+        """`setModel`: the model the next `submit_message` runs with."""
+        self.user_specified_model = model
+
     async def submit_message(
-        self, prompt: str, *, prefix: Sequence[Message] = (), user_messages: Sequence[Message] | None = None
+        self, prompt: str, *, prefix: Sequence[Message] = (), user_messages: Sequence[Message] | None = None,
+        is_meta: bool = False,
     ) -> AsyncIterator[Any]:
         """
         `submitMessage`: `processUserInput` on `prompt` after the conversation (and `prefix`, a
@@ -222,6 +243,7 @@ class QueryEngine:
             context_with_allowed_tools,
             resolve_skill_model_override,
         )
+        from app.utils.model.model import parse_user_specified_model
 
         ctx = self.context
         if ctx.cancel.cancelled:
@@ -233,7 +255,7 @@ class QueryEngine:
         mode = str(ctx.get_app_state().tool_permission_context.mode)
         result = await process_user_input(
             prompt, ctx, history, permission_mode=mode, user_messages=user_messages, session_id=self.session_id,
-            coordinator=self.config.gates.coordinator_mode,
+            coordinator=self.config.gates.coordinator_mode, is_meta=is_meta,
         )
         self.input_result = result
         messages = [*history, *result.messages]
@@ -249,9 +271,13 @@ class QueryEngine:
             )
             yield self.result
             return
-        turn_ctx = context_with_allowed_tools(replace(ctx, messages=tuple(messages)), result.allowed_tools)
+        turn_ctx = replace(ctx, messages=tuple(messages), read_file_state=self.read_file_state)
+        if self.user_specified_model:
+            # `parseUserSpecifiedModel(userSpecifiedModel)` is the turn's main-loop model.
+            turn_ctx = replace(turn_ctx, main_loop_model=parse_user_specified_model(self.user_specified_model))
+        turn_ctx = context_with_allowed_tools(turn_ctx, result.allowed_tools)
         if result.model:
-            current = ctx.main_loop_model or self.config.model
+            current = turn_ctx.main_loop_model or self.config.model
             turn_ctx = replace(turn_ctx, main_loop_model=resolve_skill_model_override(result.model, current))
         async for event in self.submit(initial_loop_state(tuple(messages), turn_ctx)):
             yield event
@@ -326,11 +352,54 @@ class QueryEngine:
         return ResultMessage(subtype="success", is_error=is_api_error, result=text, **common)
 
 
+async def ask(
+    prompt: str,
+    *,
+    config: RunConfig,
+    deps: LoopDeps,
+    transcript: TranscriptRecorder,
+    session_id: str,
+    context: Any,
+    mutable_messages: list[Message],
+    get_read_file_cache: Callable[[], dict[str, Any]],
+    set_read_file_cache: Callable[[dict[str, Any]], None],
+    user_specified_model: str | None = None,
+    cost_tracker: Any = None,
+    prefix: Sequence[Message] = (),
+    user_messages: Sequence[Message] | None = None,
+    is_meta: bool = False,
+    persist_session: bool = True,
+    on_engine: Callable[[QueryEngine], None] | None = None,
+) -> AsyncIterator[Any]:
+    """
+    `QueryEngine.ts` -> `ask`: one prompt through a new engine over `mutable_messages` (the
+    caller's conversation, left holding the turn's end), with a clone of the read-file cache
+    handed back through `set_read_file_cache` when the turn ends, however it ends.
+
+    `on_engine` (TDDAgents) receives the turn's engine before it runs, so the caller can reach
+    its state (the REPL's Esc, the 'now' subscriber, the processed input).
+    """
+    engine = QueryEngine(
+        config, deps, transcript=transcript, session_id=session_id, cost_tracker=cost_tracker, context=context,
+        initial_messages=mutable_messages, read_file_cache=dict(get_read_file_cache()),
+        user_specified_model=user_specified_model, persist_session=persist_session,
+    )
+    if on_engine is not None:
+        on_engine(engine)
+    try:
+        async for event in engine.submit_message(prompt, prefix=prefix, user_messages=user_messages, is_meta=is_meta):
+            yield event
+    finally:
+        mutable_messages[:] = engine.get_messages()
+        set_read_file_cache(engine.get_read_file_state())
+
+
 __all__ = [
     "SYNTHETIC_MESSAGES",
     "QueryEngine",
     "ResultMessage",
     "TranscriptRecorder",
+    "ask",
     "is_result_successful",
     "normalize_stop_reason",
 ]

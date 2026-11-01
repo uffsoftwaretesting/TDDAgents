@@ -93,6 +93,14 @@ async def no_microcompact(messages: tuple[Message, ...], state: LoopState, confi
     return messages
 
 
+def query_haiku_for(context: Any) -> Callable[[str, str], Awaitable[str]]:
+    """The production `queryHaiku` (imported late: the API module imports the loop's types)."""
+    from app.services.api.claude import query_haiku_for as production
+
+    query: Callable[[str, str], Awaitable[str]] = production(context)
+    return query
+
+
 async def no_autocompact(messages: tuple[Message, ...], state: LoopState, config: RunConfig) -> Any:
     """A run that never compacts proactively (fakes, and runs with autocompact off)."""
     from app.services.compact.auto_compact import AutoCompactOutcome
@@ -124,6 +132,9 @@ class LoopDeps:
     #: needs; `get_production_deps` binds the real ones.
     microcompact: Microcompact = no_microcompact
     autocompact: Autocompact = no_autocompact
+    #: `queryHaiku` for a context: the small fast model behind the tool-use summary. The default
+    #: is the live provider seam (`app/services/api/claude.py`); tests inject a fake.
+    query_haiku: Callable[[Any], Callable[[str, str], Awaitable[str]]] = lambda context: query_haiku_for(context)
 
 
 def production_uuid() -> str:

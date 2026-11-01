@@ -47,13 +47,21 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from collections.abc import AsyncIterable, AsyncIterator, Iterator, Sequence
+from collections.abc import (
+    AsyncIterable,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterator,
+    Sequence,
+)
 from typing import Any, cast
 
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     BaseMessage,
+    HumanMessage,
     SystemMessage,
     message_chunk_to_message,
 )
@@ -440,10 +448,33 @@ def prepare_cached_request(
     return prepared, {"cache_control": dict(EPHEMERAL_CACHE_CONTROL)}
 
 
+def query_haiku_for(context: Any) -> Callable[[str, str], Awaitable[str]]:
+    """
+    `queryHaiku`: a tool-less, non-streaming call to the small fast model with a system prompt
+    and one user prompt (upstream passes `getEmptyToolPermissionContext()`, which only feeds its
+    analytics). **Exempt like the model seam it wraps.**
+    """
+    from app.config.config import Config
+    from app.utils.hooks.exec_prompt_hook import (
+        build_prompt_model_caller,
+        get_small_fast_model,
+    )
+    from app.utils.model.model import provider_for_model
+
+    model = get_small_fast_model(str(getattr(context, "main_loop_model", None) or Config.MODEL))
+    caller = build_prompt_model_caller(provider_for_model(model, default=Config.CHAT_MODEL))
+
+    async def query(system_prompt: str, user_prompt: str) -> str:  # pragma: no cover - live provider
+        return await caller([HumanMessage(content=user_prompt)], system_prompt, model, {})
+
+    return query
+
+
 __all__ = [
     "TEXT_BLOCK",
     "BlockAccumulator",
     "BlockKey",
     "frame_content_blocks",
+    "query_haiku_for",
     "split_chunk_into_blocks",
 ]

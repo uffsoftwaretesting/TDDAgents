@@ -34,7 +34,7 @@ class TestTheSnapshotIsImmutable:
 
     def test_the_gates_are_frozen(self):
         """A gate that could flip mid-run would defeat the reason for snapshotting it."""
-        gates = Gates(coordinator_mode=False)
+        gates = Gates(coordinator_mode=False, emit_tool_use_summaries=False)
         with pytest.raises(FrozenInstanceError):
             gates.coordinator_mode = True  # type: ignore[misc]
 

@@ -52,7 +52,7 @@ import tempfile
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -67,9 +67,8 @@ from app.coordinator.coordinator_mode import (
 from app.cost_tracker import CostTracker
 from app.query.config import RunConfig, build_run_config
 from app.query.deps import LoopDeps
-from app.query.state import initial_loop_state
 from app.query.transitions import Terminal
-from app.query_engine import QueryEngine
+from app.query_engine import QueryEngine, ask
 from app.state.app_state_store import AppState, AppStateStore
 from app.tasks.local_shell_task.kill_shell_tasks import kill_all_shell_tasks
 from app.tdd.events import TransitionEventRecorder, events_path
@@ -310,8 +309,15 @@ class DevelopmentRun:
     config: RunConfig
     store: AppStateStore
     ctx: Any
+    #: The last turn's engine (`ask` builds one per prompt, as `print.ts` does).
     engine: QueryEngine
     transcript: TranscriptStore
+    #: The loop's dependencies, the run's event recorder included.
+    deps: Any = None
+    #: Upstream `mutableMessages`: the conversation every `ask` continues and mutates.
+    messages: list[Any] = field(default_factory=list)
+    #: Upstream `activeUserSpecifiedModel`: the model `set_model` chose for the next turns.
+    user_specified_model: str | None = None
     #: Why the last turn's UserPromptSubmit hooks stopped it, when they did.
     stopped_reason: str | None = None
     #: Every event a turn produces, as it arrives (the REPL renders them); `None` discards.
@@ -480,15 +486,14 @@ async def open_session_run(
         baseline = fingerprint_test_files(workspace)
         store.update(lambda s: replace(s, tdd_item_test_baseline=baseline))
         recorder = TransitionEventRecorder(store, events_path(run_id, cwd), session_id=run_id, plan_index=plan_index)
-        engine = QueryEngine(
-            config, replace(deps, emit_event=_both(recorder, deps.emit_event)), transcript=transcript,
-            session_id=run_id, cost_tracker=ctx.cost_tracker, context=ctx,
-        )
-        unsubscribe = ctx.command_queue.subscribe(lambda: interrupt_on_now_priority(engine, ctx.command_queue))
+        run_deps = replace(deps, emit_event=_both(recorder, deps.emit_event))
+        engine = QueryEngine(config, run_deps, transcript=transcript, session_id=run_id,
+                             cost_tracker=ctx.cost_tracker, context=ctx)
+        run = DevelopmentRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine,
+                             transcript=transcript, deps=run_deps, messages=engine.mutable_messages)
+        unsubscribe = ctx.command_queue.subscribe(lambda: interrupt_on_now_priority(run.engine, ctx.command_queue))
         try:
-            yield DevelopmentRun(
-                run_id=run_id, config=config, store=store, ctx=ctx, engine=engine, transcript=transcript
-            )
+            yield run
         finally:
             from app.context import reset_session_context
             from app.utils.hooks.hooks import execute_session_end_hooks
@@ -557,35 +562,47 @@ def _has_running_background_task(store: AppStateStore) -> bool:
     return any(is_background_task(task) for task in get_running_tasks(store.get()))
 
 
-async def wait_for_background_work(
-    engine: QueryEngine, ctx: Any, store: AppStateStore, on_message: Callable[[Any], None] | None = None
-) -> None:
+def ask_turn(
+    run: DevelopmentRun, prompt: str, *, prefix: Sequence[Any] = (), is_meta: bool = False
+) -> AsyncIterator[Any]:
+    """
+    `print.ts`'s call to `ask()` for one prompt: the run's conversation, its read-file cache
+    (cloned in, handed back), its model choice; the turn's engine becomes `run.engine`.
+    """
+
+    def set_read_file_cache(cache: dict[str, Any]) -> None:
+        run.ctx.read_file_state = cache
+
+    def take_engine(engine: QueryEngine) -> None:
+        run.engine = engine
+
+    return ask(
+        prompt, config=run.config, deps=run.deps, transcript=run.transcript, session_id=run.run_id,
+        context=run.ctx, mutable_messages=run.messages, get_read_file_cache=lambda: run.ctx.read_file_state,
+        set_read_file_cache=set_read_file_cache, user_specified_model=run.user_specified_model,
+        cost_tracker=run.ctx.cost_tracker, prefix=prefix, is_meta=is_meta, on_engine=take_engine,
+    )
+
+
+async def wait_for_background_work(run: DevelopmentRun) -> None:
     """
     `print.ts`'s `do … while (waitingForAgents)`: after a turn, while a background task runs or
     a main-thread command is queued, wait for the queue and submit each command as a new turn
-    of the same conversation (`ask({ prompt, mutableMessages })`).
-
-    A task notification is not a typed prompt, so no UserPromptSubmit hook runs for it
-    (`processUserInput` runs them for `prompt` mode only); its user-input attachments are
-    collected as for any input.
+    of the same conversation (`ask({ prompt, isMeta, mutableMessages })`). As in upstream's
+    print path, a task notification goes through `processUserInput` like any prompt.
     """
-    from app.utils.attachments import get_attachment_messages
-
-    queue: CommandQueue = ctx.command_queue
+    queue: CommandQueue = run.ctx.command_queue
     while True:
         command = next_main_thread_command(queue)
         if command is None:
-            if not _has_running_background_task(store):
+            if not _has_running_background_task(run.store):
                 return
             await asyncio.sleep(WAITING_FOR_AGENTS_POLL_SECONDS)
             continue
-        messages: tuple[Any, ...] = (*engine.get_messages(), HumanMessage(content=command.value))
-        messages = (*messages, *await get_attachment_messages(ctx, messages, user_input=command.value))
-        turn_ctx = replace(ctx, messages=messages)
         logger.info("Delivering queued %s as a new turn", command.mode)
-        async for event in engine.submit(initial_loop_state(messages, turn_ctx)):
-            if on_message is not None:
-                on_message(event)
+        async for event in ask_turn(run, command.value, is_meta=command.is_meta):
+            if run.on_message is not None:
+                run.on_message(event)
 
 
 def _both(first: Any, second: Any) -> Any:
@@ -655,9 +672,9 @@ async def _submit(
     `hook_stopped` when a UserPromptSubmit hook stopped it, else with no terminal (`None`: an
     unknown command, answered by the result's text).
     """
-    run.engine.mutable_messages = list(history)
+    run.messages[:] = list(history)
     try:
-        async for event in run.engine.submit_message(prompt_text, prefix=prefix):
+        async for event in ask_turn(run, prompt_text, prefix=prefix):
             if run.on_message is not None:
                 run.on_message(event)
         processed = run.engine.input_result
@@ -667,7 +684,7 @@ async def _submit(
             run.stopped_reason = processed.stopped_reason
             logger.info("Turn of %s not started: UserPromptSubmit hook stopped it: %s", run.run_id, run.stopped_reason)
             return Terminal.HOOK_STOPPED
-        await wait_for_background_work(run.engine, run.ctx, run.store, run.on_message)
+        await wait_for_background_work(run)
         reason = run.engine.terminal.reason if run.engine.terminal is not None else Terminal.MODEL_ERROR
     except Exception:
         logger.exception("Loop %s crashed", run.run_id)
@@ -675,6 +692,17 @@ async def _submit(
     if run.engine.result is not None:
         logger.info("Loop %s result: %s", run.run_id, run.engine.result)
     return reason
+
+
+def seed_read_file_state(run: DevelopmentRun, messages: Sequence[Any]) -> None:
+    """
+    `print.ts`: the read-file cache starts from what the conversation's file tools saw
+    (`extractReadFilesFromMessages`), so a resumed session can edit what it already read.
+    """
+    from app.utils.query_helpers import extract_read_files_from_messages
+
+    seeded = extract_read_files_from_messages(messages, run.ctx)
+    run.ctx.read_file_state = {**seeded, **run.ctx.read_file_state}
 
 
 async def begin_session(
@@ -688,6 +716,7 @@ async def begin_session(
         run.ctx, run.transcript, fresh_prompt, run.config.model, resume_prompt=resume_prompt
     )
     first = [HumanMessage(content=session.initial_user_message)] if session.initial_user_message else []
+    seed_read_file_state(run, session.messages)
     return await _submit(run, session.messages, prompt_text, first)
 
 
@@ -704,13 +733,14 @@ async def restore_session(run: DevelopmentRun) -> bool:
     if resumed is None or not resumed.messages:
         return False
     session = await process_session_start_hooks(run.ctx.hook_dispatcher, "resume", model=run.config.model)
-    run.engine.mutable_messages = [*resumed.messages, *session.messages]
+    run.messages[:] = [*resumed.messages, *session.messages]
+    seed_read_file_state(run, run.messages)
     return True
 
 
 async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal | None:
     """A later turn of the same conversation: the user's prompt after everything said so far."""
-    return await _submit(run, run.engine.get_messages(), prompt_text)
+    return await _submit(run, run.messages, prompt_text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -791,12 +821,13 @@ async def run_headless(
     async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan(), workspace=workspace,
                                 planning=True, **run_options) as run:
         reason = await start_session(run, request, prompt)
-        return outcome_of(run, reason, question=awaiting_user_answer(run.engine.get_messages()))
+        return outcome_of(run, reason, question=awaiting_user_answer(run.messages))
 
 
 __all__ = [
     "DevelopmentOutcome",
     "DevelopmentRun",
+    "ask_turn",
     "begin_session",
     "build_builtin_tools",
     "coordinator_context",
@@ -813,6 +844,7 @@ __all__ = [
     "run_headless",
     "run_permission_context",
     "run_settings_locations",
+    "seed_read_file_state",
     "session_run_id",
     "session_workspace",
     "start_session",

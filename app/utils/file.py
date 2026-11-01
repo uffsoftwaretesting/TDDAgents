@@ -3,7 +3,7 @@ File helpers.
 
 Ported from `reference/claude-code/src/utils/file.ts` -> `FILE_NOT_FOUND_CWD_NOTE`,
 `addLineNumbers` (the compact `N<TAB>line` form), `getAbsoluteAndRelativePaths`,
-`getDisplayPath`. The working directory is the context's workspace's tracked one (`getCwd`
+`getDisplayPath`, `stripLineNumberPrefix`. The working directory is the context's workspace's tracked one (`getCwd`
 is process-wide upstream); without a context it is the process's.
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+import re
 from typing import Any
 
 #: `src/utils/file.ts` -> `FILE_NOT_FOUND_CWD_NOTE`; our cwd is the workspace root.
@@ -45,3 +46,12 @@ def get_display_path(file_path: str, context: Any = None) -> str:
     if file_path.startswith(home + os.sep):
         return "~" + file_path[len(home):]
     return file_path
+
+
+_LINE_NUMBER_PREFIX = re.compile(r"^\s*\d+[→\t](.*)$", re.DOTALL)
+
+
+def strip_line_number_prefix(line: str) -> str:
+    """`stripLineNumberPrefix`: `N<tab>text` (or `N→text`) becomes `text`; anything else is kept."""
+    match = _LINE_NUMBER_PREFIX.match(line)
+    return match.group(1) if match else line

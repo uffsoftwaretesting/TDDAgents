@@ -74,7 +74,12 @@ from app.tools.skill_tool.skill_tool import format_skill_loading_metadata
 from app.tools.tools import assemble_tool_pool
 from app.types.permissions import PermissionMode
 from app.utils.hooks.hooks import execute_subagent_start_hooks
-from app.utils.messages import HookAttachment, Message, create_attachment_message
+from app.utils.messages import (
+    HookAttachment,
+    Message,
+    ToolUseSummaryMessage,
+    create_attachment_message,
+)
 from app.utils.model.model import get_agent_model
 
 logger = logging.getLogger(__name__)
@@ -284,7 +289,9 @@ def run_agent(
         events = run_loop(initial_loop_state(tuple(initial), worker), worker_config, worker_deps)
         try:
             async for event in events:
-                if isinstance(event, Terminated):
+                # A worker never labels its batches (`!toolUseContext.agentId`), so only the loop's
+                # verdict is skipped; the summary type is excluded for the type checker.
+                if isinstance(event, (Terminated, ToolUseSummaryMessage)):
                     continue
                 if store is not None and _is_recordable(event):
                     last_uuid = store.record_sidechain_transcript([event], agent_id, last_uuid)

@@ -125,15 +125,20 @@ async def process_user_input_base(
     skip_slash_commands: bool = False,
     session_id: str = "",
     coordinator: bool = False,
+    is_meta: bool = False,
 ) -> ProcessUserInputResult:
-    """`processUserInputBase`: the slash-command path, else `processTextPrompt`."""
+    """
+    `processUserInputBase`: the slash-command path, else `processTextPrompt` (with `is_meta`, the
+    user message is model-visible but hidden from the user, as a system-generated prompt is).
+    """
     if not skip_slash_commands and input_string.startswith("/"):
         slash = await process_slash_command(
             input_string, context, history, session_id=session_id, coordinator=coordinator
         )
         if slash is not None:
             return slash
-    said = list(user_messages) if user_messages is not None else [HumanMessage(content=input_string)]
+    said = list(user_messages) if user_messages is not None else [
+        HumanMessage(content=input_string, additional_kwargs={"is_meta": True} if is_meta else {})]
     return ProcessUserInputResult(messages=[*said, *await _attachments(context, [*history, *said], input_string)])
 
 
@@ -147,6 +152,7 @@ async def process_user_input(
     skip_slash_commands: bool = False,
     session_id: str = "",
     coordinator: bool = False,
+    is_meta: bool = False,
 ) -> ProcessUserInputResult:
     """
     `processUserInput`: the base result, then the UserPromptSubmit hooks on the raw input.
@@ -156,7 +162,7 @@ async def process_user_input(
 
     result = await process_user_input_base(
         input_string, context, history, user_messages=user_messages,
-        skip_slash_commands=skip_slash_commands, session_id=session_id, coordinator=coordinator,
+        skip_slash_commands=skip_slash_commands, session_id=session_id, coordinator=coordinator, is_meta=is_meta,
     )
     if not result.should_query:
         return result
