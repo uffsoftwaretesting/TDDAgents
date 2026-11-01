@@ -165,6 +165,7 @@ def check_tdd_phase_permission(
     *,
     agent_memory: bool = False,
     plan_file: bool = False,
+    cwd_offset: str | None = None,
 ) -> tuple[bool, str]:
     """
     Check if a tool call is permitted by the current TDD phase.
@@ -184,7 +185,7 @@ def check_tdd_phase_permission(
     if tool.name == BASH_TOOL_NAME:
         from app.tdd.bash_phase_permissions import check_bash_tdd_phase
 
-        return check_bash_tdd_phase(str(input_args.get("command") or ""), ledger)
+        return check_bash_tdd_phase(str(input_args.get("command") or ""), ledger, cwd_offset)
 
     if ledger.phase == TddPhase.RED:
         if is_implementation_writing_tool(tool):

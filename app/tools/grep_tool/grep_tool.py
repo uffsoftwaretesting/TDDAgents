@@ -24,6 +24,7 @@ from app.tools.utils import (
     search_target,
 )
 from app.utils.file import FILE_NOT_FOUND_CWD_NOTE
+from app.utils.path import backfill_path
 from app.utils.permissions.filesystem import (
     check_file_read_permissions,
     permission_cwd,
@@ -209,6 +210,7 @@ def build_grep_tool() -> BuiltTool:
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        backfill_observable_input=backfill_path("path", default_to_cwd=True),
         name="Grep",
         prompt=get_prompt(PROMPT_PATH, "Searches file contents."),
         input_schema={

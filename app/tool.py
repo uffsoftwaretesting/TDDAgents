@@ -3,7 +3,7 @@ Tool protocol and build_tool factory with fail-closed defaults (Part B2).
 
 Ported from:
 - `reference/claude-code/src/Tool.ts` -> `Tool`, `toolMatchesName`, `findToolByName`, `userFacingName`,
-  `renderToolUseMessage`
+  `renderToolUseMessage`, `backfillObservableInput`
 - `reference/claude-code/src/tools/MCPTool/UI.tsx` -> `renderToolUseMessage` (the default rendering)
 - `app/tools/base.py` (Phase 1B) -> fail-closed defaults and protocol adaptation
 
@@ -105,6 +105,7 @@ class Tool(Protocol):
     def description(self, input: dict[str, Any]) -> str: ...
     def user_facing_name(self, input: dict[str, Any] | None) -> str: ...
     def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None: ...
+    def backfill_observable_input(self, input: dict[str, Any], context: ToolContext) -> None: ...
     def is_enabled(self) -> bool: ...
     def is_concurrency_safe(self, input: dict[str, Any]) -> bool: ...
     def is_read_only(self, input: dict[str, Any]) -> bool: ...
@@ -172,6 +173,10 @@ class BuiltTool:
     #: `Tool.ts` -> `renderToolUseMessage`: the call's input as a dialog shows it, in full when
     #: `verbose`. The default is `MCPTool/UI.tsx`'s `key: <json>` join.
     _render_tool_use_message: Callable[[dict[str, Any], bool], str | None] | None = None
+    #: `Tool.ts` -> `backfillObservableInput`: fill in what hooks, permissions and the call should
+    #: see (a file tool's path resolved against the tracked working directory). It takes the
+    #: context because TDDAgents' working directory is per workspace, not process-wide.
+    _backfill_observable_input: Callable[[dict[str, Any], ToolContext], None] | None = None
 
     def description(self, input: dict[str, Any]) -> str:
         return self._description(input)
@@ -183,6 +188,10 @@ class BuiltTool:
         if self._render_tool_use_message is not None:
             return self._render_tool_use_message(input, verbose)
         return render_input_as_key_values(input)
+
+    def backfill_observable_input(self, input: dict[str, Any], context: ToolContext) -> None:
+        if self._backfill_observable_input is not None:
+            self._backfill_observable_input(input, context)
 
     def is_enabled(self) -> bool:
         try:
@@ -292,6 +301,7 @@ def build_tool(
     prepare_permission_matcher: Callable[[dict[str, Any]], Callable[[str], bool]] | None = None,
     user_facing_name: Callable[[dict[str, Any] | None], str] | None = None,
     render_tool_use_message: Callable[[dict[str, Any], bool], str | None] | None = None,
+    backfill_observable_input: Callable[[dict[str, Any], ToolContext], None] | None = None,
 ) -> BuiltTool:
     """
     Builds a Tool with fail-closed defaults for omitted members.
@@ -337,6 +347,7 @@ def build_tool(
         _prepare_permission_matcher=prepare_permission_matcher,
         _user_facing_name=user_facing_name,
         _render_tool_use_message=render_tool_use_message,
+        _backfill_observable_input=backfill_observable_input,
     )
 
 

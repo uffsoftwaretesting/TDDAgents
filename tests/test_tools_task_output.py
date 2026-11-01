@@ -195,3 +195,24 @@ def test_a_pending_task_at_the_deadline_times_out(tmp_path):
     assert result.content.startswith("<retrieval_status>timeout</retrieval_status>")
     assert "<status>pending</status>" in result.content
     assert store.get().tasks["a1"].notified is False
+
+
+def test_a_shell_task_shows_its_live_output_then_its_file_and_exit_code(tmp_path):
+    import dataclasses
+
+    from app.tasks.local_shell_task.guards import LocalShellTaskState
+
+    out = tmp_path / "b1.output"
+    out.write_text("from the file\n")
+    live = type("S", (), {"task_output": type("O", (), {"get_stdout": lambda self: "live so far\n"})()})()
+    store = AppStateStore()
+    task = LocalShellTaskState(id="b1", type="local_bash", status="running", description="d", output_file=str(out),
+                               start_time=0.0, command="make", shell_command=live)
+    store.update(lambda s: dataclasses.replace(s, tasks={"b1": task}))
+    running = _call({"task_id": "b1", "block": False}, tool_context_for(store))
+    assert "<output>\nlive so far\n</output>" in running.content and "<exit_code>" not in running.content
+    store.update(lambda s: dataclasses.replace(s, tasks={"b1": dataclasses.replace(
+        task, status="failed", shell_command=None, result=(2, False))}))
+    done = _call({"task_id": "b1", "block": False}, tool_context_for(store))
+    assert "<exit_code>2</exit_code>" in done.content
+    assert "<output>\nfrom the file\n</output>" in done.content

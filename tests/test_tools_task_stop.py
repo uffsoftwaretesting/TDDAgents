@@ -43,11 +43,26 @@ def test_stop_task_errors_carry_upstreams_codes():
     with pytest.raises(StopTaskError, match=r"^Task a1 is not running \(status: killed\)$") as stopped:
         asyncio.run(stop_task("a1", store.get, store.update))
     assert stopped.value.code == "not_running"
-    shell = dataclasses.replace(create_task_state_base("b1", "local_bash", "ls", "/o"), status="running")
-    store.update(lambda s: dataclasses.replace(s, tasks={**s.tasks, "b1": shell}))
-    with pytest.raises(StopTaskError, match="^Unsupported task type: local_bash$") as unsupported:
-        asyncio.run(stop_task("b1", store.get, store.update))
+    other = dataclasses.replace(create_task_state_base("w1", "local_workflow", "wf", "/o"), status="running")
+    store.update(lambda s: dataclasses.replace(s, tasks={**s.tasks, "w1": other}))
+    with pytest.raises(StopTaskError, match="^Unsupported task type: local_workflow$") as unsupported:
+        asyncio.run(stop_task("w1", store.get, store.update))
     assert unsupported.value.code == "unsupported_type"
+
+
+def test_a_shell_task_is_killed_marked_notified_and_named_by_its_command():
+    from app.tasks.local_shell_task.guards import LocalShellTaskState
+
+    killed: list[str] = []
+    shell_command = type("S", (), {"kill": lambda self: killed.append("kill"), "cleanup": lambda self: None})()
+    store, _ = _store_with_agent()
+    task = LocalShellTaskState(id="b1", type="local_bash", status="running", description="list", output_file="/o",
+                               start_time=0.0, command="ls -la", shell_command=shell_command)
+    store.update(lambda s: dataclasses.replace(s, tasks={**s.tasks, "b1": task}))
+    result = asyncio.run(stop_task("b1", store.get, store.update))
+    assert (result.task_type, result.command) == ("local_bash", "ls -la")
+    stopped = store.get().tasks["b1"]
+    assert (stopped.status, stopped.notified, stopped.shell_command, killed) == ("killed", True, None, ["kill"])
 
 
 def test_the_tool_is_upstreams_shape():

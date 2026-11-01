@@ -45,9 +45,19 @@ TASK_OUTPUT_SCHEMA: dict[str, Any] = {
 
 def _task_output_data(task: Any) -> dict[str, Any]:
     """
-    `getTaskOutputData` for a local agent: its result, else the output file's tail. Upstream's
-    `description` field feeds only its UI, never the model's result block, so it is left out.
+    `getTaskOutputData`. A shell task: its live output (`taskOutput.getStdout()`) while it runs,
+    the file's tail once it ended, and its exit code. A local agent: its result, else the output
+    file's tail. Upstream's `description` field feeds only its UI, never the model's result
+    block, so it is left out.
     """
+    if task.type == "local_bash":
+        shell = getattr(task, "shell_command", None)
+        output = shell.task_output.get_stdout() if shell is not None else get_task_output(Path(task.output_file))
+        result = getattr(task, "result", None)
+        return {
+            "task_id": task.id, "task_type": task.type, "status": task.status, "output": output,
+            "error": None, "output_file": task.output_file, "exit_code": result[0] if result is not None else None,
+        }
     output = get_task_output(Path(task.output_file))
     clean = getattr(task, "result", None)
     return {
@@ -81,6 +91,8 @@ def _render(status: str, task: dict[str, Any] | None) -> str:
     if task is not None:
         parts += [f"<task_id>{task['task_id']}</task_id>", f"<task_type>{task['task_type']}</task_type>",
                   f"<status>{task['status']}</status>"]
+        if task.get("exit_code") is not None:
+            parts.append(f"<exit_code>{task['exit_code']}</exit_code>")
         if task["output"].strip():
             content, _ = format_task_output(task["output"], task["output_file"])
             parts.append(f"<output>\n{content.rstrip()}\n</output>")

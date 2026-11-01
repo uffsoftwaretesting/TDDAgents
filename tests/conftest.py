@@ -12,6 +12,7 @@ environment is seeded before any `app.*` import happens.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -113,6 +114,9 @@ class FakeWorkspace:
         self.command_log: list[str] = []
         self.command_results: dict[str, CommandResult] = {}
         self.fail_write_on: set[str] = set()
+        self.spawn_log: list[tuple[str, str | None]] = []
+        self.spawn_hold: dict[str, asyncio.Event] = {}
+        self.spawn_cwd: dict[str, str] = {}
 
     # ── Workspace protocol ───────────────────────────────────────────────────
 
@@ -154,6 +158,45 @@ class FakeWorkspace:
         if cmd in self.command_results:
             return self.command_results[cmd]
         return CommandResult(stdout="", stderr="", exit_code=0, duration=0.0, workspace=self.kind)
+
+    async def spawn(self, cmd: str, *, output_fd: int, cwd: str | None = None,
+                    cwd_file: str | None = None) -> FakeShellProcess:
+        """
+        A scripted `spawn`: the command's `command_results` entry is its output (stdout, then
+        stderr, into the one file) and exit code; a `spawn_hold` event keeps it running until
+        set; a `spawn_cwd` entry is the directory it leaves the shell in (written to `cwd_file`).
+        """
+        self.command_log.append(cmd)
+        self.spawn_log.append((cmd, cwd))
+        empty = CommandResult(stdout="", stderr="", exit_code=0, duration=0.0, workspace=self.kind)
+        result = self.command_results.get(cmd) or empty
+        os.write(output_fd, (result.stdout + result.stderr).encode("utf-8"))
+        if cwd_file is not None and cmd in self.spawn_cwd:
+            Path(cwd_file).write_text(self.spawn_cwd[cmd] + "\n", encoding="utf-8")
+        return FakeShellProcess(result.exit_code, self.spawn_hold.get(cmd))
+
+
+class FakeShellProcess:
+    """A scripted shell process: it exits with `code` at once, or when its hold is set or it is killed."""
+
+    def __init__(self, code: int, hold: asyncio.Event | None = None) -> None:
+        self.code = code
+        self.hold = hold
+        self.killed = False
+
+    @property
+    def pid(self) -> int | None:
+        return None
+
+    async def wait(self) -> int:
+        if self.hold is not None:
+            await self.hold.wait()
+        return 137 if self.killed else self.code
+
+    def kill_tree(self) -> None:
+        self.killed = True
+        if self.hold is not None:
+            self.hold.set()
 
 
 @pytest.fixture

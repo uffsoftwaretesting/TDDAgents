@@ -59,6 +59,7 @@ from app.utils.image_resizer import (
     maybe_resize_and_downsample_image_buffer,
 )
 from app.utils.notebook import map_notebook_cells_to_blocks, read_notebook
+from app.utils.path import backfill_path
 from app.utils.pdf import PDFError, extract_pdf_pages, get_pdf_page_count, read_pdf
 from app.utils.pdf_utils import is_pdf_extension, is_pdf_supported, parse_pdf_page_range
 from app.utils.permissions.filesystem import (
@@ -313,6 +314,7 @@ def build_read_file_tool() -> BuiltTool:
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        backfill_observable_input=backfill_path("file_path"),
         name="ReadFile",
         # `renderPromptTemplate` with the default limits: no max-size line, the default offset line.
         prompt=render_prompt(get_prompt(PROMPT_PATH, "Reads a file."), {"MAX_LINES_TO_READ": MAX_LINES_TO_READ},

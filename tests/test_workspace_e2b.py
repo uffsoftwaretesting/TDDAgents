@@ -122,3 +122,84 @@ def test_execute_defaults_leave_timeout_and_env_unset(ws, adapter):
     """The adapter, not this layer, owns the default command timeout."""
     ws.execute("ls")
     assert adapter.calls == [("execute", "ls", None, None)]
+
+
+def test_spawn_copies_the_background_output_into_the_file_and_returns_the_exit_code(adapter, tmp_path):
+    import asyncio
+    import os
+    import threading
+
+    from app.sandbox.adapter import BackgroundCommand
+    from app.workspace import e2b
+
+    done = threading.Event()
+
+    class Handle:
+        pid = 7
+        killed = False
+
+        def wait(self):
+            done.wait(2)
+            if self.killed:
+                raise RuntimeError("killed")
+            error = RuntimeError("exit")
+            error.exit_code = 3  # type: ignore[attr-defined]
+            raise error
+
+        def kill(self):
+            self.killed = True
+            done.set()
+
+    background = BackgroundCommand(id="bash_1", cmd="make", handle=Handle())
+    started: list[tuple] = []
+
+    def start_background(cmd, cwd=None):
+        started.append((cmd, cwd))
+        background.append_stdout("out\n")
+        return background
+
+    adapter.start_background = start_background
+    adapter.kill_command = lambda command_id: background.handle.kill() or True
+    path = tmp_path / "b1.output"
+
+    async def go():
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        process = await e2b.E2BWorkspace(adapter).spawn("make", output_fd=fd, cwd="/work", cwd_file="/ignored")
+        os.close(fd)
+        background.append_stderr("err\n")
+        done.set()
+        return process.pid, await process.wait()
+
+    assert asyncio.run(go()) == (7, 3)
+    assert started == [("make", "/work")]
+    assert path.read_text() == "out\nerr\n"
+
+
+def test_a_killed_spawn_exits_non_zero_and_a_clean_one_zero(adapter, tmp_path):
+    import asyncio
+    import os
+
+    from app.sandbox.adapter import BackgroundCommand
+    from app.workspace import e2b
+
+    class Clean:
+        def wait(self):
+            return type("R", (), {"exit_code": 0})()
+
+    class Killed:
+        def wait(self):
+            raise RuntimeError("killed")
+
+    async def go(handle):
+        background = BackgroundCommand(id="b", cmd="x", handle=handle)
+        adapter.start_background = lambda cmd, cwd=None: background
+        killed: list[str] = []
+        adapter.kill_command = killed.append
+        fd = os.open(tmp_path / "o", os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        process = await e2b.E2BWorkspace(adapter).spawn("x", output_fd=fd)
+        os.close(fd)
+        process.kill_tree()
+        return await process.wait(), killed
+
+    assert asyncio.run(go(Clean())) == (0, ["b"])
+    assert asyncio.run(go(Killed())) == (1, ["b"])

@@ -116,9 +116,16 @@ def test_the_bash_prompt_is_upstreams_simple_prompt():
         "  - DO NOT use newlines to separate commands (newlines are ok in quoted strings).",
     ):
         assert line in prompt
-    # Not ported: `run_in_background` (our Bash has no such parameter), so neither is its note
-    # or the background sleep items; the sandbox section is empty without a sandbox.
-    assert "run_in_background" not in prompt
+    # The background note and the two always-on sleep items are upstream's, verbatim; the sandbox
+    # section is empty without a sandbox, and the Monitor items need a Monitor tool.
+    note = _function(source, "getBackgroundUsageNote").split('return "', 1)[1].rsplit('"', 1)[0]
+    assert f" - {note}\n - When issuing multiple commands:" in prompt
+    sleep_block = block.split("const sleepSubitems = [", 1)[1].split("]\n  const backgroundNote", 1)[0]
+    sleep = re.findall(r"^\s+'([^']*)',$", sleep_block, re.MULTILINE)
+    expected = [item for item in sleep if "Monitor" not in item and "is blocked" not in item]
+    for item in expected:
+        assert f"  - {item}" in prompt, item
+    assert prompt.index(expected[0]) < prompt.index(expected[1]) < prompt.index(expected[2])
 
 
 def test_the_tdd_additions_stay():

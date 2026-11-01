@@ -25,6 +25,7 @@ from app.tools.utils import (
     record_write,
     write_text,
 )
+from app.utils.path import backfill_path
 from app.utils.permissions.filesystem import (
     check_file_write_permissions,
 )
@@ -66,6 +67,7 @@ def build_write_file_tool() -> BuiltTool:
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        backfill_observable_input=backfill_path("file_path"),
         name="WriteFile",
         prompt=get_prompt(PROMPT_PATH, "Writes a file."),
         input_schema={

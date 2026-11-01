@@ -38,14 +38,17 @@ def ctx_for(ws=None, permission_context=None):
     return tool_context_for(AppStateStore(), workspace=ws, permission_context=permission_context)
 
 
-class RecordingWorkspace(FakeWorkspace):
-    def __init__(self):
-        super().__init__()
-        self.timeouts = []
+def recording_timeouts(monkeypatch):
+    """The `timeout_ms` each call hands `exec_shell`."""
+    seen: list[float] = []
+    real = bash_mod.exec_shell  # type: ignore[attr-defined]
 
-    def execute(self, cmd, timeout=None, env=None):
-        self.timeouts.append(timeout)
-        return super().execute(cmd, timeout, env)
+    async def recording(context, command, *, timeout_ms, **kw):
+        seen.append(timeout_ms)
+        return await real(context, command, timeout_ms=timeout_ms, **kw)
+
+    monkeypatch.setattr(bash_mod, "exec_shell", recording)
+    return seen
 
 
 # ── call ─────────────────────────────────────────────────────────────────────
@@ -62,7 +65,9 @@ def test_non_zero_exit_is_an_error_result_carrying_the_code(tmp_path):
                                      ctx_for(LocalWorkspace(str(tmp_path)))))
     assert res.is_error is True
     assert res.exit_code == 3
-    assert res.content == "out\n\nSTDERR:\nerr"
+    # `ShellError` through `formatError`: the code first, then the output (stdout and stderr share
+    # one file, in the order they were written).
+    assert res.content == "Exit code 3\nout\nerr"
 
 
 def test_no_output_message():
@@ -78,7 +83,7 @@ def test_stderr_only_output():
     ws = FakeWorkspace()
     ws.command_results["c"] = CommandResult(stdout="", stderr="warn", exit_code=0, duration=0.0, workspace="sandbox")
     res = run(build_bash_tool().call({"command": "c"}, ctx_for(ws)))
-    assert res.content == "STDERR:\nwarn"
+    assert res.content == "warn"
     assert res.is_error is False
 
 
@@ -95,9 +100,11 @@ def test_no_workspace_is_an_error():
 
 
 def test_execution_exception_is_an_error_result():
+    from app.workspace.base import WorkspaceProviderError
+
     class Boom(FakeWorkspace):
-        def execute(self, cmd, timeout=None, env=None):
-            raise RuntimeError("sandbox gone")
+        async def spawn(self, cmd, **kw):
+            raise WorkspaceProviderError("sandbox gone")
 
     res = run(build_bash_tool().call({"command": "ls"}, ctx_for(Boom())))
     assert res.is_error is True
@@ -118,25 +125,26 @@ def test_timeout_constants():
     assert MAX_TIMEOUT_MS == 600_000
 
 
-def test_explicit_timeout_is_passed_in_seconds():
-    ws = RecordingWorkspace()
-    run(build_bash_tool().call({"command": "x", "timeout": 5000}, ctx_for(ws)))
-    assert ws.timeouts == [5.0]
+def test_explicit_timeout_is_used_and_clamped_to_the_max(monkeypatch):
+    seen = recording_timeouts(monkeypatch)
+    run(build_bash_tool().call({"command": "x", "timeout": 5000}, ctx_for(FakeWorkspace())))
+    run(build_bash_tool().call({"command": "x", "timeout": 9_999_999}, ctx_for(FakeWorkspace())))
+    assert seen == [5000, MAX_TIMEOUT_MS]
 
 
 def test_default_timeout_when_omitted_or_zero(monkeypatch):
     monkeypatch.delenv("BASH_DEFAULT_TIMEOUT_MS", raising=False)
-    ws = RecordingWorkspace()
-    run(build_bash_tool().call({"command": "x"}, ctx_for(ws)))
-    run(build_bash_tool().call({"command": "x", "timeout": 0}, ctx_for(ws)))
-    assert ws.timeouts == [120.0, 120.0]
+    seen = recording_timeouts(monkeypatch)
+    run(build_bash_tool().call({"command": "x"}, ctx_for(FakeWorkspace())))
+    run(build_bash_tool().call({"command": "x", "timeout": 0}, ctx_for(FakeWorkspace())))
+    assert seen == [120_000, 120_000]
 
 
 def test_default_timeout_env_override(monkeypatch):
     monkeypatch.setenv("BASH_DEFAULT_TIMEOUT_MS", "3000")
-    ws = RecordingWorkspace()
-    run(build_bash_tool().call({"command": "x"}, ctx_for(ws)))
-    assert ws.timeouts == [3.0]
+    seen = recording_timeouts(monkeypatch)
+    run(build_bash_tool().call({"command": "x"}, ctx_for(FakeWorkspace())))
+    assert seen == [3000]
 
 
 @pytest.mark.parametrize("value, expected", [
@@ -208,7 +216,7 @@ def test_metadata(monkeypatch):
     assert tool.description({"command": "ls", "description": "List files"}) == "List files"
     schema = tool.input_schema
     assert schema["required"] == ["command"]
-    assert set(schema["properties"]) == {"command", "timeout", "description"}
+    assert set(schema["properties"]) == {"command", "timeout", "description", "run_in_background"}
     assert schema["properties"]["command"]["type"] == "string"
     assert schema["properties"]["timeout"]["type"] == "number"
     assert schema["properties"]["description"]["type"] == "string"
@@ -348,9 +356,21 @@ def test_input_schema_is_exact():
                 "type": "string",
                 "description": "Clear, concise description of what this command does in active voice.",
             },
+            "run_in_background": {
+                "type": "boolean",
+                "description": "Set to true to run this command in the background. Use Read to read the output later.",
+            },
         },
         "required": ["command"],
     }
+
+
+def test_disabling_background_tasks_drops_the_field_and_the_note(monkeypatch):
+    monkeypatch.setenv("TDDAGENTS_DISABLE_BACKGROUND_TASKS", "1")
+    tool = build_bash_tool()
+    assert "run_in_background" not in tool.input_schema["properties"]
+    assert "`run_in_background` parameter" not in tool.prompt
+    assert " - {{BACKGROUND_NOTE}}" not in tool.prompt
 
 
 def test_bash_results_are_capped_at_upstreams_30000_chars():

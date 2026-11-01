@@ -214,6 +214,23 @@ def test_subagent_start_context_is_attached():
     assert "use pytest" in str(first[1].content)
 
 
+def test_cleanup_kills_the_workers_background_shells():
+    from app.tasks.local_shell_task.guards import LocalShellTaskState
+
+    killed: list[str] = []
+    shell = type("S", (), {"kill": lambda self: killed.append("k"), "cleanup": lambda self: None})()
+    tasks = {
+        "b1": LocalShellTaskState(id="b1", type="local_bash", status="running", description="", output_file="",
+                                  start_time=0.0, shell_command=shell, agent_id="a4"),
+        "b2": LocalShellTaskState(id="b2", type="local_bash", status="running", description="", output_file="",
+                                  start_time=0.0, shell_command=shell, agent_id="main-ish"),
+    }
+    store = AppStateStore(AppState(tasks=tasks))
+    _run(agent_id="a4", parent=_parent(store))
+    assert {k: v.status for k, v in store.get().tasks.items()} == {"b1": "killed", "b2": "running"}
+    assert killed == ["k"]
+
+
 def test_cleanup_removes_the_workers_todos():
     store = AppStateStore(AppState(todos={"a3": ("x",), "main": ("y",)}))
     _run(agent_id="a3", parent=_parent(store))

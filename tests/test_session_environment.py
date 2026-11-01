@@ -35,6 +35,8 @@ def test_the_command_runs_after_the_script_through_eval(tmp_path):
     expected = "export A=1 && eval 'echo '\"'\"'a b'\"'\"'; ls'"
     assert build_command("echo 'a b'; ls", {ENV_FILE_VAR: str(script)}) == expected
     assert build_command("ls", {}) == "eval ls"
+    # `bashProvider.ts`: the final directory is written last, for the caller to track `cd`.
+    assert build_command("ls", {}, "/tmp/a b-cwd") == "eval ls && pwd -P >| '/tmp/a b-cwd'"
 
 
 def test_a_workspace_command_sees_the_script_and_a_failing_script_stops_it(tmp_path):

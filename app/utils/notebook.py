@@ -13,26 +13,12 @@ Blocks are LangChain's standard content blocks (`{"type": "text"}`, `{"type": "i
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
+
+from app.utils.shell.output_limits import get_max_output_length
 
 #: `notebook.ts` -> `LARGE_OUTPUT_THRESHOLD`.
 LARGE_OUTPUT_THRESHOLD = 10000
-#: `outputLimits.ts` -> `BASH_MAX_OUTPUT_DEFAULT` / `BASH_MAX_OUTPUT_UPPER_LIMIT`.
-BASH_MAX_OUTPUT_DEFAULT = 30_000
-BASH_MAX_OUTPUT_UPPER_LIMIT = 150_000
-
-
-def get_max_output_length() -> int:
-    """`getMaxOutputLength`: `BASH_MAX_OUTPUT_LENGTH`, bounded, else the default."""
-    raw = os.environ.get("BASH_MAX_OUTPUT_LENGTH")
-    try:
-        value = int(raw) if raw is not None else BASH_MAX_OUTPUT_DEFAULT
-    except ValueError:
-        return BASH_MAX_OUTPUT_DEFAULT
-    if value <= 0:
-        return BASH_MAX_OUTPUT_DEFAULT
-    return min(value, BASH_MAX_OUTPUT_UPPER_LIMIT)
 
 
 def format_output(content: str) -> str:

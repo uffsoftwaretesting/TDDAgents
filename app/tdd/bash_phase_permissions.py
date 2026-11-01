@@ -31,6 +31,9 @@ and the ledger — not this check — remains the authority on what was really p
 
 from __future__ import annotations
 
+import os
+import posixpath
+
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_permissions import BACK_TO_RED, is_test_path
 from app.utils.bash.commands import extract_output_redirections
@@ -54,15 +57,19 @@ def redirect_targets(command: str) -> tuple[tuple[str, ...], bool]:
     return targets, extraction.has_dangerous_redirection
 
 
-def check_bash_tdd_phase(command: str, ledger: PhaseLedger) -> tuple[bool, str]:
+def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | None = None) -> tuple[bool, str]:
     """
     Decide whether `command`'s writes are allowed in the current phase.
 
     Returns `(permitted, reason)`. A command that redirects nowhere is always permitted
     here — it may still be refused by the ordinary Bash permission battery, which is a
-    separate question from the phase.
+    separate question from the phase. `cwd_offset` is where the shell is
+    (`app/utils/path.py::tracked_cwd_offset`): a relative target is judged where it lands.
     """
     targets, dangerous = redirect_targets(command)
+    if cwd_offset is not None:
+        targets = tuple(t if os.path.isabs(t) or t.startswith("~")
+                        else posixpath.normpath(posixpath.join(cwd_offset, t)) for t in targets)
     if not targets and not dangerous:
         return True, ""
 

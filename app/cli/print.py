@@ -70,6 +70,7 @@ from app.query.state import initial_loop_state
 from app.query.transitions import Terminal
 from app.query_engine import QueryEngine
 from app.state.app_state_store import AppState, AppStateStore
+from app.tasks.local_shell_task.kill_shell_tasks import kill_all_shell_tasks
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
 from app.tdd.suite_fingerprint import fingerprint_test_files
@@ -489,6 +490,8 @@ async def open_session_run(
             from app.context import reset_session_context
             from app.utils.hooks.hooks import execute_session_end_hooks
 
+            # Upstream's `registerCleanup` per shell task: nothing the session started outlives it.
+            kill_all_shell_tasks(store.get, store.update)
             await hook_dispatcher.drain_background()
             await execute_session_end_hooks(hook_dispatcher, "other")
             await hook_dispatcher.registry.finalize_pending()

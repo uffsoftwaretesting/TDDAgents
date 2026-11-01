@@ -13,9 +13,13 @@ is opened in. Reports go beside it, in `<thread>/metrics_and_logging/`, outside 
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import os
+import signal
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -50,6 +54,29 @@ def workspaces_root() -> Path:
 
     override = os.environ.get(WORKSPACES_DIR_ENV)
     return (Path(override) if override else config_home() / "workspaces").expanduser().resolve()
+
+
+def kill_process_group(pid: int) -> None:
+    """`treeKill(pid, 'SIGKILL')`: the shell leads its own process group, so the group is the tree."""
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pid, signal.SIGKILL)
+
+
+class LocalShellProcess:
+    """A host shell command spawned by `LocalWorkspace.spawn`."""
+
+    def __init__(self, process: asyncio.subprocess.Process) -> None:
+        self._process = process
+
+    @property
+    def pid(self) -> int | None:
+        return self._process.pid
+
+    async def wait(self) -> int:
+        return await self._process.wait()
+
+    def kill_tree(self) -> None:
+        kill_process_group(self._process.pid)
 
 
 class LocalWorkspace:
@@ -184,6 +211,11 @@ class LocalWorkspace:
 
     # ── Execution ────────────────────────────────────────────────────────────
 
+    def _environment(self, env: dict[str, str] | None = None) -> dict[str, str]:
+        # The ceiling (set last, so no caller lifts it) keeps git inside the project: its own
+        # repository is found first, and nothing above the session's directory ever is.
+        return {**os.environ, **self._env, **(env or {}), GIT_CEILING_ENV: str(self._root.parent)}
+
     def execute(
         self,
         cmd: str,
@@ -196,38 +228,71 @@ class LocalWorkspace:
         Invoked as `/bin/bash -l -c <cmd>` to match exactly how E2B starts commands
         (`e2b/sandbox_sync/commands/command.py`), so a command behaves the same on
         both sides. As in the sandbox, a non-zero exit code is returned, not raised.
+
+        stdout and stderr go to files and the call waits for the shell's *exit*
+        (`ShellCommand.ts`: "'close' waits for stdio to close, which includes grandchild
+        processes that inherit file descriptors (e.g. `sleep 30 &`)"), so a command that leaves
+        something running in the background returns as soon as the shell is done. On timeout
+        the shell's whole process group is killed (upstream's `treeKill`).
         """
         limit = timeout if timeout is not None else Config.COMMAND_TIMEOUT
-        # The ceiling (set last, so no caller lifts it) keeps git inside the project: its own
-        # repository is found first, and nothing above the session's directory ever is.
-        environment = {**os.environ, **self._env, **(env or {}), GIT_CEILING_ENV: str(self._root.parent)}
+        environment = self._environment(env)
         started = time.monotonic()
         # `bashProvider.ts`: the session environment script (the project's venv activation, upstream's
         # `CLAUDE_ENV_FILE`) runs after the login profile and before the command (Phase 13).
         script = build_command(cmd, environment)
 
-        try:
-            completed = subprocess.run(  # noqa: PLW1510 - a failing command is a result, not an error
-                ["/bin/bash", "-l", "-c", script],
-                cwd=str(self._root),
-                env=environment,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=limit,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise WorkspaceTimeout(
-                f"Local command exceeded {limit}s: {cmd}"
-            ) from exc
-        except OSError as exc:
-            raise WorkspaceProviderError(f"Could not run local command '{cmd}': {exc}") from exc
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            try:
+                process = subprocess.Popen(
+                    ["/bin/bash", "-l", "-c", script],
+                    cwd=str(self._root),
+                    env=environment,
+                    stdin=subprocess.DEVNULL,
+                    stdout=out,
+                    stderr=err,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                raise WorkspaceProviderError(f"Could not run local command '{cmd}': {exc}") from exc
+            try:
+                code = process.wait(timeout=limit)
+            except subprocess.TimeoutExpired as exc:
+                kill_process_group(process.pid)
+                process.wait()
+                raise WorkspaceTimeout(f"Local command exceeded {limit}s: {cmd}") from exc
+            out.seek(0)
+            err.seek(0)
+            stdout = out.read().decode("utf-8", errors="replace")
+            stderr = err.read().decode("utf-8", errors="replace")
 
         return CommandResult(
-            stdout=completed.stdout or "",
-            stderr=completed.stderr or "",
-            exit_code=completed.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=code,
             duration=time.monotonic() - started,
             workspace="local",
         )
+
+    async def spawn(
+        self, cmd: str, *, output_fd: int, cwd: str | None = None, cwd_file: str | None = None
+    ) -> LocalShellProcess:
+        """
+        `Shell.ts` -> `exec` on the host: `bash -l -c` with the session environment, output to
+        `output_fd`, stdin on `/dev/null`, its own process group (upstream's `detached`).
+        """
+        environment = self._environment()
+        script = build_command(cmd, environment, cwd_file)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "/bin/bash", "-l", "-c", script,
+                cwd=cwd or str(self._root),
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=output_fd,
+                stderr=output_fd,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise WorkspaceProviderError(f"Could not run local command '{cmd}': {exc}") from exc
+        return LocalShellProcess(process)

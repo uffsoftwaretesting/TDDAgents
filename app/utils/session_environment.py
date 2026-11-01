@@ -46,17 +46,21 @@ def get_session_environment_script(environment: Mapping[str, str]) -> str | None
     return script or None
 
 
-def build_command(command: str, environment: Mapping[str, str]) -> str:
+def build_command(command: str, environment: Mapping[str, str], cwd_file: str | None = None) -> str:
     """
     `bashProvider.ts`'s command parts: the session environment script, then
-    `eval '<command>'`, joined with `&&`. The login shell (`bash -l`) stands in for upstream's
-    shell snapshot, which is sourced first.
+    `eval '<command>'`, then `pwd -P >| <cwd file>` (the shell's directory after the command,
+    which the caller reads back to track `cd`), joined with `&&`. The login shell (`bash -l`)
+    stands in for upstream's shell snapshot, which is sourced first. Upstream's per-command
+    `< /dev/null` is not needed: the shell is spawned with stdin on `/dev/null` already.
     """
     parts: list[str] = []
     script = get_session_environment_script(environment)
     if script:
         parts.append(script)
     parts.append(f"eval {shlex.quote(command)}")
+    if cwd_file is not None:
+        parts.append(f"pwd -P >| {shlex.quote(cwd_file)}")
     return " && ".join(parts)
 
 

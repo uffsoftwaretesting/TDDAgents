@@ -21,6 +21,7 @@ While the Bash tool can do similar things, it’s better to use the built-in too
  - Always quote file paths that contain spaces with double quotes in your command (e.g., cd "path with spaces/file.txt")
  - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.
  - You may specify an optional timeout in milliseconds (up to {{MAX_TIMEOUT_MS}}ms / {{MAX_TIMEOUT_MIN}} minutes). By default, your command will timeout after {{DEFAULT_TIMEOUT_MS}}ms ({{DEFAULT_TIMEOUT_MIN}} minutes).
+ - {{BACKGROUND_NOTE}}
  - When issuing multiple commands:
   - If the commands are independent and can run in parallel, make multiple Bash tool calls in a single message. Example: if you need to run "git status" and "git diff", send a single message with two Bash tool calls in parallel.
   - If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together.
@@ -32,7 +33,9 @@ While the Bash tool can do similar things, it’s better to use the built-in too
   - Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign, -c commit.gpgsign=false) unless the user has explicitly asked for it. If a hook fails, investigate and fix the underlying issue.
  - Avoid unnecessary `sleep` commands:
   - Do not sleep between commands that can run immediately — just run them.
+  - If your command is long running and you would like to be notified when it finishes — use `run_in_background`. No sleep needed.
   - Do not retry failing commands in a sleep loop — diagnose the root cause.
+  - If waiting for a background task you started with `run_in_background`, you will be notified when it completes — do not poll.
   - If you must poll an external process, use a check command (e.g. `gh run view`) rather than sleeping first.
   - If you must sleep, keep the duration short (1-5 seconds) to avoid blocking the user.
  - Every command passes a deterministic command-injection check before it runs. Command substitution (`$()`, backticks), obfuscated flags, brace expansion, unquoted redirections, and similar constructs are refused with the reason; rewrite the command without them.

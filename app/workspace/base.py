@@ -176,6 +176,25 @@ def workspace_path(ws: object, path: str) -> str:
 # The protocol
 # ─────────────────────────────────────────────────────────────────────────────
 
+class ShellProcess(Protocol):
+    """
+    A spawned shell command (`Shell.ts` -> `exec`'s child): its output goes straight to the file
+    descriptor it was given, and completion is the process's *exit*, never the closing of its
+    output — a grandchild left running (`cmd &`) keeps no caller waiting.
+    """
+
+    @property
+    def pid(self) -> int | None: ...
+
+    async def wait(self) -> int:
+        """The exit code, once the shell itself exits."""
+        ...
+
+    def kill_tree(self) -> None:
+        """Kill the shell and everything it started (upstream's `treeKill(pid, 'SIGKILL')`)."""
+        ...
+
+
 @runtime_checkable
 class Workspace(Protocol):
     """
@@ -221,5 +240,16 @@ class Workspace(Protocol):
 
         A non-zero exit code is returned in the CommandResult, not raised. Only
         infrastructure failures raise a WorkspaceError.
+        """
+        ...
+
+    async def spawn(
+        self, cmd: str, *, output_fd: int, cwd: str | None = None, cwd_file: str | None = None
+    ) -> ShellProcess:
+        """
+        Starts a shell command without waiting for it (the Bash tool's `exec`): stdout and stderr
+        go to `output_fd`, it runs from `cwd` (the workspace root when `None`), and with
+        `cwd_file` the shell writes its final directory there (`pwd -P >|`), where the
+        workspace can read it back.
         """
         ...

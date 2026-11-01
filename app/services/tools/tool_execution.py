@@ -184,6 +184,15 @@ async def _run_tool_use(
         )
         return ToolExecutionOutcome(message=msg)
 
+    # 2b. `backfillObservableInput`: hooks, permissions and the call see the filled-in input
+    #     (a file tool's path resolved against the tracked working directory). Upstream hands
+    #     the call the model's original input and re-expands inside it; here the call gets the
+    #     backfilled copy, which resolves the same path.
+    backfill = getattr(tool, "backfill_observable_input", None)
+    if callable(backfill) and isinstance(tool_args, dict):
+        tool_args = dict(tool_args)
+        backfill(tool_args, context)
+
     # 3. PreToolUse hooks. They may rewrite the input, and they may state a permission
     #    opinion — which the gate then still gets to overrule. Their messages are
     #    collected and emitted after the tool result, upstream's order once attachments

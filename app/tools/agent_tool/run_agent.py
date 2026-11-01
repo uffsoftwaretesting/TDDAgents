@@ -65,6 +65,7 @@ from app.query.transitions import Continue, Terminated
 from app.services.compact.compact import is_compact_boundary_message
 from app.skills.load_skills_dir import SkillCommand, SkillRegistry
 from app.state.app_state_store import AppState
+from app.tasks.local_shell_task.kill_shell_tasks import kill_shell_tasks_for_agent
 from app.tool import CancelToken, DenialTrackingBox, Tool, ToolContext
 from app.tools.agent_tool.agent_tool_utils import resolve_agent_tools
 from app.tools.agent_tool.load_agents_dir import AgentDefinition
@@ -295,6 +296,8 @@ def run_agent(
             if close is not None:
                 await close()
             worker.read_file_state.clear()
+            # `runAgent.ts`: the agent's background shells end with it (`killShellTasksForAgent`).
+            kill_shell_tasks_for_agent(agent_id, parent.get_app_state, parent.set_app_state, parent.command_queue)
             parent.set_app_state(lambda s: s if agent_id not in s.todos else replace(
                 s, todos={k: v for k, v in s.todos.items() if k != agent_id}))
 

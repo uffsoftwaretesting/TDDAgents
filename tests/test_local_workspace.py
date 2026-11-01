@@ -464,10 +464,10 @@ def test_move_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
 def test_execute_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
     import subprocess
 
-    def fake_run(*args, **kwargs):
+    def fake_popen(*args, **kwargs):
         raise OSError("Exec format error")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     with pytest.raises(WorkspaceProviderError, match="Could not run local command 'some_cmd': Exec format error"):
         local_ws.execute("some_cmd")
 
@@ -492,3 +492,59 @@ def test_the_git_ceiling_is_not_overridden_by_a_command_env(tmp_path):
     ws = LocalWorkspace(str(tmp_path / "workspace"), env={"GIT_CEILING_DIRECTORIES": "/nowhere"})
     res = ws.execute("printf %s \"$GIT_CEILING_DIRECTORIES\"", env={"GIT_CEILING_DIRECTORIES": "/elsewhere"})
     assert res.stdout == str(Path(ws.root).resolve().parent)
+
+
+def test_execute_returns_when_the_shell_exits_even_if_a_child_keeps_running(local_ws):
+    """The live-run hang: `cd x && nohup … &` held the pipes; output now goes to files."""
+    import os
+    import time
+
+    (local_ws.root / "sub").mkdir()
+    started = time.monotonic()
+    result = local_ws.execute("cd sub && nohup sleep 30 >/dev/null 2>&1 &\necho ok; echo warn >&2", timeout=20)
+    assert time.monotonic() - started < 10
+    assert (result.stdout, result.stderr, result.exit_code) == ("ok\n", "warn\n", 0)
+    os.system("pkill -f 'sleep 30$'")
+
+
+def test_execute_timeout_kills_the_whole_group(local_ws):
+    import subprocess
+
+    with pytest.raises(WorkspaceTimeout):
+        local_ws.execute("sleep 30 & sleep 30", timeout=0.5)
+    assert subprocess.run(["pgrep", "-f", "^sleep 30$"], check=False, capture_output=True).returncode != 0
+
+
+def test_spawn_writes_to_the_fd_tracks_the_directory_and_kills_the_tree(local_ws, tmp_path):
+    import asyncio
+    import os
+
+    (local_ws.root / "sub").mkdir()
+    out, cwd_file = tmp_path / "out", tmp_path / "cwd"
+
+    async def go():
+        fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        process = await local_ws.spawn("cd sub && echo hi", output_fd=fd, cwd_file=str(cwd_file))
+        os.close(fd)
+        code = await process.wait()
+        fd = os.open(out, os.O_WRONLY | os.O_APPEND)
+        sleeper = await local_ws.spawn("sleep 30", output_fd=fd, cwd=str(local_ws.root / "sub"))
+        os.close(fd)
+        assert sleeper.pid
+        sleeper.kill_tree()
+        return code, await sleeper.wait()
+
+    code, killed = asyncio.run(go())
+    assert (code, out.read_text(), cwd_file.read_text().strip()) == (0, "hi\n", str((local_ws.root / "sub").resolve()))
+    assert killed != 0
+
+
+def test_spawn_oserror_raises_workspace_provider_error(local_ws, monkeypatch):
+    import asyncio
+
+    async def boom(*args, **kwargs):
+        raise OSError("no bash")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", boom)
+    with pytest.raises(WorkspaceProviderError, match="Could not run local command 'ls': no bash"):
+        asyncio.run(local_ws.spawn("ls", output_fd=1))

@@ -440,8 +440,10 @@ def tdd_phase_denial(tool: Tool, input_args: dict[str, Any], context: ToolContex
         raw_path = input_args.get("file_path") or input_args.get("path")
         memory = bool(raw_path) and agent_memory_target(context, str(raw_path)) is not None
         plan_file = bool(raw_path) and session_plan_target(context, str(raw_path)) is not None
+        from app.utils.path import tracked_cwd_offset
+
         permitted, reason = check_tdd_phase_permission(tool, input_args, ledger, agent_memory=memory,
-                                                       plan_file=plan_file)
+                                                       plan_file=plan_file, cwd_offset=tracked_cwd_offset(context))
     except Exception as exc:
         logger.exception("TDD phase check failed for %s", tool.name)
         reason = f"TDD phase check failed for {tool.name}: {exc}"

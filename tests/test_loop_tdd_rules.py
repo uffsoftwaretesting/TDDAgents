@@ -139,6 +139,9 @@ def test_tool_classification_helpers():
         def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None:
             return None
 
+        def backfill_observable_input(self, input: dict[str, Any], context: Any) -> None:
+            return None
+
         def is_implementation_writer(self) -> bool:
             raise RuntimeError("boom")
 

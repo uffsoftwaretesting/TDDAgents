@@ -148,6 +148,24 @@ def test_a_settings_deny_hides_the_tool_from_the_main_pool(python_workspace, tmp
     asyncio.run(go())
 
 
+def test_closing_the_session_kills_its_running_shells(python_workspace, tmp_path):
+    from app.tasks.local_shell_task.guards import LocalShellTaskState
+
+    killed: list[str] = []
+    shell = type("S", (), {"kill": lambda self: killed.append("k"), "cleanup": lambda self: None})()
+    task = LocalShellTaskState(id="b1", type="local_bash", status="running", description="", output_file="",
+                               start_time=0.0, shell_command=shell)
+
+    async def go() -> AppStateStore:
+        async with _open(tmp_path, python_workspace, TddPlan(), planning=True, run_id="loop-p7") as run:
+            run.store.update(lambda s: dataclasses.replace(s, tasks={"b1": task}))
+            store: AppStateStore = run.store
+        return store
+
+    store = asyncio.run(go())
+    assert store.get().tasks["b1"].status == "killed" and killed == ["k"]
+
+
 def test_in_coordinator_mode_the_analyst_keeps_the_whole_roster(python_workspace, tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_COORDINATOR_MODE", "1")
 

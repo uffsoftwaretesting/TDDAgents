@@ -2,7 +2,7 @@
 A background task's output file (Phase 8).
 
 Ported from `reference/claude-code/src/utils/task/diskOutput.ts` -> `getTaskOutputDir`,
-`getTaskOutputPath`, `initTaskOutputAsSymlink`, `getTaskOutput`, and
+`getTaskOutputPath`, `initTaskOutputAsSymlink`, `getTaskOutput`, `MAX_TASK_OUTPUT_BYTES`, and
 `utils/task/outputFormatting.ts` -> `getMaxTaskOutputLength`, `formatTaskOutput`.
 
 A background agent's output file is a symlink to its sidechain transcript, so reading it shows
@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 #: `DEFAULT_MAX_READ_BYTES`.
 DEFAULT_MAX_READ_BYTES = 8 * 1024 * 1024
+#: `MAX_TASK_OUTPUT_BYTES` / `MAX_TASK_OUTPUT_BYTES_DISPLAY`: a backgrounded shell command whose
+#: output file grows past this is killed (the size watchdog).
+MAX_TASK_OUTPUT_BYTES = 5 * 1024 * 1024 * 1024
+MAX_TASK_OUTPUT_BYTES_DISPLAY = "5GB"
 #: `TASK_MAX_OUTPUT_UPPER_LIMIT` / `TASK_MAX_OUTPUT_DEFAULT` (`outputFormatting.ts`).
 TASK_MAX_OUTPUT_UPPER_LIMIT = 160_000
 TASK_MAX_OUTPUT_DEFAULT = 32_000
@@ -43,6 +47,16 @@ def get_task_output_dir(context: Any) -> Path:
 def get_task_output_path(context: Any, task_id: str) -> Path:
     """`getTaskOutputPath`."""
     return get_task_output_dir(context) / f"{task_id}.output"
+
+
+def open_task_output_for_append(output_path: Path) -> int:
+    """
+    `Shell.ts` -> `exec`'s output handle: `O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW`, so stdout
+    and stderr interleave without tearing and a planted symlink is not followed.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    return os.open(output_path, flags, 0o600)
 
 
 def init_task_output_as_symlink(output_path: Path, target_path: Path) -> Path:
@@ -96,6 +110,8 @@ def format_task_output(output: str, output_file: str) -> tuple[str, bool]:
 
 __all__ = [
     "DEFAULT_MAX_READ_BYTES",
+    "MAX_TASK_OUTPUT_BYTES",
+    "MAX_TASK_OUTPUT_BYTES_DISPLAY",
     "TASK_MAX_OUTPUT_DEFAULT",
     "TASK_MAX_OUTPUT_UPPER_LIMIT",
     "format_task_output",
@@ -104,4 +120,5 @@ __all__ = [
     "get_task_output_dir",
     "get_task_output_path",
     "init_task_output_as_symlink",
+    "open_task_output_for_append",
 ]
