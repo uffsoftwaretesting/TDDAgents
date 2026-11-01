@@ -111,9 +111,15 @@ async def _develop_interactive(
     from app.tdd.plan import TddPlan
 
     if io_factory is None:
+        from app.bootstrap.state import get_original_cwd
+        from app.history import PromptHistory
         from app.screens.terminal_io import TerminalIO
 
-        io_factory = TerminalIO
+        # `history.ts`: ↑ shows this project's prompts, this session's first.
+        prompt_history = PromptHistory(get_original_cwd(workspace), thread_id)
+
+        def io_factory(on_interrupt: Callable[[], None]) -> Any:
+            return TerminalIO(on_interrupt, prompt_history)
     holder: dict[str, Repl] = {}
 
     async def ask(permission: PermissionPrompt) -> PermissionAnswer:

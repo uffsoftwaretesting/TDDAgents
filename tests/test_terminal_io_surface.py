@@ -32,3 +32,21 @@ def test_the_seam_builds_without_a_terminal_session():
     from app.screens import terminal_io
 
     assert hasattr(terminal_io.TerminalIO, "read_line") and hasattr(terminal_io.TerminalIO, "write")
+
+
+def test_history_surface():
+    from prompt_toolkit.history import History, InMemoryHistory
+
+    assert "history" in inspect.signature(PromptSession.__init__).parameters
+    assert callable(History.load_history_strings) and callable(History.store_string)
+    assert InMemoryHistory is not None
+
+
+def test_the_history_adapter_delegates(tmp_path):
+    from app.history import PromptHistory
+    from app.screens.terminal_io import PromptToolkitHistory
+
+    history = PromptHistory("/p", "s", tmp_path / "h.jsonl", env={})
+    adapter = PromptToolkitHistory(history)
+    adapter.store_string("one")
+    assert list(adapter.load_history_strings()) == ["one"]
