@@ -10,7 +10,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tool import (
+    BuiltTool,
+    SearchOrRead,
+    ToolContext,
+    ToolResult,
+    ValidationResult,
+    build_tool,
+)
 from app.tools.glob_tool import ui
 from app.tools.utils import (
     NO_WORKSPACE,
@@ -80,6 +87,9 @@ def build_glob_tool() -> BuiltTool:
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        get_tool_use_summary=ui.get_tool_use_summary,
+        get_activity_description=ui.get_activity_description,
+        is_search_or_read_command=lambda args: SearchOrRead(is_search=True, is_read=False),
         backfill_observable_input=backfill_path("path", default_to_cwd=True),
         name="Glob",
         prompt=get_prompt(PROMPT_PATH, "Finds files."),

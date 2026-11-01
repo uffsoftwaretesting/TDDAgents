@@ -201,6 +201,8 @@ def build_web_fetch_tool(*, model_for: ModelFor = default_model_for,
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        get_tool_use_summary=ui.get_tool_use_summary,
+        get_activity_description=ui.get_activity_description,
         name=WEB_FETCH_TOOL_NAME,
         prompt=get_prompt(PROMPT_PATH, "Fetches a URL."),
         input_schema={

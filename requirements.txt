@@ -153,3 +153,4 @@ ripgrep==15.1.0
 types-PyYAML==6.0.12.20260906
 jsonschema==4.26.0
 types-jsonschema==4.26.0.20261006
+types-regex==2025.11.3.20251106

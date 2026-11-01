@@ -50,6 +50,7 @@ from app.tool import (
     build_tool,
     default_map_result,
 )
+from app.tools.mcp_tool.classify_for_collapse import classify_mcp_tool_for_collapse
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,8 @@ def build_mcp_tool(client: ConnectedMCPServer, tool: Any) -> McpBuiltTool:
         is_mcp=True,
         max_result_size_chars=MCP_MAX_RESULT_SIZE_CHARS,
         user_facing_name=lambda _args: user_facing,
+        # `client.ts`: `isSearchOrReadCommand() { return classifyMcpToolForCollapse(client.name, tool.name) }`.
+        is_search_or_read_command=lambda _args: classify_mcp_tool_for_collapse(client.name, server_tool_name),
     )
     return McpBuiltTool(
         **{f: getattr(built, f) for f in BuiltTool.__dataclass_fields__},

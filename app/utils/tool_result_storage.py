@@ -43,18 +43,14 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from app.tool import ContentReplacementState
 
+from app.constants.tool_limits import (
+    DEFAULT_MAX_RESULT_SIZE_CHARS,
+    MAX_TOOL_RESULT_BYTES,
+    MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
+)
+
 logger = logging.getLogger(__name__)
 
-#: `toolLimits.ts` -> `DEFAULT_MAX_RESULT_SIZE_CHARS`. A ceiling on every tool's own figure.
-DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000
-
-#: `toolLimits.ts`: `MAX_TOOL_RESULT_TOKENS * BYTES_PER_TOKEN`, the fallback threshold.
-MAX_TOOL_RESULT_TOKENS = 100_000
-BYTES_PER_TOKEN = 4
-MAX_TOOL_RESULT_BYTES = MAX_TOOL_RESULT_TOKENS * BYTES_PER_TOKEN
-
-#: `toolLimits.ts` -> `MAX_TOOL_RESULTS_PER_MESSAGE_CHARS`.
-MAX_TOOL_RESULTS_PER_MESSAGE_CHARS = 200_000
 
 #: `toolResultStorage.ts` -> `PREVIEW_SIZE_BYTES`.
 PREVIEW_SIZE_BYTES = 2000
@@ -487,11 +483,6 @@ def provision_content_replacement_state(
 
 
 __all__ = [
-    "BYTES_PER_TOKEN",
-    "DEFAULT_MAX_RESULT_SIZE_CHARS",
-    "MAX_TOOL_RESULTS_PER_MESSAGE_CHARS",
-    "MAX_TOOL_RESULT_BYTES",
-    "MAX_TOOL_RESULT_TOKENS",
     "PERSISTED_OUTPUT_CLOSING_TAG",
     "PERSISTED_OUTPUT_TAG",
     "PREVIEW_SIZE_BYTES",

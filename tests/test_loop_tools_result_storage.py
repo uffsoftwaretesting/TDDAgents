@@ -12,9 +12,11 @@ import math
 
 import pytest
 
-from app.utils.tool_result_storage import (
+from app.constants.tool_limits import (
     DEFAULT_MAX_RESULT_SIZE_CHARS,
     MAX_TOOL_RESULT_BYTES,
+)
+from app.utils.tool_result_storage import (
     PERSISTED_OUTPUT_CLOSING_TAG,
     PERSISTED_OUTPUT_TAG,
     PREVIEW_SIZE_BYTES,

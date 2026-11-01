@@ -27,6 +27,9 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, ToolMessage
 
+from app.constants.tool_limits import (
+    MAX_TOOL_RESULT_BYTES,
+)
 from app.services.tools.tool_hooks import (
     PERMISSION_DENIED_RETRY_MESSAGE,
     resolve_hook_permission_decision,
@@ -45,7 +48,6 @@ from app.utils.messages import (
 )
 from app.utils.tool_errors import INPUT_VALIDATION_ERROR, validate_against_schema
 from app.utils.tool_result_storage import (
-    MAX_TOOL_RESULT_BYTES,
     maybe_persist_large_result,
 )
 

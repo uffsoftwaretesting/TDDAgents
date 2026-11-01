@@ -33,7 +33,8 @@ and appended after the SubagentStart context, as upstream appends them.
 
 Not ported: MCP servers per agent, frontmatter hooks (no session-hook
 store here), effort, the fork path's exact-tools prefix, Perfetto tracing, agent metadata
-files, and the shell/monitor task kill (no background shells or monitors here).
+files, and the monitor task kill (no monitors here). The worker's background shells are killed
+when it ends (`killShellTasksForAgent`).
 
 Skill preloading for agents (Phase 8).
 

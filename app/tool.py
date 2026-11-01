@@ -44,18 +44,23 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import (
     Any,
+    Literal,
     Protocol,
     runtime_checkable,
 )
 
 from langchain_core.messages import ToolMessage
 
+from app.constants.tool_limits import MAX_TOOL_RESULT_BYTES
 from app.state.app_state_store import AppState, AppStateStore
-from app.types.permissions import PermissionResult
+from app.types.permissions import (
+    PermissionMode,
+    PermissionResult,
+    ToolPermissionContext,
+)
 from app.utils.file_state_cache import FileState
 from app.utils.messages import Message
 from app.utils.permissions.denial_tracking import DenialTrackingState
-from app.utils.tool_result_storage import MAX_TOOL_RESULT_BYTES
 
 
 def default_map_result(result: ToolResult, tool_use_id: str) -> ToolMessage:
@@ -79,6 +84,23 @@ def default_map_result(result: ToolResult, tool_use_id: str) -> ToolMessage:
         status=status,
         additional_kwargs=additional_kwargs,
     )
+
+
+#: `Tool.ts` -> `interruptBehavior`'s answer: what a new user message does to a running call.
+InterruptBehavior = Literal["cancel", "block"]
+
+
+@dataclass(frozen=True, slots=True)
+class SearchOrRead:
+    """
+    `Tool.ts` -> `isSearchOrReadCommand`'s answer: whether a call is a search (grep, find, glob),
+    a read (cat, head, a file read) or a directory listing (ls, tree, du), so the REPL can collapse
+    it. All three false means the call is not collapsed.
+    """
+
+    is_search: bool
+    is_read: bool
+    is_list: bool = False
 
 
 @runtime_checkable
@@ -106,6 +128,10 @@ class Tool(Protocol):
     def user_facing_name(self, input: dict[str, Any] | None) -> str: ...
     def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None: ...
     def backfill_observable_input(self, input: dict[str, Any], context: ToolContext) -> None: ...
+    def get_tool_use_summary(self, input: dict[str, Any] | None, context: Any = None) -> str | None: ...
+    def get_activity_description(self, input: dict[str, Any] | None, context: Any = None) -> str | None: ...
+    def is_search_or_read_command(self, input: dict[str, Any]) -> SearchOrRead | None: ...
+    def interrupt_behavior(self) -> InterruptBehavior: ...
     def is_enabled(self) -> bool: ...
     def is_concurrency_safe(self, input: dict[str, Any]) -> bool: ...
     def is_read_only(self, input: dict[str, Any]) -> bool: ...
@@ -177,6 +203,16 @@ class BuiltTool:
     #: see (a file tool's path resolved against the tracked working directory). It takes the
     #: context because TDDAgents' working directory is per workspace, not process-wide.
     _backfill_observable_input: Callable[[dict[str, Any], ToolContext], None] | None = None
+    #: `Tool.ts` -> `getToolUseSummary`: a short summary of the call for compact views (a hook
+    #: prompt's title, an agent's progress line), `None` to show none. Absent upstream by default.
+    _get_tool_use_summary: Callable[[dict[str, Any] | None, Any], str | None] | None = None
+    #: `Tool.ts` -> `getActivityDescription`: the present-tense activity for a spinner or a
+    #: permission's requires-action details ("Reading src/foo.ts"), `None` to fall back to the name.
+    _get_activity_description: Callable[[dict[str, Any] | None, Any], str | None] | None = None
+    #: `Tool.ts` -> `isSearchOrReadCommand`: `None` (the default) means the tool never collapses.
+    _is_search_or_read_command: Callable[[dict[str, Any]], SearchOrRead] | None = None
+    #: `Tool.ts` -> `interruptBehavior`, `'block'` when not implemented.
+    _interrupt_behavior: Callable[[], InterruptBehavior] | None = None
 
     def description(self, input: dict[str, Any]) -> str:
         return self._description(input)
@@ -192,6 +228,29 @@ class BuiltTool:
     def backfill_observable_input(self, input: dict[str, Any], context: ToolContext) -> None:
         if self._backfill_observable_input is not None:
             self._backfill_observable_input(input, context)
+
+    def get_tool_use_summary(self, input: dict[str, Any] | None, context: Any = None) -> str | None:
+        """
+        `getToolUseSummary?.(input)`: `None` when the tool has none; a raise reaches the caller.
+        `context` stands in for upstream's process-wide cwd (a path is shown relative to it).
+        """
+        if self._get_tool_use_summary is None:
+            return None
+        return self._get_tool_use_summary(input, context)
+
+    def get_activity_description(self, input: dict[str, Any] | None, context: Any = None) -> str | None:
+        """`getActivityDescription?.(input)`: `None` when the tool has none."""
+        if self._get_activity_description is None:
+            return None
+        return self._get_activity_description(input, context)
+
+    def is_search_or_read_command(self, input: dict[str, Any]) -> SearchOrRead | None:
+        """`isSearchOrReadCommand?.(input)`: `None` when the tool never collapses."""
+        return self._is_search_or_read_command(input) if self._is_search_or_read_command is not None else None
+
+    def interrupt_behavior(self) -> InterruptBehavior:
+        """`interruptBehavior?.() ?? 'block'`."""
+        return self._interrupt_behavior() if self._interrupt_behavior is not None else "block"
 
     def is_enabled(self) -> bool:
         try:
@@ -302,6 +361,10 @@ def build_tool(
     user_facing_name: Callable[[dict[str, Any] | None], str] | None = None,
     render_tool_use_message: Callable[[dict[str, Any], bool], str | None] | None = None,
     backfill_observable_input: Callable[[dict[str, Any], ToolContext], None] | None = None,
+    get_tool_use_summary: Callable[[dict[str, Any] | None, Any], str | None] | None = None,
+    get_activity_description: Callable[[dict[str, Any] | None, Any], str | None] | None = None,
+    is_search_or_read_command: Callable[[dict[str, Any]], SearchOrRead] | None = None,
+    interrupt_behavior: Callable[[], InterruptBehavior] | None = None,
 ) -> BuiltTool:
     """
     Builds a Tool with fail-closed defaults for omitted members.
@@ -348,6 +411,26 @@ def build_tool(
         _user_facing_name=user_facing_name,
         _render_tool_use_message=render_tool_use_message,
         _backfill_observable_input=backfill_observable_input,
+        _get_tool_use_summary=get_tool_use_summary,
+        _get_activity_description=get_activity_description,
+        _is_search_or_read_command=is_search_or_read_command,
+        _interrupt_behavior=interrupt_behavior,
+    )
+
+
+def get_empty_tool_permission_context() -> ToolPermissionContext:
+    """
+    `Tool.ts` -> `getEmptyToolPermissionContext`: the default mode, no rules, no extra working
+    directories, bypass unavailable. The default `AppState` starts from it, as do side queries
+    that run no tools (the tool-use summary).
+    """
+    return ToolPermissionContext(
+        mode=PermissionMode.DEFAULT,
+        additional_working_directories=(),
+        always_allow_rules=(),
+        always_deny_rules=(),
+        always_ask_rules=(),
+        is_bypass_permissions_mode_available=False,
     )
 
 

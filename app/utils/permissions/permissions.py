@@ -413,7 +413,11 @@ def extract_permission_context(context: ToolContext) -> ToolPermissionContext:
         except Exception:  # noqa: BLE001, S110 - an unreadable app state falls back to the default context
             pass
 
-    return ToolPermissionContext()
+    from app.tool import (
+        get_empty_tool_permission_context,  # app.tool imports this module
+    )
+
+    return get_empty_tool_permission_context()
 
 
 def tdd_phase_denial(tool: Tool, input_args: dict[str, Any], context: ToolContext) -> PermissionResult | None:

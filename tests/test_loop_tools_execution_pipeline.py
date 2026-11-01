@@ -327,8 +327,10 @@ def test_a_context_without_a_run_id_still_files_the_result(tmp_path, monkeypatch
 
 def test_a_tool_that_declares_no_limit_is_governed_by_the_global_budget():
     """The fallback must be a number, not None — `math.isfinite(None)` would raise."""
+    from app.constants.tool_limits import (
+        MAX_TOOL_RESULT_BYTES,
+    )
     from app.services.tools.tool_execution import _persist_if_oversized
-    from app.utils.tool_result_storage import MAX_TOOL_RESULT_BYTES
 
     bare = SimpleNamespace(name="Bare")
     assert not hasattr(bare, "max_result_size_chars")

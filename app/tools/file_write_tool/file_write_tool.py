@@ -67,6 +67,8 @@ def build_write_file_tool() -> BuiltTool:
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        get_tool_use_summary=ui.get_tool_use_summary,
+        get_activity_description=ui.get_activity_description,
         backfill_observable_input=backfill_path("file_path"),
         name="WriteFile",
         prompt=get_prompt(PROMPT_PATH, "Writes a file."),

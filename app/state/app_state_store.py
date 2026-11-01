@@ -42,6 +42,9 @@ class AppState:
     #: entry by `build_tool_permission_context`. It lives here rather than on the
     #: `ToolContext` so a synchronous worker, which reads its parent's app state, is held
     #: to the same rules (`ToolContext.permission_context` still overrides it when set).
+    #: The default is `getDefaultAppState`'s `{...getEmptyToolPermissionContext(), mode}`: the
+    #: dataclass's own defaults are exactly that empty context (`app.tool` imports this module,
+    #: so the factory cannot be `get_empty_tool_permission_context` itself).
     tool_permission_context: ToolPermissionContext = field(default_factory=ToolPermissionContext)
     #: Upstream `appState.denialTracking`: the auto-mode classifier's denial streak and total
     #: (`utils/permissions/denial_tracking.py`), `None` until auto mode first records one.

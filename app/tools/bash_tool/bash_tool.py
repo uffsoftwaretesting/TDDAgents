@@ -37,7 +37,14 @@ from app.tasks.local_shell_task.local_shell_task import (
     spawn_shell_task,
     unregister_foreground,
 )
-from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tool import (
+    BuiltTool,
+    SearchOrRead,
+    ToolContext,
+    ToolResult,
+    ValidationResult,
+    build_tool,
+)
 from app.tools.bash_tool import ui
 from app.tools.bash_tool.bash_permissions import bash_tool_has_permission
 from app.tools.bash_tool.read_only_validation import is_bash_read_only
@@ -46,7 +53,7 @@ from app.tools.bash_tool.utils import (
     std_err_append_shell_reset_message,
 )
 from app.types.permissions import PermissionResult, ToolPermissionContext
-from app.utils.bash.commands import split_command
+from app.utils.bash.commands import split_command, split_command_with_operators
 from app.utils.cwd import get_cwd
 from app.utils.frontmatter_parser import parse_markdown_frontmatter, render_prompt
 from app.utils.permissions.filesystem import permission_cwd
@@ -93,6 +100,67 @@ RUN_IN_BACKGROUND_DESCRIPTION = (
 #: `toolErrors.ts` -> `INTERRUPT_MESSAGE_FOR_TOOL_USE` is not used here: an aborted command says so
 #: in the result (`mapToolResultToToolResultBlockParam`).
 ABORTED_COMMAND_ERROR = "<error>Command was aborted before completion</error>"
+
+
+#: `BashTool.tsx` -> `BASH_SEARCH_COMMANDS`: search commands, collapsed in the REPL.
+BASH_SEARCH_COMMANDS = frozenset({"find", "grep", "rg", "ag", "ack", "locate", "which", "whereis"})
+#: `BASH_READ_COMMANDS`: read/view, analysis and data-processing commands.
+BASH_READ_COMMANDS = frozenset({
+    "cat", "head", "tail", "less", "more",
+    "wc", "stat", "file", "strings",
+    "jq", "awk", "cut", "sort", "uniq", "tr",
+})
+#: `BASH_LIST_COMMANDS`: directory listings, summarized as "Listed N directories".
+BASH_LIST_COMMANDS = frozenset({"ls", "tree", "du"})
+#: `BASH_SEMANTIC_NEUTRAL_COMMANDS`: output/status commands that never change what a pipeline is.
+BASH_SEMANTIC_NEUTRAL_COMMANDS = frozenset({"echo", "printf", "true", "false", ":"})
+
+_NOT_SEARCH_OR_READ = SearchOrRead(is_search=False, is_read=False, is_list=False)
+
+
+def is_search_or_read_bash_command(command: str) -> SearchOrRead:
+    """
+    `isSearchOrReadBashCommand`: a command whose every non-neutral part is a search, read or
+    listing command (redirect targets and operators skipped) collapses; anything else does not.
+    """
+    try:
+        parts = split_command_with_operators(command)
+    except Exception:  # noqa: BLE001 - upstream: unparseable syntax is not a search/read command
+        return _NOT_SEARCH_OR_READ
+    if not parts:
+        return _NOT_SEARCH_OR_READ
+    has_search = has_read = has_list = has_non_neutral = skip_next = False
+    for part in parts:
+        if skip_next:
+            skip_next = False
+            continue
+        if part in (">", ">>", ">&"):
+            skip_next = True
+            continue
+        if part in ("||", "&&", "|", ";"):
+            continue
+        words = part.split()
+        base = words[0] if words else ""
+        if not base or base in BASH_SEMANTIC_NEUTRAL_COMMANDS:
+            continue
+        has_non_neutral = True
+        is_search = base in BASH_SEARCH_COMMANDS
+        is_read = base in BASH_READ_COMMANDS
+        is_list = base in BASH_LIST_COMMANDS
+        if not (is_search or is_read or is_list):
+            return _NOT_SEARCH_OR_READ
+        has_search, has_read, has_list = has_search or is_search, has_read or is_read, has_list or is_list
+    if not has_non_neutral:
+        return _NOT_SEARCH_OR_READ
+    return SearchOrRead(is_search=has_search, is_read=has_read, is_list=has_list)
+
+
+def bash_search_or_read(input: dict[str, Any]) -> SearchOrRead:
+    """`BashTool.isSearchOrReadCommand`: an input without a string command is not one."""
+    command = input.get("command")
+    if not isinstance(command, str):
+        return _NOT_SEARCH_OR_READ
+    return is_search_or_read_bash_command(command)
 
 
 def _positive_int(value: str | None) -> int | None:
@@ -353,6 +421,9 @@ def build_bash_tool() -> BuiltTool:
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        get_tool_use_summary=ui.get_tool_use_summary,
+        get_activity_description=ui.get_activity_description,
+        is_search_or_read_command=bash_search_or_read,
         name="Bash",
         prompt=get_bash_prompt(),
         input_schema={

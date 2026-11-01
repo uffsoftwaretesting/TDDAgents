@@ -142,6 +142,18 @@ def test_tool_classification_helpers():
         def backfill_observable_input(self, input: dict[str, Any], context: Any) -> None:
             return None
 
+        def get_tool_use_summary(self, input: dict[str, Any] | None, context: Any = None) -> str | None:
+            return None
+
+        def get_activity_description(self, input: dict[str, Any] | None, context: Any = None) -> str | None:
+            return None
+
+        def is_search_or_read_command(self, input: dict[str, Any]) -> Any:
+            return None
+
+        def interrupt_behavior(self) -> Any:
+            return "block"
+
         def is_implementation_writer(self) -> bool:
             raise RuntimeError("boom")
 

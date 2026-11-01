@@ -9,9 +9,11 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import app.utils.tool_result_storage as rs
+from app.constants.tool_limits import (
+    MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
+)
 from app.tool import ContentReplacementState
 from app.utils.tool_result_storage import (
-    MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
     PERSISTED_OUTPUT_TAG,
     apply_tool_result_budget,
     enforce_tool_result_budget,
