@@ -145,14 +145,22 @@ def request_system_texts(state: LoopState, config: RunConfig) -> list[str]:
     if ctx.agent_system_prompt is not None:
         sections = list(ctx.agent_system_prompt)
     else:
-        session = get_session_context(config.run_id, ctx.workspace)
-        registry = ctx.skill_registry
-        sections = resolve_system_prompt_sections(
-            get_system_prompt(ctx.workspace, Config.MODEL, ctx.mcp_clients,
-                              enabled_tools=frozenset(tool.name for tool in ctx.tools),
-                              has_skills=bool(registry is not None and registry.get_skill_tool_commands())),
-            session.section_cache)
+        sections = resolve_default_system_prompt(ctx, config.run_id, ctx.tools)
     return append_system_context(sections, request_system_context(state, config))
+
+
+def resolve_default_system_prompt(ctx: Any, run_id: str, tools: Sequence[Tool]) -> list[str]:
+    """
+    `getSystemPrompt(tools, model)`, resolved through the run's section cache: what the main
+    thread's request sends when no agent prompt replaces it. `/context` counts the same text.
+    """
+    session = get_session_context(run_id, ctx.workspace)
+    registry = ctx.skill_registry
+    return resolve_system_prompt_sections(
+        get_system_prompt(ctx.workspace, Config.MODEL, ctx.mcp_clients,
+                          enabled_tools=frozenset(tool.name for tool in tools),
+                          has_skills=bool(registry is not None and registry.get_skill_tool_commands())),
+        session.section_cache)
 
 
 def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]:

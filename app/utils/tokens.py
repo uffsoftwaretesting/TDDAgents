@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from app.cost_tracker import usage_from_langchain
 from app.utils.messages import Message, tool_calls_in
 
 
@@ -159,7 +160,7 @@ class TokenCounter:
 # - `reference/claude-code/src/services/tokenEstimation.ts` -> `roughTokenCountEstimation`,
 #   `roughTokenCountEstimationForMessages` (and its per-message / per-block helpers)
 # - `reference/claude-code/src/utils/tokens.ts` -> `getTokenUsage`, `getTokenCountFromUsage`,
-#   `tokenCountWithEstimation`
+#   `tokenCountWithEstimation`, `getCurrentUsage`
 # - `reference/claude-code/src/utils/context.ts` -> `MODEL_CONTEXT_WINDOW_DEFAULT`,
 #   `COMPACT_MAX_OUTPUT_TOKENS`, `getContextWindowForModel`, `getModelMaxOutputTokens`
 # - `reference/claude-code/src/services/api/claude.ts` -> `getMaxOutputTokensForModel`
@@ -282,6 +283,24 @@ def get_token_count_from_usage(usage: dict[str, Any]) -> int:
     so the sum is `input_tokens + output_tokens`.
     """
     return int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+
+
+def get_current_usage(messages: Sequence[Message]) -> dict[str, int] | None:
+    """
+    `getCurrentUsage`: the last real API response's usage in Anthropic's shape, else `None`.
+    LangChain's `input_tokens` includes the cache tokens, so the uncached input is split from
+    them (`app/cost_tracker.py::usage_from_langchain`).
+    """
+    for message in reversed(messages):
+        usage = usage_from_langchain(get_token_usage(message))
+        if usage is not None:
+            return {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cache_creation_input_tokens": usage.cache_creation_input_tokens,
+                "cache_read_input_tokens": usage.cache_read_input_tokens,
+            }
+    return None
 
 
 def _assistant_message_id(message: Message) -> str | None:

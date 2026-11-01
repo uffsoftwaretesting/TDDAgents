@@ -421,6 +421,24 @@ def test_plan_commands_and_their_deferral(python_workspace, tmp_path):
     assert "Paused: 0/1 done — current: 1. A. Type to continue, /resume, or /help." in io.out
 
 
+def test_context_reports_the_sessions_context_usage(python_workspace, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    model = Model([[AIMessage(content="planned the calculator")]])
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: not repl.busy and repl.last_terminal is not None)
+        io.lines.put_nowait("/context")
+        await until(lambda: any(line.startswith("## Context Usage\n") for line in io.out))
+        io.lines.put_nowait("/exit")
+
+    _, repl, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    report = next(line for line in io.out if line.startswith("## Context Usage\n"))
+    assert f"**Model:** {repl.run.config.model}  \n" in report
+    for row in ("| System prompt |", "| System tools |", "| Messages |", "| Free space |", "| Autocompact buffer |",
+                "### Skills\n"):
+        assert row in report
+
+
 def test_resume_unpauses_and_continues(python_workspace, tmp_path):
     model = Model([[AIMessage(content="stopping")], [AIMessage(content="again")], [AIMessage(content="x")]])
 

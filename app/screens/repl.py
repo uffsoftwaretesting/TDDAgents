@@ -42,6 +42,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from app.cli.print import (
     DevelopmentRun,
+    project_root_of,
     start_session,
     submit_prompt,
 )
@@ -51,7 +52,9 @@ from app.commands import (
     CommandError,
     SlashCommand,
     apply_plan_command,
+    collect_context_data,
     find_command,
+    format_context_as_markdown_table,
     get_commands,
     help_text,
     parse_slash_command,
@@ -72,11 +75,13 @@ from app.query.transitions import Terminal
 from app.query_engine import ResultMessage
 from app.session.prompts import development_continue_prompt
 from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
+from app.tools.agent_tool.load_agents_dir import get_agent_definitions_with_overrides
 from app.tools.agent_tool.ui import extract_last_tool_info
 from app.types.hooks import PromptRequest, PromptResponse
 from app.types.permissions import PermissionMode
 from app.utils.collapse_read_search import summarize_recent_activities
 from app.utils.message_queue_manager import QueuedCommand
+from app.utils.model.model import parse_user_specified_model
 from app.utils.permissions.permission_setup import set_permission_mode
 from app.utils.process_user_input.process_slash_command import parse_slash_input
 
@@ -463,6 +468,8 @@ class Repl:
                 self._start(submit_prompt(self.run, development_continue_prompt(self.plan)))
         elif name == "requirements":
             await self._requirements(command.args)
+        elif name == "context":
+            await self._context()
         else:  # exit, quit
             self.exiting = True
             await self._stop_turn()
@@ -477,6 +484,21 @@ class Repl:
             self.io.write(str(exc))
             return
         self.io.write(render_plan(updated))
+
+    async def _context(self) -> None:
+        """
+        `/context` (`context-noninteractive.ts` -> `call`): the session's context usage, as Markdown.
+        The model is the one the next turn calls (`getMainLoopModel`), the tools the pool it is
+        offered (`refreshTools`), the agents those the Agent tool lists (`appState.agentDefinitions`).
+        """
+        run = self.run
+        ctx = run.ctx
+        model = parse_user_specified_model(run.user_specified_model) if run.user_specified_model else run.config.model
+        tools = ctx.refresh_tools() if ctx.refresh_tools is not None else ctx.tools
+        definitions = get_agent_definitions_with_overrides(project_dir=project_root_of(ctx.workspace))
+        data = await collect_context_data(
+            run.messages, main_loop_model=model, tools=tools, agent_definitions=definitions, tool_context=ctx)
+        self.io.write(format_context_as_markdown_table(data))
 
     async def _requirements(self, request: str) -> None:
         """Upstream's `/plan <description>`: plan mode again (its approval re-plans), then the request."""
