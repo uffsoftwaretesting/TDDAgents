@@ -73,6 +73,7 @@ from app.tools.agent_tool.load_agents_dir import AgentDefinition
 from app.tools.skill_tool.skill_tool import format_skill_loading_metadata
 from app.tools.tools import assemble_tool_pool
 from app.types.permissions import PermissionMode
+from app.utils.file_history import noop_update_file_history_state
 from app.utils.hooks.hooks import execute_subagent_start_hooks
 from app.utils.messages import (
     HookAttachment,
@@ -257,8 +258,10 @@ def run_agent(
             # `canUseTool` is not inherited, except by a `bubble` agent, whose prompts surface to the
             # parent's terminal (`runAgent.ts`; the verification agent, user decision 2026-10-28).
             can_use_tool=parent.can_use_tool if agent_definition.permission_mode == PermissionMode.BUBBLE else None,
-            # `createSubagentContext` copies neither `requestPrompt` nor the REPL's progress hooks.
+            # `createSubagentContext` copies neither `requestPrompt` nor the REPL's progress hooks,
+            # and stubs `updateFileHistoryState` (`() => {}`): a worker's edits are not tracked.
             request_prompt=None,
+            update_file_history_state=noop_update_file_history_state,
             on_progress=None,
             set_has_interruptible_tool_in_progress=None,
             agent_id=agent_id,

@@ -258,8 +258,10 @@ async def _run_tool_use(
     # Execute tool call. A tool that raises takes upstream's failure path: PostToolUseFailure
     # hooks, no governance and no PostToolUse.
     try:
-        # `tool.call(input, { ...toolUseContext, toolUseId })`: the call sees its own id.
-        result = await tool.call(effective_args, replace(context, tool_use_id=call_id))
+        # `tool.call(input, { ...toolUseContext, toolUseId }, canUseTool, assistantMessage)`: the call
+        # sees its own id and the assistant message that made it (`parentMessage`).
+        call_context = replace(context, tool_use_id=call_id, parent_message=assistant_message)
+        result = await tool.call(effective_args, call_context)
     except Exception as exc:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
         content = f"<tool_use_error>Error calling tool ({tool.name}): {exc}</tool_use_error>"
         failure = await run_post_tool_use_failure_hooks(

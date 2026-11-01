@@ -265,6 +265,16 @@ def test_the_worker_starts_from_fresh_per_agent_state():
     assert ctx.read_file_state == {} and ctx.read_file_state is not parent.read_file_state
 
 
+def test_a_worker_never_tracks_file_history():
+    """`createSubagentContext` stubs `updateFileHistoryState` (`() => {}`): a worker's edits are untracked."""
+    from app.utils.file_history import noop_update_file_history_state
+
+    parent = _parent()
+    parent.update_file_history_state = lambda updater: None
+    model, _ = _run(parent=parent)
+    assert model.seen[0].tool_context.update_file_history_state is noop_update_file_history_state
+
+
 def test_a_worker_never_inherits_the_interactive_can_use_tool():
     """Phase 11: a worker avoids permission prompts, so the REPL's `canUseTool` is not handed down."""
     parent = _parent()
