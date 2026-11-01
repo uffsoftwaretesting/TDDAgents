@@ -614,9 +614,12 @@ def _effective_system_prompt(
     default: list[str] = []
     if agent_prompt is None and not custom_system_prompt:
         default = resolve_default_system_prompt(tool_context, tool_context.run_id, tools)
+    from app.context import tdd_contract_section
+
     return build_effective_system_prompt(
         agent_system_prompt=agent_prompt, custom_system_prompt=custom_system_prompt,
-        default_system_prompt=default, append_system_prompt=append_system_prompt)
+        default_system_prompt=default, append_system_prompt=append_system_prompt,
+        tdd_contract=tdd_contract_section() if custom_system_prompt else None)
 
 
 async def analyze_context_usage(

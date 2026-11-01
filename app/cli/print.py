@@ -358,6 +358,8 @@ async def open_session_run(
     plan_index: int = 0,
     can_use_tool: Any = None,
     planning: bool = False,
+    custom_system_prompt: str | None = None,
+    append_system_prompt: str | None = None,
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -476,6 +478,8 @@ async def open_session_run(
             **coordinator_context(config),
         )
         ctx.can_use_tool = can_use_tool
+        ctx.custom_system_prompt = custom_system_prompt
+        ctx.append_system_prompt = append_system_prompt
         # `updateFileHistoryState` over the run's store (`QueryEngine.ts` / `REPL.tsx`).
         ctx.update_file_history_state = update_file_history_state_for(store.update)
         saved_plan_path = plan_path(run_id, cwd)
@@ -1503,9 +1507,10 @@ class HeadlessStreaming:
                                pending_permission_requests=self.sio.get_pending_permission_requests())
             return
         if request.get("systemPrompt") is not None:
-            self.options.system_prompt = str(request["systemPrompt"])
+            self.options.system_prompt = self.run_.ctx.custom_system_prompt = str(request["systemPrompt"])
         if request.get("appendSystemPrompt") is not None:
             self.options.append_system_prompt = str(request["appendSystemPrompt"])
+            self.run_.ctx.append_system_prompt = self.options.append_system_prompt
         if request.get("promptSuggestions") is not None:
             self.options.prompt_suggestions = bool(request["promptSuggestions"])
         agents = self.agent_definitions()

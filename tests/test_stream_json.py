@@ -380,7 +380,8 @@ def test_stream_json_turn(python_workspace: Any, tmp_path: Path) -> None:
 
 def test_control_requests_without_a_turn(python_workspace: Any, tmp_path: Path) -> None:
     feed = Feed(
-        control("a", "initialize"), control("b", "initialize"), control("c", "interrupt"),
+        control("a", "initialize", systemPrompt="HOST PROMPT", appendSystemPrompt="HOST TAIL"),
+        control("b", "initialize"), control("c", "interrupt"),
         control("d", "no_such_thing"), control("e", "set_model", model="claude-other"),
         control("f", "cancel_async_message", message_uuid="nope"), control("g", "mcp_status"),
         control("h", "claude_authenticate"), control("i", "claude_oauth_callback"),
@@ -403,6 +404,7 @@ def test_control_requests_without_a_turn(python_workspace: Any, tmp_path: Path) 
     out = lines_of(written)
     got = responses(out)
     assert got["a"]["subtype"] == "success"
+    assert (options.system_prompt, options.append_system_prompt) == ("HOST PROMPT", "HOST TAIL")
     assert (got["b"]["subtype"], got["b"]["error"], got["b"]["pending_permission_requests"]) == (
         "error", "Already initialized", [])
     assert got["c"] == {"subtype": "success", "request_id": "c"}

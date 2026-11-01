@@ -175,6 +175,11 @@ def enhance_system_prompt_with_env_details(
     return (*prompt_sections, AGENT_NOTES, compute_env_info(workspace, model, additional_working_directories))
 
 
+def tdd_contract_section() -> str:
+    """`tdd-contract.md` rendered, as the static block carries it: what a custom prompt keeps."""
+    return _file_section("tdd-contract.md")()
+
+
 def _file_section(filename: str) -> Callable[[], str]:
     """A static section's text, with the TDD values it names filled in (Phase 12)."""
     return lambda: render_prompt(read_system_prompt_file(filename), TDD_PROMPT_VARS, strip_comments=False)

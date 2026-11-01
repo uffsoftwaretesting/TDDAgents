@@ -35,9 +35,11 @@ def test_thread_ids() -> None:
 def test_options_defaults_and_what_the_run_is_told() -> None:
     assert SessionOptions() == SessionOptions(headless=False, permission_mode=None, settings_path=None,
                                               dangerously_skip_permissions=False)
-    options = SessionOptions(permission_mode="plan", settings_path="/s.json", dangerously_skip_permissions=True)
+    options = SessionOptions(permission_mode="plan", settings_path="/s.json", dangerously_skip_permissions=True,
+                             system_prompt="S", append_system_prompt="A")
     assert development_run_options(options) == {
-        "permission_mode": "plan", "settings_path": "/s.json", "dangerously_skip_permissions": True}
+        "permission_mode": "plan", "settings_path": "/s.json", "dangerously_skip_permissions": True,
+        "custom_system_prompt": "S", "append_system_prompt": "A"}
 
 
 def _options(tmp_path: Any) -> dict[str, Any]:

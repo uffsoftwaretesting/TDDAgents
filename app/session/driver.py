@@ -39,6 +39,9 @@ class SessionOptions:
     verbose: bool = False
     #: `-p`'s output and input options (`app/cli/print.py`); `None` interactively.
     headless_options: Any = None
+    #: `--system-prompt` / `--append-system-prompt` (their `-file` forms already read).
+    system_prompt: str | None = None
+    append_system_prompt: str | None = None
 
 
 def derive_thread_id(initial_input: str) -> str:
@@ -68,6 +71,8 @@ def development_run_options(options: SessionOptions) -> dict[str, Any]:
         "permission_mode": options.permission_mode,
         "settings_path": options.settings_path,
         "dangerously_skip_permissions": options.dangerously_skip_permissions,
+        "custom_system_prompt": options.system_prompt,
+        "append_system_prompt": options.append_system_prompt,
     }
 
 

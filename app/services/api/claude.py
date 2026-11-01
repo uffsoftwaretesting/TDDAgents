@@ -141,11 +141,18 @@ def request_system_texts(state: LoopState, config: RunConfig) -> list[str]:
     sections, as `runAgent` hands `query()` the agent's prompt. The default sections stay
     memoized in the run's section cache, which an override never touches.
     """
+    from app.context import tdd_contract_section
+    from app.utils.system_prompt import build_effective_system_prompt
+
     ctx = state.tool_context
-    if ctx.agent_system_prompt is not None:
-        sections = list(ctx.agent_system_prompt)
-    else:
-        sections = resolve_default_system_prompt(ctx, config.run_id, ctx.tools)
+    custom = getattr(ctx, "custom_system_prompt", None)
+    default: list[str] = []
+    if ctx.agent_system_prompt is None and not custom:
+        default = resolve_default_system_prompt(ctx, config.run_id, ctx.tools)
+    sections = build_effective_system_prompt(
+        agent_system_prompt=ctx.agent_system_prompt, custom_system_prompt=custom, default_system_prompt=default,
+        append_system_prompt=getattr(ctx, "append_system_prompt", None),
+        tdd_contract=tdd_contract_section() if custom else None)
     return append_system_context(sections, request_system_context(state, config))
 
 

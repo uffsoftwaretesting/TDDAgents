@@ -96,6 +96,20 @@ def test_session_options() -> None:
     assert entry.session_options(entry.parse_args([])) == SessionOptions()
 
 
+def test_system_prompt_flags_reach_the_session(tmp_path: Path) -> None:
+    file = tmp_path / "p.md"
+    file.write_text("FROM FILE", encoding="utf-8")
+    options = entry.session_options(entry.parse_args(["--system-prompt", "S", "--append-system-prompt", "A"]))
+    assert (options.system_prompt, options.append_system_prompt) == ("S", "A")
+    options = entry.session_options(entry.parse_args(["--system-prompt", "S", "--system-prompt-file", str(file),
+                                                      "--append-system-prompt-file", str(file)]))
+    assert (options.system_prompt, options.append_system_prompt) == ("FROM FILE", "FROM FILE")
+    from app.session.driver import development_run_options
+
+    run = development_run_options(entry.session_options(entry.parse_args(["--system-prompt", "S"])))
+    assert (run["custom_system_prompt"], run["append_system_prompt"]) == ("S", None)
+
+
 def test_read_initial_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     spec = tmp_path / "spec.txt"
     spec.write_text("  from file \n", encoding="utf-8")
@@ -362,6 +376,10 @@ def test_parser_help_and_metadata() -> None:
         "replay_user_messages": "Re-emit user messages from stdin back on stdout for acknowledgment (only works "
                                 "with --input-format=stream-json and --output-format=stream-json)",
         "permission_prompt_tool": argparse.SUPPRESS,
+        "system_prompt": "System prompt to use for the session",
+        "system_prompt_file": argparse.SUPPRESS,
+        "append_system_prompt": "Append a system prompt to the default system prompt",
+        "append_system_prompt_file": argparse.SUPPRESS,
         "rewind_files": argparse.SUPPRESS,
     }
     flags = {action.dest: tuple(action.option_strings) for action in parser._actions}

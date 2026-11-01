@@ -285,6 +285,16 @@ def test_a_synchronous_worker_tracks_file_history_as_its_parent():
     assert model.seen[0].tool_context.update_file_history_state is noop_update_file_history_state
 
 
+def test_a_worker_never_inherits_the_custom_system_prompts():
+    """`runAgent` builds the worker's own prompt: `--system-prompt` / `--append-system-prompt` stay home."""
+    parent = _parent()
+    parent.custom_system_prompt = "CUSTOM"
+    parent.append_system_prompt = "APPENDED"
+    model, _ = _run(parent=parent)
+    ctx = model.seen[0].tool_context
+    assert (ctx.custom_system_prompt, ctx.append_system_prompt) == (None, None)
+
+
 def test_a_worker_never_inherits_the_interactive_can_use_tool():
     """Phase 11: a worker avoids permission prompts, so the REPL's `canUseTool` is not handed down."""
     parent = _parent()

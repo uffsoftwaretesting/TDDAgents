@@ -650,6 +650,11 @@ class ToolContext:
     #: (`runAgent.ts`: `query({ systemPrompt: agentSystemPrompt })`). `None` is the main
     #: thread's `getSystemPrompt`; the system context is appended either way.
     agent_system_prompt: tuple[str, ...] | None = None
+    #: `--system-prompt` / `--append-system-prompt` (or the SDK's `initialize`): the main thread's
+    #: `customSystemPrompt` and `appendSystemPrompt` (`buildEffectiveSystemPrompt`). A worker never
+    #: has them, as upstream's `runAgent` builds its own prompt.
+    custom_system_prompt: str | None = None
+    append_system_prompt: str | None = None
     #: `runAgent.ts` -> `shouldOmitClaudeMd`: the user context goes without `claudeMd`.
     omit_claude_md: bool = False
     #: `runAgent.ts` -> `systemContextNoGit` (Explore/Plan): the system context goes without

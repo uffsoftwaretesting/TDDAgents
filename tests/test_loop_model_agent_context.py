@@ -61,6 +61,26 @@ def test_an_agent_prompt_replaces_the_default_sections_and_keeps_the_system_cont
     assert request_system_texts(state, CONFIG) == ["I am the tester.", "Notes", "gitStatus: STATUS"]
 
 
+def test_a_custom_prompt_replaces_the_default_but_keeps_the_tdd_contract():
+    """`buildEffectiveSystemPrompt`, with TDDAgents' contract kept after `--system-prompt` (2026-11-01)."""
+    from app.context import tdd_contract_section
+
+    state = _state()
+    state.tool_context.custom_system_prompt = "CUSTOM"
+    state.tool_context.append_system_prompt = "APPENDED"
+    contract = tdd_contract_section()
+    assert contract and "DEFAULT PROMPT" not in contract
+    assert request_system_texts(state, CONFIG) == ["CUSTOM", contract, "APPENDED", "gitStatus: STATUS"]
+    state.tool_context.custom_system_prompt = None
+    assert request_system_texts(state, CONFIG) == ["DEFAULT PROMPT", "APPENDED", "gitStatus: STATUS"]
+
+
+def test_an_agent_prompt_wins_over_a_custom_prompt():
+    state = _state(agent_system_prompt=("I am the tester.",))
+    state.tool_context.custom_system_prompt = "CUSTOM"
+    assert request_system_texts(state, CONFIG) == ["I am the tester.", "gitStatus: STATUS"]
+
+
 def test_an_empty_agent_prompt_still_replaces_the_default():
     state = _state(agent_system_prompt=())
     assert request_system_texts(state, CONFIG) == ["gitStatus: STATUS"]

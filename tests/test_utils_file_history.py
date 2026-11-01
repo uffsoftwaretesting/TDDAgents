@@ -552,7 +552,10 @@ def test_handle_rewind_files_rewinds_and_restarts_the_ledger_in_red(h: Harness) 
 
     a, b = _session_with_edits(h)
     green = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True)
-    h.store.update(lambda s: dataclasses.replace(s, phase_ledger=green, last_test_run=object(),
+    from app.tdd.ledger import TestRunRecord
+
+    run = TestRunRecord(test_path="tests", exit_code=0)
+    h.store.update(lambda s: dataclasses.replace(s, phase_ledger=green, last_test_run=run,
                                                  tdd_item_test_baseline="old"))
     workspace = FakeWorkspace()
     workspace.write_file("tests/test_a.py", "def test_a():\n    assert True\n")

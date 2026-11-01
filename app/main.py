@@ -185,6 +185,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Re-emit user messages from stdin back on stdout for acknowledgment (only works with "
                              "--input-format=stream-json and --output-format=stream-json)")
     parser.add_argument("--permission-prompt-tool", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--system-prompt", default=None, help="System prompt to use for the session")
+    parser.add_argument("--system-prompt-file", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--append-system-prompt", default=None,
+                        help="Append a system prompt to the default system prompt")
+    parser.add_argument("--append-system-prompt-file", default=None, help=argparse.SUPPRESS)
     # `main.tsx`: "Restore files to state at the specified user message and exit (requires --resume)",
     # hidden from the help (`.hideHelp()`).
     parser.add_argument("--rewind-files", default=None, metavar="<user-message-id>", help=argparse.SUPPRESS)
@@ -244,7 +249,16 @@ def session_options(args: argparse.Namespace) -> SessionOptions:
         dangerously_skip_permissions=bool(args.dangerously_skip_permissions),
         verbose=bool(args.verbose),
         headless_options=headless_options(args) if args.print else None,
+        system_prompt=system_prompt_flag(args.system_prompt, args.system_prompt_file),
+        append_system_prompt=system_prompt_flag(args.append_system_prompt, args.append_system_prompt_file),
     )
+
+
+def system_prompt_flag(text: str | None, file: str | None) -> str | None:
+    """`--system-prompt` or its `-file` form, read (`main.tsx`); `None` when neither is given."""
+    if file:
+        return Path(file).read_text(encoding="utf-8")
+    return text
 
 
 def _write_token_report(artifacts_dir: str) -> None:

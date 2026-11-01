@@ -118,6 +118,12 @@ def test_build_effective_system_prompt():
     assert build_effective_system_prompt(agent_system_prompt=None, custom_system_prompt="custom",
                                          default_system_prompt=default, append_system_prompt="tail") == [
         "custom", "tail"]
+    assert build_effective_system_prompt(agent_system_prompt=None, custom_system_prompt="custom",
+                                         default_system_prompt=default, append_system_prompt="tail",
+                                         tdd_contract="TDD") == ["custom", "TDD", "tail"]
+    assert build_effective_system_prompt(agent_system_prompt=None, custom_system_prompt=None,
+                                         default_system_prompt=default, append_system_prompt=None,
+                                         tdd_contract="TDD") == default
     assert build_effective_system_prompt(agent_system_prompt=("agent",), custom_system_prompt="custom",
                                          default_system_prompt=default, append_system_prompt="") == ["agent"]
 
@@ -393,7 +399,11 @@ def test_the_default_system_prompt_and_the_system_context(monkeypatch):
     assert sections == [("ctx-run", ["Bash"])]
     assert data["categories"][0]["tokens"] == len("# Default\nbody") + len("clean")
     custom = _analyze(_ctx(agent_system_prompt=None), custom_system_prompt="CUSTOM", append_system_prompt="APPEND")
-    assert custom["categories"][0]["tokens"] == len("CUSTOM") + len("APPEND") + len("clean")
+    # A custom prompt keeps TDDAgents' TDD contract after it (user decision 2026-11-01).
+    from app.context import tdd_contract_section
+
+    assert custom["categories"][0]["tokens"] == (
+        len("CUSTOM") + len(tdd_contract_section()) + len("APPEND") + len("clean"))
     assert len(sections) == 1
 
 
