@@ -667,6 +667,10 @@ class ToolContext:
     #: `onProgress(toolUseID, data)`: a tool's progress while it runs (the Agent tool's worker
     #: messages, `{"type": "agent_progress", "message", "prompt", "agentId"}`). Only the REPL sets it.
     on_progress: Callable[[str, Mapping[str, Any]], None] | None = None
+    #: `requestPrompt(sourceName, toolInputSummary)`: answers a command hook's prompt request
+    #: (`HOOK_PROMPTS`). Only the REPL sets it, and only with `TDDAGENTS_HOOK_PROMPTS`; a
+    #: worker never has it (`createSubagentContext` does not copy it).
+    request_prompt: Callable[[str, str | None], Callable[[Any], Awaitable[Any]]] | None = None
 
 
 @dataclass

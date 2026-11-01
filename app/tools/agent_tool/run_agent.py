@@ -257,6 +257,10 @@ def run_agent(
             # `canUseTool` is not inherited, except by a `bubble` agent, whose prompts surface to the
             # parent's terminal (`runAgent.ts`; the verification agent, user decision 2026-10-28).
             can_use_tool=parent.can_use_tool if agent_definition.permission_mode == PermissionMode.BUBBLE else None,
+            # `createSubagentContext` copies neither `requestPrompt` nor the REPL's progress hooks.
+            request_prompt=None,
+            on_progress=None,
+            set_has_interruptible_tool_in_progress=None,
             agent_id=agent_id,
             agent_type=agent_type,
             # `createSubagentContext`: the worker's model is its own (`worker_config`).

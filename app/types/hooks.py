@@ -192,6 +192,57 @@ def hook_json_errors(parsed: Any) -> list[str]:
 
 
 @dataclass(frozen=True, slots=True)
+class PromptOption:
+    """One choice of a `PromptRequest`."""
+
+    key: str
+    label: str
+    description: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PromptRequest:
+    """
+    `promptRequestSchema` (`types/hooks.ts`): a command hook's question on stdout. The `prompt`
+    key discriminates it (as `{async: true}` does) and carries the request id.
+    """
+
+    prompt: str
+    message: str
+    options: tuple[PromptOption, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PromptResponse:
+    """`PromptResponse`: the choice written back to the hook's stdin."""
+
+    prompt_response: str
+    selected: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"prompt_response": self.prompt_response, "selected": self.selected}
+
+
+def parse_prompt_request(value: Any) -> PromptRequest | None:
+    """`promptRequestSchema().safeParse`: the request, or `None` when `value` is not one."""
+    if not isinstance(value, dict) or not isinstance(value.get("prompt"), str):
+        return None
+    if not isinstance(value.get("message"), str) or not isinstance(value.get("options"), list):
+        return None
+    options = []
+    for option in value["options"]:
+        if not isinstance(option, dict) or not isinstance(option.get("key"), str):
+            return None
+        if not isinstance(option.get("label"), str):
+            return None
+        description = option.get("description")
+        if description is not None and not isinstance(description, str):
+            return None
+        options.append(PromptOption(key=option["key"], label=option["label"], description=description))
+    return PromptRequest(prompt=value["prompt"], message=value["message"], options=tuple(options))
+
+
+@dataclass(frozen=True, slots=True)
 class ParsedHookOutput:
     """`parseHookOutput`'s `{json?, plainText?, validationError?}`."""
 
@@ -495,6 +546,9 @@ __all__ = [
     "HookOutputError",
     "HookResult",
     "ParsedHookOutput",
+    "PromptOption",
+    "PromptRequest",
+    "PromptResponse",
     "get_pre_tool_hook_blocking_message",
     "get_stop_hook_message",
     "get_user_prompt_submit_hook_blocking_message",
@@ -503,6 +557,7 @@ __all__ = [
     "is_async_hook_json_output",
     "parse_hook_output",
     "parse_http_hook_output",
+    "parse_prompt_request",
     "process_hook_json_output",
     "validate_hook_json",
 ]

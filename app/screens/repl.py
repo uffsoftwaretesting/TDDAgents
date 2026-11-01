@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any, Protocol
@@ -56,6 +56,13 @@ from app.commands import (
     help_text,
     parse_slash_command,
 )
+from app.components.hooks.prompt_dialog import (
+    PROMPT_CANCELLED,
+    PromptCancelled,
+    hook_prompts_enabled,
+    parse_prompt_choice,
+    render_prompt_dialog,
+)
 from app.components.messages.collapsed_read_search_content import (
     CollapsedReadSearchRenderer,
 )
@@ -66,6 +73,7 @@ from app.query_engine import ResultMessage
 from app.session.prompts import development_continue_prompt
 from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
 from app.tools.agent_tool.ui import extract_last_tool_info
+from app.types.hooks import PromptRequest, PromptResponse
 from app.types.permissions import PermissionMode
 from app.utils.collapse_read_search import summarize_recent_activities
 from app.utils.message_queue_manager import QueuedCommand
@@ -245,6 +253,8 @@ class Repl:
         self._agent_progress: dict[str, list[Any]] = {}
         self._progress_shown: dict[str, str] = {}
         run.ctx.on_progress = self._on_progress
+        if hook_prompts_enabled():
+            run.ctx.request_prompt = self.request_prompt
         store = getattr(run, "store", None)
         if store is not None:
             store.subscribe(self._on_state_change)
@@ -315,6 +325,27 @@ class Repl:
             f"Choose 1-{len(prompt.options)}.", PermissionAnswer("no"),
         )
         return answer
+
+    def request_prompt(
+        self, title: str, tool_input_summary: str | None
+    ) -> Callable[[PromptRequest], Awaitable[PromptResponse]]:
+        """
+        `REPL.tsx`'s `requestPrompt(title, toolInputSummary)`: a hook's question, queued behind any
+        other question on screen and answered by number; Esc rejects it ("Prompt cancelled by
+        user") and aborts the turn.
+        """
+
+        async def ask(request: PromptRequest) -> PromptResponse:
+            cancelled = object()
+            answer = await self._wait_for_answer(
+                render_prompt_dialog(title, tool_input_summary, request),
+                partial(parse_prompt_choice, request.options), f"Choose 1-{len(request.options)}.", cancelled,
+            )
+            if answer is cancelled:
+                raise PromptCancelled(PROMPT_CANCELLED)
+            return PromptResponse(prompt_response=request.prompt, selected=str(answer))
+
+        return ask
 
     async def ask_questions(self, questions: Sequence[Mapping[str, Any]]) -> dict[str, str] | None:
         """`AskUserQuestion`'s questions, one at a time: question text -> answer, or `None` on Esc."""

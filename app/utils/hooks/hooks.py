@@ -80,6 +80,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import json
 import logging
 import os
@@ -104,10 +105,13 @@ from app.schemas.hooks import (
 from app.types.hooks import (
     AggregatedHookResult,
     HookResult,
+    PromptRequest,
+    PromptResponse,
     hook_result_from_json,
     is_async_hook_json_output,
     parse_hook_output,
     parse_http_hook_output,
+    parse_prompt_request,
 )
 from app.utils.hooks.async_hook_registry import AsyncHookRegistry
 from app.utils.hooks.hook_events import (
@@ -148,6 +152,10 @@ class HookOutsideReplResult:
     blocked: bool
     watch_paths: tuple[str, ...] = ()
     system_message: str | None = None
+
+
+#: `requestPrompt(sourceName, toolInputSummary)`: the REPL's dialog, bound to who asks.
+RequestPrompt = Callable[[str, str | None], Callable[[PromptRequest], Awaitable[PromptResponse]]]
 
 
 @dataclass
@@ -231,8 +239,14 @@ class HookDispatcher:
         tool_context: Any = None,
         messages: Sequence[Message] | None = None,
         force_sync: bool = False,
+        request_prompt: RequestPrompt | None = None,
+        tool_input_summary: str | None = None,
     ) -> AsyncIterator[AggregatedHookResult]:
-        """`executeHooks`: run the matching hooks in parallel and stream their news."""
+        """
+        `executeHooks`: run the matching hooks in parallel and stream their news. `request_prompt`
+        is bound to this hook's name and the tool's summary, so a dialog can say who asks; only
+        command hooks receive it.
+        """
         if self.snapshot.disable_all:
             return
         hook_event = str(hook_input["hook_event_name"])
@@ -242,12 +256,14 @@ class HookDispatcher:
         if not matched or is_aborted(signal):
             return
         json_input = json.dumps(hook_input)
+        bound_prompt = request_prompt(hook_name, tool_input_summary) if request_prompt is not None else None
 
         async def run(index: int, m: MatchedHook) -> HookResult:
             return await self._run_one(
                 m.hook, index, hook_event, hook_name, json_input, tool_use_id, signal,
                 timeout_ms, tool_context, messages, force_sync,
                 str(hook_input.get("agent_type")) if hook_input.get("agent_type") is not None else None,
+                bound_prompt,
             )
 
         permission_behavior: str | None = None
@@ -295,6 +311,7 @@ class HookDispatcher:
         messages: Sequence[Message] | None,
         force_sync: bool,
         agent_type: str | None,
+        request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]] | None = None,
     ) -> HookResult:
         """One hook of `executeHooks`' parallel batch. Never raises."""
         started = time.monotonic()
@@ -340,7 +357,8 @@ class HookDispatcher:
             if isinstance(hook, HttpHook):
                 return await self._run_http(hook, hook_event, hook_name, json_input, tool_use_id, signal)
             return await self._run_command(
-                hook, index, hook_event, hook_name, json_input, tool_use_id, signal, timeout_ms, force_sync, started
+                hook, index, hook_event, hook_name, json_input, tool_use_id, signal, timeout_ms, force_sync, started,
+                request_prompt,
             )
         except Exception as exc:  # noqa: BLE001 - upstream turns any failure into a non-blocking error
             return non_blocking(f"Failed to run: {exc}")
@@ -408,12 +426,13 @@ class HookDispatcher:
         timeout_ms: int,
         force_sync: bool,
         started: float,
+        request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]] | None = None,
     ) -> HookResult:
         command_timeout = int(hook.timeout * 1000) if hook.timeout else timeout_ms
         result: CommandHookResult = await exec_command_hook(
             hook, hook_event, hook_name, json_input, signal,
             cwd=self.cwd, project_dir=self.project_dir, registry=self.registry,
-            timeout_ms=command_timeout, force_sync=force_sync,
+            timeout_ms=command_timeout, force_sync=force_sync, request_prompt=request_prompt,
         )
         duration = int((time.monotonic() - started) * 1000)
         command = hook_display_text(hook)
@@ -677,8 +696,9 @@ def execute_pre_tool_hooks(
     tool_input: Mapping[str, Any],
     permission_mode: str | None,
     signal: Any = None,
+    tool_input_summary: str | None = None,
 ) -> AsyncIterator[AggregatedHookResult]:
-    """`executePreToolHooks`."""
+    """`executePreToolHooks`: the context's `request_prompt` goes along with the tool's summary."""
     dispatcher = dispatcher_of(context)
     if dispatcher is None or not dispatcher.has_hook_for_event(HookEvent.PRE_TOOL_USE):
         return _empty()
@@ -691,7 +711,8 @@ def execute_pre_tool_hooks(
         "tool_use_id": tool_use_id,
     }
     return dispatcher.execute_hooks(
-        hook_input, tool_use_id, match_query=tool_name, signal=signal, tool_context=context
+        hook_input, tool_use_id, match_query=tool_name, signal=signal, tool_context=context,
+        request_prompt=getattr(context, "request_prompt", None), tool_input_summary=tool_input_summary,
     )
 
 
@@ -868,7 +889,8 @@ def execute_user_prompt_submit_hooks(
         "prompt": prompt,
     }
     return dispatcher.execute_hooks(
-        hook_input, str(uuid.uuid4()), signal=getattr(context, "cancel", None), tool_context=context
+        hook_input, str(uuid.uuid4()), signal=getattr(context, "cancel", None), tool_context=context,
+        request_prompt=getattr(context, "request_prompt", None),
     )
 
 
@@ -1266,10 +1288,16 @@ async def exec_command_hook(
     hook_id: str | None = None,
     timeout_ms: int | None = None,
     force_sync: bool = False,
+    request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]] | None = None,
 ) -> CommandHookResult:
     """
     `execCommandHook`. Failures to start or to talk to the child become a status-1 result
     with the error in stderr; they never raise, so one broken hook cannot fail its siblings.
+
+    With `request_prompt` (the hook prompt protocol, `HOOK_PROMPTS`): stdin stays open, every
+    complete stdout line that is a `PromptRequest` is answered in order through `request_prompt`
+    and the answer written back to stdin as one JSON line, and those lines are left out of the
+    hook's stdout. A failed answer closes stdin.
     """
     hook_id = hook_id or str(uuid.uuid4())
     if timeout_ms is None:
@@ -1281,6 +1309,11 @@ async def exec_command_hook(
         return CommandHookResult(stdout="", stderr=message, output=message, status=1)
     capture = CapturedProcess(process)
     process_id = f"async_hook_{process.pid}"
+    prompt_lines: set[str] = set()
+    prompt_chain: list[asyncio.Future[None]] = []
+    if request_prompt is not None:
+        capture.line_listener = functools.partial(
+            _on_prompt_line, capture=capture, request_prompt=request_prompt, seen=prompt_lines, chain=prompt_chain)
 
     if (hook.run_async or hook.async_rewake) and not force_sync and registry is not None:
         await capture.write_stdin(json_input + "\n")
@@ -1299,8 +1332,11 @@ async def exec_command_hook(
         return CommandHookResult(stdout="", stderr="", output="", status=0, backgrounded=True)
 
     try:
-        await capture.write_stdin(json_input + "\n")
+        await capture.write_stdin(json_input + "\n", keep_open=request_prompt is not None)
     except (BrokenPipeError, ConnectionResetError):
+        if request_prompt is not None:
+            # With prompts, a stdin error is only logged: the hook may simply not read it.
+            logger.debug("Hooks: stdin error during prompt flow")
         message = "Hook command closed stdin before hook input was fully written (EPIPE)"
         capture.kill()
         await capture.result()
@@ -1346,7 +1382,45 @@ async def exec_command_hook(
             )
 
     code = await capture.result()
-    return CommandHookResult(stdout=capture.stdout, stderr=capture.stderr, output=capture.output, status=code)
+    if prompt_chain:
+        await prompt_chain[-1]
+    stdout = capture.stdout
+    if prompt_lines:
+        stdout = "\n".join(line for line in stdout.split("\n") if line.strip() not in prompt_lines)
+    return CommandHookResult(stdout=stdout, stderr=capture.stderr, output=capture.output, status=code)
+
+
+def _on_prompt_line(
+    line: str, *, capture: CapturedProcess, request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]],
+    seen: set[str], chain: list[asyncio.Future[None]],
+) -> None:
+    """One stdout line: a `PromptRequest` is queued behind the earlier ones and answered on stdin."""
+    trimmed = line.strip()
+    if not trimmed:
+        return
+    try:
+        request = parse_prompt_request(json.loads(trimmed))
+    except ValueError:
+        return
+    if request is None:
+        return
+    seen.add(trimmed)
+    previous = chain[-1] if chain else None
+
+    async def answer() -> None:
+        if previous is not None:
+            await previous
+        try:
+            response = await request_prompt(request)
+            stdin = capture.process.stdin
+            if stdin is not None:
+                stdin.write((json.dumps(response.as_dict(), separators=(",", ":")) + "\n").encode("utf-8"))
+                await stdin.drain()
+        except Exception as err:  # noqa: BLE001 - upstream: log, then destroy stdin
+            logger.debug("Hooks: Prompt request handling failed: %s", err)
+            capture.close_stdin()
+
+    chain.append(asyncio.ensure_future(answer()))
 
 
 async def _either(capture: CapturedProcess) -> None:

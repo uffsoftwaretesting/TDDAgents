@@ -127,7 +127,8 @@ class PreToolHooksOutcome:
 
 
 async def run_pre_tool_use_hooks(
-    context: Any, tool_name: str, tool_input: Mapping[str, Any], tool_use_id: str
+    context: Any, tool_name: str, tool_input: Mapping[str, Any], tool_use_id: str,
+    tool_input_summary: str | None = None,
 ) -> PreToolHooksOutcome:
     """`runPreToolUseHooks`, consumed in place (the `switch` in `checkPermissionsAndCallTool`)."""
     # Imported here: `app.tools.tools` imports the tool pipeline, which imports this module.
@@ -137,7 +138,7 @@ async def run_pre_tool_use_hooks(
     cancel = getattr(context, "cancel", None)
     try:
         async for result in execute_pre_tool_hooks(
-            context, tool_name, tool_use_id, tool_input, _permission_mode(context), cancel
+            context, tool_name, tool_use_id, tool_input, _permission_mode(context), cancel, tool_input_summary
         ):
             if result.attachment is not None:
                 outcome.attachments.append(result.attachment)

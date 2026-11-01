@@ -199,7 +199,10 @@ async def _run_tool_use(
     #    opinion — which the gate then still gets to overrule. Their messages are
     #    collected and emitted after the tool result, upstream's order once attachments
     #    are reordered past tool results for the API.
-    pre = await run_pre_tool_use_hooks(context, tool_name, tool_args if isinstance(tool_args, dict) else {}, call_id)
+    hook_args = tool_args if isinstance(tool_args, dict) else {}
+    # `tool.getToolUseSummary?.(processedInput)`: who asks, for a hook's prompt dialog.
+    pre = await run_pre_tool_use_hooks(context, tool_name, hook_args, call_id,
+                                       tool.get_tool_use_summary(hook_args, context))
     hook_messages: list[Message] = list(messages_for(pre.attachments))
     if pre.stopped:
         msg = ToolMessage(

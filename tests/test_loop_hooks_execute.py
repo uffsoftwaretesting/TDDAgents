@@ -818,7 +818,8 @@ def test_pre_tool_hooks_input_and_routing():
                           "hook_event_name": "PreToolUse", "tool_name": "Bash",
                           "tool_input": {"command": "ls"}, "tool_use_id": "tu"}
     assert tool_use_id == "tu"
-    assert kwargs == {"match_query": "Bash", "signal": "sig", "tool_context": context}
+    assert kwargs == {"match_query": "Bash", "signal": "sig", "tool_context": context,
+                      "request_prompt": None, "tool_input_summary": None}
 
 
 def test_tool_entry_points_short_circuit_without_a_dispatcher_or_hook():
@@ -925,7 +926,7 @@ def test_user_prompt_submit_input():
     assert hook_input == {**BASE, "permission_mode": "acceptEdits", "hook_event_name": "UserPromptSubmit",
                           "prompt": "build a calculator"}
     assert tool_use_id
-    assert kwargs == {"signal": context.cancel, "tool_context": context}
+    assert kwargs == {"signal": context.cancel, "tool_context": context, "request_prompt": None}
 
 
 def test_session_start_input():

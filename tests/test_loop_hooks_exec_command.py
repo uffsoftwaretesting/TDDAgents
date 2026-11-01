@@ -293,7 +293,7 @@ def test_a_hook_that_ignores_stdin_still_succeeds(tmp_path):
 
 
 def test_a_broken_stdin_pipe_is_reported_as_epipe(tmp_path, monkeypatch):
-    async def broken(self: Any, data: str) -> None:
+    async def broken(self: Any, data: str, *, keep_open: bool = False) -> None:
         raise BrokenPipeError()
 
     monkeypatch.setattr(CapturedProcess, "write_stdin", broken)

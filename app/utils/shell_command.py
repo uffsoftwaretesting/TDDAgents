@@ -52,6 +52,10 @@ class CapturedProcess:
         self.status: str = "running"
         self.exit_code: int | None = None
         self.stdout_changed = asyncio.Event()
+        #: Called with each complete stdout line (the hook prompt protocol), when set before output
+        #: arrives; the trailing partial line waits for its newline.
+        self.line_listener: Callable[[str], None] | None = None
+        self._line_buffer = ""
         self._readers = [
             asyncio.ensure_future(self._drain(process.stdout, "stdout")),
             asyncio.ensure_future(self._drain(process.stderr, "stderr")),
@@ -70,6 +74,11 @@ class CapturedProcess:
             if name == "stdout":
                 self.stdout += text
                 self.stdout_changed.set()
+                if self.line_listener is not None:
+                    self._line_buffer += text
+                    *lines, self._line_buffer = self._line_buffer.split("\n")
+                    for line in lines:
+                        self.line_listener(line)
             else:
                 self.stderr += text
 
@@ -86,14 +95,23 @@ class CapturedProcess:
     def done(self) -> asyncio.Future[int]:
         return self._done
 
-    async def write_stdin(self, data: str) -> None:
+    async def write_stdin(self, data: str, *, keep_open: bool = False) -> None:
+        """Write `data`; stdin is then closed unless `keep_open` (a hook that may ask prompts)."""
         stdin = self.process.stdin
         if stdin is None:
             return
         stdin.write(data.encode("utf-8"))
         with contextlib.suppress(Exception):
             await stdin.drain()
-        stdin.close()
+        if not keep_open:
+            stdin.close()
+
+    def close_stdin(self) -> None:
+        """`stdin.destroy()`."""
+        stdin = self.process.stdin
+        if stdin is not None:
+            with contextlib.suppress(Exception):
+                stdin.close()
 
     def kill(self) -> None:
         """
