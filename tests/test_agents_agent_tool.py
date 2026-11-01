@@ -192,9 +192,10 @@ class TestRun:
         assert any("<env>" in s for s in system)
         assert state.tool_context.agent_type == "tester"
 
-    def test_run_memory_is_appended_to_the_agents_prompt(self, tmp_path):
+    def test_run_memory_is_appended_to_the_agents_prompt_when_auto_memory_is_on(self, tmp_path, monkeypatch):
         from app.tools.agent_tool.agent_memory import AgentMemoryStore
 
+        monkeypatch.setenv("TDDAGENTS_ENABLE_AUTO_MEMORY", "1")
         model = FakeModel([[AIMessage(content="report")]])
         store = AppStateStore(AppState())
         ctx = tool_context_for(store, run_id="r1", agent_memory_store=AgentMemoryStore(base_dir=tmp_path))
@@ -203,8 +204,21 @@ class TestRun:
         system = model.seen[0].tool_context.agent_system_prompt
         assert system is not None
         first = system[0]
-        assert first.startswith("You write tests.\n\n")
+        assert first.startswith("You write tests.\n\n# Persistent Agent Memory\n")
         assert "run-memory/r1/tester" in first
+
+    def test_without_auto_memory_the_agent_gets_no_memory(self, tmp_path, monkeypatch):
+        from app.tools.agent_tool.agent_memory import AgentMemoryStore
+
+        monkeypatch.delenv("TDDAGENTS_ENABLE_AUTO_MEMORY", raising=False)
+        model = FakeModel([[AIMessage(content="report")]])
+        ctx = tool_context_for(AppStateStore(AppState()), run_id="r1",
+                               agent_memory_store=AgentMemoryStore(base_dir=tmp_path))
+        _call(_tool(model, definitions={"tester": dataclasses.replace(TESTER, memory="run")}), ARGS, ctx)
+        system = model.seen[0].tool_context.agent_system_prompt
+        assert system is not None and system[0].startswith("You write tests.")
+        assert "Persistent Agent Memory" not in system[0]
+        assert not (tmp_path / ".tddagents" / "run-memory").exists()
 
     def test_the_result_is_the_last_text_with_upstreams_trailer(self):
         model = FakeModel([[asks_for("Nothing", "c1")], [AIMessage(content="final report")]])
@@ -261,7 +275,8 @@ class TestMapResult:
         assert map_agent_result(empty) == NO_OUTPUT_MARKER == "(Subagent completed but returned no output.)"
 
 
-def test_run_memory_needs_the_runs_store():
+def test_run_memory_needs_the_runs_store(monkeypatch):
+    monkeypatch.setenv("TDDAGENTS_ENABLE_AUTO_MEMORY", "1")
     defs = {"tester": dataclasses.replace(TESTER, memory="run")}
     _, ctx = _ctx()
     with pytest.raises(ValueError, match="^Run-scoped agent memory needs the run's memory store$"):

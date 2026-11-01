@@ -223,8 +223,15 @@ def _select_agent(definitions: Mapping[str, AgentDefinition], context: ToolConte
 
 
 def agent_system_prompt(agent: AgentDefinition, context: ToolContext) -> str:
-    """`getSystemPrompt()` of a file agent: its body, plus its memory prompt when it has one."""
-    if not agent.memory or agent.memory == "none":
+    """
+    `getSystemPrompt()` of a file agent: its body, plus its memory prompt when it has one and auto
+    memory is on (`isAutoMemoryEnabled() && memory`, upstream's gate for every scope).
+    """
+    from app.memdir.paths import is_auto_memory_enabled
+    from app.utils.memory_file_detection import memory_context
+
+    if not agent.memory or agent.memory == "none" or not is_auto_memory_enabled(
+            settings=memory_context(context).settings):
         return agent.prompt
     store = context.agent_memory_store
     if store is None:

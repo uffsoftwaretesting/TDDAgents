@@ -43,23 +43,21 @@ def test_ensure_memory_dir_exists_and_entrypoint(tmp_path: Path) -> None:
 
 
 def test_load_memory_prompt_empty_and_populated(tmp_path: Path) -> None:
+    """`loadAgentMemoryPrompt`: memdir's `buildMemoryPrompt` with the scope note and the index."""
+    from app.tools.agent_tool.agent_memory import SCOPE_NOTES
+
     store = AgentMemoryStore(base_dir=tmp_path)
-
-    # Empty prompt
     prompt_run = store.load_memory_prompt("refactorer", "run", run_id="r2")
-    assert "# Agent Persistent Memory" in prompt_run
-    assert "run-scoped" in prompt_run
-    assert "scientific reproducibility" in prompt_run
-    assert "Existing Memory Notes" not in prompt_run
-
-    # Write notes to MEMORY.md
     entrypoint = store.get_entrypoint("refactorer", "run", run_id="r2")
     assert entrypoint is not None
-    entrypoint.write_text("Discovered architecture pattern X.", encoding="utf-8")
+    assert prompt_run.startswith(f"# Persistent Agent Memory\n\nYou have a persistent, file-based memory system at "
+                                 f"`{entrypoint.parent}/`.")
+    assert f"\n{SCOPE_NOTES['run']}\n" in prompt_run
+    assert prompt_run.endswith("Your MEMORY.md is currently empty. When you save new memories, they will appear here.")
 
+    entrypoint.write_text("Discovered architecture pattern X.", encoding="utf-8")
     prompt_with_notes = store.load_memory_prompt("refactorer", "run", run_id="r2")
-    assert "Existing Memory Notes:" in prompt_with_notes
-    assert "Discovered architecture pattern X." in prompt_with_notes
+    assert prompt_with_notes.endswith("## MEMORY.md\n\nDiscovered architecture pattern X.")
 
     # 'none' scope returns empty
     assert store.load_memory_prompt("refactorer", "none") == ""

@@ -93,17 +93,19 @@ def invalid(message: str, code: int) -> ValidationResult:
 def host_path(context: ToolContext | None, path: str) -> Path | None:
     """
     The host file a path names when it lives outside the workspace on purpose: a persisted tool
-    result, this run's agent memory (`agent_memory_target`) or the session's plan file
-    (`session_plan_target`). `None` for a workspace path.
+    result, this run's agent memory (`agent_memory_target`), the session's plan file
+    (`session_plan_target`) or an auto-memory file (`auto_memory_target`). `None` for a workspace path.
     """
     if is_persisted_result_path(path):
         return Path(path).expanduser()
     from app.tools.agent_tool.agent_memory import agent_memory_target
+    from app.utils.memory_file_detection import auto_memory_target
     from app.utils.plans import session_plan_target
 
     if context is None:
         return None
-    target = agent_memory_target(context, path) or session_plan_target(context, path)
+    target = (agent_memory_target(context, path) or session_plan_target(context, path)
+              or auto_memory_target(context, path))
     return Path(target) if target is not None else None
 
 

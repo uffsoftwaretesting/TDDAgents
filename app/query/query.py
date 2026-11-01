@@ -45,7 +45,7 @@ from app.services.compact.compact import (
 from app.services.tools.streaming_tool_executor import StreamingToolExecutor
 from app.services.tools.tool_execution import yield_missing_tool_results
 from app.utils.abort_controller import AbortController, bridge_cancel_token
-from app.utils.attachments import get_attachment_messages
+from app.utils.attachments import create_attachment_messages, get_attachment_messages
 from app.utils.hooks.hooks import dispatcher_of, execute_stop_failure_hooks
 from app.utils.messages import (
     Message,
@@ -183,6 +183,14 @@ async def run_loop(
     left unstated: the reset-or-preserve decision for every one of them is visible in
     that one literal, which is the whole reason the record is shaped this way.
     """
+    # `startRelevantMemoryPrefetch`: once per user turn (the prompt does not change between
+    # iterations); the collect point after the tools never waits for it.
+    from app.memdir.relevant_memories import (
+        consume_memory_prefetch,
+        start_relevant_memory_prefetch,
+    )
+
+    memory_prefetch = start_relevant_memory_prefetch(state.messages, state.tool_context)
     while True:
         if state.tool_context.cancel.cancelled:
             term = Terminated(reason=Terminal.ABORTED_STREAMING)
@@ -521,6 +529,10 @@ async def run_loop(
         ):
             yield attachment
             tool_results.append(attachment)
+        for memory_attachment in consume_memory_prefetch(memory_prefetch, state.tool_context):
+            for message in create_attachment_messages(memory_attachment):
+                yield message
+                tool_results.append(message)
 
         if tracking is not None and tracking.compacted:
             tracking = replace(tracking, turn_counter=tracking.turn_counter + 1)

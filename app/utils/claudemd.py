@@ -3,8 +3,7 @@ Memory files: the instruction hierarchy the model reads as `claudeMd` user conte
 
 Ported from `reference/claude-code/src/utils/claudemd.ts` (`getMemoryFiles`,
 `processMemoryFile`, `processMdRules`, `parseMemoryFileContent`, `stripHtmlComments`,
-`extractIncludePathsFromTokens`, `getClaudeMds`), `src/memdir/memdir.ts`
-(`truncateEntrypointContent`), `src/utils/frontmatterParser.ts` (`FRONTMATTER_REGEX`,
+`extractIncludePathsFromTokens`, `getClaudeMds`), `src/utils/frontmatterParser.ts` (`FRONTMATTER_REGEX`,
 `splitPathInFrontmatter`) and `src/utils/format.ts` (`formatFileSize`).
 
 Load order, lowest priority first (the model weighs later files more):
@@ -13,8 +12,9 @@ Load order, lowest priority first (the model weighs later files more):
 2. User     `~/.tddagents/TDDAGENTS.md`, `~/.tddagents/rules/**/*.md`
 3. Project  `TDDAGENTS.md`, `.tddagents/TDDAGENTS.md`, `.tddagents/rules/**/*.md`
 4. Local    `TDDAGENTS.local.md`
-5. AutoMem  `~/.tddagents/projects/<project>/memory/MEMORY.md` — **off unless
-   `TDDAGENTS_ENABLE_AUTO_MEMORY` is truthy**, because Part I5 requires every run to be an
+5. AutoMem  `<config home>/projects/<project>/memory/MEMORY.md` (`app/memdir/paths.py`), then
+   TeamMem `<auto memory>/team/MEMORY.md` — **off unless auto memory is opted into**
+   (`app/memdir/paths.py::is_auto_memory_enabled`), because Part I5 requires every run to be an
    independent sample and upstream's AutoMem persists across conversations.
 
 Names are TDDAgents' (`TDDAGENTS.md`, `.tddagents/`) where upstream's are product-specific
@@ -30,7 +30,7 @@ Divergences forced by this architecture:
   cwd, and the protocol cannot see above it, so the upward walk is the root alone.
 * Upstream lexes with `marked`; here a CommonMark block scanner finds fenced and indented
   code and type-2 HTML (comment) blocks, and inline code spans are skipped for `@include`.
-* `claudeMdExcludes`, the `InstructionsLoaded` hook and team memory are not ported (no
+* `claudeMdExcludes` and the `InstructionsLoaded` hook are not ported (no
   settings key, hook event or feature for them exists here). Workspace rules directories
   are listed without following symlinks, since the protocol does not expose them.
 """
@@ -47,9 +47,13 @@ from typing import Any, Literal, Protocol
 
 import yaml
 
+from app.memdir.memdir import truncate_entrypoint_content
+from app.memdir.paths import get_auto_mem_entrypoint, is_auto_memory_enabled
+from app.memdir.team_mem_paths import get_team_mem_entrypoint, is_team_memory_enabled
+from app.utils.settings.settings import SettingsLocations, load_settings
 from app.workspace.base import WorkspaceError, normalize_path
 
-MemoryType = Literal["Managed", "User", "Project", "Local", "AutoMem"]
+MemoryType = Literal["Managed", "User", "Project", "Local", "AutoMem", "TeamMem"]
 
 MEMORY_INSTRUCTION_PROMPT = (
     "Codebase and user instructions are shown below. Be sure to adhere to these instructions. "
@@ -64,9 +68,6 @@ LOCAL_MEMORY_FILE_NAME = "TDDAGENTS.local.md"
 CONFIG_DIR_NAME = ".tddagents"
 MANAGED_DIR = "/etc/tddagents"
 
-ENTRYPOINT_NAME = "MEMORY.md"
-MAX_ENTRYPOINT_LINES = 200
-MAX_ENTRYPOINT_BYTES = 25_000
 
 #: "Unbounded" for `Workspace.list_files`: the largest depth a protobuf int32/uint32
 #: accepts, since the sandbox forwards it to envd. Not a policy ceiling.
@@ -391,29 +392,6 @@ def format_file_size(size: int) -> str:
     return fmt(mb / 1024, "GB")
 
 
-def truncate_entrypoint_content(raw: str) -> str:
-    """`memdir.ts` -> `truncateEntrypointContent`: line cap, then byte cap, then a warning."""
-    trimmed = raw.strip()
-    lines = trimmed.split("\n")
-    line_count, byte_count = len(lines), len(trimmed)
-    line_cut, byte_cut = line_count > MAX_ENTRYPOINT_LINES, byte_count > MAX_ENTRYPOINT_BYTES
-    if not line_cut and not byte_cut:
-        return trimmed
-    truncated = "\n".join(lines[:MAX_ENTRYPOINT_LINES]) if line_cut else trimmed
-    if len(truncated) > MAX_ENTRYPOINT_BYTES:
-        cut = truncated.rfind("\n", 0, MAX_ENTRYPOINT_BYTES + 1)
-        truncated = truncated[:cut if cut > 0 else MAX_ENTRYPOINT_BYTES]
-    if byte_cut and not line_cut:
-        reason = (f"{format_file_size(byte_count)} (limit: {format_file_size(MAX_ENTRYPOINT_BYTES)}) "
-                  "— index entries are too long")
-    elif line_cut and not byte_cut:
-        reason = f"{line_count} lines (limit: {MAX_ENTRYPOINT_LINES})"
-    else:
-        reason = f"{line_count} lines and {format_file_size(byte_count)}"
-    return (truncated + f"\n\n> WARNING: {ENTRYPOINT_NAME} is {reason}. Only part of it was loaded. "
-            "Keep index entries to one line under ~200 chars; move detail into topic files.")
-
-
 def parse_memory_file_content(raw: str, path: str, type: MemoryType) -> tuple[MemoryFileInfo | None, list[str]]:
     """`parseMemoryFileContent`: frontmatter, comment strip, @includes, MEMORY.md truncation."""
     ext = os.path.splitext(path)[1]
@@ -423,7 +401,7 @@ def parse_memory_file_content(raw: str, path: str, type: MemoryType) -> tuple[Me
     blocks = lex_blocks(content)
     stripped = _strip_comment_blocks(blocks)[0] if "<!--" in content else content
     includes = extract_include_paths(blocks)
-    final = truncate_entrypoint_content(stripped) if type == "AutoMem" else stripped
+    final = truncate_entrypoint_content(stripped).content if type in ("AutoMem", "TeamMem") else stripped
     differs = final != raw
     info = MemoryFileInfo(
         path=path, type=type, content=final, globs=globs,
@@ -488,20 +466,6 @@ def is_env_truthy(value: str | None) -> bool:
     return value is not None and value.strip().lower() in ("1", "true", "yes", "on")
 
 
-def is_auto_memory_enabled(env: Mapping[str, str] | None = None) -> bool:
-    """Off unless explicitly enabled (Part I5: runs must stay independent samples)."""
-    return is_env_truthy((env if env is not None else os.environ).get("TDDAGENTS_ENABLE_AUTO_MEMORY"))
-
-
-def sanitize_path(path: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]", "-", path)
-
-
-def get_auto_mem_entrypoint(project: str, home: str | None = None) -> str:
-    base = home if home is not None else os.path.expanduser("~")
-    return os.path.join(base, CONFIG_DIR_NAME, "projects", sanitize_path(project), "memory", ENTRYPOINT_NAME)
-
-
 def get_memory_files(
     ws: Any,
     *,
@@ -528,13 +492,20 @@ def get_memory_files(
         result += process_md_rules(workspace, f"{CONFIG_DIR_NAME}/rules", "Project", processed, False)
         result += process_memory_file(workspace, LOCAL_MEMORY_FILE_NAME, "Local", processed, False)
 
-    if is_auto_memory_enabled(env):
-        project = str(getattr(ws, "root", "sandbox"))
-        entry = get_auto_mem_entrypoint(project, home)
+    project = str(getattr(ws, "root", "sandbox"))
+    locations = SettingsLocations(project_root=Path(project), home=Path(home) if home is not None else None)
+    settings = load_settings(locations) if ws is not None and getattr(ws, "root", None) is not None else {}
+    # `memdir`: the auto-memory index, then the team one, each only when its memory is on.
+    entries: list[tuple[str, MemoryType]] = []
+    if is_auto_memory_enabled(env, settings):
+        entries.append((get_auto_mem_entrypoint(project, locations), "AutoMem"))
+    if is_team_memory_enabled(env, settings):
+        entries.append((get_team_mem_entrypoint(project, locations), "TeamMem"))
+    for entry, memory_type in entries:
         key = host.key(entry)
         raw = host.read(entry)
         if raw is not None and key not in processed:
-            info, _ = parse_memory_file_content(raw, entry, "AutoMem")
+            info, _ = parse_memory_file_content(raw, entry, memory_type)
             if info is not None:
                 processed.add(key)
                 result.append(info)
@@ -544,6 +515,7 @@ def get_memory_files(
 _DESCRIPTIONS: dict[str, str] = {
     "Project": " (project instructions, checked into the codebase)",
     "Local": " (user's private project instructions, not checked in)",
+    "TeamMem": " (shared team memory, synced across the organization)",
     "AutoMem": " (user's auto-memory, persists across conversations)",
 }
 _DEFAULT_DESCRIPTION = " (user's private global instructions for all projects)"
@@ -552,7 +524,9 @@ _DEFAULT_DESCRIPTION = " (user's private global instructions for all projects)"
 def get_claude_mds(files: list[MemoryFileInfo]) -> str:
     """`getClaudeMds`: the rendered `claudeMd` user-context value."""
     memories = [
-        f"Contents of {f.path}{_DESCRIPTIONS.get(f.type, _DEFAULT_DESCRIPTION)}:\n\n{f.content.strip()}"
+        (f"Contents of {f.path}{_DESCRIPTIONS.get(f.type, _DEFAULT_DESCRIPTION)}:\n\n"
+         + (f'<team-memory-content source="shared">\n{f.content.strip()}\n</team-memory-content>'
+            if f.type == "TeamMem" else f.content.strip()))
         for f in files
         if f.content
     ]
@@ -566,15 +540,10 @@ def get_large_memory_files(files: list[MemoryFileInfo]) -> list[MemoryFileInfo]:
 
 
 __all__ = [
-    "ENTRYPOINT_NAME",
-    "MAX_ENTRYPOINT_BYTES",
-    "MAX_ENTRYPOINT_LINES",
     "MEMORY_INSTRUCTION_PROMPT",
     "MemoryFileInfo",
-    "get_auto_mem_entrypoint",
     "get_claude_mds",
     "get_large_memory_files",
     "get_memory_files",
-    "is_auto_memory_enabled",
     "strip_html_comments",
 ]

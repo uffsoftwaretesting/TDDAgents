@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -225,6 +226,20 @@ def _read_pdf(context: ToolContext, file_path: str, pages: str | None) -> ToolRe
     )
 
 
+def _memory_freshness_prefix(context: ToolContext, file_path: str) -> str:
+    """`memoryFileFreshnessPrefix`: the staleness note when the file is an auto-memory file."""
+    from app.memdir.memory_age import memory_freshness_note
+    from app.utils.memory_file_detection import auto_memory_target
+
+    target = auto_memory_target(context, file_path)
+    if target is None:
+        return ""
+    try:
+        return memory_freshness_note(os.path.getmtime(target) * 1000)
+    except OSError:
+        return ""
+
+
 def build_read_file_tool() -> BuiltTool:
     def validate_read(input_args: dict[str, Any], context: ToolContext) -> ValidationResult:
         # `FileReadTool.validateInput`: a Read-deny match is refused before any I/O.
@@ -299,7 +314,9 @@ def build_read_file_tool() -> BuiltTool:
         activate_conditional_skills(context, file_path)
 
         if window:
-            return ToolResult(content=add_line_numbers(window, max(offset, 1)))
+            # `memoryFileFreshnessPrefix`: a stale auto-memory file is read with its age.
+            return ToolResult(content=_memory_freshness_prefix(context, file_path)
+                              + add_line_numbers(window, max(offset, 1)))
         if not all_lines:
             return ToolResult(
                 content="<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"

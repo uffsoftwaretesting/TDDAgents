@@ -92,10 +92,10 @@ def test_get_system_prompt_structure():
     sections = get_system_prompt(Shell({"uname -s": "Linux", "uname -sr": "Linux 6"}), "m-1")
     names = [s.name for s in sections]
     assert names == [n for n, _ in STATIC_SECTION_FILES] + [
-        SYSTEM_PROMPT_DYNAMIC_BOUNDARY.name, "session_guidance", "env_info_simple", "mcp_instructions"]
+        SYSTEM_PROMPT_DYNAMIC_BOUNDARY.name, "session_guidance", "memory", "env_info_simple", "mcp_instructions"]
     static, dynamic = split_system_prompt_sections(sections)
     assert len(static) == 8
-    assert [s.name for s in dynamic] == ["session_guidance", "env_info_simple", "mcp_instructions"]
+    assert [s.name for s in dynamic] == ["session_guidance", "memory", "env_info_simple", "mcp_instructions"]
     rendered = resolve_system_prompt_sections(sections)
     assert rendered[0] == a.read_system_prompt_file("identity.md").strip()
     # The contract names the coverage rule of thumb as a placeholder; the code fills it.
@@ -366,9 +366,9 @@ def test_default_branch_prefers_main_over_master():
 
 def test_user_context_passes_env_and_home(tmp_path, monkeypatch):
     monkeypatch.delenv("TDDAGENTS_ENABLE_AUTO_MEMORY", raising=False)
-    from app.utils.claudemd import get_auto_mem_entrypoint
+    from app.memdir.paths import get_auto_mem_entrypoint
 
-    entry = Path(get_auto_mem_entrypoint("sandbox", str(tmp_path)))
+    entry = Path(get_auto_mem_entrypoint("sandbox"))
     entry.parent.mkdir(parents=True)
     entry.write_text("remembered", encoding="utf-8")
     (tmp_path / ".tddagents").mkdir(exist_ok=True)

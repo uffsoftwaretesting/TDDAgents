@@ -257,6 +257,21 @@ def get_session_specific_guidance_section(enabled_tools: frozenset[str], has_ski
     return "\n".join(["# Session-specific guidance", *(f" - {item}" for item in items)])
 
 
+def get_memory_section(ws: Any) -> str | None:
+    """
+    `systemPromptSection('memory', loadMemoryPrompt)`: the auto-memory instructions for this
+    project, when auto memory is on (opt-in, Part I5).
+    """
+    from app.bootstrap.state import get_original_cwd
+    from app.memdir.memdir import load_memory_prompt
+    from app.utils.session_storage_portable import get_project_dir
+    from app.utils.settings.settings import SettingsLocations, load_settings
+
+    root = get_original_cwd(ws)
+    locations = SettingsLocations(project_root=Path(root))
+    return load_memory_prompt(root, str(get_project_dir(root)), locations, settings=load_settings(locations))
+
+
 def get_system_prompt(
     ws: Any,
     model_id: str,
@@ -266,13 +281,14 @@ def get_system_prompt(
 ) -> list[SystemPromptSection]:
     """
     `getSystemPrompt`: static (cacheable) sections, the boundary, then dynamic sections —
-    `session_guidance` (the tools the run starts with), `env_info_simple`, then upstream's
-    uncached `mcp_instructions` (servers can connect between turns).
+    `session_guidance` (the tools the run starts with), `memory` (auto memory, when on),
+    `env_info_simple`, then upstream's uncached `mcp_instructions` (servers can connect between turns).
     """
     static = [systemPromptSection(name, _file_section(filename)) for name, filename in STATIC_SECTION_FILES]
     dynamic = [
         systemPromptSection("session_guidance",
                             lambda: get_session_specific_guidance_section(enabled_tools, has_skills)),
+        systemPromptSection("memory", lambda: get_memory_section(ws)),
         systemPromptSection("env_info_simple", lambda: compute_simple_env_info(ws, model_id)),
         DANGEROUS_uncachedSystemPromptSection(
             "mcp_instructions",

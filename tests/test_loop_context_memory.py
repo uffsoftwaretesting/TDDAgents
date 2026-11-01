@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import app.utils.claudemd as m
+from app.memdir.paths import get_auto_mem_entrypoint
 from app.utils.claudemd import (
     MEMORY_INSTRUCTION_PROMPT,
     HostSource,
@@ -28,7 +29,6 @@ from app.utils.claudemd import (
     process_memory_file,
     split_path_in_frontmatter,
     strip_html_comments,
-    truncate_entrypoint_content,
 )
 from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
@@ -57,7 +57,6 @@ def load(dirs, env=None):
 def test_constants():
     assert m.MAX_INCLUDE_DEPTH == 5
     assert m.MAX_MEMORY_CHARACTER_COUNT == 40000
-    assert (m.MAX_ENTRYPOINT_LINES, m.MAX_ENTRYPOINT_BYTES, m.ENTRYPOINT_NAME) == (200, 25_000, "MEMORY.md")
     assert (m.MEMORY_FILE_NAME, m.LOCAL_MEMORY_FILE_NAME, m.CONFIG_DIR_NAME) == (
         "TDDAGENTS.md", "TDDAGENTS.local.md", ".tddagents")
     assert m.MANAGED_DIR == "/etc/tddagents"
@@ -347,24 +346,6 @@ def test_auto_mem_content_is_truncated():
 
 # ── truncation and sizes ─────────────────────────────────────────────────────
 
-def test_truncate_entrypoint_content():
-    assert truncate_entrypoint_content("  short  ") == "short"
-    lines = "\n".join(f"{i}" for i in range(201))
-    out = truncate_entrypoint_content(lines)
-    assert out.startswith("0\n1\n")
-    assert "\n199\n\n> WARNING: MEMORY.md is 201 lines (limit: 200). Only part of it was loaded." in out
-    long_line = "x" * 25_001
-    out = truncate_entrypoint_content("a\n" + long_line)
-    assert out.startswith("a\n\n> WARNING: MEMORY.md is 24.4KB (limit: 24.4KB) — index entries are too long.")
-    out = truncate_entrypoint_content(long_line)
-    assert out.startswith("x" * 25_000 + "\n\n> WARNING")
-    both = "\n".join(["y" * 200] * 300)
-    out = truncate_entrypoint_content(both)
-    assert "is 300 lines and 58.9KB." in out
-    exact = "z" * 25_000
-    assert truncate_entrypoint_content(exact) == exact
-    assert truncate_entrypoint_content("\n".join(["q"] * 200)) == "\n".join(["q"] * 200)
-
 
 @pytest.mark.parametrize("size, expected", [
     (0, "0 bytes"), (1023, "1023 bytes"), (1024, "1KB"), (1536, "1.5KB"),
@@ -379,7 +360,7 @@ def test_format_file_size(size, expected):
 def test_auto_memory_off_by_default_and_opt_in(dirs):
     home, managed, ws_root = dirs
     ws = LocalWorkspace(str(ws_root))
-    entry = m.get_auto_mem_entrypoint(str(ws.root), str(home))
+    entry = get_auto_mem_entrypoint(str(ws.root))
     write(Path(entry), "remembered")
     assert get_memory_files(ws, home=str(home), managed_dir=str(managed), env={}) == []
     for truthy in ("1", "true", "YES", " on "):
@@ -390,19 +371,8 @@ def test_auto_memory_off_by_default_and_opt_in(dirs):
                             env={"TDDAGENTS_ENABLE_AUTO_MEMORY": "0"}) == []
 
 
-def test_auto_memory_path_and_env_default(monkeypatch, tmp_path):
-    assert m.get_auto_mem_entrypoint("/a/b c", str(tmp_path)) == str(
-        tmp_path / ".tddagents/projects/-a-b-c/memory/MEMORY.md")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert m.get_auto_mem_entrypoint("p") == str(tmp_path / ".tddagents/projects/p/memory/MEMORY.md")
-    monkeypatch.setenv("TDDAGENTS_ENABLE_AUTO_MEMORY", "1")
-    assert m.is_auto_memory_enabled() is True
-    monkeypatch.delenv("TDDAGENTS_ENABLE_AUTO_MEMORY")
-    assert m.is_auto_memory_enabled() is False
-
-
 def test_auto_memory_for_sandbox_and_missing_or_binary(tmp_path):
-    entry = m.get_auto_mem_entrypoint("sandbox", str(tmp_path))
+    entry = get_auto_mem_entrypoint("sandbox")
     env = {"TDDAGENTS_ENABLE_AUTO_MEMORY": "1"}
     assert get_memory_files(FakeWorkspace(), home=str(tmp_path), managed_dir="/none", env=env) == []
     write(Path(entry), "sbx")
@@ -411,7 +381,7 @@ def test_auto_memory_for_sandbox_and_missing_or_binary(tmp_path):
 
 
 def test_auto_memory_not_duplicated_when_already_loaded(tmp_path, monkeypatch):
-    entry = m.get_auto_mem_entrypoint("sandbox", str(tmp_path))
+    entry = get_auto_mem_entrypoint("sandbox")
     write(Path(entry), "dup")
     managed = tmp_path / "managed"
     managed.mkdir()
@@ -454,10 +424,6 @@ def test_env_truthy():
     assert m.is_env_truthy(None) is False
     assert m.is_env_truthy("off") is False
     assert m.is_env_truthy("On") is True
-
-
-def test_sanitize_path():
-    assert m.sanitize_path("/a_b.c-d") == "-a-b-c-d"
 
 
 # ── mutation-driven pins ─────────────────────────────────────────────────────
@@ -533,29 +499,3 @@ def test_include_extraction_edges():
 @pytest.mark.parametrize("size, expected", [(1024 ** 3, "1GB"), (1024 ** 4, "1024GB")])
 def test_format_file_size_unit_boundaries(size, expected):
     assert format_file_size(size) == expected
-
-
-def test_truncation_counts_newline_lines_not_words():
-    text = "\n".join(["x y z"] * 150)
-    assert truncate_entrypoint_content(text) == text
-
-
-def test_truncation_byte_cut_boundaries():
-    limit = m.MAX_ENTRYPOINT_BYTES
-    # after the line cut the content is exactly at the byte cap: no further cut
-    head = "\n".join(["a" * 125] + ["b" * 124] * 199)
-    assert len(head) == limit
-    out = truncate_entrypoint_content(head + "\nextra")
-    assert out.startswith(head + "\n\n> WARNING")
-    # the cut is the LAST newline at or before the cap, never a later one
-    text = "a\n" + "b" * 100 + "\n" + "c" * limit + "\nd"
-    assert truncate_entrypoint_content(text).startswith("a\n" + "b" * 100 + "\n\n> WARNING")
-    # a newline exactly at the cap counts; one just past it does not
-    at_cap = "x" * limit + "\n" + "y" * 10
-    assert truncate_entrypoint_content(at_cap).startswith("x" * limit + "\n\n> WARNING")
-    past = "x" * (limit + 1) + "\n" + "y"
-    assert truncate_entrypoint_content(past).startswith("x" * limit + "\n\n> WARNING")
-
-
-def test_sanitize_path_replaces_nothing_alphanumeric():
-    assert m.sanitize_path("/Ab9") == "-Ab9"

@@ -1,11 +1,13 @@
 """
-Agent memory management and run-scoped lifecycle cleanup.
+Agent memory: where each scope lives, its prompt, and the run-scoped purge.
 
-Implements I5 conforming to §4.5:
-- Run-scoped agent memory discarded at run end so each run stays an independent sample.
-- Scopes: 'run', 'session', 'local', 'project', 'user', 'none'.
-- Memory prompt generation and entrypoint file (MEMORY.md).
-- Automatic directory creation and complete run-memory purge.
+Ported from `reference/claude-code/src/tools/AgentTool/agentMemory.ts` -> `getAgentMemoryDir`,
+`getAgentMemoryEntrypoint`, `isAgentMemoryPath`, `loadAgentMemoryPrompt` (the prompt is memdir's
+`buildMemoryPrompt`, `app/memdir/memdir.py`). Upstream injects it only when auto memory is on
+(`agent_tool.py::agent_system_prompt`, user decision 2026-11-01).
+
+TDDAgents' additions (Part I5, §4.5): the `run` scope, discarded when the run ends so every run
+stays an independent sample, and the `session` scope; `none` means no memory.
 """
 
 from __future__ import annotations
@@ -20,6 +22,23 @@ from typing import Any, Literal
 logger = logging.getLogger(__name__)
 
 AgentMemoryScope = Literal["run", "session", "local", "project", "user", "none"]
+
+#: `loadAgentMemoryPrompt`'s display name.
+AGENT_MEMORY_DISPLAY_NAME = "Persistent Agent Memory"
+
+#: `loadAgentMemoryPrompt`'s scope notes: upstream's three, verbatim, plus the two TDDAgents scopes
+#: (run, session) that Part I5 adds.
+SCOPE_NOTES: dict[str, str] = {
+    "user": "- Since this memory is user-scope, keep learnings general since they apply across all projects",
+    "project": ("- Since this memory is project-scope and shared with your team via version control, tailor your "
+                "memories to this project"),
+    "local": ("- Since this memory is local-scope (not checked into version control), tailor your memories to this "
+              "project and machine"),
+    "run": ("- Since this memory is run-scope (discarded when this run ends, so every run stays an independent "
+            "sample), keep only what helps the rest of this run"),
+    "session": ("- Since this memory is session-scope (kept for this session only), tailor your memories to this "
+                "session's work"),
+}
 
 
 class AgentMemoryStore:
@@ -99,53 +118,16 @@ class AgentMemoryStore:
         session_id: str | None = None,
     ) -> str:
         """
-        Generate memory prompt section to inject into the agent's system instructions.
+        `agentMemory.ts` -> `loadAgentMemoryPrompt`: the directory is created, then
+        `buildMemoryPrompt('Persistent Agent Memory', dir, [scope note])` with its MEMORY.md.
         """
         norm_scope = scope.strip().lower()
         mdir = self.ensure_memory_dir_exists(agent_type, norm_scope, run_id=run_id, session_id=session_id)
         if mdir is None:
             return ""
+        from app.memdir.memdir import build_memory_prompt
 
-        entrypoint = mdir / "MEMORY.md"
-        existing_notes = ""
-        if entrypoint.is_file():
-            try:
-                existing_notes = entrypoint.read_text(encoding="utf-8").strip()
-            except (OSError, UnicodeDecodeError) as e:
-                logger.warning("Failed reading agent memory from %s: %s", entrypoint, e)
-
-        scope_desc = {
-            "run": "run-scoped (scratchpad discarded at run end to guarantee sample independence)",
-            "session": "session-scoped (preserved across queries within this active session)",
-            "local": "local-scoped (persisted on this machine, untracked by VCS)",
-            "project": "project-scoped (shared via version control)",
-            "user": "user-scoped (universal across all projects on this machine)",
-        }[norm_scope]
-
-        memory_block = [
-            "# Agent Persistent Memory",
-            f"You have access to a {scope_desc} memory store at: {mdir}",
-            f"Entrypoint file: {entrypoint}",
-            (
-                "- Use your file writing/editing tools to update MEMORY.md with "
-                "key architectural findings, patterns, or decisions."
-            ),
-        ]
-
-        if norm_scope == "run":
-            memory_block.append(
-                "- NOTE: This memory is strictly run-scoped and will be purged upon "
-                "run completion to maintain scientific reproducibility."
-            )
-
-        if existing_notes:
-            memory_block.extend([
-                "",
-                "## Existing Memory Notes:",
-                existing_notes,
-            ])
-
-        return "\n".join(memory_block)
+        return build_memory_prompt(AGENT_MEMORY_DISPLAY_NAME, f"{mdir}{os.sep}", [SCOPE_NOTES[norm_scope]])
 
     def memory_roots(self, run_id: str | None) -> tuple[str, ...]:
         """

@@ -448,6 +448,9 @@ def normalize_attachment_for_api(attachment: Attachment) -> list[str]:
         ]
     if kind == "nested_memory":
         return [f"Contents of {data['path']}:\n\n{data['content']}"]
+    if kind == "relevant_memories":
+        # The header stored when the attachment was made, so the bytes stay stable across turns.
+        return [f"{m['header']}\n\n{m['content']}" for m in data["memories"]]
     if kind == "queued_command":
         # An explicit origin wins; task notifications predate origin and fall back to the mode.
         explicit = data.get("origin")

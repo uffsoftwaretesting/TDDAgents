@@ -438,7 +438,10 @@ def tdd_phase_denial(tool: Tool, input_args: dict[str, Any], context: ToolContex
         from app.utils.plans import session_plan_target
 
         raw_path = input_args.get("file_path") or input_args.get("path")
-        memory = bool(raw_path) and agent_memory_target(context, str(raw_path)) is not None
+        from app.utils.memory_file_detection import auto_memory_target
+
+        memory = bool(raw_path) and (agent_memory_target(context, str(raw_path)) is not None
+                                     or auto_memory_target(context, str(raw_path)) is not None)
         plan_file = bool(raw_path) and session_plan_target(context, str(raw_path)) is not None
         from app.utils.path import tracked_cwd_offset
 

@@ -38,10 +38,10 @@ from typing import Any
 
 import yaml
 
+from app.memdir.paths import is_auto_memory_enabled
 from app.skills.load_skills_dir import parse_slash_command_tools_from_frontmatter
 from app.tdd.ledger import TddPhase
 from app.types.permissions import PERMISSION_MODES
-from app.utils.claudemd import is_auto_memory_enabled
 from app.utils.frontmatter_parser import strip_html_comments
 from app.utils.settings.settings import parse_tool_list_from_cli
 

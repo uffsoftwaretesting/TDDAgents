@@ -365,6 +365,7 @@ def check_write_permission_for_tool(
     *,
     agent_memory: bool = False,
     plan_file: bool = False,
+    auto_memory: bool = False,
 ) -> PermissionResult:
     """
     `checkWritePermissionForTool`, the `checkPermissions` of `WriteFile` and `Edit`.
@@ -401,6 +402,14 @@ def check_write_permission_for_tool(
             behavior=PermissionBehavior.ALLOW,
             updated_input=input_args,
             decision_reason={"type": "other", "reason": "Agent memory files are allowed for writing"},
+        )
+    if auto_memory:
+        # `memdir`: the auto-memory directory is under the config home, a dangerous directory, so
+        # the carve-out comes before the safety check (upstream's `isAutoMemPath`).
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "other", "reason": "auto memory files are allowed for writing"},
         )
 
     safe, message, approvable = check_path_safety_for_auto_edit(absolute, candidates)
@@ -531,7 +540,7 @@ def get_bundled_skills_root() -> str:
 
 def check_readable_internal_path(
     absolute_path: str, input_args: dict[str, Any], cwd: str, *, agent_memory: bool = False,
-    plan_file: bool = False,
+    plan_file: bool = False, auto_memory: bool = False,
 ) -> PermissionResult:
     """
     `checkReadableInternalPath`, reduced to the internal stores this loop has: the project
@@ -551,6 +560,12 @@ def check_readable_internal_path(
             behavior=PermissionBehavior.ALLOW,
             updated_input=input_args,
             decision_reason={"type": "other", "reason": "Agent memory files are allowed for reading"},
+        )
+    if auto_memory:
+        return PermissionResult(
+            behavior=PermissionBehavior.ALLOW,
+            updated_input=input_args,
+            decision_reason={"type": "other", "reason": "auto memory files are allowed for reading"},
         )
     if is_project_dir_path(absolute_path, cwd):
         return PermissionResult(
@@ -578,6 +593,7 @@ def check_read_permission_for_tool(
     *,
     agent_memory: bool = False,
     plan_file: bool = False,
+    auto_memory: bool = False,
 ) -> PermissionResult:
     """
     `checkReadPermissionForTool`, the `check_permissions` of `ReadFile`, `Glob` and `Grep`.
@@ -643,7 +659,7 @@ def check_read_permission_for_tool(
             decision_reason={"type": "mode", "mode": PermissionMode.DEFAULT},
         )
     internal = check_readable_internal_path(absolute, input_args, cwd, agent_memory=agent_memory,
-                                            plan_file=plan_file)
+                                            plan_file=plan_file, auto_memory=auto_memory)
     if internal.behavior != PermissionBehavior.PASSTHROUGH:
         return internal
     allow_rule = matching_rule_for_input(absolute, context, "read", "allow", cwd)
@@ -746,6 +762,7 @@ def check_file_write_permissions() -> Any:
         cwd = permission_cwd(context)
         raw = path_from_tool_input(input_args)
         from app.tools.agent_tool.agent_memory import agent_memory_target
+        from app.utils.memory_file_detection import auto_memory_target
         from app.utils.plans import session_plan_target
 
         return check_write_permission_for_tool(
@@ -755,6 +772,7 @@ def check_file_write_permissions() -> Any:
             cwd,
             agent_memory=agent_memory_target(context, raw) is not None,
             plan_file=session_plan_target(context, raw) is not None,
+            auto_memory=auto_memory_target(context, raw) is not None,
         )
 
     return check
@@ -772,12 +790,14 @@ def check_file_read_permissions(path_key: str) -> Any:
         cwd = permission_cwd(context)
         raw = str(input_args.get(path_key) or "")
         from app.tools.agent_tool.agent_memory import agent_memory_target
+        from app.utils.memory_file_detection import auto_memory_target
         from app.utils.plans import session_plan_target
 
         target = workspace_absolute_path(raw, cwd) if raw else cwd
         return check_read_permission_for_tool(target, input_args, extract_permission_context(context), cwd,
                                               agent_memory=bool(raw) and agent_memory_target(context, raw) is not None,
-                                              plan_file=bool(raw) and session_plan_target(context, raw) is not None)
+                                              plan_file=bool(raw) and session_plan_target(context, raw) is not None,
+                                              auto_memory=bool(raw) and auto_memory_target(context, raw) is not None)
 
     return check
 

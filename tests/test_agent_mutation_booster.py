@@ -421,50 +421,20 @@ class TestMemoryStoreBooster:
         # unrecognized scope returns empty string
         assert store.load_memory_prompt("agent1", "unknown") == ""
 
-        p_run = store.load_memory_prompt("agent1", "run", run_id="r1")
-        mdir = (tmp_path / "proj" / ".tddagents" / "run-memory" / "r1" / "agent1").resolve()
-        entrypoint = mdir / "MEMORY.md"
-        expected_run_prompt = (
-            "# Agent Persistent Memory\n"
-            f"You have access to a run-scoped (scratchpad discarded at run end to guarantee sample independence) "
-            f"memory store at: {mdir}\n"
-            f"Entrypoint file: {entrypoint}\n"
-            "- Use your file writing/editing tools to update MEMORY.md with "
-            "key architectural findings, patterns, or decisions.\n"
-            "- NOTE: This memory is strictly run-scoped and will be purged upon "
-            "run completion to maintain scientific reproducibility."
-        )
-        assert p_run == expected_run_prompt
+        from app.tools.agent_tool.agent_memory import SCOPE_NOTES
 
-        # session with session_id
-        p_sess = store.load_memory_prompt("agent1", "session", session_id="s1")
-        assert "session-scoped (preserved across queries within this active session)" in p_sess
-        assert "s1" in p_sess
-
-        # local
-        p_local = store.load_memory_prompt("agent1", "local")
-        assert "local-scoped (persisted on this machine, untracked by VCS)" in p_local
-
-        # project
-        p_proj = store.load_memory_prompt("agent1", "project")
-        assert "project-scoped (shared via version control)" in p_proj
-
-        # user
-        p_user = store.load_memory_prompt("agent1", "user")
-        assert "user-scoped (universal across all projects on this machine)" in p_user
-
-        # Existing content in MEMORY.md
+        for scope, kwargs in (("run", {"run_id": "r1"}), ("session", {"session_id": "s1"}), ("local", {}),
+                              ("project", {}), ("user", {})):
+            prompt = store.load_memory_prompt("agent1", scope, **kwargs)
+            mdir = store.get_memory_dir("agent1", scope, **kwargs)
+            assert mdir is not None and mdir.is_dir()
+            assert f"memory system at `{mdir}/`" in prompt and f"\n{SCOPE_NOTES[scope]}\n" in prompt
+        assert "/session-memory/s1/agent1/" in store.load_memory_prompt("agent1", "session", session_id="s1")
         entry = store.get_entrypoint("agent1", "run", run_id="r1")
         assert entry is not None
         entry.write_text("Saved notes here", encoding="utf-8")
-        p_with_content = store.load_memory_prompt("agent1", "run", run_id="r1")
-        assert "## Existing Memory Notes:\nSaved notes here" in p_with_content
-
-        # read exception in MEMORY.md
-        with patch.object(Path, "read_text", side_effect=OSError("Disk read error")), caplog.at_level(logging.WARNING):
-            _ = store.load_memory_prompt("agent1", "run", run_id="r1")
-        assert "Failed reading agent memory" in caplog.text
-        assert "Disk read error" in caplog.text
+        assert store.load_memory_prompt("agent1", "run", run_id="r1").endswith("## MEMORY.md\n\nSaved notes here")
+        assert "Failed reading" not in caplog.text
 
     def test_discard_run_memory_logging_and_errors(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         store = AgentMemoryStore(base_dir=tmp_path / "proj")

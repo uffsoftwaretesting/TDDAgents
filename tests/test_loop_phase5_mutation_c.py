@@ -422,22 +422,19 @@ def test_session_memory_without_an_id_uses_the_default_session(tmp_path):
         tmp_path / ".tddagents" / "session-memory" / "default_session" / "tester")
 
 
-@pytest.mark.parametrize("scope,description", [
-    ("session", "session-scoped (preserved across queries within this active session)"),
-    ("local", "local-scoped (persisted on this machine, untracked by VCS)"),
-    ("project", "project-scoped (shared via version control)"),
-    ("user", "user-scoped (universal across all projects on this machine)"),
-])
-def test_each_scope_is_described_in_the_prompt(tmp_path, scope, description):
+@pytest.mark.parametrize("scope", ["session", "local", "project", "user"])
+def test_each_scope_is_described_in_the_prompt(tmp_path, scope):
+    from app.tools.agent_tool.agent_memory import SCOPE_NOTES
+
     store = AgentMemoryStore(base_dir=tmp_path, user_home=tmp_path / "home")
     prompt = store.load_memory_prompt("tester", scope, session_id="s")
-    assert f"You have access to a {description} memory store at: " in prompt
+    assert f"\n\n{SCOPE_NOTES[scope]}\n" in prompt
 
 
-def test_existing_notes_follow_a_blank_line(tmp_path):
+def test_existing_notes_follow_the_index_heading(tmp_path):
     store = AgentMemoryStore(base_dir=tmp_path, user_home=tmp_path / "home")
     mdir = store.ensure_memory_dir_exists("tester", "project")
     assert mdir is not None
     (mdir / "MEMORY.md").write_text("  remember this  \n")
     prompt = store.load_memory_prompt("tester", "project")
-    assert prompt.endswith("decisions.\n\n## Existing Memory Notes:\nremember this")
+    assert prompt.endswith("\n\n## MEMORY.md\n\nremember this")

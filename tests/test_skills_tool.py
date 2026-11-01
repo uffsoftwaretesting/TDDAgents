@@ -362,9 +362,10 @@ class TestForkWorkerContext:
         model, ctx = self._fork(_skill(context="fork"), EXPLORE)
         assert model.seen[0].tool_context.cancel is ctx.cancel
 
-    def test_an_agent_with_memory_reads_it_through_the_forked_context(self, tmp_path):
+    def test_an_agent_with_memory_reads_it_through_the_forked_context(self, tmp_path, monkeypatch):
         from app.tools.agent_tool.agent_memory import AgentMemoryStore
 
+        monkeypatch.setenv("TDDAGENTS_ENABLE_AUTO_MEMORY", "1")
         agent = dataclasses.replace(EXPLORE, memory="run")
         model, _ = self._fork(_skill(context="fork"), agent, agent_memory_store=AgentMemoryStore(base_dir=tmp_path))
         prompt = model.seen[0].tool_context.agent_system_prompt
