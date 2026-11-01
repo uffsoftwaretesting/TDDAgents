@@ -544,15 +544,31 @@ def test_handle_rewind_files_dry_run_reports_without_touching_files(h: Harness) 
     assert set(result.to_json()) == {"canRewind", "filesChanged", "insertions", "deletions"}
 
 
-def test_handle_rewind_files_rewinds(h: Harness) -> None:
+def test_handle_rewind_files_rewinds_and_restarts_the_ledger_in_red(h: Harness) -> None:
+    import dataclasses
+
+    from app.tdd.ledger import PhaseLedger, TddPhase
+    from tests.conftest import FakeWorkspace
+
     a, b = _session_with_edits(h)
-    before = h.store.get()
-    result = asyncio.run(fh.handle_rewind_files("u1", h.store.get(), h.store.update, False))
+    green = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True)
+    h.store.update(lambda s: dataclasses.replace(s, phase_ledger=green, last_test_run=object(),
+                                                 tdd_item_test_baseline="old"))
+    workspace = FakeWorkspace()
+    workspace.write_file("tests/test_a.py", "def test_a():\n    assert True\n")
+    result = asyncio.run(fh.handle_rewind_files("u1", h.store.get(), h.store.update, False, workspace=workspace))
     assert result == RewindFilesResult(can_rewind=True)
     assert result.to_json() == {"canRewind": True}
     assert a.read_text(encoding="utf-8") == "one\n" and not b.exists()
-    # The TDD seam leaves the state as it is (pending decision), as upstream.
-    assert h.store.get() == before
+    # User decision 2026-11-01: the evidence about reverted files is erased, never created.
+    state = h.store.get()
+    assert state.phase_ledger == green.transition_to(TddPhase.RED)
+    assert state.phase_ledger.phase == TddPhase.RED and not state.phase_ledger.green_passed
+    assert state.last_test_run is None
+    from app.tdd.suite_fingerprint import fingerprint_test_files
+
+    assert state.tdd_item_test_baseline == fingerprint_test_files(workspace)
+    assert state.tdd_item_test_baseline not in (None, "old")
 
 
 def test_handle_rewind_files_reports_a_failed_rewind(h: Harness, monkeypatch: Any) -> None:

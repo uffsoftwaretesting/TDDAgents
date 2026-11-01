@@ -265,13 +265,23 @@ def test_the_worker_starts_from_fresh_per_agent_state():
     assert ctx.read_file_state == {} and ctx.read_file_state is not parent.read_file_state
 
 
-def test_a_worker_never_tracks_file_history():
-    """`createSubagentContext` stubs `updateFileHistoryState` (`() => {}`): a worker's edits are untracked."""
+def test_a_synchronous_worker_tracks_file_history_as_its_parent():
+    """
+    Upstream stubs `updateFileHistoryState` for every worker; a synchronous worker here keeps its
+    parent's, so a rewind reverts its edits (user decision 2026-11-01). A background one is stubbed.
+    """
     from app.utils.file_history import noop_update_file_history_state
 
+    def parents_updater(updater):
+        return None
+
     parent = _parent()
-    parent.update_file_history_state = lambda updater: None
+    parent.update_file_history_state = parents_updater
     model, _ = _run(parent=parent)
+    assert model.seen[0].tool_context.update_file_history_state is parents_updater
+    parent = _parent()
+    parent.update_file_history_state = parents_updater
+    model, _ = _run(parent=parent, is_async=True)
     assert model.seen[0].tool_context.update_file_history_state is noop_update_file_history_state
 
 

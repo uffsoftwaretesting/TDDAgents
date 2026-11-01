@@ -258,10 +258,12 @@ def run_agent(
             # `canUseTool` is not inherited, except by a `bubble` agent, whose prompts surface to the
             # parent's terminal (`runAgent.ts`; the verification agent, user decision 2026-10-28).
             can_use_tool=parent.can_use_tool if agent_definition.permission_mode == PermissionMode.BUBBLE else None,
-            # `createSubagentContext` copies neither `requestPrompt` nor the REPL's progress hooks,
-            # and stubs `updateFileHistoryState` (`() => {}`): a worker's edits are not tracked.
+            # `createSubagentContext` copies neither `requestPrompt` nor the REPL's progress hooks. It
+            # stubs `updateFileHistoryState` (`() => {}`); here a synchronous worker, which shares the
+            # parent's state (and ledger), keeps the parent's, so a rewind reverts its edits too (user
+            # decision 2026-11-01). A background worker keeps upstream's stub.
             request_prompt=None,
-            update_file_history_state=noop_update_file_history_state,
+            update_file_history_state=noop_update_file_history_state if is_async else parent.update_file_history_state,
             on_progress=None,
             set_has_interruptible_tool_in_progress=None,
             on_stream_chunk=None,

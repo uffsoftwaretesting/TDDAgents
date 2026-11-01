@@ -923,12 +923,15 @@ async def handle_rewind_files(
     app_state: AppState,
     set_app_state: Callable[[Callable[[AppState], AppState]], None],
     dry_run: bool,
+    *,
+    workspace: Any = None,
 ) -> RewindFilesResult:
     """
     `print.ts` -> `handleRewindFiles`: the `--rewind-files` flag and the SDK's `rewind_files`
     control request. With `dry_run` it only reports what a rewind would change (`filesChanged`,
     `insertions`, `deletions`); otherwise it rewinds the files to the snapshot of
-    `user_message_id` and answers `can_rewind=True`, or the reason it could not.
+    `user_message_id` and answers `can_rewind=True`, or the reason it could not. After a rewind the
+    TDD ledger restarts in RED over `workspace`'s test files (`app/tdd/file_rewind.py`).
     """
     bootstrap = app_state.bootstrap
     if not file_history_enabled(bootstrap):
@@ -953,8 +956,10 @@ async def handle_rewind_files(
     # TDD: what a rewind does to the ledger and the plan is decided in one place. Function-level
     # import: `app.tdd` imports `AppState`, whose module imports this one.
     from app.tdd.file_rewind import tdd_state_after_file_rewind
+    from app.tdd.suite_fingerprint import fingerprint_test_files
 
-    set_app_state(tdd_state_after_file_rewind)
+    baseline = fingerprint_test_files(workspace)
+    set_app_state(lambda state: tdd_state_after_file_rewind(state, baseline))
     return RewindFilesResult(can_rewind=True)
 
 

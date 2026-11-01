@@ -1715,7 +1715,8 @@ async def run_rewind_files(
             write_err(f"Error: --rewind-files requires a user message UUID, but {user_message_id} is not a user "
                       "message in this session\n")
             return 1
-        result = await handle_rewind_files(user_message_id, run.store.get(), run.store.update, False)
+        result = await handle_rewind_files(user_message_id, run.store.get(), run.store.update, False,
+                                           workspace=run.ctx.workspace)
         if not result.can_rewind:
             write_err(f"Error: {result.error or 'Unexpected error'}\n")
             return 1
