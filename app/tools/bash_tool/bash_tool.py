@@ -315,6 +315,14 @@ async def _wait_for_result(
         await asyncio.wait({shell.result}, timeout=CANCEL_POLL_SECONDS)
 
 
+def bash_output(stdout: str, stderr: str, interrupted: bool, background_task_id: str | None) -> dict[str, Any]:
+    """Upstream's Bash `Out`: what the result rendering and the SDK's `tool_use_result` read."""
+    data: dict[str, Any] = {"stdout": stdout, "stderr": stderr, "interrupted": interrupted}
+    if background_task_id:
+        data["backgroundTaskId"] = background_task_id
+    return data
+
+
 def strip_leading_blank_lines(text: str) -> str:
     """`mapToolResultToToolResultBlockParam`: leading blank lines removed, the end trimmed."""
     return re.sub(r"^(\s*\n)+", "", text).rstrip()
@@ -388,7 +396,8 @@ def build_bash_tool() -> BuiltTool:
             shell.on_timeout(start_backgrounding)
         if bool(input_args.get("run_in_background")) and not disabled:
             start_backgrounding()
-            return ToolResult(content=background_info(state["background"], context))
+            return ToolResult(content=background_info(state["background"], context),
+                              metadata=bash_output("", "", False, state["background"]))
 
         def register() -> None:
             state["foreground"] = register_foreground(context, command=command, description=description,
@@ -396,7 +405,8 @@ def build_bash_tool() -> BuiltTool:
 
         result = await _wait_for_result(shell, context, backgrounded, register)
         if result is None:
-            return ToolResult(content=background_info(state["background"], context))
+            return ToolResult(content=background_info(state["background"], context),
+                              metadata=bash_output("", "", False, state["background"]))
         if state["foreground"] is not None:
             if result.background_task_id:
                 mark_task_notified(result.background_task_id, context.set_app_state)
@@ -417,16 +427,19 @@ def build_bash_tool() -> BuiltTool:
         if result.code != 0 and not result.interrupted:
             # `ShellError` through `formatError`: `Exit code N`, then stderr, then the output.
             content = "\n".join(part for part in (f"Exit code {result.code}", stderr.strip(), stdout) if part)
-            return ToolResult(content=content, exit_code=result.code, is_error=True)
+            return ToolResult(content=content, exit_code=result.code, is_error=True,
+                              metadata=bash_output(stdout, stderr, result.interrupted, None))
         content = bash_result_content(stdout, stderr, result.interrupted, "")
         return ToolResult(content=content or "Command executed successfully (no output).", exit_code=result.code,
-                          is_error=result.interrupted)
+                          is_error=result.interrupted,
+                          metadata=bash_output(stdout, stderr, result.interrupted, None))
 
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
         get_tool_use_summary=ui.get_tool_use_summary,
         get_activity_description=ui.get_activity_description,
+        render_tool_result_message=ui.render_tool_result_message,
         is_search_or_read_command=bash_search_or_read,
         name="Bash",
         prompt=get_bash_prompt(),

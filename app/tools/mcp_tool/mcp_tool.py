@@ -50,6 +50,7 @@ from app.tool import (
     build_tool,
     default_map_result,
 )
+from app.tools.mcp_tool import ui
 from app.tools.mcp_tool.classify_for_collapse import classify_mcp_tool_for_collapse
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
@@ -120,6 +121,8 @@ def map_mcp_result(result: ToolResult, tool_use_id: str) -> ToolMessage:
     """`MCPTool.mapToolResultToToolResultBlockParam`: the blocks while the string is still theirs."""
     message = default_map_result(result, tool_use_id)
     blocks = (result.metadata or {}).get("content_blocks")
+    # Upstream's `toolUseResult` for MCP is the content itself (its blocks, else its text).
+    message.additional_kwargs["tool_use_result"] = list(blocks) if blocks is not None else result.content
     if blocks is not None and result.content == render_blocks_as_text(blocks):
         message.content = [_to_langchain_block(b) for b in blocks]
     return message
@@ -175,6 +178,7 @@ def build_mcp_tool(client: ConnectedMCPServer, tool: Any) -> McpBuiltTool:
         user_facing_name=lambda _args: user_facing,
         # `client.ts`: `isSearchOrReadCommand() { return classifyMcpToolForCollapse(client.name, tool.name) }`.
         is_search_or_read_command=lambda _args: classify_mcp_tool_for_collapse(client.name, server_tool_name),
+        render_tool_result_message=ui.render_tool_result_message,
     )
     return McpBuiltTool(
         **{f: getattr(built, f) for f in BuiltTool.__dataclass_fields__},

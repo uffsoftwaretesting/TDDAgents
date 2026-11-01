@@ -187,7 +187,9 @@ def build_grep_tool() -> BuiltTool:
             items, applied = apply_head_limit(results, head_limit, offset)
             body = "\n".join(_relativize_first_colon(line) for line in items) or "No matches found"
             info = format_limit_info(applied, offset)
-            return ToolResult(content=f"{body}\n\n[Showing results with pagination = {info}]" if info else body)
+            data = {"mode": "content", "numFiles": 0, "filenames": [], "content": body, "numLines": len(items)}
+            return ToolResult(content=f"{body}\n\n[Showing results with pagination = {info}]" if info else body,
+                              metadata=data)
 
         if mode == "count":
             items, applied = apply_head_limit(results, head_limit, offset)
@@ -204,21 +206,26 @@ def build_grep_tool() -> BuiltTool:
                 f"{n_files} {'file' if n_files == 1 else 'files'}."
                 f"{f' with pagination = {info}' if info else ''}"
             )
-            return ToolResult(content=("\n".join(lines) or "No matches found") + summary)
+            data = {"mode": "count", "numFiles": n_files, "filenames": [], "content": "\n".join(lines),
+                    "numMatches": total}
+            return ToolResult(content=("\n".join(lines) or "No matches found") + summary, metadata=data)
 
         items, applied = apply_head_limit(sort_by_mtime(ws, results), head_limit, offset)
         if not items:
-            return ToolResult(content="No files found")
+            return ToolResult(content="No files found",
+                              metadata={"mode": "files_with_matches", "numFiles": 0, "filenames": []})
         info = format_limit_info(applied, offset)
         names = [to_relative_path(p) for p in items]
         header = f"Found {len(names)} {'file' if len(names) == 1 else 'files'}{f' {info}' if info else ''}"
-        return ToolResult(content=header + "\n" + "\n".join(names))
+        return ToolResult(content=header + "\n" + "\n".join(names),
+                          metadata={"mode": "files_with_matches", "numFiles": len(names), "filenames": names})
 
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
         get_tool_use_summary=ui.get_tool_use_summary,
         get_activity_description=ui.get_activity_description,
+        render_tool_result_message=ui.render_tool_result_message,
         is_search_or_read_command=lambda args: SearchOrRead(is_search=True, is_read=False),
         backfill_observable_input=backfill_path("path", default_to_cwd=True),
         name="Grep",

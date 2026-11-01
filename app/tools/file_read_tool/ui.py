@@ -67,3 +67,30 @@ def get_activity_description(input: dict[str, Any] | None, context: Any = None) 
     """`FileReadTool.ts` -> `getActivityDescription`."""
     summary = get_tool_use_summary(input, context)
     return f"Reading {summary}" if summary else "Reading file"
+
+
+def render_tool_result_message(output: Any, verbose: bool) -> str | None:
+    """`renderToolResultMessage`: what was read, by output type; `None` for an unknown output."""
+    from app.utils.tool_result_storage import format_file_size
+
+    if not isinstance(output, dict):
+        return None
+    file = output.get("file") or {}
+    kind = output.get("type")
+    if kind == "image":
+        return f"Read image ({format_file_size(int(file.get('originalSize', 0)))})"
+    if kind == "notebook":
+        cells = file.get("cells") or []
+        return f"Read {len(cells)} cells" if cells else "No cells found in notebook"
+    if kind == "pdf":
+        return f"Read PDF ({format_file_size(int(file.get('originalSize', 0)))})"
+    if kind == "parts":
+        count = int(file.get("count", 0))
+        return (f"Read {count} {'page' if count == 1 else 'pages'} "
+                f"({format_file_size(int(file.get('originalSize', 0)))})")
+    if kind == "text":
+        lines = int(file.get("numLines", 0))
+        return f"Read {lines} {'line' if lines == 1 else 'lines'}"
+    if kind == "file_unchanged":
+        return "Unchanged since last read"
+    return None

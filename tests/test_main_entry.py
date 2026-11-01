@@ -337,6 +337,7 @@ def test_parser_help_and_metadata() -> None:
         "settings": "A settings file (upstream's flag settings).",
         "dangerously_skip_permissions": None,
         "coordinator": "Run development in coordinator mode.",
+        "verbose": "Override verbose mode setting from config",
     }
     flags = {action.dest: tuple(action.option_strings) for action in parser._actions}
     assert flags["print"] == ("-p", "--print")

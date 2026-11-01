@@ -154,6 +154,9 @@ def test_tool_classification_helpers():
         def interrupt_behavior(self) -> Any:
             return "block"
 
+        def render_tool_result_message(self, output: Any, verbose: bool) -> str | None:
+            return None
+
         def is_implementation_writer(self) -> bool:
             raise RuntimeError("boom")
 

@@ -78,17 +78,21 @@ def build_glob_tool() -> BuiltTool:
         except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Glob error: {e}", is_error=True)
         if not paths:
-            return ToolResult(content="No files found")
+            return ToolResult(content="No files found",
+                              metadata={"filenames": [], "numFiles": 0, "truncated": False})
         lines = paths[:GLOB_MAX_RESULTS]
         if len(paths) > GLOB_MAX_RESULTS:
             lines.append("(Results are truncated. Consider using a more specific path or pattern.)")
-        return ToolResult(content="\n".join(lines))
+        shown = paths[:GLOB_MAX_RESULTS]
+        return ToolResult(content="\n".join(lines), metadata={
+            "filenames": shown, "numFiles": len(shown), "truncated": len(paths) > GLOB_MAX_RESULTS})
 
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
         get_tool_use_summary=ui.get_tool_use_summary,
         get_activity_description=ui.get_activity_description,
+        render_tool_result_message=ui.render_tool_result_message,
         is_search_or_read_command=lambda args: SearchOrRead(is_search=True, is_read=False),
         backfill_observable_input=backfill_path("path", default_to_cwd=True),
         name="Glob",

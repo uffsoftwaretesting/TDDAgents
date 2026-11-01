@@ -35,6 +35,8 @@ class SessionOptions:
     permission_mode: str | None = None
     settings_path: str | None = None
     dangerously_skip_permissions: bool = False
+    #: `--verbose`: the REPL expands collapsed searches and reads, call by call.
+    verbose: bool = False
 
 
 def derive_thread_id(initial_input: str) -> str:
@@ -133,7 +135,7 @@ async def _develop_interactive(
                                 planning=True, can_use_tool=build_interactive_can_use_tool(ask, ask_questions),
                                 **opts) as run:
         io = io_factory(lambda: holder["repl"].interrupt())
-        repl = Repl(run, io)
+        repl = Repl(run, io, verbose=options.verbose)
         holder["repl"] = repl
         with io:
             terminal = await repl.run_session(request, prompt)

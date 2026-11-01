@@ -39,3 +39,30 @@ def get_activity_description(input: dict[str, Any] | None, context: Any = None) 
     """`getActivityDescription`."""
     summary = get_tool_use_summary(input, context)
     return f"Searching for {summary}" if summary else "Searching"
+
+
+def search_result_summary(count: int, count_label: str, content: str | None, verbose: bool,
+                          secondary_count: int | None = None, secondary_label: str | None = None) -> str:
+    """`SearchResultSummary`: `Found N files` (`across M files`), then the content when verbose."""
+    label = count_label if count == 0 or count > 1 else count_label[:-1]
+    text = f"Found {count} {label}"
+    if secondary_count is not None and secondary_label:
+        secondary = secondary_label if secondary_count == 0 or secondary_count > 1 else secondary_label[:-1]
+        text += f" across {secondary_count} {secondary}"
+    if verbose and content:
+        return f"{text}\n{content}"
+    return text
+
+
+def render_tool_result_message(output: Any, verbose: bool) -> str | None:
+    """`renderToolResultMessage` (Glob reuses it): the count found, by output mode."""
+    if not isinstance(output, dict):
+        return None
+    mode = output.get("mode") or "files_with_matches"
+    if mode == "content":
+        return search_result_summary(int(output.get("numLines") or 0), "lines", output.get("content"), verbose)
+    if mode == "count":
+        return search_result_summary(int(output.get("numMatches") or 0), "matches", output.get("content"), verbose,
+                                     int(output.get("numFiles") or 0), "files")
+    filenames = [str(f) for f in output.get("filenames") or []]
+    return search_result_summary(int(output.get("numFiles") or 0), "files", "\n".join(filenames), verbose)

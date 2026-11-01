@@ -11,6 +11,8 @@ not ported.
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from app.constants.tool_limits import TOOL_SUMMARY_MAX_LENGTH
@@ -61,3 +63,53 @@ def get_activity_description(input: dict[str, Any] | None, context: Any = None) 
     description = input.get("description")
     shown = description if description is not None else truncate(str(input["command"]), TOOL_SUMMARY_MAX_LENGTH)
     return f"Running {shown}"
+
+
+#: `BashToolResultMessage`'s `SHELL_CWD_RESET_PATTERN`.
+SHELL_CWD_RESET_PATTERN = re.compile(r"(?:^|\n)(Shell cwd was reset to .+)$")
+
+
+def try_format_json(line: str) -> str:
+    """`tryFormatJson`: a JSON line pretty-printed, unless the round trip would change it."""
+    try:
+        parsed = json.loads(line)
+    except (ValueError, TypeError):
+        return line
+    stringified = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+    original = re.sub(r"\s+", "", line.replace("\\/", "/"))
+    if original != re.sub(r"\s+", "", stringified):
+        return line
+    return json.dumps(parsed, ensure_ascii=False, indent=2)
+
+
+def try_json_format_content(content: str) -> str:
+    """`tryJsonFormatContent`: each line through `try_format_json`, up to 10 000 characters."""
+    if len(content) > 10_000:
+        return content
+    return "\n".join(try_format_json(line) for line in content.split("\n"))
+
+
+def render_tool_result_message(output: Any, verbose: bool) -> str | None:
+    """`BashToolResultMessage`: stdout, stderr, the cwd-reset warning, or what ran silently."""
+    if not isinstance(output, dict):
+        return None
+    stdout = str(output.get("stdout") or "")
+    stderr = str(output.get("stderr") or "")
+    match = SHELL_CWD_RESET_PATTERN.search(stderr)
+    warning = match.group(1) if match else None
+    if match:
+        stderr = SHELL_CWD_RESET_PATTERN.sub("", stderr).strip()
+    blocks = []
+    if stdout:
+        blocks.append(try_json_format_content(stdout))
+    if stderr.strip():
+        blocks.append(try_json_format_content(stderr))
+    if warning:
+        blocks.append(warning)
+    if not blocks:
+        if output.get("backgroundTaskId"):
+            blocks.append("Running in the background (↓ to manage)")
+        else:
+            blocks.append(str(output.get("returnCodeInterpretation") or "")
+                          or ("Done" if output.get("noOutputExpected") else "(No output)"))
+    return "\n".join(blocks)

@@ -38,3 +38,10 @@ def get_activity_description(input: dict[str, Any] | None, context: Any = None) 
     """`getActivityDescription`."""
     summary = get_tool_use_summary(input, context)
     return f"Finding {summary}" if summary else "Finding files"
+
+
+def render_tool_result_message(output: Any, verbose: bool) -> str | None:
+    """`GlobTool`'s `renderToolResultMessage` is GrepTool's (files mode)."""
+    from app.tools.grep_tool.ui import render_tool_result_message as grep_render
+
+    return grep_render(output, verbose)

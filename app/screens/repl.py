@@ -56,6 +56,9 @@ from app.commands import (
     help_text,
     parse_slash_command,
 )
+from app.components.messages.collapsed_read_search_content import (
+    CollapsedReadSearchRenderer,
+)
 from app.components.permissions.permission_options import PermissionOption
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt
 from app.query.transitions import Terminal
@@ -218,9 +221,12 @@ def turn_end_text(terminal: Terminal, plan: TddPlan, paused: bool) -> str:
 class Repl:
     """One development session at the terminal."""
 
-    def __init__(self, run: DevelopmentRun, io: ReplIO) -> None:
+    def __init__(self, run: DevelopmentRun, io: ReplIO, *, verbose: bool = False) -> None:
         self.run = run
         self.io = io
+        #: Consecutive searches and reads collapse into one summary; `--verbose` expands them.
+        self.renderer = CollapsedReadSearchRenderer(
+            lambda: getattr(self.run.ctx, "tools", ()) or (), lambda: self.run.ctx, render_message, verbose=verbose)
         self.turn: asyncio.Task[None] | None = None
         self.deferred: list[SlashCommand] = []
         self.pending: PendingAnswer | None = None
@@ -247,9 +253,8 @@ class Repl:
         return plan
 
     def _show(self, event: Any) -> None:
-        text = render_message(event)
-        if text is not None:
-            self.io.write(text)
+        for line in self.renderer.feed(event):
+            self.io.write(line)
 
     # ── permissions ────────────────────────────────────────────────────────
 
@@ -297,6 +302,8 @@ class Repl:
         except Exception:  # a crashed turn is reported, and the session goes on
             logger.exception("Turn crashed")
             terminal = Terminal.MODEL_ERROR
+        for line in self.renderer.flush():
+            self.io.write(line)
         if terminal is not None:
             self.last_terminal = terminal
             self.io.write(turn_end_text(terminal, self.plan, self.run.store.get().tdd_paused))

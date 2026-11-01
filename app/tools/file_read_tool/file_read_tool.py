@@ -175,7 +175,8 @@ def _read_notebook(context: ToolContext, file_path: str, content: str) -> ToolRe
     _trigger_nested_memory(context, file_path)
     blocks = map_notebook_cells_to_blocks(cells)
     text = "\n".join(b["text"] for b in blocks if b["type"] == "text")
-    return ToolResult(content=text, content_blocks=tuple(blocks))
+    return ToolResult(content=text, content_blocks=tuple(blocks),
+                      metadata={"type": "notebook", "file": {"filePath": file_path, "cells": cells}})
 
 
 def _read_image(context: ToolContext, file_path: str) -> ToolResult:
@@ -186,6 +187,7 @@ def _read_image(context: ToolContext, file_path: str) -> ToolResult:
         content=f"Image file read: {file_path} ({media_type}, {format_file_size(original_size)})",
         content_blocks=(_image_block(data, media_type),),
         new_messages=(_meta(metadata),) if metadata else (),
+        metadata={"type": "image", "file": {"type": media_type, "originalSize": original_size}},
     )
 
 
@@ -210,6 +212,8 @@ def _read_pdf(context: ToolContext, file_path: str, pages: str | None) -> ToolRe
             content=(f"PDF pages extracted: {extracted.count} page(s) from {file_path} "
                      f"({format_file_size(extracted.original_size)})"),
             new_messages=(_meta(blocks),) if blocks else (),
+            metadata={"type": "parts", "file": {"filePath": file_path, "originalSize": extracted.original_size,
+                                                "count": extracted.count, "outputDir": str(extracted.output_dir)}},
         )
     page_count = get_pdf_page_count(host)
     if page_count is not None and page_count > PDF_AT_MENTION_INLINE_THRESHOLD:
@@ -230,6 +234,7 @@ def _read_pdf(context: ToolContext, file_path: str, pages: str | None) -> ToolRe
     return ToolResult(
         content=f"PDF file read: {file_path} ({format_file_size(read.original_size)})",
         new_messages=(_meta([document]),),
+        metadata={"type": "pdf", "file": {"filePath": file_path, "originalSize": read.original_size}},
     )
 
 
@@ -322,8 +327,11 @@ def build_read_file_tool() -> BuiltTool:
 
         if window:
             # `memoryFileFreshnessPrefix`: a stale auto-memory file is read with its age.
+            data = {"type": "text", "file": {"filePath": file_path, "content": "\n".join(window),
+                                             "numLines": len(window), "startLine": max(offset, 1),
+                                             "totalLines": len(all_lines)}}
             return ToolResult(content=_memory_freshness_prefix(context, file_path)
-                              + add_line_numbers(window, max(offset, 1)))
+                              + add_line_numbers(window, max(offset, 1)), metadata=data)
         if not all_lines:
             return ToolResult(
                 content="<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"
@@ -340,6 +348,7 @@ def build_read_file_tool() -> BuiltTool:
         render_tool_use_message=ui.render_tool_use_message,
         get_tool_use_summary=ui.get_tool_use_summary,
         get_activity_description=ui.get_activity_description,
+        render_tool_result_message=ui.render_tool_result_message,
         is_search_or_read_command=lambda args: SearchOrRead(is_search=False, is_read=True),
         backfill_observable_input=backfill_path("file_path"),
         name="ReadFile",

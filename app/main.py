@@ -160,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--settings", default=None, help="A settings file (upstream's flag settings).")
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
     parser.add_argument("--coordinator", action="store_true", help="Run development in coordinator mode.")
+    parser.add_argument("--verbose", action="store_true", help="Override verbose mode setting from config")
     return parser
 
 
@@ -178,6 +179,7 @@ def session_options(args: argparse.Namespace) -> SessionOptions:
         permission_mode=args.permission_mode,
         settings_path=args.settings,
         dangerously_skip_permissions=bool(args.dangerously_skip_permissions),
+        verbose=bool(args.verbose),
     )
 
 

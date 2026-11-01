@@ -77,6 +77,10 @@ def default_map_result(result: ToolResult, tool_use_id: str) -> ToolMessage:
         additional_kwargs["is_error"] = True
     if result.exit_code is not None:
         additional_kwargs["exit_code"] = result.exit_code
+    if result.metadata is not None:
+        # Upstream `toolUseResult`: the tool's structured output, which the REPL's result rendering
+        # and the SDK's user messages read.
+        additional_kwargs["tool_use_result"] = result.metadata
 
     return ToolMessage(
         content=list(result.content_blocks) if result.content_blocks else result.content,
@@ -132,6 +136,7 @@ class Tool(Protocol):
     def get_activity_description(self, input: dict[str, Any] | None, context: Any = None) -> str | None: ...
     def is_search_or_read_command(self, input: dict[str, Any]) -> SearchOrRead | None: ...
     def interrupt_behavior(self) -> InterruptBehavior: ...
+    def render_tool_result_message(self, output: Any, verbose: bool) -> str | None: ...
     def is_enabled(self) -> bool: ...
     def is_concurrency_safe(self, input: dict[str, Any]) -> bool: ...
     def is_read_only(self, input: dict[str, Any]) -> bool: ...
@@ -213,6 +218,9 @@ class BuiltTool:
     _is_search_or_read_command: Callable[[dict[str, Any]], SearchOrRead] | None = None
     #: `Tool.ts` -> `interruptBehavior`, `'block'` when not implemented.
     _interrupt_behavior: Callable[[], InterruptBehavior] | None = None
+    #: `Tool.ts` -> `renderToolResultMessage`, as text: how a result's structured output (its
+    #: `tool_use_result`) reads in the REPL's expanded view; `None` when the tool has none.
+    _render_tool_result_message: Callable[[Any, bool], str | None] | None = None
 
     def description(self, input: dict[str, Any]) -> str:
         return self._description(input)
@@ -251,6 +259,12 @@ class BuiltTool:
     def interrupt_behavior(self) -> InterruptBehavior:
         """`interruptBehavior?.() ?? 'block'`."""
         return self._interrupt_behavior() if self._interrupt_behavior is not None else "block"
+
+    def render_tool_result_message(self, output: Any, verbose: bool) -> str | None:
+        """`renderToolResultMessage?.(output, [], { verbose })`."""
+        if self._render_tool_result_message is None:
+            return None
+        return self._render_tool_result_message(output, verbose)
 
     def is_enabled(self) -> bool:
         try:
@@ -365,6 +379,7 @@ def build_tool(
     get_activity_description: Callable[[dict[str, Any] | None, Any], str | None] | None = None,
     is_search_or_read_command: Callable[[dict[str, Any]], SearchOrRead] | None = None,
     interrupt_behavior: Callable[[], InterruptBehavior] | None = None,
+    render_tool_result_message: Callable[[Any, bool], str | None] | None = None,
 ) -> BuiltTool:
     """
     Builds a Tool with fail-closed defaults for omitted members.
@@ -415,6 +430,7 @@ def build_tool(
         _get_activity_description=get_activity_description,
         _is_search_or_read_command=is_search_or_read_command,
         _interrupt_behavior=interrupt_behavior,
+        _render_tool_result_message=render_tool_result_message,
     )
 
 
