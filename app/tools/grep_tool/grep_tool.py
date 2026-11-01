@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tools.grep_tool import ui
 from app.tools.utils import (
     NO_WORKSPACE,
     VALID,
@@ -206,6 +207,8 @@ def build_grep_tool() -> BuiltTool:
         return ToolResult(content=header + "\n" + "\n".join(names))
 
     return build_tool(
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         name="Grep",
         prompt=get_prompt(PROMPT_PATH, "Searches file contents."),
         input_schema={

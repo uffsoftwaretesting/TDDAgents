@@ -74,6 +74,14 @@ def test_absent_hints_are_false_and_absent_description_empty():
     assert not bare.is_read_only({}) and bare.input_schema == {"type": "object"}
 
 
+def test_the_user_facing_name_is_server_dash_title_or_name_mcp():
+    titled = mt.build_mcp_tool(client("srv"), definition("add", annotations=SimpleNamespace(title="Add numbers")))
+    assert titled.user_facing_name({}) == "srv - Add numbers (MCP)"
+    plain = mt.build_mcp_tool(client("srv"), definition("add", annotations=None))
+    assert plain.user_facing_name(None) == "srv - add (MCP)"
+    assert plain.render_tool_use_message({"a": 1}, True) == "a: 1"
+
+
 def test_a_long_description_is_capped_for_the_prompt_only():
     tool = mt.build_mcp_tool(client(), definition(description="d" * 3000))
     assert tool.prompt == "d" * 2048 + "… [truncated]"

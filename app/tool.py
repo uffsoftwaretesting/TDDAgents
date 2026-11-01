@@ -2,7 +2,9 @@
 Tool protocol and build_tool factory with fail-closed defaults (Part B2).
 
 Ported from:
-- `reference/claude-code/src/Tool.ts` -> `Tool`, `toolMatchesName`, `findToolByName`
+- `reference/claude-code/src/Tool.ts` -> `Tool`, `toolMatchesName`, `findToolByName`, `userFacingName`,
+  `renderToolUseMessage`
+- `reference/claude-code/src/tools/MCPTool/UI.tsx` -> `renderToolUseMessage` (the default rendering)
 - `app/tools/base.py` (Phase 1B) -> fail-closed defaults and protocol adaptation
 
 Core dataclasses for the tool layer (Part B1).
@@ -37,6 +39,7 @@ anywhere in the tool path.
 from __future__ import annotations
 
 import inspect
+import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import (
@@ -100,6 +103,8 @@ class Tool(Protocol):
     def is_mcp(self) -> bool: ...
 
     def description(self, input: dict[str, Any]) -> str: ...
+    def user_facing_name(self, input: dict[str, Any] | None) -> str: ...
+    def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None: ...
     def is_enabled(self) -> bool: ...
     def is_concurrency_safe(self, input: dict[str, Any]) -> bool: ...
     def is_read_only(self, input: dict[str, Any]) -> bool: ...
@@ -113,6 +118,13 @@ class Tool(Protocol):
     ) -> Awaitable[PermissionResult] | PermissionResult: ...
     def call(self, input: dict[str, Any], context: ToolContext) -> Awaitable[ToolResult]: ...
     def map_result(self, result: ToolResult, tool_use_id: str) -> ToolMessage: ...
+
+
+def render_input_as_key_values(input: dict[str, Any]) -> str:
+    """`MCPTool/UI.tsx` -> `renderToolUseMessage`: `key: <json>` pairs joined by `, `."""
+    # `jsonStringify` is `JSON.stringify`: no spaces after separators.
+    return ", ".join(f"{key}: {json.dumps(value, ensure_ascii=False, separators=(',', ':'))}"
+                     for key, value in input.items())
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,9 +166,23 @@ class BuiltTool:
     #: permission-rule content string (`git *`, `src/**`). Hook `if` conditions use it;
     #: `None` means the tool matches only a bare `Tool` condition, as upstream.
     _prepare_permission_matcher: Callable[[dict[str, Any]], Callable[[str], bool]] | None = None
+    #: `Tool.ts` -> `userFacingName`: the name a dialog or a transcript shows (`buildTool`'s
+    #: default is the tool's own name).
+    _user_facing_name: Callable[[dict[str, Any] | None], str] | None = None
+    #: `Tool.ts` -> `renderToolUseMessage`: the call's input as a dialog shows it, in full when
+    #: `verbose`. The default is `MCPTool/UI.tsx`'s `key: <json>` join.
+    _render_tool_use_message: Callable[[dict[str, Any], bool], str | None] | None = None
 
     def description(self, input: dict[str, Any]) -> str:
         return self._description(input)
+
+    def user_facing_name(self, input: dict[str, Any] | None) -> str:
+        return self._user_facing_name(input) if self._user_facing_name is not None else self.name
+
+    def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None:
+        if self._render_tool_use_message is not None:
+            return self._render_tool_use_message(input, verbose)
+        return render_input_as_key_values(input)
 
     def is_enabled(self) -> bool:
         try:
@@ -264,6 +290,8 @@ def build_tool(
     is_mcp: bool = False,
     max_result_size_chars: float = MAX_TOOL_RESULT_BYTES,
     prepare_permission_matcher: Callable[[dict[str, Any]], Callable[[str], bool]] | None = None,
+    user_facing_name: Callable[[dict[str, Any] | None], str] | None = None,
+    render_tool_use_message: Callable[[dict[str, Any], bool], str | None] | None = None,
 ) -> BuiltTool:
     """
     Builds a Tool with fail-closed defaults for omitted members.
@@ -307,6 +335,8 @@ def build_tool(
         ),
         _map_result=map_result if map_result is not None else default_map_result,
         _prepare_permission_matcher=prepare_permission_matcher,
+        _user_facing_name=user_facing_name,
+        _render_tool_use_message=render_tool_use_message,
     )
 
 

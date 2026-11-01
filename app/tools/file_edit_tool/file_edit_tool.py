@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tools.file_edit_tool import ui
 from app.tools.file_edit_tool.constants import FILE_UNEXPECTEDLY_MODIFIED_ERROR
 from app.tools.file_edit_tool.utils import (
     apply_edit_to_file,
@@ -109,6 +110,8 @@ def build_edit_tool() -> BuiltTool:
         return ToolResult(content=f"The file {file_path} has been updated successfully.")
 
     return build_tool(
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         name="Edit",
         prompt=get_prompt(PROMPT_PATH, "Edits a file."),
         input_schema={

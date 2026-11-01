@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tools.bash_tool import ui
 from app.tools.bash_tool.bash_permissions import bash_tool_has_permission
 from app.tools.bash_tool.read_only_validation import is_bash_read_only
 from app.types.permissions import PermissionResult
@@ -149,6 +150,8 @@ def build_bash_tool() -> BuiltTool:
         )
 
     return build_tool(
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         name="Bash",
         prompt=get_bash_prompt(),
         input_schema={

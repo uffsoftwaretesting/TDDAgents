@@ -118,6 +118,18 @@ def test_render_permission_prompt():
         "⚠ Permission needed: Bash — Run make (the verification agent asks)\n")
 
 
+def test_render_permission_prompt_with_a_dialog():
+    from app.components.permissions.permission_dialog import PermissionDialog
+
+    dialog = PermissionDialog(title="Bash command", body="make 2>&1 | tail", description="Run make",
+                              explanation="why")
+    prompt = PermissionPrompt("Bash", "Run make", "garbled text", {}, OPTIONS, agent="verification", dialog=dialog)
+    assert render_permission_prompt(prompt) == (
+        "⚠ Bash command (the verification agent asks)\nmake 2>&1 | tail\nRun make\nwhy\nDo you want to proceed?\n"
+        "  1. Yes\n  2. Yes, during this session\n  3. No\n"
+        "Choose 1-3; after a No you may add what to do instead (e.g. \"3 use the existing helper\").")
+
+
 def test_two_prompts_at_once_are_shown_one_after_the_other():
     """A background agent's prompt waits for the one on screen (upstream's `toolUseConfirmQueue`)."""
     async def go() -> list[str]:
@@ -347,7 +359,8 @@ def test_a_permission_question_is_answered_by_the_next_line(python_workspace, tm
     model = Model([[call("Bash", "b1", command="make build")], [AIMessage(content="ran it")]])
 
     async def script(repl: Repl, io: FakeIO) -> None:
-        await until(lambda: "Permission needed: Bash" in io.text())
+        # Upstream's Bash dialog: the title, then the whole command.
+        await until(lambda: "⚠ Bash command\nmake build\n" in io.text())
         io.lines.put_nowait("")  # asks again
         await until(lambda: "Choose 1-3." in io.out)
         io.lines.put_nowait("1")

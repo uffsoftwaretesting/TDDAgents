@@ -23,6 +23,7 @@ import httpx
 
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
 from app.tools.utils import get_prompt
+from app.tools.web_fetch_tool import ui
 from app.tools.web_fetch_tool.preapproved import is_preapproved_host
 from app.tools.web_fetch_tool.utils import (
     MAX_MARKDOWN_LENGTH,
@@ -198,6 +199,8 @@ def build_web_fetch_tool(*, model_for: ModelFor = default_model_for,
             "TDDAgents wants to fetch content from this URL"
 
     return build_tool(
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         name=WEB_FETCH_TOOL_NAME,
         prompt=get_prompt(PROMPT_PATH, "Fetches a URL."),
         input_schema={

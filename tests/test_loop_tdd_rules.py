@@ -133,6 +133,12 @@ def test_tool_classification_helpers():
         def is_destructive(self, input: dict[str, Any]) -> bool:
             return False
 
+        def user_facing_name(self, input: dict[str, Any] | None) -> str:
+            return self.name
+
+        def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None:
+            return None
+
         def is_implementation_writer(self) -> bool:
             raise RuntimeError("boom")
 

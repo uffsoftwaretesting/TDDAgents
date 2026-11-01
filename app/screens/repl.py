@@ -100,11 +100,19 @@ def render_message(event: Any) -> str | None:
 
 
 def render_permission_prompt(prompt: PermissionPrompt) -> str:
-    """The permission question, with its options numbered."""
+    """
+    The permission question, with its options numbered. A tool with a dialog shows it as
+    upstream's `PermissionRequest` lays it out (the full call, then why it asks); the plan
+    approval and a plan change show their own text.
+    """
     asker = f" (the {prompt.agent} agent asks)" if prompt.agent else ""
-    lines = [f"⚠ Permission needed: {prompt.tool_name} — {prompt.description}{asker}"]
-    if prompt.message:
-        lines.append(prompt.message)
+    if prompt.dialog is not None:
+        first, *rest = prompt.dialog.lines()
+        lines = [f"⚠ {first}{asker}", *rest]
+    else:
+        lines = [f"⚠ Permission needed: {prompt.tool_name} — {prompt.description}{asker}"]
+        if prompt.message:
+            lines.append(prompt.message)
     lines += [f"  {i}. {option.label}" for i, option in enumerate(prompt.options, start=1)]
     lines.append(f"Choose 1-{len(prompt.options)}; after a No you may add what to do instead (e.g. "
                  f"\"{len(prompt.options)} use the existing helper\").")

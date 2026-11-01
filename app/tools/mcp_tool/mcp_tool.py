@@ -137,6 +137,9 @@ def build_mcp_tool(client: ConnectedMCPServer, tool: Any) -> McpBuiltTool:
     destructive = bool(getattr(annotations, "destructive_hint", None) or False)
     description = tool.description or ""
     server_tool_name = tool.name
+    # `client.ts` -> `userFacingName`: the title annotation when the server gives one.
+    display_name = getattr(annotations, "title", None) or tool.name
+    user_facing = f"{client.name} - {display_name} (MCP)"
 
     async def call(input: dict[str, Any], context: Any) -> ToolResult:
         out = await call_mcp_tool(
@@ -168,6 +171,7 @@ def build_mcp_tool(client: ConnectedMCPServer, tool: Any) -> McpBuiltTool:
         map_result=map_mcp_result,
         is_mcp=True,
         max_result_size_chars=MCP_MAX_RESULT_SIZE_CHARS,
+        user_facing_name=lambda _args: user_facing,
     )
     return McpBuiltTool(
         **{f: getattr(built, f) for f in BuiltTool.__dataclass_fields__},

@@ -10,7 +10,8 @@ time this runs, so the TDD phase tier — which denies, never asks — is out of
 answer here can open a phase-forbidden write.
 
 1. PermissionRequest hooks have the first word, as upstream's race against the dialog does.
-2. Otherwise the user is asked, with the tool's options (`components/permissions/`).
+2. Otherwise the user is asked: the tool's dialog (`components/permissions/permission_request.py`,
+   upstream's `PermissionRequest`) and its options.
 3. "Yes" allows; a "don't ask again" / "during this session" choice also persists its
    permission updates and applies them to the run (re-stripped of dangerous allows).
 4. "No" rejects with upstream's `REJECT_MESSAGE`; without feedback the turn is aborted, so
@@ -38,11 +39,14 @@ from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.components.permissions.permission_dialog import PermissionDialog
 from app.components.permissions.permission_options import (
     EXIT_PLAN_MODE_TOOL_NAME,
     PermissionOption,
     permission_options,
 )
+from app.components.permissions.permission_request import permission_dialog
+from app.tdd.tdd_plan_tool.tdd_plan_tool import UPDATE_PLAN_TOOL_NAME
 from app.tools.ask_user_question_tool.ask_user_question_tool import (
     ASK_USER_QUESTION_TOOL_NAME,
 )
@@ -68,6 +72,9 @@ class PermissionPrompt:
     options: tuple[PermissionOption, ...] = field(default_factory=tuple)
     #: The agent asking, when it is not the main thread (a `bubble` agent's prompt).
     agent: str | None = None
+    #: The tool's dialog (`components/permissions/`), as upstream's `PermissionRequest` draws it.
+    #: `None` for the flows with their own text (the plan approval, a plan change).
+    dialog: PermissionDialog | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +190,8 @@ def build_interactive_can_use_tool(
             return PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input={**input_args, "answers": answers},
                                     decision_reason={"type": "user", "option": "answered"})
         options = permission_options(tool.name, input_args, result.suggestions, perm, permission_cwd(context))
+        # A plan change shows its before/after diff (its message), as ExitPlanMode shows its plan.
+        dialog = None if tool.name == UPDATE_PLAN_TOOL_NAME else permission_dialog(tool, input_args, result, context)
         answer = await ask_user(PermissionPrompt(
             tool_name=tool.name,
             description=tool.description(input_args),
@@ -190,6 +199,7 @@ def build_interactive_can_use_tool(
             input=input_args,
             options=tuple(options),
             agent=getattr(context, "agent_type", None),
+            dialog=dialog,
         ))
         choice = _chosen(options, answer.value)
         if choice.reject:

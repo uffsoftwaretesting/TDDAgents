@@ -33,6 +33,7 @@ from app.constants.api_limits import (
 )
 from app.constants.files import has_binary_extension
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tools.file_read_tool import ui
 from app.tools.utils import (
     NO_WORKSPACE,
     VALID,
@@ -310,6 +311,8 @@ def build_read_file_tool() -> BuiltTool:
         )
 
     return build_tool(
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         name="ReadFile",
         # `renderPromptTemplate` with the default limits: no max-size line, the default offset line.
         prompt=render_prompt(get_prompt(PROMPT_PATH, "Reads a file."), {"MAX_LINES_TO_READ": MAX_LINES_TO_READ},
