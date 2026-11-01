@@ -25,7 +25,7 @@ from langchain_core.messages import ToolMessage
 
 from app.services.tools.tool_execution import CANCEL_MESSAGE, run_tool_use
 from app.services.tools.tool_orchestration import apply_context_modifier
-from app.tool import Tool, ToolContext, find_tool_by_name
+from app.tool import InterruptBehavior, Tool, ToolContext, find_tool_by_name
 from app.utils.abort_controller import (
     AbortController,
     create_child_abort_controller,
@@ -191,8 +191,39 @@ class StreamingToolExecutor:
             self.turn_abort_controller.signal.aborted
             or self.tool_context.cancel.cancelled
         ):
+            # 'interrupt' means the user typed a new message while tools were running. Only
+            # cancel tools whose interruptBehavior is 'cancel'; 'block' tools keep their result.
+            if self._abort_signal_reason() == "interrupt":
+                return "user_interrupted" if self.get_tool_interrupt_behavior(tool) == "cancel" else None
             return "user_interrupted"
         return None
+
+    def _abort_signal_reason(self) -> str | None:
+        """`abortController.signal.reason`: the turn controller's, else the run's cancel token's."""
+        if self.turn_abort_controller.signal.aborted:
+            return self.turn_abort_controller.signal.reason
+        return self.tool_context.cancel.reason
+
+    def get_tool_interrupt_behavior(self, tool: TrackedTool) -> InterruptBehavior:
+        """`getToolInterruptBehavior`: `'block'` for an unknown tool, or one whose answer raises."""
+        definition = find_tool_by_name(self.tool_definitions, str(tool.tool_call.get("name") or ""))
+        if definition is None:
+            return "block"
+        try:
+            return definition.interrupt_behavior()
+        except Exception:  # noqa: BLE001 - upstream: a raising interruptBehavior counts as 'block'
+            return "block"
+
+    def update_interruptible_state(self) -> None:
+        """
+        `updateInterruptibleState`: tell the REPL whether every executing tool would be
+        cancelled by a new message (it then aborts the turn with reason `'interrupt'`).
+        """
+        report = self.tool_context.set_has_interruptible_tool_in_progress
+        if report is None:
+            return
+        executing = [t for t in self._tools if t.status == "executing"]
+        report(bool(executing) and all(self.get_tool_interrupt_behavior(t) == "cancel" for t in executing))
 
     def create_synthetic_error_message(
         self,
@@ -244,6 +275,7 @@ class StreamingToolExecutor:
         """
         Execute tool call under the three-controller abort tree (F3).
         """
+        self.update_interruptible_state()
         initial_abort = self.get_abort_reason(tool)
         if initial_abort:
             tool.results = [
@@ -252,6 +284,7 @@ class StreamingToolExecutor:
                 )
             ]
             tool.status = "completed"
+            self.update_interruptible_state()
             self.tool_context.in_flight_tool_ids.discard(tool.id)
             self._progress_event.set()
             self._process_queue()
@@ -272,7 +305,7 @@ class StreamingToolExecutor:
                 and not self.discarded
             ):
                 self.turn_abort_controller.abort(reason)
-                self.tool_context.cancel.cancel()
+                self.tool_context.cancel.cancel(reason)
 
         tool_abort_controller.signal.add_listener(on_tool_abort)
 
@@ -336,6 +369,7 @@ class StreamingToolExecutor:
         tool.results = messages
         tool.context_modifiers = context_modifiers
         tool.status = "completed"
+        self.update_interruptible_state()
         self.tool_context.in_flight_tool_ids.discard(tool.id)
 
         # Apply context modifiers in order for non-concurrent tools

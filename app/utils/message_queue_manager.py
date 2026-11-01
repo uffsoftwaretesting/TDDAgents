@@ -3,7 +3,7 @@ The run's command queue (Phase 8).
 
 Ported from `reference/claude-code/src/utils/messageQueueManager.ts` (`enqueue`,
 `enqueuePendingNotification`, `dequeue`, `peek`, `dequeueAllMatching`, `remove`,
-`getCommandsByMaxPriority`, `isSlashCommand`). Upstream's queue is a process-global singleton
+`getCommandsByMaxPriority`, `isSlashCommand`, `subscribeToCommandQueue`). Upstream's queue is a process-global singleton
 shared by the coordinator and every in-process worker; here it is one object per run, carried
 on `ToolContext.command_queue` and shared by reference with every worker, which is the same
 sharing.
@@ -57,6 +57,22 @@ class CommandQueue:
 
     def __init__(self) -> None:
         self._commands: list[QueuedCommand] = []
+        self._subscribers: list[Callable[[], None]] = []
+
+    def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """`subscribeToCommandQueue`: `listener` runs after every change; the result unsubscribes."""
+        self._subscribers.append(listener)
+
+        def unsubscribe() -> None:
+            if listener in self._subscribers:
+                self._subscribers.remove(listener)
+
+        return unsubscribe
+
+    def _notify(self) -> None:
+        """`notifySubscribers`."""
+        for listener in tuple(self._subscribers):
+            listener()
 
     def __len__(self) -> int:
         return len(self._commands)
@@ -72,10 +88,12 @@ class CommandQueue:
     def enqueue(self, command: QueuedCommand) -> None:
         """`enqueue`: priority defaults to `next`."""
         self._commands.append(replace(command, priority=command.priority or "next"))
+        self._notify()
 
     def enqueue_pending_notification(self, command: QueuedCommand) -> None:
         """`enqueuePendingNotification`: priority defaults to `later`, so input is never starved."""
         self._commands.append(replace(command, priority=command.priority or "later"))
+        self._notify()
 
     def _best(self, filter: Callable[[QueuedCommand], bool] | None) -> int:
         best_index, best_priority = -1, len(PRIORITY_ORDER)
@@ -89,7 +107,11 @@ class CommandQueue:
     def dequeue(self, filter: Callable[[QueuedCommand], bool] | None = None) -> QueuedCommand | None:
         """`dequeue`: the highest-priority command passing `filter`, FIFO within a level."""
         index = self._best(filter)
-        return None if index == -1 else self._commands.pop(index)
+        if index == -1:
+            return None
+        command = self._commands.pop(index)
+        self._notify()
+        return command
 
     def peek(self, filter: Callable[[QueuedCommand], bool] | None = None) -> QueuedCommand | None:
         """`peek`: as `dequeue`, without removing."""
@@ -101,12 +123,16 @@ class CommandQueue:
         matched = [c for c in self._commands if predicate(c)]
         if matched:
             self._commands = [c for c in self._commands if not predicate(c)]
+            self._notify()
         return matched
 
     def remove(self, commands: Iterable[QueuedCommand]) -> None:
         """`remove`: by identity."""
         doomed = {id(c) for c in commands}
+        before = len(self._commands)
         self._commands = [c for c in self._commands if id(c) not in doomed]
+        if len(self._commands) != before:
+            self._notify()
 
     def get_commands_by_max_priority(self, max_priority: QueuePriority) -> list[QueuedCommand]:
         """`getCommandsByMaxPriority`: every command at or above `max_priority`, in queue order."""

@@ -126,10 +126,10 @@ def bridge_cancel_token(
     ctrl = controller if controller is not None else AbortController()
 
     if cancel_token.cancelled and not ctrl.signal.aborted:
-        ctrl.abort("token_cancelled")
+        ctrl.abort(cancel_token.reason or "token_cancelled")
 
     def on_abort(reason: str | None) -> None:
-        cancel_token.cancelled = True
+        cancel_token.cancel(reason)
 
     ctrl.signal.add_listener(on_abort)
     return cancel_token, ctrl

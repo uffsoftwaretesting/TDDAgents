@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import tempfile
 import uuid
@@ -78,6 +79,7 @@ from app.tool import Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.tools.tools import assemble_tool_pool
 from app.types.permissions import PermissionMode, ToolPermissionContext
+from app.utils.claudemd import is_env_truthy
 from app.utils.hooks.hooks import HookDispatcher
 from app.utils.message_queue_manager import CommandQueue, QueuedCommand
 from app.utils.permissions.permission_setup import set_permission_mode
@@ -482,6 +484,7 @@ async def open_session_run(
             config, replace(deps, emit_event=_both(recorder, deps.emit_event)), transcript=transcript,
             session_id=run_id, cost_tracker=ctx.cost_tracker, context=ctx,
         )
+        unsubscribe = ctx.command_queue.subscribe(lambda: interrupt_on_now_priority(engine, ctx.command_queue))
         try:
             yield DevelopmentRun(
                 run_id=run_id, config=config, store=store, ctx=ctx, engine=engine, transcript=transcript
@@ -490,6 +493,7 @@ async def open_session_run(
             from app.context import reset_session_context
             from app.utils.hooks.hooks import execute_session_end_hooks
 
+            unsubscribe()
             # Upstream's `registerCleanup` per shell task: nothing the session started outlives it.
             kill_all_shell_tasks(store.get, store.update)
             await hook_dispatcher.drain_background()
@@ -502,6 +506,15 @@ async def open_session_run(
                 shutil.rmtree(memory_root, ignore_errors=True)
     finally:
         await mcp.aclose()
+
+
+def interrupt_on_now_priority(engine: QueryEngine, queue: CommandQueue) -> None:
+    """
+    `print.ts` / `REPL.tsx`: abort the turn in flight with reason `'interrupt'` when a `'now'`
+    priority command arrives (equivalent to Esc + send; 'block' tools keep running).
+    """
+    if engine.running and queue.get_commands_by_max_priority("now"):
+        engine.interrupt("interrupt")
 
 
 async def connect_mcp_servers(root_dir: Path, locations: SettingsLocations) -> Any:
@@ -595,6 +608,10 @@ def _prompt_text(message: Any) -> str:
     )
 
 
+#: `CLAUDE_CODE_RESUME_INTERRUPTED_TURN`: auto-resume an interrupted turn on restart.
+RESUME_INTERRUPTED_TURN_ENV = "TDDAGENTS_RESUME_INTERRUPTED_TURN"
+
+
 async def load_initial_messages(
     ctx: Any, transcript: TranscriptStore, sub_req: str, model: str, *, resume_prompt: str | None = None
 ) -> tuple[Any, str]:
@@ -603,7 +620,8 @@ async def load_initial_messages(
     from and the prompt it submits.
 
     With a transcript on disk the conversation is resumed (`loadConversationForResume`, whose
-    SessionStart hooks run with source `resume`); an interrupted turn is taken out and its
+    SessionStart hooks run with source `resume`); with `TDDAGENTS_RESUME_INTERRUPTED_TURN`
+    (upstream's `CLAUDE_CODE_RESUME_INTERRUPTED_TURN`) an interrupted turn is taken out and its
     prompt submitted again, else `resume_prompt` (the sub-requirement when there is none) is
     the prompt. Without one the run starts fresh with SessionStart (`startup`).
     """
@@ -619,7 +637,7 @@ async def load_initial_messages(
     history: list[Any] = list(resumed.messages)
     prompt = resume_prompt if resume_prompt is not None else sub_req
     interruption = resumed.turn_interruption_state
-    if interruption.message is not None:
+    if interruption.message is not None and is_env_truthy(os.environ.get(RESUME_INTERRUPTED_TURN_ENV)):
         logger.info("Auto-resuming interrupted turn (kind: %s)", interruption.kind)
         history = remove_interrupted_message(history, interruption.message)
         prompt = _prompt_text(interruption.message)
@@ -783,6 +801,7 @@ __all__ = [
     "build_builtin_tools",
     "coordinator_context",
     "first_prompts",
+    "interrupt_on_now_priority",
     "load_initial_messages",
     "main_thread_tools",
     "next_main_thread_command",

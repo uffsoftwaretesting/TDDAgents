@@ -134,7 +134,7 @@ def test_two_prompts_at_once_are_shown_one_after_the_other():
     """A background agent's prompt waits for the one on screen (upstream's `toolUseConfirmQueue`)."""
     async def go() -> list[str]:
         io = FakeIO()
-        repl = Repl(SimpleNamespace(on_message=None), io)  # type: ignore[arg-type]
+        repl = Repl(SimpleNamespace(on_message=None, ctx=SimpleNamespace()), io)  # type: ignore[arg-type]
         first = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "one", "", {}, OPTIONS)))
         second = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "two", "", {}, OPTIONS)))
         await asyncio.sleep(0.01)

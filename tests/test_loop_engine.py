@@ -412,8 +412,15 @@ class TestAllTerminalReturns:
         state.tool_context.cancel.cancel()
         model = FakeModel([[AIMessage(content="never reached")]])
         events = collect(model, state=state)
-        assert events == [Terminated(reason=Terminal.ABORTED_STREAMING)]
+        assert events == [HumanMessage(content=[{"type": "text", "text": "[Request interrupted by user]"}]),
+                          Terminated(reason=Terminal.ABORTED_STREAMING)]
         assert model.seen == []
+
+    def test_a_submit_interrupt_ends_the_turn_without_the_interruption_message(self):
+        state = start()
+        state.tool_context.cancel.cancel("interrupt")
+        events = collect(FakeModel([]), state=state)
+        assert events == [Terminated(reason=Terminal.ABORTED_STREAMING)]
 
     def test_terminal_aborted_streaming_during_call(self):
         state = start()

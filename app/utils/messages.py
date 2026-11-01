@@ -342,6 +342,8 @@ def messages_for(attachments: Sequence[HookAttachment]) -> tuple[Message, ...]:
 
 __all__ = [
     "ATTACHMENT_KEY",
+    "INTERRUPT_MESSAGE",
+    "INTERRUPT_MESSAGE_FOR_TOOL_USE",
     "HookAttachment",
     "HookBlockingError",
     "Message",
@@ -349,6 +351,7 @@ __all__ = [
     "async_hook_response_messages",
     "attachment_type_of",
     "create_attachment_message",
+    "create_user_interruption_message",
     "is_attachment_message",
     "is_hook_stopped_continuation",
     "messages_for",
@@ -357,6 +360,17 @@ __all__ = [
     "tool_calls_in",
     "wrap_in_system_reminder",
 ]
+
+
+#: `INTERRUPT_MESSAGE` / `INTERRUPT_MESSAGE_FOR_TOOL_USE` (`src/utils/messages.ts`).
+INTERRUPT_MESSAGE = "[Request interrupted by user]"
+INTERRUPT_MESSAGE_FOR_TOOL_USE = "[Request interrupted by user for tool use]"
+
+
+def create_user_interruption_message(*, tool_use: bool = False) -> HumanMessage:
+    """`createUserInterruptionMessage`: a user message with one text block."""
+    text = INTERRUPT_MESSAGE_FOR_TOOL_USE if tool_use else INTERRUPT_MESSAGE
+    return HumanMessage(content=[{"type": "text", "text": text}])
 
 
 #: `REJECT_MESSAGE` (`src/utils/messages.ts`): the user said no at a permission prompt.

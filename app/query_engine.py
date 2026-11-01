@@ -190,15 +190,20 @@ class QueryEngine:
         self.context = context
         #: What `processUserInput` made of the last prompt `submit_message` took.
         self.input_result: ProcessUserInputResult | None = None
+        #: A turn is in flight (upstream: an `abortController` exists for it).
+        self.running = False
         if context is not None:
             context.record_permission_denial = self._record_denial
 
     def _record_denial(self, tool_name: str, tool_use_id: str, tool_input: Any) -> None:
         self.permission_denials.append({"tool_name": tool_name, "tool_use_id": tool_use_id, "tool_input": tool_input})
 
-    def interrupt(self) -> None:
-        """`interrupt`: abort the turn in flight."""
-        self.context.cancel.cancel()
+    def interrupt(self, reason: str | None = None) -> None:
+        """
+        `interrupt`: abort the turn in flight. `reason` is the abort signal's (`'interrupt'` for a
+        message submitted while the turn ran, which the REPL and the `'now'` subscriber pass).
+        """
+        self.context.cancel.cancel(reason)
 
     def get_messages(self) -> list[Message]:
         """`getMessages`: the conversation as recorded."""
@@ -264,23 +269,27 @@ class QueryEngine:
         turn_count = 1
         last_stop_reason: str | None = None
         last_relevant: Message | None = None
-        async for event in run_loop(state, self.config, self.deps):
-            if isinstance(event, BaseMessage):
-                boundary = is_compact_boundary_message(event)
-                if boundary or isinstance(event, (AIMessage, HumanMessage, ToolMessage)):
-                    self.mutable_messages.append(event)
-                    self._record(self.mutable_messages)
-                if boundary:
-                    self.mutable_messages = [event]
-                if isinstance(event, (HumanMessage, ToolMessage)) and attachment_of(event) is None:
-                    turn_count += 1
-                if isinstance(event, AIMessage):
-                    last_stop_reason = normalize_stop_reason(event) or last_stop_reason
-                if _is_turn_relevant(event):
-                    last_relevant = event
-            elif isinstance(event, Terminated):
-                self.terminal = event
-            yield event
+        self.running = True
+        try:
+            async for event in run_loop(state, self.config, self.deps):
+                if isinstance(event, BaseMessage):
+                    boundary = is_compact_boundary_message(event)
+                    if boundary or isinstance(event, (AIMessage, HumanMessage, ToolMessage)):
+                        self.mutable_messages.append(event)
+                        self._record(self.mutable_messages)
+                    if boundary:
+                        self.mutable_messages = [event]
+                    if isinstance(event, (HumanMessage, ToolMessage)) and attachment_of(event) is None:
+                        turn_count += 1
+                    if isinstance(event, AIMessage):
+                        last_stop_reason = normalize_stop_reason(event) or last_stop_reason
+                    if _is_turn_relevant(event):
+                        last_relevant = event
+                elif isinstance(event, Terminated):
+                    self.terminal = event
+                yield event
+        finally:
+            self.running = False
 
         self.result = self._build_result(start, turn_count, last_stop_reason, last_relevant)
         yield self.result

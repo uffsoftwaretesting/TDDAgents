@@ -50,6 +50,7 @@ from app.utils.hooks.hooks import dispatcher_of, execute_stop_failure_hooks
 from app.utils.messages import (
     Message,
     ToolCall,
+    create_user_interruption_message,
     is_hook_stopped_continuation,
     tool_calls_in,
 )
@@ -57,6 +58,15 @@ from app.utils.tokens import token_count_with_estimation
 from app.utils.tool_result_storage import apply_tool_result_budget
 
 logger = logging.getLogger("TDDOrchestrator.Loop")
+
+
+def abort_reason(tool_context: Any, turn_controller: Any = None) -> str | None:
+    """`toolUseContext.abortController.signal.reason`: the run's cancel token's, else the turn's."""
+    reason = getattr(tool_context.cancel, "reason", None)
+    if reason is None and turn_controller is not None and turn_controller.signal.aborted:
+        return str(turn_controller.signal.reason) if turn_controller.signal.reason is not None else None
+    return reason
+
 
 #: What a run emits: every message as it is produced, then exactly one `Terminated`.
 LoopEvent: TypeAlias = Message | Terminated
@@ -193,6 +203,10 @@ async def run_loop(
     memory_prefetch = start_relevant_memory_prefetch(state.messages, state.tool_context)
     while True:
         if state.tool_context.cancel.cancelled:
+            # Skip the interruption message for submit-interrupts: the queued user message that
+            # follows provides sufficient context.
+            if abort_reason(state.tool_context) != "interrupt":
+                yield create_user_interruption_message(tool_use=False)
             term = Terminated(reason=Terminal.ABORTED_STREAMING)
             deps.emit_event(term)
             yield term
@@ -353,9 +367,15 @@ async def run_loop(
 
         if state.tool_context.cancel.cancelled or turn_controller.signal.aborted:
             if streaming_executor is not None:
+                # The executor answers the aborted tools with synthetic results.
                 async for res in streaming_executor.get_remaining_results():
                     yield res
                     early_completed_tool_results.append(res)
+            else:
+                for repair in yield_missing_tool_results(tuple(tool_calls), set(), message="Interrupted by user"):
+                    yield repair
+            if abort_reason(state.tool_context, turn_controller) != "interrupt":
+                yield create_user_interruption_message(tool_use=False)
             term = Terminated(reason=Terminal.ABORTED_STREAMING)
             deps.emit_event(term)
             yield term
@@ -433,6 +453,8 @@ async def run_loop(
                 yield wm
 
         if state.tool_context.cancel.cancelled or turn_controller.signal.aborted:
+            if abort_reason(state.tool_context, turn_controller) != "interrupt":
+                yield create_user_interruption_message(tool_use=False)
             term = Terminated(reason=Terminal.ABORTED_STREAMING)
             deps.emit_event(term)
             yield term
@@ -499,6 +521,8 @@ async def run_loop(
                 tool_results.append(result)
 
         if state.tool_context.cancel.cancelled or turn_controller.signal.aborted:
+            if abort_reason(state.tool_context, turn_controller) != "interrupt":
+                yield create_user_interruption_message(tool_use=True)
             term = Terminated(reason=Terminal.ABORTED_TOOLS)
             deps.emit_event(term)
             yield term

@@ -294,7 +294,7 @@ async def _wait_for_result(
     """
     The foreground wait: the result, or `None` once the command went to the background. After
     `PROGRESS_THRESHOLD_MS` the command is registered as a foreground task; a cancelled run
-    kills it (upstream's abort signal).
+    kills it (upstream's abort signal), unless the cancel is a submit-interrupt.
     """
     loop = asyncio.get_running_loop()
     registered = False
@@ -305,7 +305,9 @@ async def _wait_for_result(
         if backgrounded.is_set():
             return None
         cancel = getattr(context, "cancel", None)
-        if cancel is not None and cancel.cancelled:
+        # `ShellCommand#abortHandler`: on 'interrupt' (the user submitted a new message) the
+        # command is not killed; it runs on and its output reaches the model.
+        if cancel is not None and cancel.cancelled and cancel.reason != "interrupt":
             shell.kill()
         if not registered and (loop.time() - started) * 1000 >= PROGRESS_THRESHOLD_MS:
             register()
@@ -410,6 +412,8 @@ def build_bash_tool() -> BuiltTool:
         if persisted is not None:
             preview, has_more = generate_preview(stdout)
             stdout = build_large_tool_result_message(persisted[1], persisted[0], preview, has_more)
+        # An interrupted command is never a `ShellError` here (upstream's `isInterrupt` is the
+        # submit-interrupt subset of this).
         if result.code != 0 and not result.interrupted:
             # `ShellError` through `formatError`: `Exit code N`, then stderr, then the output.
             content = "\n".join(part for part in (f"Exit code {result.code}", stderr.strip(), stdout) if part)

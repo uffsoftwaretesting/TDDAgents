@@ -512,8 +512,13 @@ class CancelToken:
     """
 
     cancelled: bool = False
+    #: `AbortSignal.reason`: why the token fired (`'interrupt'` is a message the user submitted
+    #: while the turn ran), kept from the first `cancel`.
+    reason: str | None = None
 
-    def cancel(self) -> None:
+    def cancel(self, reason: str | None = None) -> None:
+        if not self.cancelled:
+            self.reason = reason
         self.cancelled = True
 
 
@@ -640,6 +645,9 @@ class ToolContext:
     #: `QueryEngine`'s `wrappedCanUseTool` bookkeeping: called with (tool name, tool use id,
     #: input) for every call whose permission ends other than `allow`. A worker shares it.
     record_permission_denial: Callable[[str, str, Any], None] | None = None
+    #: `setHasInterruptibleToolInProgress`: the streaming executor reports whether every executing
+    #: tool would be cancelled by a new user message. Only the REPL sets it.
+    set_has_interruptible_tool_in_progress: Callable[[bool], None] | None = None
 
 
 @dataclass

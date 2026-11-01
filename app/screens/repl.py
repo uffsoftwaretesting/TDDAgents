@@ -229,7 +229,13 @@ class Repl:
         self._asking = asyncio.Lock()
         self.last_terminal: Terminal | None = None
         self.exiting = False
+        #: `hasInterruptibleToolInProgressRef`: every executing tool would be cancelled by a new message.
+        self.has_interruptible_tool_in_progress = False
         run.on_message = self._show
+        run.ctx.set_has_interruptible_tool_in_progress = self._set_interruptible
+
+    def _set_interruptible(self, value: bool) -> None:
+        self.has_interruptible_tool_in_progress = value
 
     @property
     def busy(self) -> bool:
@@ -336,7 +342,11 @@ class Repl:
         if not text:
             return
         if self.busy:
-            # `handlePromptSubmit` while busy: queued for the loop to hand over between tool rounds.
+            # `handlePromptSubmit` while busy: when every executing tool is a 'cancel' one, the
+            # turn is aborted ('interrupt') first; then the message is queued for the loop to
+            # hand over between tool rounds.
+            if self.has_interruptible_tool_in_progress:
+                self.run.engine.interrupt("interrupt")
             self.run.ctx.command_queue.enqueue(QueuedCommand(value=text, mode="prompt", priority="next"))
             self.io.write("(queued for the agents)")
             return

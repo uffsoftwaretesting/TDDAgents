@@ -10,6 +10,7 @@ import re
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import app.cli.print as runner_mod
@@ -134,7 +135,8 @@ def _seed_transcript(tmp_path, messages: list[Any]) -> None:
     store.record_transcript(messages)
 
 
-def test_an_interrupted_prompt_is_submitted_again_once(make_fake_workspace, tmp_path) -> None:
+def test_an_interrupted_prompt_is_submitted_again_once(make_fake_workspace, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TDDAGENTS_RESUME_INTERRUPTED_TURN", "1")
     _seed_transcript(tmp_path, [HumanMessage(content="the spec"), AIMessage(content="working"),
                                 HumanMessage(content="also handle negatives")])
     seen: list[Any] = []
@@ -146,7 +148,8 @@ def test_an_interrupted_prompt_is_submitted_again_once(make_fake_workspace, tmp_
     assert texts.index("working") < texts.index("also handle negatives")
 
 
-def test_a_mid_turn_interruption_continues_from_where_it_left_off(make_fake_workspace, tmp_path) -> None:
+def test_a_mid_turn_interruption_continues_from_where_it_left_off(make_fake_workspace, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TDDAGENTS_RESUME_INTERRUPTED_TURN", "1")
     call = {"id": "t1", "name": "Glob", "args": {"pattern": "*"}}
     _seed_transcript(tmp_path, [HumanMessage(content="the spec"), AIMessage(content="", tool_calls=[call]),
                                 ToolMessage(content="no files", tool_call_id="t1")])
@@ -156,6 +159,26 @@ def test_a_mid_turn_interruption_continues_from_where_it_left_off(make_fake_work
     assert texts.count(CONTINUATION_MESSAGE) == 1
     assert texts.count("the spec") == 1
     assert "no files" in texts
+
+
+@pytest.mark.parametrize("value", [None, "0", "false"])
+def test_without_the_env_an_interrupted_turn_is_not_replayed(
+    make_fake_workspace, tmp_path, monkeypatch, value
+) -> None:
+    # `CLAUDE_CODE_RESUME_INTERRUPTED_TURN` gates it upstream: the history is kept as it is and the
+    # sub-requirement is the new prompt, so an Esc'd turn's interruption text is never resubmitted.
+    if value is None:
+        monkeypatch.delenv("TDDAGENTS_RESUME_INTERRUPTED_TURN", raising=False)
+    else:
+        monkeypatch.setenv("TDDAGENTS_RESUME_INTERRUPTED_TURN", value)
+    _seed_transcript(tmp_path, [HumanMessage(content="the spec"), AIMessage(content="working"),
+                                HumanMessage(content="[Request interrupted by user]")])
+    seen: list[Any] = []
+    _run(make_fake_workspace, _recording_model(seen), tmp_path)
+    texts = _texts(seen[0][0].messages)
+    assert texts.count("[Request interrupted by user]") == 1
+    assert texts.count("the spec") == 2
+    assert texts.index("[Request interrupted by user]") < len(texts) - 1
 
 
 def test_an_empty_transcript_starts_fresh(make_fake_workspace, tmp_path) -> None:
