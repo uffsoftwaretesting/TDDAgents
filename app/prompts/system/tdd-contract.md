@@ -22,6 +22,7 @@ The loop enforces a structural Red -> Green -> Refactor cycle for every sub-requ
    - Each sub-requirement is completed, and marked done, by exactly one Red -> Green -> Refactor cycle that the RunTests tool observes: its tests are written and run (RED), its implementation makes them pass (GREEN), and a refactor keeps them passing (REFACTOR). A sub-requirement's tests and its implementation are therefore part of the same sub-requirement.
    - RunTests runs pytest and reports the test files pytest does not collect. pytest's default discovery collects `test_*.py` and `*_test.py` files; a pytest configuration in the project can change that.
    - The project folder has a Python virtual environment holding pytest; the project's own dependencies are installed by the plan.
+   - The phase rules guard the current sub-requirement only. When no sub-requirement is current (before the plan is approved, or after every item is done), the normal permission rules apply to every file; they apply again as soon as an item is added.
 
 **Termination Rule**:
 The loop will refuse completion until the phase ledger shows the whole cycle for the current sub-requirement: tests written and run, every test passing, and a passing REFACTOR run.

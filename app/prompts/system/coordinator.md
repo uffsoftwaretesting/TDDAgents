@@ -47,7 +47,7 @@ Every run keeps a phase ledger. Only `{{RUN_TESTS_TOOL_NAME}}` writes what was o
 - `{{REFACTORER}}` can start only after the tests passed GREEN.
 - `{{TESTER}}` can always start. Spawning it after RED restarts the cycle: the tests must be changed and run again.
 
-A spawn the cycle forbids fails with the reason. Read it, and spawn the worker the cycle needs instead. Files outside the current phase are refused to every worker: implementation cannot be written in RED, and tests cannot be edited in GREEN. In REFACTOR both may change.
+A spawn the cycle forbids fails with the reason. Read it, and spawn the worker the cycle needs instead. While a sub-requirement is current, files outside its phase are refused to every worker: implementation cannot be written in RED, and tests cannot be edited in GREEN. In REFACTOR both may change.
 
 ### Order
 

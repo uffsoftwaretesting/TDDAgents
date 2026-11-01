@@ -47,6 +47,7 @@ from app.types.permissions import (
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
 from tests.conftest import FakeWorkspace
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 
 def make_test_tool(name: str, *, is_impl: bool = False, is_test: bool = False) -> BuiltTool:
@@ -163,7 +164,7 @@ class TestInvariant1NoImplementationWriterInRedPool:
     def test_property_1_runtime_gate_denies_implementation_writers_in_red(self):
         async def go():
             for ledger in self.reachable_red_ledger_states():
-                store = AppStateStore(AppState(phase_ledger=ledger))
+                store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger))
                 perm_ctx = ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS)
                 ctx = tool_context_for(store, permission_context=perm_ctx)
 

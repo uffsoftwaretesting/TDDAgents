@@ -29,6 +29,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 from tests.test_mcp_client import demo_server
 
 
@@ -170,7 +171,8 @@ def gate(tool: Any, *, allow: tuple[str, ...] = (), phase: TddPhase = TddPhase.R
         always_allow_rules=tuple(PermissionRule(tool_name=a) for a in allow),
         should_avoid_permission_prompts=True,
     )
-    store = AppStateStore(state=AppState(phase_ledger=PhaseLedger(phase=phase), tool_permission_context=perm))
+    store = AppStateStore(state=AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=phase),
+                                         tool_permission_context=perm))
     ctx = tool_context_for(store, workspace=SimpleNamespace(root="/w"))
     return asyncio.run(has_permissions_to_use_tool(tool, {}, ctx, "tu"))
 

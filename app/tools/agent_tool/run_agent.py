@@ -155,9 +155,9 @@ def _phase_filtered_pool(
 
     def refresh() -> tuple[Any, ...]:
         state = get_app_state()
-        ledger = state.phase_ledger
+        ledger = state.phase_ledger if state.tdd_plan.current is not None else None
         permission_context = state.tool_permission_context
-        key = (ledger.phase, permission_context.always_deny_rules)
+        key = (ledger.phase if ledger is not None else None, permission_context.always_deny_rules)
         if cache["key"] != key:
             cache["key"] = key
             cache["tools"] = assemble_tool_pool(resolved, phase_ledger=ledger, permission_context=permission_context)

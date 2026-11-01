@@ -257,8 +257,9 @@ def build_agent_tool(
         if background_enabled:
             refuse_background_phase_agent(agent, requested_background)
         run_async = background_enabled and agent.phase is None and (requested_background or is_coordinator)
-        ledger = context.get_app_state().phase_ledger
-        spawn_ledger = phase_on_spawn(ledger, agent)
+        spawn_state = context.get_app_state()
+        ledger = spawn_state.phase_ledger
+        spawn_ledger = phase_on_spawn(spawn_state, agent)
         if spawn_ledger is not ledger:
             baseline = spawn_test_baseline(spawn_ledger, context)
             context.set_app_state(lambda s: replace(s, phase_ledger=spawn_ledger, tdd_item_test_baseline=baseline))

@@ -31,6 +31,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 
 def make_dummy_tool(
@@ -452,7 +453,7 @@ class TestRuntimePermissionGatePhaseRules:
 
     def test_red_phase_denies_implementation_writer_even_in_bypass_mode(self):
         async def go():
-            store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+            store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
             perm_ctx = ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS)
             ctx = tool_context_for(store, permission_context=perm_ctx)
 
@@ -465,7 +466,7 @@ class TestRuntimePermissionGatePhaseRules:
 
     def test_red_phase_denies_generic_writer_targeting_production_file(self):
         async def go():
-            store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+            store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
             ctx = tool_context_for(store)
 
             write_tool = make_dummy_tool("WriteFile")
@@ -482,7 +483,7 @@ class TestRuntimePermissionGatePhaseRules:
     def test_green_phase_denies_test_writer_even_in_bypass_mode(self):
         async def go():
             store = AppStateStore(
-                AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
+                AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
             )
             perm_ctx = ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS)
             ctx = tool_context_for(store, permission_context=perm_ctx)
@@ -497,7 +498,7 @@ class TestRuntimePermissionGatePhaseRules:
     def test_green_phase_denies_generic_writer_targeting_test_file(self):
         async def go():
             store = AppStateStore(
-                AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
+                AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
             )
             ctx = tool_context_for(store)
 
@@ -515,7 +516,7 @@ class TestRuntimePermissionGatePhaseRules:
     def test_run_tests_is_never_denied_in_any_phase(self):
         async def go():
             for phase in (TddPhase.RED, TddPhase.GREEN, TddPhase.REFACTOR):
-                store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=phase)))
+                store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=phase)))
                 ctx = tool_context_for(store)
                 res = await has_permissions_to_use_tool(RunTests, {}, ctx)
                 assert res.behavior == "allow"

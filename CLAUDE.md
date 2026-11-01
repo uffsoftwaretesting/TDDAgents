@@ -108,7 +108,8 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
    forked skills) and plan changes may move the phase or reset evidence, never create it.
    `test_run_tests_is_the_only_ledger_writer` pins exactly this. The ledger is **never
    restored** on resume; RED must be observed again.
-2. **The phase permission tier**, in the gate above step 1a, **failing closed**:
+2. **The phase permission tier**, in the gate above step 1a, **failing closed**, **only while
+   the plan has a current item** (an empty or finished plan leaves the normal rules in charge):
    RED writes tests only, GREEN production only (tests locked), REFACTOR both. It covers the
    file tools, Bash redirect targets and the pool's deny rules. Agent memory and the session
    plan file are exempt in every phase. A PreToolUse hook's `allow`, a hook `ask`, an

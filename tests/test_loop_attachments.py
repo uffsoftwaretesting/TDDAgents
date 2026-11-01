@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import app.utils.attachments as dates_mod
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
+from app.tdd.plan import TddPlan
 from app.tdd.tdd_state_attachment import create_tdd_state_attachment_message
 from app.tool import tool_context_for
 from app.tools.todo_write_tool.todo_write_tool import TodoItem
@@ -503,18 +504,21 @@ def test_mcp_instructions_delta(monkeypatch):
 def test_tdd_state_is_announced_once_until_the_ledger_moves():
     ctx = ctx_for()
     (att,) = [a for a in run(get_attachments(ctx, [])) if a.type == "tdd_state"]
+    # No plan, so no current sub-requirement: the state says the phase rules are off.
     assert att.data == {"phase": "RED", "tests_written": False, "green_passed": False, "refactor_passed": False,
-                        "coverage": None}
+                        "coverage": None, "phase_rules": "off"}
     history = create_attachment_messages(att)
     assert history[0].content == wrap_in_system_reminder(
         "TDD phase ledger (written only by RunTests from observed test runs):\n"
-        "Current Phase: RED\nTests Written: False\nGreen Passed: False\nRefactor Passed: False\nCoverage: not measured"
+        "Current Phase: RED\nTests Written: False\nGreen Passed: False\nRefactor Passed: False\n"
+        "Coverage: not measured\n"
+        "Phase rules: not applied, because no sub-requirement is current; they apply again when one is added."
     )
     assert [a for a in run(get_attachments(ctx, history)) if a.type == "tdd_state"] == []
     moved = ctx_for(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     (again,) = [a for a in run(get_attachments(moved, history)) if a.type == "tdd_state"]
     assert again.data == {"phase": "GREEN", "tests_written": True, "green_passed": False, "refactor_passed": False,
-                          "coverage": None}
+                          "coverage": None, "phase_rules": "off"}
 
 
 def test_post_compaction_tdd_state_carries_the_runtests_evidence():
@@ -535,7 +539,7 @@ def test_post_compaction_tdd_state_carries_the_runtests_evidence():
 
 
 def test_a_post_compaction_announcement_counts_for_dedup():
-    msg = create_tdd_state_attachment_message(PhaseLedger(), None, after_compaction=True)
+    msg = create_tdd_state_attachment_message(PhaseLedger(), None, after_compaction=True, plan=TddPlan())
     assert [a for a in run(get_attachments(ctx_for(), [msg])) if a.type == "tdd_state"] == []
 
 

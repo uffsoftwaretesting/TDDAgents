@@ -25,6 +25,7 @@ from app.types.permissions import PermissionMode
 from app.workspace.local import LocalWorkspace, workspaces_root
 from app.workspace.project import SHIPPED_SETTINGS, prepare_project
 from tests.conftest import FakeWorkspace
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -122,7 +123,7 @@ def skip_lines(phase: TddPhase) -> list[str]:
 @pytest.mark.parametrize("phase", [TddPhase.GREEN, TddPhase.REFACTOR])
 def test_a_pass_with_skips_does_not_pass_green_or_refactor(phase):
     ledger = PhaseLedger(phase=phase, tests_written=True, green_passed=phase == TddPhase.REFACTOR)
-    store = AppStateStore(AppState(phase_ledger=ledger))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger))
     result = SuiteExecutionResult(exit_code=0, stdout="== 3 passed, 1 skipped ==")
     res = asyncio.run(build_run_tests_tool(lambda p: result).call({}, tool_context_for(store)))
     assert res.content.split("\n\n", 1)[0].splitlines() == skip_lines(phase)
@@ -131,7 +132,8 @@ def test_a_pass_with_skips_does_not_pass_green_or_refactor(phase):
 
 
 def test_an_injected_runner_can_report_its_skips():
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                   phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     result = SuiteExecutionResult(exit_code=0, stdout="all good", skipped=1)
     asyncio.run(build_run_tests_tool(lambda p: result).call({}, tool_context_for(store)))
     assert store.get().phase_ledger.phase == TddPhase.GREEN
@@ -154,7 +156,8 @@ def test_real_pytest_skips_keep_green_until_the_tool_is_there(python_workspace):
     ws.write_file("tests/test_calc.py", (
         "import pytest\nfrom calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n"
         "\n\ndef test_lint():\n    pytest.importorskip('not_installed_anywhere')\n"))
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                   phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
     assert res.exit_code == 0 and "Skipped: 1\n" in res.content
     assert skip_lines(TddPhase.GREEN)[-1] in res.content

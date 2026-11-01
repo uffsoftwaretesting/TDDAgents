@@ -29,7 +29,7 @@ from app.utils.messages import ATTACHMENT_KEY, Message, wrap_in_system_reminder
 from app.utils.tool_result_storage import PREVIEW_SIZE_BYTES
 
 _LEDGER_FIELDS = ("phase", "tests_written", "green_passed", "refactor_passed", "coverage", "sub_requirement",
-                  "plan_progress")
+                  "plan_progress", "phase_rules")
 
 
 def tdd_state_data(ledger: PhaseLedger, plan: TddPlan | None = None) -> dict[str, Any]:
@@ -42,6 +42,9 @@ def tdd_state_data(ledger: PhaseLedger, plan: TddPlan | None = None) -> dict[str
         current = plan.current
         data["sub_requirement"] = f"{current.id}. {current.text}" if current is not None else None
         data["plan_progress"] = f"{plan.done_count}/{len(plan.items)}"
+    if plan is not None and plan.current is None:
+        # No current sub-requirement: the phase rules are off (user decision 2026-10-31).
+        data["phase_rules"] = "off"
     return data
 
 

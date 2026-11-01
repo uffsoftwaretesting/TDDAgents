@@ -15,6 +15,7 @@ from app.tools.agent_tool.load_agents_dir import AgentDefinition
 from app.tools.agent_tool.run_agent import create_agent_id, run_agent
 from app.types.permissions import PermissionMode, ToolPermissionContext
 from app.utils.session_storage import TranscriptStore
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 from tests.test_loop_engine import CONFIG, FakeModel, asks_for, make_fake_deps
 
 TESTER = AgentDefinition(name="tester", description="writes tests", prompt="You write tests.", phase=TddPhase.RED)
@@ -74,7 +75,7 @@ def test_the_worker_starts_from_its_prompt_with_its_own_identity():
 
 
 def test_a_sync_worker_shares_the_parents_ledger():
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger()))
 
     async def run_tests(args, ctx):
         ctx.set_app_state(lambda s: dataclasses.replace(
@@ -90,7 +91,7 @@ def test_a_sync_worker_shares_the_parents_ledger():
 
 
 def test_an_async_worker_cannot_write_the_parents_state():
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger()))
     model, _ = _run(parent=_parent(store), is_async=True)
     ctx = model.seen[0].tool_context
     ctx.set_app_state(lambda s: dataclasses.replace(s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN)))
@@ -127,7 +128,7 @@ def test_the_worker_pool_is_resolved_and_phase_filtered():
 
 
 def test_the_worker_pool_follows_the_phase_between_turns():
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger()))
     tools = (_tool("ReadFile"), _tool("SrcWriter", impl_writer=True))
     model, _ = _run(tools=tools, parent=_parent(store))
     refresh = model.seen[0].tool_context.refresh_tools
@@ -277,8 +278,15 @@ def test_an_async_worker_only_gets_the_async_allowed_tools():
 
 def test_the_phase_denies_the_implementation_writer_in_red():
     tools = (_tool("ReadFile"), _tool("WriteFile", impl_writer=True))
-    model, _ = _run(tools=tools)
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN))
+    model, _ = _run(tools=tools, parent=_parent(store))
     assert [t.name for t in model.seen[0].tool_context.tools] == ["ReadFile"]
+
+
+def test_without_a_current_item_the_worker_pool_has_no_phase_rules():
+    tools = (_tool("ReadFile"), _tool("WriteFile", impl_writer=True))
+    model, _ = _run(tools=tools)
+    assert [t.name for t in model.seen[0].tool_context.tools] == ["ReadFile", "WriteFile"]
 
 
 def test_the_context_omissions_follow_the_definition():
@@ -389,7 +397,7 @@ def test_a_compact_boundary_is_recorded_in_the_sidechain(tmp_path):
 def test_an_async_worker_writes_task_state_through_to_the_root():
     """Upstream's `setAppStateForTasks`: a background worker's task writes reach the root store,
     while everything else it writes (the ledger above all) is discarded."""
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger()))
     model, _ = _run(parent=_parent(store), is_async=True)
     ctx = model.seen[0].tool_context
     ctx.set_app_state(lambda s: dataclasses.replace(

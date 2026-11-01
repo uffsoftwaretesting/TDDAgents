@@ -27,6 +27,7 @@ from app.types.hooks import AggregatedHookResult
 from app.types.permissions import ToolPermissionContext
 from app.utils.messages import HookBlockingError
 from tests.hook_doubles import ScriptedDispatcher
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 SCHEMA = {
     "type": "object",
@@ -40,7 +41,8 @@ def call(tool_name: str = "WriteFile", call_id: str = "c1", **args: Any) -> dict
 
 
 def context(ledger: PhaseLedger | None = None, **kwargs: Any) -> Any:
-    store = AppStateStore(AppState(phase_ledger=ledger)) if ledger is not None else AppStateStore()
+    store = (AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger)) if ledger is not None
+             else AppStateStore())
     return tool_context_for(
         store,
         permission_context=ToolPermissionContext(should_avoid_permission_prompts=True),

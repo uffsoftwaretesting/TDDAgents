@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage
 
 import app.utils.glob as glob_util
 from app.services.tools.tool_execution import run_tool_use
-from app.state.app_state_store import AppStateStore
+from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_permissions import check_tdd_phase_permission
 from app.tool import tool_context_for
@@ -62,6 +62,7 @@ from app.utils.file import FILE_NOT_FOUND_CWD_NOTE, add_line_numbers
 from app.utils.file_state_cache import FileState
 from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 L1, R1, L2, R2 = "‘", "’", "“", "”"
 
@@ -668,7 +669,7 @@ def test_edit_through_pipeline():
     """Validation runs before the TDD gate; RED permits test files only."""
     path = "tests/test_f.py"
     ws = FakeWorkspace(files={path: "abc", "src/m.py": "abc"})
-    ctx = ctx_for(ws)
+    ctx = tool_context_for(AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN)), workspace=ws)
     ctx.permission_context = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
     msg = via_pipeline(build_edit_tool, edit_args(path=path), ctx)
     assert msg.content == f"<tool_use_error>{FILE_NOT_READ_ERROR}</tool_use_error>"

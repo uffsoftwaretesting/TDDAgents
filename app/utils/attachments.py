@@ -398,6 +398,12 @@ def _async_hook_response(data: Mapping[str, Any]) -> list[str]:
 TDD_STATE_HEADER = "TDD phase ledger (written only by RunTests from observed test runs):"
 
 
+#: The state line when no sub-requirement is current (user decision 2026-10-31).
+NO_CURRENT_ITEM_LINE = (
+    "Phase rules: not applied, because no sub-requirement is current; they apply again when one is added."
+)
+
+
 def _coverage_text(coverage: Any) -> str:
     return "not measured" if coverage is None else f"{coverage:.1f}%"
 
@@ -415,6 +421,8 @@ def tdd_state_lines(data: Mapping[str, Any]) -> list[str]:
     if "plan_progress" in data:
         lines.append(f"Current Sub-requirement: {data.get('sub_requirement') or '(all done)'}")
         lines.append(f"Sub-requirements Done: {data['plan_progress']}")
+    if data.get("phase_rules") == "off":
+        lines.append(NO_CURRENT_ITEM_LINE)
     return lines
 
 

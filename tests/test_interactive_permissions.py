@@ -68,6 +68,7 @@ from app.utils.permissions.shell_rule_matching import (
 )
 from app.utils.settings.settings import build_tool_permission_context
 from tests.conftest import FakeWorkspace
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 LOCAL = PermissionRuleSource.LOCAL_SETTINGS
 SESSION = PermissionRuleSource.SESSION
@@ -334,7 +335,7 @@ def test_an_answer_naming_no_option_is_a_no(tmp_path: Path):
 
 def test_the_tdd_tier_denies_before_any_question(tmp_path: Path):
     asker = Asker()
-    ctx = interactive_context(tmp_path, asker, mode="bypassPermissions")
+    ctx = interactive_context(tmp_path, asker, mode="bypassPermissions", plan=CURRENT_ITEM_PLAN)
     out = call(build_write_file_tool(), {"file_path": "calculator.py", "content": "x"}, ctx)
     assert out.message.status == "error"
     assert asker.prompts == []

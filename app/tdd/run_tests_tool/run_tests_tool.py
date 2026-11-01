@@ -334,6 +334,14 @@ _NOT_PASSED: dict[Outcome, str] = {
 }
 
 
+#: The ledger line when no sub-requirement is current: the phase rules do not apply then
+#: (user decision 2026-10-31), so the run is reported without a rule it could meet.
+NO_CURRENT_ITEM_LEDGER = (
+    "TDD ledger: no sub-requirement is current, so the phase rules do not apply and this run is "
+    "not evidence for a cycle."
+)
+
+
 def ledger_line(before: PhaseLedger, after: PhaseLedger, *, outcome: Outcome, facts: RunFacts) -> str:
     """The ledger change, the phase's rule, and the observed facts that met it or did not."""
     phase = TddPhase(before.phase)
@@ -419,7 +427,8 @@ def build_run_tests_tool(
                 s, phase_ledger=s.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage),
                 last_test_run=record)
         )
-        line = ledger_line(before.phase_ledger, after, outcome=outcome, facts=facts)
+        line = (ledger_line(before.phase_ledger, after, outcome=outcome, facts=facts)
+                if before.tdd_plan.current is not None else NO_CURRENT_ITEM_LEDGER)
         return ToolResult(content=render_result(exec_result, facts, line), is_error=is_error, exit_code=code)
 
     prompt_text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]

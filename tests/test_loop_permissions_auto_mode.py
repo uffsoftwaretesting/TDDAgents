@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.services.tools.tool_execution import run_tool_use
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.plan import TddPlan
 from app.tool import DenialTrackingBox, ToolResult, build_tool, tool_context_for
 from app.types.hooks import AggregatedHookResult
 from app.types.permissions import (
@@ -34,6 +35,7 @@ from app.utils.permissions.yolo_classifier import (
     build_yolo_rejection_message,
 )
 from tests.hook_doubles import ScriptedDispatcher
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK
 AUTO = ToolPermissionContext(mode=PermissionMode.AUTO, should_avoid_permission_prompts=True)
@@ -77,8 +79,10 @@ class AskTool:
 
 
 def ctx_for(perm=AUTO, classifier=None, denial=None, ledger=None, local_denial_tracking=None, **kw):
+    # A given ledger means the test is about the phase tier, which needs a current item.
     state = AppState(tool_permission_context=perm, denial_tracking=denial,
-                     phase_ledger=ledger if ledger is not None else PhaseLedger())
+                     phase_ledger=ledger if ledger is not None else PhaseLedger(),
+                     tdd_plan=CURRENT_ITEM_PLAN if ledger is not None else TddPlan())
     store = AppStateStore(state=state)
     ctx = tool_context_for(store, messages=(HumanMessage(content="task"),), run_id="r1", **kw)
     from dataclasses import replace

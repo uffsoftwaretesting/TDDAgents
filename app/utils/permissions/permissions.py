@@ -418,7 +418,8 @@ def extract_permission_context(context: ToolContext) -> ToolPermissionContext:
 
 def tdd_phase_denial(tool: Tool, input_args: dict[str, Any], context: ToolContext) -> PermissionResult | None:
     """
-    The TDD managed tier: a deny when the ledger's phase forbids this call, else `None`.
+    The TDD managed tier: a deny when the ledger's phase forbids this call, else `None`. It
+    applies only while the plan has a current sub-requirement.
 
     It runs before every rule, mode and hook — in the gate and in the rule-only re-check of
     a hook verdict alike — so that no allow path can reach past it. It fails closed: a check
@@ -426,8 +427,11 @@ def tdd_phase_denial(tool: Tool, input_args: dict[str, Any], context: ToolContex
     switched off.
     """
     try:
-        ledger = getattr(context.get_app_state(), "phase_ledger", None)
-        if ledger is None:
+        app_state = context.get_app_state()
+        ledger = getattr(app_state, "phase_ledger", None)
+        # The tier guards the current sub-requirement's cycle: with none current (an empty or a
+        # finished plan) the normal permission rules govern (user decision 2026-10-31).
+        if ledger is None or app_state.tdd_plan.current is None:
             return None
         from app.tdd.phase_permissions import check_tdd_phase_permission
         from app.tools.agent_tool.agent_memory import agent_memory_target

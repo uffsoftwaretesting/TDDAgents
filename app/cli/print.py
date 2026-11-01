@@ -407,10 +407,11 @@ async def open_session_run(
             turn and break the prompt cache for no reason.
             """
             state = store.get()
-            current = state.phase_ledger
+            # The phase rules guard the current sub-requirement only (user decision 2026-10-31).
+            current = state.phase_ledger if state.tdd_plan.current is not None else None
             permission_context = state.tool_permission_context
             in_plan = permission_context.mode == PermissionMode.PLAN
-            key = (current.phase, in_plan, permission_context.always_deny_rules)
+            key = (current.phase if current is not None else None, in_plan, permission_context.always_deny_rules)
             if key != pool_cache["key"]:
                 pool_cache["key"] = key
                 tools, extra = (planning_tools, list(mcp.tools)) if in_plan else (built_ins, main_mcp)

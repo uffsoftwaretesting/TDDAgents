@@ -51,6 +51,7 @@ from app.utils.permissions.permissions import (
     run_permission_request_hooks_for_headless_agent,
 )
 from app.utils.settings.constants import SOURCE_DISPLAY_NAMES
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK
 S = PermissionRuleSource
@@ -564,7 +565,7 @@ def _gate_call(tool_name, args, perm, ledger, ws, dispatcher=None):
     from app.cli.print import build_builtin_tools
 
     tool = next(t for t in build_builtin_tools() if t.name == tool_name)
-    store = AppStateStore(state=AppState(phase_ledger=ledger, tool_permission_context=perm))
+    store = AppStateStore(state=AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger, tool_permission_context=perm))
     ctx = tool_context_for(store, workspace=SimpleNamespace(root=str(ws)), hook_dispatcher=dispatcher)
     return asyncio.run(has_permissions_to_use_tool(tool, args, ctx, "tu"))
 

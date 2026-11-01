@@ -317,8 +317,9 @@ def build_skill_tool(
         skill_content = command.prompt_for_command(skill_args, session_id=context.run_id)
         allowed = parse_tool_list_from_cli(command.allowed_tools)
         agent = select_fork_agent(command, definitions)
-        ledger = context.get_app_state().phase_ledger
-        spawn_ledger = phase_on_spawn(ledger, agent)
+        spawn_state = context.get_app_state()
+        ledger = spawn_state.phase_ledger
+        spawn_ledger = phase_on_spawn(spawn_state, agent)
         if spawn_ledger is not ledger:
             baseline = spawn_test_baseline(spawn_ledger, context)
             context.set_app_state(lambda s: replace(s, phase_ledger=spawn_ledger, tdd_item_test_baseline=baseline))

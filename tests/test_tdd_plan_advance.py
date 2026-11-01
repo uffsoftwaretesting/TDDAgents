@@ -160,12 +160,14 @@ def test_a_complete_cycle_never_blocks():
 def test_tdd_state_data_adds_the_current_item_and_progress_only_with_a_plan():
     assert tdd_state_data(PhaseLedger()) == {"phase": "RED", "tests_written": False, "green_passed": False,
                                              "refactor_passed": False, "coverage": None}
-    assert tdd_state_data(PhaseLedger(), TddPlan()) == tdd_state_data(PhaseLedger())
+    # An empty plan has no current item, so the phase rules are off (user decision 2026-10-31).
+    assert tdd_state_data(PhaseLedger(), TddPlan()) == {**tdd_state_data(PhaseLedger()), "phase_rules": "off"}
     plan = TddPlan.from_texts(["A", "B"]).complete_current(CYCLE)
     assert tdd_state_data(PhaseLedger(), plan) == {
         "phase": "RED", "tests_written": False, "green_passed": False, "refactor_passed": False, "coverage": None,
         "sub_requirement": "2. B", "plan_progress": "1/2"}
-    assert tdd_state_data(PhaseLedger(), plan.complete_current(CYCLE))["sub_requirement"] is None
+    finished = tdd_state_data(PhaseLedger(), plan.complete_current(CYCLE))
+    assert finished["sub_requirement"] is None and finished["phase_rules"] == "off"
 
 
 def test_the_state_is_announced_again_when_the_plan_advances():

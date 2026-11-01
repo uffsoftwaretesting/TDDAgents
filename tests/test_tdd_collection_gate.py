@@ -30,6 +30,7 @@ from app.tdd.run_tests_tool.run_tests_tool import (
 )
 from app.tool import tool_context_for
 from tests.conftest import FakeWorkspace
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 TEST = "def test_a():\n    assert True\n"
 MET = CoverageReading(CoverageStatus.MEASURED, 100.0)
@@ -140,7 +141,7 @@ ONLY_A = frozenset({"tests/test_a.py"})
 
 
 def run(ledger: PhaseLedger, collected: frozenset[str] | None, exit_code: int = 0) -> tuple[Any, AppStateStore]:
-    store = AppStateStore(AppState(phase_ledger=ledger))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger))
     ctx = tool_context_for(store, workspace=FakeWorkspace(files=dict(FILES)))
     result = SuiteExecutionResult(exit_code=exit_code, coverage=MET, collected_files=collected)
     tool = build_run_tests_tool(lambda path: result)
@@ -198,7 +199,8 @@ def test_the_live_case_with_real_pytest(python_workspace):
     assert result.collected_files == frozenset({"tests/test_a.py"})
     assert not python_workspace.exists(JUNIT_REPORT_PATH)
 
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                   phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     ctx = tool_context_for(store, workspace=python_workspace)
     res = asyncio.run(build_run_tests_tool(None).call({}, ctx))
     assert NOT_COLLECTED in res.content

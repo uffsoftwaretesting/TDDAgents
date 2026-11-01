@@ -26,6 +26,7 @@ from app.tools.file_read_tool.file_read_tool import build_read_file_tool
 from app.tools.file_write_tool.file_write_tool import build_write_file_tool
 from app.types.permissions import PermissionMode, ToolPermissionContext
 from app.workspace.local import LocalWorkspace
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 
 def store_in(tmp_path: Path) -> AgentMemoryStore:
@@ -77,7 +78,8 @@ def worker(tmp_path: Path, phase: TddPhase = TddPhase.RED) -> Any:
     store = store_in(tmp_path)
     ws = LocalWorkspace(str(tmp_path / "thread" / "project"))
     perm = ToolPermissionContext(mode=PermissionMode.DEFAULT, should_avoid_permission_prompts=True)
-    app = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=phase), tool_permission_context=perm))
+    app = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=phase),
+                                 tool_permission_context=perm))
     return tool_context_for(app, workspace=ws, run_id="r1", agent_memory_store=store), store
 
 

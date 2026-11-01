@@ -126,7 +126,11 @@ def test_the_pool_is_cached_per_phase_and_mode(python_workspace, tmp_path):
 
 
 def test_a_settings_deny_hides_the_tool_from_the_main_pool(python_workspace, tmp_path):
-    from app.types.permissions import PermissionBehavior, PermissionRule, PermissionRuleSource
+    from app.types.permissions import (
+        PermissionBehavior,
+        PermissionRule,
+        PermissionRuleSource,
+    )
 
     deny = PermissionRule(tool_name="Grep", rule_behavior=PermissionBehavior.DENY,
                           source=PermissionRuleSource.USER_SETTINGS)

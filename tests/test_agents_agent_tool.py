@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_on_spawn import phase_on_spawn
+from app.tdd.plan import TddPlan
 from app.tool import tool_context_for
 from app.tools.agent_tool.agent_tool import (
     AGENT_TOOL_NAME,
@@ -31,6 +32,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.model.model import MODEL_ALIASES
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 from tests.test_loop_engine import CONFIG, FakeModel, asks_for, make_fake_deps
 
 TESTER = AgentDefinition(name="tester", description="Writes failing tests.", prompt="You write tests.",
@@ -49,7 +51,7 @@ def _tool(model: FakeModel | None = None, definitions=DEFS, **kw: Any):
 
 
 def _ctx(ledger: PhaseLedger | None = None, perm: ToolPermissionContext | None = None):
-    store = AppStateStore(AppState(phase_ledger=ledger or PhaseLedger(),
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger or PhaseLedger(),
                                    tool_permission_context=perm or ToolPermissionContext()))
     return store, tool_context_for(store, messages=(HumanMessage(content="coordinate"),))
 
@@ -106,29 +108,41 @@ class TestSelection:
             _call(_tool(), {**ARGS, "subagent_type": "Explore"}, ctx)
 
 
+def _spawn_state(ledger: PhaseLedger) -> AppState:
+    return AppState(phase_ledger=ledger, tdd_plan=CURRENT_ITEM_PLAN)
+
+
 class TestPhaseOnSpawn:
+    def test_without_a_current_item_a_spawn_moves_nothing(self):
+        ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True)
+        for plan in (TddPlan(), TddPlan.from_texts(["a"]).complete_current(
+                PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True))):
+            state = AppState(phase_ledger=ledger, tdd_plan=plan)
+            assert phase_on_spawn(state, TESTER) is ledger
+            assert phase_on_spawn(state, REFACTORER) is ledger
+
     def test_an_agent_without_a_phase_leaves_the_ledger(self):
         ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
-        assert phase_on_spawn(ledger, EXPLORE) is ledger
+        assert phase_on_spawn(_spawn_state(ledger), EXPLORE) is ledger
 
     def test_the_same_phase_leaves_the_ledger(self):
         ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
-        assert phase_on_spawn(ledger, DEVELOPER) is ledger
-        assert phase_on_spawn(PhaseLedger(), TESTER) == PhaseLedger()
+        assert phase_on_spawn(_spawn_state(ledger), DEVELOPER) is ledger
+        assert phase_on_spawn(_spawn_state(PhaseLedger()), TESTER) == PhaseLedger()
 
     def test_a_tester_after_red_restarts_the_cycle(self):
         ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True)
-        assert phase_on_spawn(ledger, TESTER) == PhaseLedger()
+        assert phase_on_spawn(_spawn_state(ledger), TESTER) == PhaseLedger()
 
     def test_a_developer_needs_a_confirmed_red(self):
         with pytest.raises(ValueError, match="^Agent 'developer' cannot start: Cannot transition to GREEN"):
-            phase_on_spawn(PhaseLedger(), DEVELOPER)
+            phase_on_spawn(_spawn_state(PhaseLedger()), DEVELOPER)
 
     def test_a_refactorer_needs_a_completed_cycle(self):
         done = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True, refactor_passed=True)
-        assert phase_on_spawn(done, REFACTORER).phase == TddPhase.REFACTOR
+        assert phase_on_spawn(_spawn_state(done), REFACTORER).phase == TddPhase.REFACTOR
         with pytest.raises(ValueError, match="^Agent 'refactorer' cannot start"):
-            phase_on_spawn(PhaseLedger(phase=TddPhase.GREEN, tests_written=True), REFACTORER)
+            phase_on_spawn(_spawn_state(PhaseLedger(phase=TddPhase.GREEN, tests_written=True)), REFACTORER)
 
     def test_the_call_writes_the_spawn_phase_before_the_worker_runs(self):
         seen: list[Any] = []
@@ -149,7 +163,8 @@ class TestPhaseOnSpawn:
         from tests.conftest import FakeWorkspace
 
         ws = FakeWorkspace(files={"tests/test_a.py": "A"})
-        store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
+        store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                       phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
                                        tdd_item_test_baseline="old"))
         ctx = tool_context_for(store, messages=(HumanMessage(content="coordinate"),), workspace=ws)
         _call(_tool(FakeModel([[AIMessage(content="ok")]])), ARGS, ctx)

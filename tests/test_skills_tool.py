@@ -39,6 +39,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 from tests.test_loop_engine import CONFIG, FakeModel, asks_for, make_fake_deps
 
 COMMAND = PermissionRuleSource.COMMAND
@@ -57,7 +58,7 @@ def _tool(*skills: SkillCommand, model: FakeModel | None = None, config=CONFIG, 
 
 
 def _ctx(perm: ToolPermissionContext | None = None, ledger: PhaseLedger | None = None, **kw: Any):
-    store = AppStateStore(AppState(phase_ledger=ledger or PhaseLedger(),
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger or PhaseLedger(),
                                    tool_permission_context=perm or ToolPermissionContext()))
     return tool_context_for(store, messages=(HumanMessage(content="go"),), **kw)
 
@@ -289,7 +290,7 @@ class TestFork:
         model = FakeModel([[asks_for("Nothing", "c1")], [AIMessage(content="forked report")]])
         skill = _skill(context="fork", agent="Explore", allowed_tools=("Glob",))
         tool = _tool(skill, model=model, definitions={"Explore": EXPLORE})
-        store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+        store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
         ctx = tool_context_for(store, run_id="r1")
         result = _call(tool, {"skill": "design", "args": "add()"}, ctx)
         assert result.content == 'Skill "design" completed (forked execution).\n\nResult:\nforked report'
@@ -323,7 +324,8 @@ class TestForkWorkerContext:
     def _fork(self, skill: SkillCommand, agent: AgentDefinition, **ctx_kw: Any):
         model = FakeModel([[AIMessage(content="done")]])
         tool = _tool(skill, model=model, definitions={agent.name: agent})
-        ctx = tool_context_for(AppStateStore(AppState(phase_ledger=PhaseLedger())), run_id="r1", **ctx_kw)
+        store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger()))
+        ctx = tool_context_for(store, run_id="r1", **ctx_kw)
         _call(tool, {"skill": skill.name}, ctx)
         return model, ctx
 
@@ -428,7 +430,7 @@ class TestForkPhaseOnSpawn:
     def _run(self, agent: AgentDefinition, ledger: PhaseLedger):
         model = FakeModel([[AIMessage(content="done")]])
         tool = _tool(_skill(context="fork", agent=agent.name), model=model, definitions={agent.name: agent})
-        store = AppStateStore(AppState(phase_ledger=ledger))
+        store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger))
         return model, store, tool, tool_context_for(store)
 
     def test_a_developer_before_red_is_refused_before_any_worker_runs(self):

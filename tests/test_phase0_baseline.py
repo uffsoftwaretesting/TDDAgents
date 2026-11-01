@@ -407,14 +407,16 @@ def test_runner_drives_a_real_red_green_cycle(python_workspace, tmp_path):
     assert ctx.messages == seen[0].messages[:3]
     assert ctx.run_id.startswith("loop-") and len(ctx.run_id) == len("loop-") + 32
     assert seen[0].turn_count == 1
-    # `refresh_tools`: the ledger moved RED -> GREEN during the run, so the pool was rebuilt
-    # once and is then returned *by identity* until the phase moves again.
+    # `refresh_tools`: the item completed, so the pool lost its phase rules (no current
+    # sub-requirement) and is then returned *by identity* until the key moves again.
     assert ctx.refresh_tools is not None
     current = ctx.refresh_tools()
     assert current is not ctx.tools and current is ctx.refresh_tools()
     assert {t.name for t in current} == {t.name for t in ctx.tools}
-    # The finished item restarted the ledger in RED (Phase 11), so moving it is a GREEN.
+    # With no current item a ledger move changes nothing; a new item brings the phase rules back.
     ctx.set_app_state(lambda st: dataclasses.replace(st, phase_ledger=PhaseLedger(phase=TddPhase.GREEN)))
+    assert ctx.refresh_tools() is current
+    ctx.set_app_state(lambda st: dataclasses.replace(st, tdd_plan=st.tdd_plan.add("next")))
     rebuilt = ctx.refresh_tools()
     assert rebuilt is not current and rebuilt is ctx.refresh_tools()
 

@@ -42,6 +42,7 @@ from app.utils.hooks.exec_agent_hook import (
     structured_output_enforcement,
 )
 from app.utils.hooks.exec_prompt_hook import SMALL_FAST_MODEL_ENV
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 
 def _run(awaitable: Any) -> Any:
@@ -268,7 +269,7 @@ def test_enforcement_blocks_until_output():
 def _parent_context(ledger: PhaseLedger | None = None):
     from app.cli.print import build_builtin_tools
 
-    store = AppStateStore(AppState(phase_ledger=ledger or PhaseLedger()))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger or PhaseLedger()))
     return store, tool_context_for(store, tools=tuple(build_builtin_tools()), agent_id=None)
 
 
@@ -398,7 +399,7 @@ def test_verifier_cannot_write_production_path_in_red(tmp_path):
     from app.cli.print import build_builtin_tools
 
     store = AppStateStore(AppState(
-        phase_ledger=PhaseLedger(phase=TddPhase.RED),
+        phase_ledger=PhaseLedger(phase=TddPhase.RED), tdd_plan=CURRENT_ITEM_PLAN,
         tool_permission_context=ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS),
     ))
     parent = tool_context_for(store, tools=tuple(build_builtin_tools()), workspace=ws)
@@ -438,7 +439,7 @@ def test_verifier_run_tests_never_moves_parent_ledger():
 
     tools = tuple(t for t in build_builtin_tools() if t.name != "RunTests") + (
         build_run_tests_tool(test_runner=failing_suite),)
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
     parent = tool_context_for(store, tools=tools, workspace=object())
     before = store.get().phase_ledger
     seen: list[Any] = []

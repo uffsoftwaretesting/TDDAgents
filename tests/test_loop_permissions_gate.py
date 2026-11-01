@@ -30,6 +30,7 @@ from app.utils.messages import (
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
 from tests.hook_doubles import ScriptedDispatcher
+from tests.plan_helpers import CURRENT_ITEM_PLAN
 
 ALLOW, DENY, ASK, PASS = (
     PermissionBehavior.ALLOW,
@@ -59,7 +60,7 @@ class _Tool:
 
 
 def _ctx(perm=None, ledger=None, hook_dispatcher=None):
-    state = AppState(phase_ledger=ledger) if ledger is not None else AppState()
+    state = AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger) if ledger is not None else AppState()
     return tool_context_for(
         AppStateStore(state=state),
         permission_context=perm if perm is not None else ToolPermissionContext(),
@@ -111,7 +112,7 @@ def test_phase_check_fails_closed(monkeypatch):
 
     monkeypatch.setattr("app.tdd.phase_permissions.check_tdd_phase_permission", boom)
     tool = _Tool(result=PermissionResult(behavior=ALLOW))
-    res = _gate(tool, ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS))
+    res = _gate(tool, ctx=_ctx(ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS), ledger=PhaseLedger()))
     assert res.behavior == DENY
     assert res.message == "TDD phase check failed for T: ledger unreadable"
     assert res.decision_reason == {"type": "phase_rule", "phase": None, "reason": res.message}
@@ -387,3 +388,44 @@ def test_interactive_contexts_do_not_run_permission_request_hooks():
     dispatcher = _Dispatcher({"behavior": "allow"})
     assert _gate(_Tool(), ctx=_ctx(ToolPermissionContext(), hook_dispatcher=dispatcher)).behavior == ASK
     assert dispatcher.calls == []
+
+
+class TestTierOnlyWhileAnItemIsCurrent:
+    """The TDD tier guards the current sub-requirement only (user decision 2026-10-31)."""
+
+    @staticmethod
+    def _denial(plan, path="calculator.py"):
+        from app.tools.file_write_tool.file_write_tool import build_write_file_tool
+        from app.utils.permissions.permissions import tdd_phase_denial
+
+        ctx = tool_context_for(AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED), tdd_plan=plan)))
+        return tdd_phase_denial(build_write_file_tool(), {"file_path": path, "content": "x"}, ctx)
+
+    def test_a_current_item_keeps_the_red_rule(self):
+        res = self._denial(CURRENT_ITEM_PLAN)
+        assert res is not None and res.behavior == DENY
+        assert res.decision_reason["type"] == "phase_rule"
+
+    def test_an_empty_plan_has_no_tier(self):
+        from app.tdd.plan import TddPlan
+
+        assert self._denial(TddPlan()) is None
+
+    def test_a_finished_plan_has_no_tier_and_a_new_item_brings_it_back(self):
+        done_cycle = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
+        finished = CURRENT_ITEM_PLAN.complete_current(done_cycle)
+        assert self._denial(finished, ".gitignore") is None
+        assert self._denial(finished, "/tmp/uvicorn.log") is None
+        assert self._denial(finished.add("next")) is not None
+
+    def test_after_the_plan_a_write_follows_the_normal_rules(self):
+        from app.tdd.plan import TddPlan
+        from app.tools.file_write_tool.file_write_tool import build_write_file_tool
+        from tests.conftest import FakeWorkspace
+
+        ws = FakeWorkspace()
+        state = AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED), tdd_plan=TddPlan(),
+                         tool_permission_context=ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS))
+        ctx = tool_context_for(AppStateStore(state), workspace=ws)
+        res = _gate(build_write_file_tool(), args={"file_path": ".gitignore", "content": ".env\n"}, ctx=ctx)
+        assert res.behavior == ALLOW
