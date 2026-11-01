@@ -629,7 +629,8 @@ async def load_initial_messages(
 
 
 async def _submit(
-    run: DevelopmentRun, history: Sequence[Any], prompt_text: str, prefix: Sequence[Any] = ()
+    run: DevelopmentRun, history: Sequence[Any], prompt_text: str, prefix: Sequence[Any] = (),
+    user_messages: Sequence[Any] | None = None, modify_context: Callable[[Any], Any] | None = None,
 ) -> Terminal:
     """
     One user turn: UserPromptSubmit, the user-input attachments, the loop, then any background
@@ -646,7 +647,8 @@ async def _submit(
         run.stopped_reason = prompt.blocked_message or prompt.stopped_message
         logger.info("Turn of %s not started: UserPromptSubmit hook stopped it: %s", run.run_id, run.stopped_reason)
         return Terminal.HOOK_STOPPED
-    messages: tuple[Any, ...] = (*history, *prefix, HumanMessage(content=prompt_text), *prompt.messages)
+    said = tuple(user_messages) if user_messages is not None else (HumanMessage(content=prompt_text),)
+    messages: tuple[Any, ...] = (*history, *prefix, *said, *prompt.messages)
     # `processUserInput`: the user-input attachments (the TDD state among them), persisted into
     # the history the loop starts from.
     messages = (*messages, *await get_attachment_messages(run.ctx, messages, user_input=prompt_text))
@@ -655,6 +657,8 @@ async def _submit(
         # Esc that ended the last turn must not end this one.
         run.ctx.cancel = CancelToken()
     turn_ctx = replace(run.ctx, messages=messages)
+    if modify_context is not None:
+        turn_ctx = modify_context(turn_ctx)
     try:
         async for event in run.engine.submit(initial_loop_state(messages, turn_ctx)):
             if run.on_message is not None:
@@ -701,6 +705,34 @@ async def restore_session(run: DevelopmentRun) -> bool:
 async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal:
     """A later turn of the same conversation: the user's prompt after everything said so far."""
     return await _submit(run, run.engine.mutable_messages, prompt_text)
+
+
+async def submit_prompt_command(run: DevelopmentRun, name: str, args: str) -> Terminal:
+    """
+    A typed `/<skill> args` (`processSlashCommand` -> `getMessagesForPromptSlashCommand`): the
+    command's messages open the turn, and its `allowed-tools` and `model` apply to it.
+    """
+    from app.tools.skill_tool.skill_tool import (
+        context_with_allowed_tools,
+        resolve_skill_model_override,
+    )
+    from app.utils.process_user_input.process_slash_command import (
+        get_messages_for_prompt_slash_command,
+    )
+
+    command = run.ctx.skill_registry.find_command(name)
+    turn = get_messages_for_prompt_slash_command(command, args, session_id=run.run_id,
+                                                 coordinator=run.config.gates.coordinator_mode)
+
+    def modify(ctx: Any) -> Any:
+        modified = context_with_allowed_tools(ctx, turn.allowed_tools)
+        if turn.model:
+            current = ctx.main_loop_model or run.config.model
+            modified = replace(modified, main_loop_model=resolve_skill_model_override(turn.model, current))
+        return modified
+
+    raw = f"/{name} {args}".rstrip()
+    return await _submit(run, run.engine.mutable_messages, raw, user_messages=turn.messages, modify_context=modify)
 
 
 @dataclass(frozen=True, slots=True)
@@ -806,5 +838,6 @@ __all__ = [
     "session_workspace",
     "start_session",
     "submit_prompt",
+    "submit_prompt_command",
     "wait_for_background_work",
 ]

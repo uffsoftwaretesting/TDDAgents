@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
@@ -40,12 +41,21 @@ from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
-from app.cli.print import DevelopmentRun, start_session, submit_prompt
+from app.cli.print import (
+    DevelopmentRun,
+    start_session,
+    submit_prompt,
+    submit_prompt_command,
+)
 from app.commands import (
     HELP_TEXT,
+    Command,
     CommandError,
     SlashCommand,
     apply_plan_command,
+    find_command,
+    get_commands,
+    help_text,
     parse_slash_command,
 )
 from app.components.permissions.permission_options import PermissionOption
@@ -56,6 +66,11 @@ from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
 from app.types.permissions import PermissionMode
 from app.utils.message_queue_manager import QueuedCommand
 from app.utils.permissions.permission_setup import set_permission_mode
+from app.utils.process_user_input.process_slash_command import (
+    looks_like_command,
+    parse_slash_input,
+    unknown_skill_message,
+)
 
 logger = logging.getLogger("TDDOrchestrator.REPL")
 
@@ -311,7 +326,7 @@ class Repl:
             elif not pending.future.done():
                 pending.future.set_result(answer)
             return
-        command = parse_slash_command(line)
+        command = parse_slash_command(line) or self._typed_skill(line)
         if command is not None:
             if self.busy and not command.immediate:
                 self.deferred.append(command)
@@ -320,7 +335,7 @@ class Repl:
             await self.run_command(command)
             return
         text = line.strip()
-        if not text:
+        if not text or self._unknown_skill(text):
             return
         if self.busy:
             # `handlePromptSubmit` while busy: queued for the loop to hand over between tool rounds.
@@ -329,10 +344,36 @@ class Repl:
             return
         self._start(submit_prompt(self.run, text))
 
+    def _commands(self) -> list[Command]:
+        return get_commands(getattr(self.run.ctx, "skill_registry", None))
+
+    def _typed_skill(self, line: str) -> SlashCommand | None:
+        """`/<skill> args`: a prompt command when a user-invocable skill has that name."""
+        parsed = parse_slash_input(line)
+        if parsed is None:
+            return None
+        command = find_command(parsed[0], self._commands())
+        if command is None or command.type != "prompt" or command.is_hidden:
+            return None
+        return SlashCommand(name=command.name, args=parsed[1], kind="prompt")
+
+    def _unknown_skill(self, text: str) -> bool:
+        """
+        `processSlashCommand`'s unknown branch: `/name` that looks like a command but is none is
+        answered here ("Unknown skill: …") and never sent; `/usr/bin/x` is a path, so it is a message.
+        """
+        parsed = parse_slash_input(text)
+        if parsed is None or not looks_like_command(parsed[0]) or os.path.exists(f"/{parsed[0]}"):
+            return False
+        self.io.write(unknown_skill_message(*parsed))
+        return True
+
     async def run_command(self, command: SlashCommand) -> None:
         name = command.name
-        if name == "help":
-            self.io.write(HELP_TEXT)
+        if command.kind == "prompt":
+            self._start(submit_prompt_command(self.run, command.name, command.args))
+        elif name == "help":
+            self.io.write(help_text(self._commands()))
         elif name == "plan":
             self._plan_command(command.args)
         elif name == "pause":

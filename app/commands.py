@@ -1,10 +1,15 @@
 """
-The REPL's slash commands (Phase 11).
+The REPL's slash commands (Phase 11) and the command registry.
 
-Upstream's `commands.ts` merges bundled, skill, plugin and built-in commands into one list and
-dispatches by type (`prompt`, `local`, `local-jsx`). TDDAgents' REPL has only `local` commands
-— they run in the session and report to the user, never sending a prompt themselves — so this
-module is the parser and the help text; `app/screens/repl.py` runs them.
+Ported from `reference/claude-code/src/commands.ts` -> `getCommands`, `builtInCommandNames`,
+`findCommand`, `hasCommand`, `getCommand`, `formatDescriptionWithSource`, and
+`types/command.ts` -> `getCommandName`. Upstream merges bundled, skill, plugin and built-in
+commands into one list and dispatches by type: TDDAgents' built-ins are `local` (they run in the
+session and report to the user, `app/screens/repl.py`); its skills are `prompt` commands, which
+a typed `/<skill> args` expands into the turn
+(`app/utils/process_user_input/process_slash_command.py`). Not ported: plugins, workflows, MCP
+prompts and skills, the remote/bridge filters, availability requirements (no auth types) and the
+memoized command cache (the list is built from the run's skill registry each time).
 
 | Command | What it does |
 |---|---|
@@ -25,7 +30,9 @@ the turn to end. `/help`, `/plan` (showing), `/pause` and `/exit` are immediate.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from app.tdd.plan import PlanError, TddPlan
 
@@ -48,6 +55,102 @@ HELP_TEXT = """Commands:
 Anything else is a message to the agents; Esc interrupts them."""
 
 
+@dataclass(frozen=True, slots=True)
+class Command:
+    """`Command`, the fields this REPL uses."""
+
+    name: str
+    description: str
+    type: str  # "local" or "prompt"
+    source: str = "builtin"
+    aliases: tuple[str, ...] = ()
+    is_hidden: bool = False
+    display_name: str | None = None
+
+    def user_facing_name(self) -> str:
+        """`getCommandName`: the display name when there is one."""
+        return self.display_name or self.name
+
+
+#: The built-in commands' one-line descriptions.
+BUILT_IN_DESCRIPTIONS: dict[str, str] = {
+    "plan": "Show or change the TDD plan",
+    "pause": "Let the agents stop after the current turn",
+    "resume": "Continue the plan",
+    "requirements": "Enter plan mode and plan a new request",
+    "help": "Show the commands",
+    "exit": "Leave (continue later with --thread-id)",
+}
+#: `/quit` is `/exit`'s alias.
+BUILT_IN_ALIASES: dict[str, tuple[str, ...]] = {"exit": ("quit",)}
+
+#: `getSettingSourceName`, plus `bundled`.
+SOURCE_NAMES: dict[str, str] = {
+    "userSettings": "user", "projectSettings": "project", "localSettings": "project, gitignored",
+    "flagSettings": "cli flag", "policySettings": "managed",
+}
+
+
+def built_in_commands() -> list[Command]:
+    """The REPL's `local` commands."""
+    return [Command(name, description, "local", aliases=BUILT_IN_ALIASES.get(name, ()))
+            for name, description in BUILT_IN_DESCRIPTIONS.items()]
+
+
+def built_in_command_names() -> frozenset[str]:
+    """`builtInCommandNames`: every built-in name and alias."""
+    return frozenset(n for c in built_in_commands() for n in (c.name, *c.aliases))
+
+
+def get_commands(skill_registry: Any) -> list[Command]:
+    """`getCommands`: the skills (as `prompt` commands), then the built-ins."""
+    skills = [] if skill_registry is None else [
+        Command(s.name, s.description, "prompt", source=s.source, is_hidden=s.is_hidden, display_name=s.display_name)
+        for s in skill_registry.commands()
+    ]
+    return [*skills, *built_in_commands()]
+
+
+def find_command(name: str, commands: Sequence[Command]) -> Command | None:
+    """`findCommand`: by name, display name or alias."""
+    return next((c for c in commands if c.name == name or c.user_facing_name() == name or name in c.aliases), None)
+
+
+def has_command(name: str, commands: Sequence[Command]) -> bool:
+    """`hasCommand`."""
+    return find_command(name, commands) is not None
+
+
+def get_command(name: str, commands: Sequence[Command]) -> Command:
+    """`getCommand`: the command, or `LookupError` listing what exists."""
+    command = find_command(name, commands)
+    if command is None:
+        available = sorted(
+            f"{c.user_facing_name()} (aliases: {', '.join(c.aliases)})" if c.aliases else c.user_facing_name()
+            for c in commands)
+        raise LookupError(f"Command {name} not found. Available commands: {', '.join(available)}")
+    return command
+
+
+def format_description_with_source(command: Command) -> str:
+    """`formatDescriptionWithSource`: a prompt command's description with where it comes from."""
+    if command.type != "prompt" or command.source in ("builtin", "mcp"):
+        return command.description
+    if command.source == "bundled":
+        return f"{command.description} (bundled)"
+    return f"{command.description} ({SOURCE_NAMES.get(command.source, command.source)})"
+
+
+def help_text(commands: Sequence[Command]) -> str:
+    """`/help`: the built-ins, then the skills the user can type."""
+    skills = [c for c in commands if c.type == "prompt" and not c.is_hidden]
+    if not skills:
+        return HELP_TEXT
+    width = max(len(c.user_facing_name()) for c in skills) + 3
+    lines = [f"  /{c.user_facing_name():<{width}}{format_description_with_source(c)}" for c in skills]
+    return HELP_TEXT + "\nSkills:\n" + "\n".join(lines)
+
+
 class CommandError(ValueError):
     """A slash command that cannot run as typed; the message says how to type it."""
 
@@ -56,11 +159,13 @@ class CommandError(ValueError):
 class SlashCommand:
     name: str
     args: str = ""
+    #: `local` (a built-in) or `prompt` (a skill the user typed).
+    kind: str = "local"
 
     @property
     def immediate(self) -> bool:
         """Runs mid-turn: the immediate commands, and `/plan` with nothing to change."""
-        return self.name in IMMEDIATE or (self.name == "plan" and not self.args)
+        return self.kind == "local" and (self.name in IMMEDIATE or (self.name == "plan" and not self.args))
 
 
 def parse_slash_command(line: str) -> SlashCommand | None:

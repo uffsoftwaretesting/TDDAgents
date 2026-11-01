@@ -409,7 +409,8 @@ def test_plan_commands_and_their_deferral(python_workspace, tmp_path):
         io.lines.put_nowait("/plan bogus")
         await until(lambda: any(line.startswith("Usage: /plan [") for line in io.out))
         io.lines.put_nowait("/help")
-        await until(lambda: io.out.count(HELP_TEXT) == 1)
+        # `/help` is the commands, then the skills (the bundled ones here).
+        await until(lambda: sum(line.startswith(HELP_TEXT + "\nSkills:\n") for line in io.out) == 1)
         io.lines.put_nowait("   ")
         io.lines.put_nowait("/exit")
 
