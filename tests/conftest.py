@@ -58,6 +58,20 @@ def _isolated_config_home(tmp_path_factory: Any, monkeypatch: Any) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _offline_token_counts(monkeypatch: Any) -> None:
+    """
+    The suite is offline: the provider's token-count endpoint (`app/services/token_estimation.py`)
+    gives no count, so `/context` and `get_context_usage` fall back to the rough estimate. A test
+    of the counting itself passes its own counter.
+    """
+
+    async def no_count(*args: Any) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.token_estimation._provider_count", no_count)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_bundled_skills_root(tmp_path_factory: Any, monkeypatch: Any) -> Any:
     """
     Launching a bundled skill extracts its files under the per-process bundled-skills root

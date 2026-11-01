@@ -1584,6 +1584,7 @@ class HeadlessStreaming:
     async def _control_get_context_usage(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         """`collectContextData` over the conversation, the main loop model and the current tool pool."""
         from app.commands import collect_context_data
+        from app.services.token_estimation import api_token_counter
         from app.utils.model.model import parse_user_specified_model
 
         run = self.run_
@@ -1592,7 +1593,8 @@ class HeadlessStreaming:
         data = await collect_context_data(
             run.messages, main_loop_model=model, tools=ctx.refresh_tools() if ctx.refresh_tools else ctx.tools,
             agent_definitions=self.agent_definitions(), tool_context=ctx,
-            custom_system_prompt=ctx.custom_system_prompt, append_system_prompt=ctx.append_system_prompt)
+            custom_system_prompt=ctx.custom_system_prompt, append_system_prompt=ctx.append_system_prompt,
+            count_tokens=api_token_counter(model))
         self.respond(message, dict(data))
 
     async def _control_rewind_files(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:

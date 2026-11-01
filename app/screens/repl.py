@@ -496,8 +496,11 @@ class Repl:
         model = parse_user_specified_model(run.user_specified_model) if run.user_specified_model else run.config.model
         tools = ctx.refresh_tools() if ctx.refresh_tools is not None else ctx.tools
         definitions = get_agent_definitions_with_overrides(project_dir=project_root_of(ctx.workspace))
+        from app.services.token_estimation import api_token_counter
+
         data = await collect_context_data(
-            run.messages, main_loop_model=model, tools=tools, agent_definitions=definitions, tool_context=ctx)
+            run.messages, main_loop_model=model, tools=tools, agent_definitions=definitions, tool_context=ctx,
+            count_tokens=api_token_counter(model))
         self.io.write(format_context_as_markdown_table(data))
 
     async def _requirements(self, request: str) -> None:
