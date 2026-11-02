@@ -655,6 +655,9 @@ class ToolContext:
     #: has them, as upstream's `runAgent` builds its own prompt.
     custom_system_prompt: str | None = None
     append_system_prompt: str | None = None
+    #: The main thread's `thinkingConfig` (`app/utils/thinking.py`); `None` is off (nothing asked).
+    #: A worker never has it, as upstream's `runAgent` disables thinking outside a fork.
+    thinking_config: Any = None
     #: `runAgent.ts` -> `shouldOmitClaudeMd`: the user context goes without `claudeMd`.
     omit_claude_md: bool = False
     #: `runAgent.ts` -> `systemContextNoGit` (Explore/Plan): the system context goes without

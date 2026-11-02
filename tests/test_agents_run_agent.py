@@ -290,9 +290,10 @@ def test_a_worker_never_inherits_the_custom_system_prompts():
     parent = _parent()
     parent.custom_system_prompt = "CUSTOM"
     parent.append_system_prompt = "APPENDED"
+    parent.thinking_config = {"type": "adaptive"}
     model, _ = _run(parent=parent)
     ctx = model.seen[0].tool_context
-    assert (ctx.custom_system_prompt, ctx.append_system_prompt) == (None, None)
+    assert (ctx.custom_system_prompt, ctx.append_system_prompt, ctx.thinking_config) == (None, None, None)
 
 
 def test_a_worker_never_inherits_the_interactive_can_use_tool():

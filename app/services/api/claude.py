@@ -221,8 +221,18 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
 
     # `retryContext?.maxTokensOverride || getMaxOutputTokensForModel(model)` (`claude.ts`): the
     # retry layer's override after a context overflow, else the factory's model default.
-    overrides = {"max_tokens": context.max_tokens_override} if context.max_tokens_override else {}
-    model = get_chat_model(provider, model=context.model, temperature=Config.TEMPERATURE, **overrides)
+    overrides: dict[str, Any] = {"max_tokens": context.max_tokens_override} if context.max_tokens_override else {}
+    # `claude.ts`: the thinking parameter, and temperature only while thinking is off.
+    from app.utils.thinking import thinking_request_kwargs
+    from app.utils.tokens import get_max_output_tokens_for_model
+
+    max_output = context.max_tokens_override or get_max_output_tokens_for_model(context.model)
+    thinking, without_temperature = thinking_request_kwargs(
+        provider, context.model, getattr(state.tool_context, "thinking_config", None), max_output)
+    overrides.update(thinking)
+    if not without_temperature:
+        overrides["temperature"] = Config.TEMPERATURE
+    model = get_chat_model(provider, model=context.model, **overrides)
     if lc_tools:
         model = model.bind_tools(lc_tools)
 

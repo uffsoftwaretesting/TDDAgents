@@ -340,7 +340,7 @@ def test_text_prompt_json_output(python_workspace: Any, tmp_path: Path) -> None:
     (result,) = lines_of(written)
     assert (result["type"], result["subtype"], result["result"], result["is_error"]) == (
         "result", "success", "The plan is ready.", False)
-    assert outcome.result == result and outcome.result["session_id"].startswith("loop-")
+    assert outcome.result == result and outcome.result["session_id"] == "sj-text"
     assert "Build X" in [m.content for m in model.seen[0].messages if isinstance(m, HumanMessage)]
 
 

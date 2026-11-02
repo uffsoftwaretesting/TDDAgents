@@ -378,6 +378,8 @@ def test_parser_help_and_metadata() -> None:
         "permission_prompt_tool": argparse.SUPPRESS,
         "max_turns": argparse.SUPPRESS,
         "max_budget_usd": argparse.SUPPRESS,
+        "thinking": argparse.SUPPRESS,
+        "max_thinking_tokens": argparse.SUPPRESS,
         "json_schema": 'JSON Schema for structured output validation. Example: '
                        '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}',
         "system_prompt": "System prompt to use for the session",

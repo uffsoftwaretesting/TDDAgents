@@ -39,7 +39,7 @@ def test_options_defaults_and_what_the_run_is_told() -> None:
                              system_prompt="S", append_system_prompt="A")
     assert development_run_options(options) == {
         "permission_mode": "plan", "settings_path": "/s.json", "dangerously_skip_permissions": True,
-        "custom_system_prompt": "S", "append_system_prompt": "A"}
+        "custom_system_prompt": "S", "append_system_prompt": "A", "thinking": None, "max_thinking_tokens": None}
 
 
 def _options(tmp_path: Any) -> dict[str, Any]:

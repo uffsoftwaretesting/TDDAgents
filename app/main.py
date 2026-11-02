@@ -186,6 +186,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "--input-format=stream-json and --output-format=stream-json)")
     parser.add_argument("--permission-prompt-tool", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--max-turns", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--thinking", choices=("enabled", "adaptive", "disabled"), default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--max-thinking-tokens", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--json-schema", type=json_schema_flag, default=None,
                         help='JSON Schema for structured output validation. Example: '
                              '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}')
@@ -283,6 +286,8 @@ def session_options(args: argparse.Namespace) -> SessionOptions:
         headless_options=headless_options(args) if args.print else None,
         system_prompt=system_prompt_flag(args.system_prompt, args.system_prompt_file),
         append_system_prompt=system_prompt_flag(args.append_system_prompt, args.append_system_prompt_file),
+        thinking=args.thinking,
+        max_thinking_tokens=args.max_thinking_tokens,
     )
 
 

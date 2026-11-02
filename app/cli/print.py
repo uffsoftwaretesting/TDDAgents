@@ -368,6 +368,8 @@ async def open_session_run(
     custom_system_prompt: str | None = None,
     append_system_prompt: str | None = None,
     interactive: bool | None = None,
+    thinking: str | None = None,
+    max_thinking_tokens: int | None = None,
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -493,6 +495,10 @@ async def open_session_run(
         ctx.can_use_tool = can_use_tool
         ctx.custom_system_prompt = custom_system_prompt
         ctx.append_system_prompt = append_system_prompt
+        from app.utils.thinking import resolve_thinking_config
+
+        ctx.thinking_config = resolve_thinking_config(
+            thinking, max_thinking_tokens, load_settings(run_settings_locations(config, root_dir, home, managed_dir)))
         # `updateFileHistoryState` over the run's store (`QueryEngine.ts` / `REPL.tsx`).
         ctx.update_file_history_state = update_file_history_state_for(store.update)
         saved_plan_path = plan_path(run_id, cwd)
@@ -929,7 +935,7 @@ async def run_headless(
         run.max_turns, run.max_budget_usd = options.max_turns, options.max_budget_usd
         if options.json_schema is not None:
             use_json_schema(run, options.json_schema)
-        streaming = HeadlessStreaming(sio, run, options)
+        streaming = HeadlessStreaming(sio, run, options, session_id)
         await streaming.load_initial_messages(request, prompt, stream_input=stream_input)
         needs_full_array = options.output_format == "json" and options.verbose
         messages: list[dict[str, Any]] = []
@@ -1123,12 +1129,14 @@ class HeadlessStreaming:
     and nothing is left to run.
     """
 
-    def __init__(self, sio: Any, run: DevelopmentRun, options: HeadlessOptions) -> None:
+    def __init__(self, sio: Any, run: DevelopmentRun, options: HeadlessOptions, session_id: str | None = None) -> None:
         self.sio = sio
         self.run_ = run
         self.options = options
         self.output = sio.outbound
-        self.session_id = run.run_id
+        #: The SDK's `session_id`: the thread id, the one `--thread-id` / `--resume` take (user decision
+        #: 2026-11-01); the run id (`loop-…`) names the transcript, not the session.
+        self.session_id = session_id or run.run_id
         self.running = False
         self.input_closed = False
         self.initialized = False
@@ -1632,6 +1640,7 @@ class HeadlessStreaming:
             self.options.thinking_config = {"type": "disabled"}
         else:
             self.options.thinking_config = {"type": "enabled", "budgetTokens": int(tokens)}
+        self.run_.ctx.thinking_config = self.options.thinking_config
         self.respond(message)
 
     async def _control_mcp_status(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:

@@ -274,6 +274,7 @@ def run_agent(
             agent_system_prompt=tuple(system_prompt),
             custom_system_prompt=None,
             append_system_prompt=None,
+            thinking_config=None,
             omit_claude_md=agent_definition.omit_claude_md,
             omit_git_status=agent_type in _NO_GIT_STATUS_AGENT_TYPES,
             critical_system_reminder=agent_definition.critical_system_reminder,

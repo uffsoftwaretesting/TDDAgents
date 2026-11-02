@@ -42,6 +42,9 @@ class SessionOptions:
     #: `--system-prompt` / `--append-system-prompt` (their `-file` forms already read).
     system_prompt: str | None = None
     append_system_prompt: str | None = None
+    #: `--thinking` / `--max-thinking-tokens` (`app/utils/thinking.py`).
+    thinking: str | None = None
+    max_thinking_tokens: int | None = None
 
 
 def derive_thread_id(initial_input: str) -> str:
@@ -73,6 +76,8 @@ def development_run_options(options: SessionOptions) -> dict[str, Any]:
         "dangerously_skip_permissions": options.dangerously_skip_permissions,
         "custom_system_prompt": options.system_prompt,
         "append_system_prompt": options.append_system_prompt,
+        "thinking": options.thinking,
+        "max_thinking_tokens": options.max_thinking_tokens,
     }
 
 
