@@ -5,8 +5,11 @@ Ported from `reference/claude-code/src/cli/print.ts`'s closure state and the fun
 `sdkMcpConfigs` / `sdkClients` / `sdkTools`, `dynamicMcpState`, `updateSdkMcp`,
 `applyMcpServerChanges` (serialized), `handleMcpSetServers`, `reconcileMcpServers`, `toScopedConfig`,
 `buildMcpServerStatuses`, and the `mcp_reconnect` / `mcp_toggle` bodies (`reconnectMcpServerImpl`, then
-`appState.mcp` and `dynamicMcpState` updated); and `services/mcp/utils.ts` -> `excludeStalePluginClients`
-with `useManageMCPConnections`' reconnect on `pluginReconnectKey` (`refresh_plugin_servers`).
+`appState.mcp` and `dynamicMcpState` updated). `reconnect` closes the server's connection first, as
+`reconnectMcpServerImpl` does (`clearServerCache`); `clear_server` is the `/mcp` menu's clear-auth
+state update (`components/mcp/MCPRemoteServerMenu.tsx` -> `handleClearAuth`); and
+`services/mcp/utils.ts` -> `excludeStalePluginClients` with `useManageMCPConnections`' reconnect on
+`pluginReconnectKey` (`refresh_plugin_servers`).
 
 Divergence (`refresh_plugin_servers`): upstream's headless `applyPluginMcpDiff` hands every
 configured server to `applyMcpServerChanges`, whose connections are memoized, so the servers
@@ -29,7 +32,7 @@ from typing import Any
 from app.services.mcp.config import set_mcp_server_enabled
 from app.services.mcp.mcp_connection_manager import ReconnectResult, reconnect_mcp_server_impl
 from app.services.mcp.sdk_control_transport import SdkControlClientTransport, SendMcpMessage, setup_sdk_mcp_clients
-from app.services.mcp.types import ConnectedMCPServer, DisabledMCPServer, McpServerConfig
+from app.services.mcp.types import ConnectedMCPServer, DisabledMCPServer, FailedMCPServer, McpServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -161,16 +164,44 @@ class SessionMcp:
 
     # ── reconnect / toggle ───────────────────────────────────────────────────
 
+    def find_client(self, name: str) -> Any:
+        """The server's connection (`appState.mcp.clients.find(c => c.name === name)`), else `None`."""
+        return next((c for c in self.all_clients() if c.name == name), None)
+
+    async def _close(self, name: str) -> None:
+        """`clearServerCache`: the server's live connection closed."""
+        client = self.find_client(name)
+        if isinstance(client, ConnectedMCPServer) and client.cleanup is not None:
+            try:
+                await client.cleanup()
+            except Exception as error:  # noqa: BLE001 - upstream ignores a failed close
+                logger.debug("MCP server %s: cleanup failed: %s", name, error)
+
     async def reconnect(self, name: str, config: McpServerConfig) -> ReconnectResult:
-        """`reconnectMcpServerImpl`, the result put in place of the server's client and tools."""
+        """`reconnectMcpServerImpl` (the old connection closed first), the result put in place of the server's."""
         if config.type == "sdk":
             await self.update_sdk(force=True)
             client = next((c for c in self.sdk_clients if c.name == name), None)
             tools = [t for t in self.sdk_tools if t.name.startswith(mcp_prefix(name))]
             return ReconnectResult(client=client or DisabledMCPServer(name=name, config=config), tools=tools)
+        await self._close(name)
         result: ReconnectResult = await reconnect_mcp_server_impl(name, config, cwd=self.cwd, **self.connect_options)
         self.apply_reconnect(name, result)
         return result
+
+    async def clear_server(self, name: str, config: McpServerConfig) -> None:
+        """
+        `handleClearAuth`'s state update: the connection closed, the server recorded `failed` ("not
+        connected"), its tools gone.
+        """
+        await self._close(name)
+        prefix = mcp_prefix(name)
+        failed = FailedMCPServer(name=name, config=config)
+        self.manager.clients = [failed if c.name == name else c for c in self.manager.clients]
+        self.manager.tools = [t for t in self.manager.tools if not t.name.startswith(prefix)]
+        self.dynamic_clients = [failed if c.name == name else c for c in self.dynamic_clients]
+        self.dynamic_tools = [t for t in self.dynamic_tools if not t.name.startswith(prefix)]
+        self.on_change()
 
     def apply_reconnect(self, name: str, result: ReconnectResult) -> None:
         """`setAppState(... mcp: clients/tools ...)` and `dynamicMcpState` for one server."""
@@ -188,9 +219,7 @@ class SessionMcp:
     async def disable(self, name: str, config: McpServerConfig) -> None:
         """`mcp_toggle` with `enabled: false`: persisted, disconnected, its tools gone."""
         set_mcp_server_enabled(name, False, self.cwd)
-        client = next((c for c in self.all_clients() if c.name == name), None)
-        if isinstance(client, ConnectedMCPServer) and client.cleanup is not None:
-            await client.cleanup()
+        await self._close(name)
         prefix = mcp_prefix(name)
         disabled = DisabledMCPServer(name=name, config=config)
         self.manager.clients = [disabled if c.name == name else c for c in self.manager.clients]

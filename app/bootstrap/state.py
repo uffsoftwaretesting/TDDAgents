@@ -2,7 +2,8 @@
 The session's working directory: where the shell is now, and where the session started.
 
 Ported from `reference/claude-code/src/bootstrap/state.ts` -> `getOriginalCwd`, `getCwdState`,
-`setCwd`, `setInlinePlugins`, `getInlinePlugins`, and (`SessionBootstrap`) `getSessionId`,
+`setCwd`, `setInlinePlugins`, `getInlinePlugins`, `setSessionTrustAccepted`,
+`getSessionTrustAccepted`, and (`SessionBootstrap`) `getSessionId`,
 `getIsNonInteractiveSession`. Upstream keeps
 these in the process-wide `STATE`, one session per process. A TDDAgents process can hold
 several sessions (the test suite, the experiment drivers), each over its own workspace, so the
@@ -11,7 +12,9 @@ working directory is kept per workspace object: the original directory is the wo
 with it (weak keys). The session's identity is a `SessionBootstrap` value on the run's `AppState`.
 
 The `--plugin-dir` directories (`inlinePlugins`) stay process-wide, as upstream: the flag is a
-property of the process invocation, set once by `app/main.py` before any plugin load.
+property of the process invocation, set once by `app/main.py` before any plugin load. So does
+`sessionTrustAccepted`: the interactive entry point sets it once the trust dialog is past
+(`app/session/driver.py`, upstream's `showSetupScreens`).
 """
 
 from __future__ import annotations
@@ -26,6 +29,18 @@ _CWD: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
 _CWD_BY_ID: dict[int, str] = {}
 #: `STATE.inlinePlugins`: the `--plugin-dir` directories, in flag order.
 _INLINE_PLUGINS: list[str] = []
+#: `STATE.sessionTrustAccepted`: trust given for this process only (the home directory's case).
+_SESSION_TRUST_ACCEPTED: list[bool] = [False]
+
+
+def set_session_trust_accepted(accepted: bool) -> None:
+    """`setSessionTrustAccepted`."""
+    _SESSION_TRUST_ACCEPTED[0] = accepted
+
+
+def get_session_trust_accepted() -> bool:
+    """`getSessionTrustAccepted`."""
+    return _SESSION_TRUST_ACCEPTED[0]
 
 
 def set_inline_plugins(plugins: list[str]) -> None:
