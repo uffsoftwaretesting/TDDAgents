@@ -10,10 +10,10 @@ Ported from `reference/claude-code/src/utils/plugins/pluginAutoupdate.ts` ->
 `getAutoUpdaterDisabledReason` (its environment checks); `src/utils/privacyLevel.ts` ->
 `getEssentialTrafficOnlyReason`.
 
-Seam (stage 3): upstream updates each installation through `updatePluginOp`
-(`src/services/plugins/pluginOperations.ts`). Until stage 3 ports it, the update functions take
-it as the keyword argument `update_plugin_op(plugin_id, scope)`, returning an object with
-upstream's `success`, `already_up_to_date`, `old_version`, `new_version`, `message`.
+Each installation is updated through `updatePluginOp` (`app/services/plugins/plugin_operations.py`),
+bound to the run's settings. A caller may pass another `update_plugin_op(plugin_id, scope)`
+(tests do), returning an object with upstream's `success`, `already_up_to_date`, `old_version`,
+`new_version`, `message`.
 
 Settings come from the run's `SettingsLocations`. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is
 `TDDAGENTS_DISABLE_NONESSENTIAL_TRAFFIC`; `DISABLE_AUTOUPDATER` and `FORCE_AUTOUPDATE_PLUGINS`
@@ -58,17 +58,37 @@ PluginAutoUpdateCallback = Callable[[list[str]], None]
 
 
 class PluginOperationResult(Protocol):
-    """The fields of `updatePluginOp`'s result this module reads."""
+    """The fields of `updatePluginOp`'s result this module reads (read-only)."""
 
-    success: bool
-    already_up_to_date: bool | None
-    old_version: str | None
-    new_version: str | None
-    message: str
+    @property
+    def success(self) -> bool: ...
+
+    @property
+    def already_up_to_date(self) -> bool | None: ...
+
+    @property
+    def old_version(self) -> str | None: ...
+
+    @property
+    def new_version(self) -> str | None: ...
+
+    @property
+    def message(self) -> str: ...
 
 
-#: `updatePluginOp(pluginId, scope)` (stage 3).
+#: `updatePluginOp(pluginId, scope)`.
 UpdatePluginOp = Callable[[str, str], Awaitable[PluginOperationResult]]
+
+
+def _default_update_plugin_op(locations: SettingsLocations) -> UpdatePluginOp:
+    """The ported `updatePluginOp`, bound to the run's settings."""
+    from app.services.plugins.plugin_operations import update_plugin_op
+
+    async def update(plugin_id: str, scope: str) -> PluginOperationResult:
+        return await update_plugin_op(plugin_id, scope, locations=locations)
+
+    return update
+
 
 _plugin_update_callback: PluginAutoUpdateCallback | None = None
 _pending_notification: list[str] | None = None
@@ -146,12 +166,13 @@ async def _update_plugin(
 
 
 async def update_plugins_for_marketplaces(
-    marketplace_names: set[str], locations: SettingsLocations, *, update_plugin_op: UpdatePluginOp
+    marketplace_names: set[str], locations: SettingsLocations, *, update_plugin_op: UpdatePluginOp | None = None
 ) -> list[str]:
     """
     `updatePluginsForMarketplaces`: update every installed plugin of these (lowercase)
     marketplaces, only the installations relevant to this project. Returns the updated ids.
     """
+    update_op = update_plugin_op if update_plugin_op is not None else _default_update_plugin_op(locations)
     installed_plugins = load_installed_plugins_from_disk()
     plugin_ids = list(installed_plugins["plugins"])
     if not plugin_ids:
@@ -165,13 +186,13 @@ async def update_plugins_for_marketplaces(
         relevant = [i for i in installations if is_installation_relevant_to_current_project(i, locations)]
         if not relevant:
             return None
-        return await _update_plugin(plugin_id, relevant, update_plugin_op)
+        return await _update_plugin(plugin_id, relevant, update_op)
 
     results = await asyncio.gather(*(one(p) for p in plugin_ids), return_exceptions=True)
     return [r for r in results if isinstance(r, str)]
 
 
-async def _auto_update(locations: SettingsLocations, update_plugin_op: UpdatePluginOp) -> None:
+async def _auto_update(locations: SettingsLocations, update_plugin_op: UpdatePluginOp | None) -> None:
     global _pending_notification
     if should_skip_plugin_autoupdate():
         logger.debug("Plugin autoupdate: skipped (auto-updater disabled)")
@@ -203,7 +224,7 @@ async def _auto_update(locations: SettingsLocations, update_plugin_op: UpdatePlu
 
 
 def auto_update_marketplaces_and_plugins_in_background(
-    locations: SettingsLocations, *, update_plugin_op: UpdatePluginOp
+    locations: SettingsLocations, *, update_plugin_op: UpdatePluginOp | None = None
 ) -> asyncio.Task[None]:
     """
     `autoUpdateMarketplacesAndPluginsInBackground`: in a background task, refresh the

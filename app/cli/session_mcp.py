@@ -5,7 +5,14 @@ Ported from `reference/claude-code/src/cli/print.ts`'s closure state and the fun
 `sdkMcpConfigs` / `sdkClients` / `sdkTools`, `dynamicMcpState`, `updateSdkMcp`,
 `applyMcpServerChanges` (serialized), `handleMcpSetServers`, `reconcileMcpServers`, `toScopedConfig`,
 `buildMcpServerStatuses`, and the `mcp_reconnect` / `mcp_toggle` bodies (`reconnectMcpServerImpl`, then
-`appState.mcp` and `dynamicMcpState` updated). Upstream keeps it in `runHeadlessStreaming`'s closure;
+`appState.mcp` and `dynamicMcpState` updated); and `services/mcp/utils.ts` -> `excludeStalePluginClients`
+with `useManageMCPConnections`' reconnect on `pluginReconnectKey` (`refresh_plugin_servers`).
+
+Divergence (`refresh_plugin_servers`): upstream's headless `applyPluginMcpDiff` hands every
+configured server to `applyMcpServerChanges`, whose connections are memoized, so the servers
+already connected are shared. Connections are not memoized here, so the plugin refresh applies
+to the configured connections instead, the way upstream's REPL does (stale ones closed, new ones
+connected), for both the REPL and `-p`. Upstream keeps it in `runHeadlessStreaming`'s closure;
 here it is one object on the run (`DevelopmentRun.mcp`), so the tool pools read it live: every
 change calls `on_change`, which rebuilds the rosters and the pool (upstream's `buildAllTools`).
 """
@@ -44,6 +51,16 @@ def to_scoped_config(raw: Mapping[str, Any]) -> McpServerConfig:
     if raw.get("type") == "sdk":
         return McpServerConfig(type="sdk", scope="dynamic")
     return server_config_from_raw(dict(raw), "dynamic")
+
+
+def _is_stale(current: McpServerConfig, fresh: McpServerConfig | None) -> bool:
+    """
+    `excludeStalePluginClients`' test: gone (a dynamic-scope server only), or changed
+    (`hashMcpConfig`, the scope aside).
+    """
+    if fresh is None:
+        return current.scope == "dynamic"
+    return dataclasses.replace(current, scope="") != dataclasses.replace(fresh, scope="")
 
 
 @dataclass
@@ -291,6 +308,42 @@ class SessionMcp:
                 errors[name] = str(error)
         self.dynamic_configs = {name: dataclasses.replace(config) for name, config in desired.items()}
         return added, removed, errors
+
+    # ── plugin servers ───────────────────────────────────────────────────────
+
+    async def refresh_plugin_servers(self) -> dict[str, list[str]]:
+        """
+        The plugins' MCP servers applied after a plugin refresh: the configured servers are read
+        again (`getClaudeCodeMcpConfigs`), each configured connection whose config changed, or
+        whose dynamic-scope (plugin) config is gone, is closed with its tools
+        (`excludeStalePluginClients`), and each new server is connected (`useManageMCPConnections`
+        on `pluginReconnectKey`; `applyPluginMcpDiff` in `print.ts`).
+        """
+        from app.services.mcp.config import get_claude_code_mcp_configs
+
+        if self.settings_locations is None:
+            return {"added": [], "removed": []}
+        async with self._lock:
+            configs, _ = await get_claude_code_mcp_configs(self.cwd, self.settings_locations())
+            stale = [c for c in self.manager.clients if _is_stale(c.config, configs.get(c.name))]
+            for client in stale:
+                if isinstance(client, ConnectedMCPServer) and client.cleanup is not None:
+                    try:
+                        await client.cleanup()
+                    except Exception as error:  # noqa: BLE001 - upstream logs a failed cleanup
+                        logger.error("MCP server %s: cleanup failed: %s", client.name, error)
+            stale_names = {c.name for c in stale}
+            self.manager.clients = [c for c in self.manager.clients if c.name not in stale_names]
+            self.manager.tools = [t for t in self.manager.tools
+                                  if not any(t.name.startswith(mcp_prefix(n)) for n in stale_names)]
+            held = {c.name for c in self.manager.clients} | set(self.sdk_configs) | set(self.dynamic_configs)
+            new = {name: config for name, config in configs.items() if name not in held}
+            if new:
+                await self.manager.connect(new)
+        removed = sorted(stale_names - set(new))
+        logger.debug("Plugin MCP refresh: added=%d, removed=%d", len(new), len(removed))
+        self.on_change()
+        return {"added": list(new), "removed": removed}
 
     async def aclose(self) -> None:
         """Close the SDK and dynamic connections (the configured ones are the manager's)."""

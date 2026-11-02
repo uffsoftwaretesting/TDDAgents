@@ -733,7 +733,7 @@ def test_outside_command_gets_cwd_project_and_registry(tmp_path, monkeypatch):
     [(args, kwargs)] = seen
     assert args == (CommandHook(command="x"), "PreCompact", "PreCompact:auto", json.dumps(COMPACT), token)
     assert kwargs == {"cwd": str(tmp_path), "project_dir": str(tmp_path), "registry": d.registry,
-                      "timeout_ms": TOOL_HOOK_EXECUTION_TIMEOUT_MS}
+                      "timeout_ms": TOOL_HOOK_EXECUTION_TIMEOUT_MS, "plugin": None}
 
 
 def outside_http(answer: Any, event: str = "PreCompact") -> HookOutsideReplResult:

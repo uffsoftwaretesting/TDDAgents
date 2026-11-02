@@ -30,6 +30,11 @@ thread's own project; `--permission-mode`, `--settings` and `--dangerously-skip-
 upstream's startup flags for it, and `--coordinator` turns on coordinator mode
 (`TDDAGENTS_COORDINATOR_MODE`). `--plugin-dir <path>` (repeatable) loads a plugin directory for
 this process only (upstream's session plugins, `<name>@inline`).
+
+`plugin …` (alias `plugins`) is upstream's `claude plugin` subcommand (`main.tsx`'s `pluginCmd`,
+handlers in `app/cli/handlers/plugins.py`): `validate`, `list`, `install`, `uninstall`, `enable`,
+`disable`, `update`, and `marketplace add|list|remove|update`. It runs without a session; its
+project scope is the directory it runs in, as upstream's (`plugin_cli_locations`).
 """
 
 import argparse
@@ -659,8 +664,132 @@ def rewind_files(args: argparse.Namespace, initial_input: str | None, write_stdo
                                  session_options(args), write_out=write_stdout)
 
 
+#: `main.tsx`'s `plugin` command and its alias.
+PLUGIN_COMMANDS = ("plugin", "plugins")
+
+
+def build_plugin_parser() -> argparse.ArgumentParser:
+    """`main.tsx`'s `pluginCmd` and `marketplaceCmd` (commander), as argparse subcommands."""
+    from app.services.plugins.plugin_operations import (
+        VALID_INSTALLABLE_SCOPES,
+        VALID_UPDATE_SCOPES,
+    )
+    from app.utils.plugins.plugin_directories import PLUGIN_PACKAGE_DIR
+
+    parser = argparse.ArgumentParser(prog="python -m app.main plugin", description="Manage TDDAgents plugins")
+    parser.add_argument("--plugin-dir", dest="plugin_dir", action="append", default=[], metavar="<path>",
+                        help="Load plugins from a directory for this session only")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    def command(name: str, help_text: str, aliases: Sequence[str] = ()) -> argparse.ArgumentParser:
+        sub = commands.add_parser(name, help=help_text, aliases=list(aliases), description=help_text)
+        sub.add_argument("--cowork", action="store_true", help=argparse.SUPPRESS)
+        return sub
+
+    validate = command("validate", "Validate a plugin or marketplace manifest")
+    validate.add_argument("path")
+    listing = command("list", "List installed plugins")
+    listing.add_argument("--json", action="store_true", help="Output as JSON")
+    listing.add_argument("--available", action="store_true",
+                         help="Include available plugins from marketplaces (requires --json)")
+    marketplace = commands.add_parser("marketplace", help="Manage TDDAgents marketplaces")
+    marketplace_commands = marketplace.add_subparsers(dest="marketplace_command", required=True)
+
+    def marketplace_command(name: str, help_text: str, aliases: Sequence[str] = ()) -> argparse.ArgumentParser:
+        sub = marketplace_commands.add_parser(name, help=help_text, aliases=list(aliases), description=help_text)
+        sub.add_argument("--cowork", action="store_true", help=argparse.SUPPRESS)
+        return sub
+
+    add = marketplace_command("add", "Add a marketplace from a URL, path, or GitHub repo")
+    add.add_argument("source")
+    add.add_argument("--sparse", nargs="+", metavar="<paths...>",
+                     help="Limit checkout to specific directories via git sparse-checkout (for monorepos). "
+                          f"Example: --sparse {PLUGIN_PACKAGE_DIR} plugins")
+    add.add_argument("--scope", help="Where to declare the marketplace: user (default), project, or local")
+    marketplace_list = marketplace_command("list", "List all configured marketplaces")
+    marketplace_list.add_argument("--json", action="store_true", help="Output as JSON")
+    marketplace_command("remove", "Remove a configured marketplace", aliases=("rm",)).add_argument("name")
+    marketplace_command("update", "Update marketplace(s) from their source - updates all if no name specified"
+                        ).add_argument("name", nargs="?")
+    install = command("install", "Install a plugin from available marketplaces (use plugin@marketplace for specific "
+                      "marketplace)", aliases=("i",))
+    install.add_argument("plugin")
+    install.add_argument("-s", "--scope", default="user", help="Installation scope: user, project, or local")
+    uninstall = command("uninstall", "Uninstall an installed plugin", aliases=("remove", "rm"))
+    uninstall.add_argument("plugin")
+    uninstall.add_argument("-s", "--scope", default="user", help="Uninstall from scope: user, project, or local")
+    uninstall.add_argument("--keep-data", action="store_true",
+                           help="Preserve the plugin's persistent data directory (~/.tddagents/plugins/data/{id}/)")
+    scopes = ", ".join(VALID_INSTALLABLE_SCOPES)
+    enable = command("enable", "Enable a disabled plugin")
+    enable.add_argument("plugin")
+    enable.add_argument("-s", "--scope", help=f"Installation scope: {scopes} (default: auto-detect)")
+    disable = command("disable", "Disable an enabled plugin")
+    disable.add_argument("plugin", nargs="?")
+    disable.add_argument("-a", "--all", dest="all_plugins", action="store_true", help="Disable all enabled plugins")
+    disable.add_argument("-s", "--scope", help=f"Installation scope: {scopes} (default: auto-detect)")
+    update = command("update", "Update a plugin to the latest version (restart required to apply)")
+    update.add_argument("plugin")
+    update.add_argument("-s", "--scope", help=f"Installation scope: {', '.join(VALID_UPDATE_SCOPES)} (default: user)")
+    return parser
+
+
+def plugin_cli_locations() -> Any:
+    """
+    The settings the `plugin` subcommand reads and writes: upstream's process settings, whose
+    project is the directory the command runs in (`getOriginalCwd()`).
+    """
+    from app.utils.settings.settings import MANAGED_DIR, SettingsLocations
+
+    return SettingsLocations(project_root=Path.cwd(), managed_dir=Path(MANAGED_DIR))
+
+
+def run_plugin_command(argv: Sequence[str]) -> int:
+    """`claude plugin …`: parse, then run the handler (each returns the exit code)."""
+    import asyncio
+
+    from app.cli.handlers import plugins as handlers
+
+    args = build_plugin_parser().parse_args(list(argv))
+    apply_plugin_dirs(args.plugin_dir)
+    locations = plugin_cli_locations()
+    command = args.command
+    if command == "validate":
+        work: Any = handlers.plugin_validate_handler(args.path, cowork=args.cowork)
+    elif command == "list":
+        work = handlers.plugin_list_handler(locations=locations, as_json=args.json, available=args.available,
+                                            cowork=args.cowork)
+    elif command == "marketplace":
+        sub = args.marketplace_command
+        if sub == "add":
+            work = handlers.marketplace_add_handler(args.source, locations=locations, sparse=args.sparse,
+                                                    scope=args.scope, cowork=args.cowork)
+        elif sub == "list":
+            work = handlers.marketplace_list_handler(as_json=args.json, cowork=args.cowork)
+        elif sub in ("remove", "rm"):
+            work = handlers.marketplace_remove_handler(args.name, locations=locations, cowork=args.cowork)
+        else:
+            work = handlers.marketplace_update_handler(args.name, cowork=args.cowork)
+    elif command in ("install", "i"):
+        work = handlers.plugin_install_handler(args.plugin, locations=locations, scope=args.scope, cowork=args.cowork)
+    elif command in ("uninstall", "remove", "rm"):
+        work = handlers.plugin_uninstall_handler(args.plugin, locations=locations, scope=args.scope,
+                                                 keep_data=args.keep_data, cowork=args.cowork)
+    elif command == "enable":
+        work = handlers.plugin_enable_handler(args.plugin, locations=locations, scope=args.scope, cowork=args.cowork)
+    elif command == "disable":
+        work = handlers.plugin_disable_handler(args.plugin, locations=locations, scope=args.scope,
+                                               all_plugins=args.all_plugins, cowork=args.cowork)
+    else:
+        work = handlers.plugin_update_handler(args.plugin, locations=locations, scope=args.scope, cowork=args.cowork)
+    return int(asyncio.run(work))
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in PLUGIN_COMMANDS:
+        return run_plugin_command(arguments[1:])
     args = parse_args(argv)
     error = validate_sdk_flags(args)
     if error is not None:

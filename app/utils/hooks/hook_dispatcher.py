@@ -7,6 +7,9 @@ three executors a non-command hook needs are bound to the run — the prompt hoo
 agent hook to the run's model as their fallback (`getSmallFastModel` first, see
 `utils/hooks/exec_prompt_hook.py`), the HTTP hook to the settings' URL and env-var allowlists.
 
+The run's `locations` stay on the dispatcher: the plugins' hooks are loaded from them
+(`app/utils/plugins/load_plugin_hooks.py`) and a plugin hook's saved options read from them.
+
 Every production piece is injectable, so a test builds a dispatcher with fakes and no model,
 network or subprocess it did not ask for.
 """
@@ -71,6 +74,7 @@ def build_hook_dispatcher(
             exec_agent_hook, agent_runner=runner, transcript_path=transcript_path, default_model=model
         ),
         http_executor=partial(exec_http_hook, policy=http_policy, transport=http_transport),
+        settings_locations=locations,
     )
 
 

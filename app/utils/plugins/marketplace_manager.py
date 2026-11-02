@@ -1117,7 +1117,8 @@ async def remove_marketplace_source(name: str, locations: SettingsLocations) -> 
     if seed_dir:
         raise ValueError(
             f"Marketplace '{name}' is registered from the read-only seed directory ({seed_dir}) and will be "
-            f"re-registered on next startup. To stop using its plugins: claude plugin disable <plugin>@{name}"
+            "re-registered on next startup. To stop using its plugins: "
+            f"python -m app.main plugin disable <plugin>@{name}"
         )
     del config[name]
     await save_known_marketplaces_config(config)
@@ -1342,7 +1343,8 @@ async def refresh_marketplace(
                 raise ValueError(
                     f"Marketplace '{name}' has a corrupted installLocation ({install_location}) — expected a path "
                     f"inside {cache_dir}. This can happen after cross-platform path writes or manual edits to "
-                    f'known_marketplaces.json. Run: claude plugin marketplace remove "{name}" and re-add it.'
+                    "known_marketplaces.json. Run: "
+                    f'python -m app.main plugin marketplace remove "{name}" and re-add it.'
                 )
         kind = source["source"]
         if kind in ("github", "git"):
@@ -1390,7 +1392,7 @@ async def refresh_marketplace(
                 raise RuntimeError(
                     "The marketplace.json file is no longer present in this repository.\n\n"
                     f"{reason}\nSource: {display}\n\n"
-                    f'You can remove this marketplace with: claude plugin marketplace remove "{name}"'
+                    f'You can remove this marketplace with: python -m app.main plugin marketplace remove "{name}"'
                 ) from exc
         elif kind == "url":
             await cache_marketplace_from_url(source["url"], install_location, source.get("headers"), on_progress)

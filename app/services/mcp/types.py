@@ -48,6 +48,8 @@ class McpServerConfig:
     headers: Mapping[str, str] | None = None
     headers_helper: str | None = None
     oauth: McpOAuthConfig | None = None
+    #: `ScopedMcpServerConfig.pluginSource`: the plugin id a plugin's server comes from.
+    plugin_source: str | None = None
 
     @property
     def transport(self) -> str:

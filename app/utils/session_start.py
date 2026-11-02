@@ -18,12 +18,14 @@ the prompt, before the first model call.
   model. `continue: false` keeps the prompt but also stops before the model. Otherwise the
   hooks' context follows the prompt as messages.
 
-Not ported: plugin-hook loading (no plugins), `watchPaths` / FileChanged watching, and the
+The plugins' hooks are registered before SessionStart fires (`loadPluginHooks`, skipped under
+`allowManagedHooksOnly`). Not ported: `watchPaths` / FileChanged watching, and the
 10 000-character `applyTruncation` of hook output (no UI to protect).
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from app.types.hooks import get_user_prompt_submit_hook_blocking_message
@@ -33,6 +35,23 @@ from app.utils.hooks.hooks import (
     execute_user_prompt_submit_hooks,
 )
 from app.utils.messages import HookAttachment, Message, create_attachment_message
+
+logger = logging.getLogger(__name__)
+
+
+async def ensure_plugin_hooks_loaded(dispatcher: HookDispatcher | None, source: str) -> None:
+    """`processSessionStartHooks`' `loadPluginHooks()` guard."""
+    if dispatcher is None or getattr(dispatcher, "settings_locations", None) is None:
+        return
+    if dispatcher.snapshot.managed_only:
+        logger.debug("Skipping plugin hooks - allowManagedHooksOnly is enabled")
+        return
+    from app.utils.plugins.load_plugin_hooks import load_plugin_hooks
+
+    try:
+        await load_plugin_hooks(dispatcher)
+    except Exception as exc:  # noqa: BLE001 - the session starts without plugin hooks, as upstream
+        logger.error("Failed to load plugin hooks during %s: %s", source, exc)
 
 
 @dataclass
@@ -49,8 +68,12 @@ async def process_session_start_hooks(
     agent_type: str | None = None,
     model: str | None = None,
 ) -> SessionStartOutcome:
-    """`processSessionStartHooks`."""
+    """
+    `processSessionStartHooks`: the plugins' hooks are registered first (`loadPluginHooks`), unless
+    a managed-only policy excludes them; a failed load is logged and the session goes on without.
+    """
     outcome = SessionStartOutcome()
+    await ensure_plugin_hooks_loaded(dispatcher, source)
     contexts: list[str] = []
     async for result in execute_session_start_hooks(dispatcher, source, agent_type, model):
         if result.attachment is not None:

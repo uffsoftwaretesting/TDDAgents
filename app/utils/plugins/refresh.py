@@ -9,17 +9,18 @@ the active components (`AppState`, this module). Callers: `/reload-plugins`, the
 `reload_plugins` control request (`print.ts`), and the background installation after a new
 marketplace is installed (`app/services/plugins/plugin_installation_manager.py`).
 
-`refresh_active_plugins(set_app_state, locations)` takes the run's `SettingsLocations`
-(`app/cli/print.py` `run_settings_locations`), where upstream reads its process-wide settings.
-The agent definitions are `get_agent_definitions_with_overrides` over the run's project and home
+`refresh_active_plugins(set_app_state, locations, hook_dispatcher=…)` takes the run's
+`SettingsLocations` (`app/cli/print.py` `run_settings_locations`), where upstream reads its
+process-wide settings, and the run's hook dispatcher, which holds the registered plugin hooks
+(upstream's `STATE.registeredHooks`; without one no hook is registered). The agent definitions
+are `get_agent_definitions_with_overrides` over the run's project and home with the plugin agents
 (this repository's `dict[str, AgentDefinition]`, upstream's `AgentDefinitionsResult.allAgents`).
+The plugin commands are `getPluginCommands` (the `commands/` entries; the plugin skills are
+reloaded by the caller with the rest of the command list, as upstream's `getCommands`).
 
-**Stage-3 seams**: each component loader below (`_get_plugin_commands`,
-`_load_plugin_mcp_servers`, `_load_plugin_lsp_servers`, `_load_plugin_hooks`,
-`_reinitialize_lsp_server_manager`) is a placeholder returning nothing until stage 3 ports
-`loadPluginCommands.ts`, `mcpPluginIntegration.ts`, `lspPluginIntegration.ts`,
-`loadPluginHooks.ts` and the LSP manager; the plugin agents join
-`get_agent_definitions_with_overrides` then (`loadPluginAgents.ts`).
+LSP: TDDAgents has no LSP server manager (`services/lsp/`), so `lspPluginIntegration.ts` is not
+ported: `_load_plugin_lsp_servers` reads nothing, `lsp_count` counts only servers a plugin's
+manifest already carried, and `_reinitialize_lsp_server_manager` does nothing.
 """
 
 from __future__ import annotations
@@ -62,42 +63,54 @@ class RefreshActivePluginsResult:
     plugin_commands: list[Any] = field(default_factory=list)
 
 
-# ── stage-3 seams ─────────────────────────────────────────────────────────────
+# ── the component loaders ─────────────────────────────────────────────────────
 
 async def _get_plugin_commands(locations: SettingsLocations) -> list[Any]:
-    """Stage-3 seam: `getPluginCommands` (`loadPluginCommands.ts`). No plugin command is loaded yet."""
-    return []
+    """`getPluginCommands` (`loadPluginCommands.ts`)."""
+    from app.utils.plugins.load_plugin_commands import get_plugin_commands
+
+    return list(await get_plugin_commands(locations))
 
 
 async def _load_plugin_mcp_servers(
     plugin: LoadedPlugin, errors: list[PluginError], locations: SettingsLocations
 ) -> dict[str, dict[str, Any]] | None:
-    """Stage-3 seam: `loadPluginMcpServers` (`mcpPluginIntegration.ts`). No plugin MCP server is loaded yet."""
-    return None
+    """`loadPluginMcpServers` (`mcpPluginIntegration.ts`): the plugin's servers, unresolved."""
+    from app.utils.plugins.mcp_plugin_integration import load_plugin_mcp_servers
+
+    return await load_plugin_mcp_servers(plugin, errors, locations)
 
 
 async def _load_plugin_lsp_servers(plugin: LoadedPlugin, errors: list[PluginError]) -> dict[str, Any] | None:
-    """Stage-3 seam: `loadPluginLspServers` (`lspPluginIntegration.ts`). No plugin LSP server is loaded yet."""
+    """`loadPluginLspServers` (`lspPluginIntegration.ts`): not ported, TDDAgents has no LSP manager."""
     return None
 
 
-async def _load_plugin_hooks(locations: SettingsLocations) -> None:
-    """Stage-3 seam: `loadPluginHooks` (`loadPluginHooks.ts`), the full swap of the registered plugin hooks."""
+async def _load_plugin_hooks(hook_dispatcher: Any) -> None:
+    """`loadPluginHooks` (`loadPluginHooks.ts`): the full swap of the run's registered plugin hooks."""
+    if hook_dispatcher is None:
+        return
+    from app.utils.plugins.load_plugin_hooks import load_plugin_hooks
+
+    await load_plugin_hooks(hook_dispatcher)
 
 
 def _reinitialize_lsp_server_manager() -> None:
-    """Stage-3 seam: `reinitializeLspServerManager` (`services/lsp/manager.ts`); TDDAgents has no LSP manager."""
+    """`reinitializeLspServerManager` (`services/lsp/manager.ts`): nothing, TDDAgents has no LSP manager."""
 
 
-def _get_agent_definitions(locations: SettingsLocations) -> dict[str, AgentDefinition]:
-    """`getAgentDefinitionsWithOverrides(getOriginalCwd())`; stage 3 adds the plugin agents to it."""
-    return get_agent_definitions_with_overrides(project_dir=locations.project_root, user_home=locations.home)
+async def _get_agent_definitions(locations: SettingsLocations) -> dict[str, AgentDefinition]:
+    """`getAgentDefinitionsWithOverrides(getOriginalCwd())`, the plugin agents (`loadPluginAgents`) included."""
+    from app.utils.plugins.load_plugin_agents import load_plugin_agents
+
+    return get_agent_definitions_with_overrides(project_dir=locations.project_root, user_home=locations.home,
+                                                plugin_agents=await load_plugin_agents(locations))
 
 
 # ── refreshActivePlugins ──────────────────────────────────────────────────────
 
 async def refresh_active_plugins(
-    set_app_state: SetAppState, locations: SettingsLocations
+    set_app_state: SetAppState, locations: SettingsLocations, *, hook_dispatcher: Any = None
 ) -> RefreshActivePluginsResult:
     """
     `refreshActivePlugins`: clear every plugin cache (and the orphan exclusions), load all plugins
@@ -110,8 +123,8 @@ async def refresh_active_plugins(
     clear_plugin_cache_exclusions()
 
     plugin_result = await load_all_plugins(locations)
-    plugin_commands = await _get_plugin_commands(locations)
-    agent_definitions = _get_agent_definitions(locations)
+    plugin_commands, agent_definitions = await asyncio.gather(
+        _get_plugin_commands(locations), _get_agent_definitions(locations))
     enabled, disabled, errors = plugin_result.enabled, plugin_result.disabled, plugin_result.errors
 
     async def mcp_one(plugin: LoadedPlugin) -> int:
@@ -152,7 +165,7 @@ async def refresh_active_plugins(
 
     hook_load_failed = False
     try:
-        await _load_plugin_hooks(locations)
+        await _load_plugin_hooks(hook_dispatcher)
     except Exception as exc:  # noqa: BLE001 - upstream counts a hook-load failure as an error, never a failure
         hook_load_failed = True
         logger.error("refreshActivePlugins: loadPluginHooks failed: %s", exc)

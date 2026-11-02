@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -158,30 +159,30 @@ class TestMerged:
 
     def test_local_beats_project_beats_user(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch)
-        servers, _ = get_claude_code_mcp_configs(cwd, loc)
+        servers, _ = asyncio.run(get_claude_code_mcp_configs(cwd, loc))
         assert set(servers) == {"p", "u", "l", "shared"}
         assert (servers["shared"].command, servers["shared"].scope) == ("local", "local")
 
     def test_rejected_project_servers_are_dropped(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch, settings={"disabledMcpjsonServers": ["p"]})
-        assert "p" not in get_claude_code_mcp_configs(cwd, loc)[0]
+        assert "p" not in asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0]
 
     def test_disabled_servers_are_dropped(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch, global_extra={"disabledMcpServers": ["u"]})
-        assert "u" not in get_claude_code_mcp_configs(cwd, loc)[0]
+        assert "u" not in asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0]
 
     def test_an_enterprise_file_is_exclusive(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch)
         _write(tmp_path / "etc" / "managed-mcp.json", {"mcpServers": {"corp": STDIO}})
-        assert list(get_claude_code_mcp_configs(cwd, loc)[0]) == ["corp"]
+        assert list(asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0]) == ["corp"]
 
     def test_plugin_only_customization_locks_user_editable_scopes(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch, policy={"strictPluginOnlyCustomization": ["mcp"]})
-        assert get_claude_code_mcp_configs(cwd, loc)[0] == {}
+        assert asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0] == {}
 
     def test_policy_denies_by_name(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch, policy={"deniedMcpServers": [{"serverName": "u"}]})
-        assert "u" not in get_claude_code_mcp_configs(cwd, loc)[0]
+        assert "u" not in asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0]
 
 
 class TestProjectApproval:
@@ -398,7 +399,7 @@ class TestScopeExpansion:
         _write(tmp_path / "etc" / "managed-mcp.json", {"mcpServers": {"corp": STDIO, "other": STDIO}})
         _write(tmp_path / "etc" / "managed-settings.json", {"deniedMcpServers": [{"serverName": "other"}]})
         (tmp_path / "proj").mkdir()
-        assert list(get_claude_code_mcp_configs(tmp_path / "proj", _locations(tmp_path))[0]) == ["corp"]
+        assert list(asyncio.run(get_claude_code_mcp_configs(tmp_path / "proj", _locations(tmp_path)))[0]) == ["corp"]
 
 
 @pytest.mark.parametrize("kind", ["sse", "http", "ws", "sse-ide", "ws-ide", "claudeai-proxy"])
