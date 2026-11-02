@@ -64,6 +64,8 @@ class McpPanelContext:
     mcp: Any
     cwd: str
     managed_dir: Path | None = None
+    #: The session's log file, named in the list when a server failed (upstream's `--debug` hint).
+    log_file: Path | None = None
     perform_oauth_flow: Callable[..., Awaitable[None]] = perform_mcp_oauth_flow
     revoke_server_tokens: Callable[..., Awaitable[None]] = revoke_server_tokens
     read_tokens: Callable[[str, McpServerConfig], Awaitable[Any]] = _stored_tokens

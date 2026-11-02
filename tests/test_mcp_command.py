@@ -33,7 +33,7 @@ from app.components.mcp.mcp_remote_server_menu import (
     remote_menu_options,
     render_remote_server,
 )
-from app.components.mcp.mcp_settings import NO_SERVERS, prepare_servers, run_mcp_settings
+from app.components.mcp.mcp_settings import no_servers_message, prepare_servers, run_mcp_settings
 from app.components.mcp.mcp_stdio_server_menu import capitalize, render_stdio_server, stdio_menu_options
 from app.components.mcp.mcp_tool_detail_view import render_tool_detail
 from app.components.mcp.mcp_tool_list_view import tool_annotations, tool_display_name
@@ -197,6 +197,10 @@ def test_the_list_groups_by_scope_with_the_built_in_servers_last() -> None:
     assert lines[-2:] == ["  Built-in MCPs (always available)", "  4. zeta · ✔ connected"]
     assert "  3. web · △ needs authentication" in lines
     assert render_list_panel(servers[:1], "/p")[1] == "1 server"
+    # A failed server: the footer names the session's log (upstream's `claude --debug` hint).
+    assert render_list_panel(servers, "/p", log_file="/s/logs.txt")[-2:] == ["", "※ Error logs are in /s/logs.txt"]
+    healthy = [s for s in servers if s.name != "b"]
+    assert render_list_panel(healthy, "/p", log_file="/s/logs.txt")[-1] == "  3. zeta · ✔ connected"
 
 
 def test_prepare_servers() -> None:
@@ -209,7 +213,11 @@ def test_prepare_servers() -> None:
 
 
 def test_no_servers_and_dismissing() -> None:
-    assert run(run_mcp_settings(FakeDialog(), context(session()))) == NO_SERVERS
+    from app.services.mcp.config import get_global_config_path
+
+    assert run(run_mcp_settings(FakeDialog(), context(session()))) == no_servers_message() == (
+        "No MCP servers configured. Add servers to the project's .mcp.json, or to \"mcpServers\" in "
+        f"{get_global_config_path()} to use them in every project.")
     assert run(run_mcp_settings(FakeDialog(ESC), context(session(connected("a"))))) == DISMISSED
 
 

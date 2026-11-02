@@ -8,8 +8,10 @@ configured, SDK and dynamic), sorted by name, without `ide`. An sse or http serv
 authenticated when it has stored OAuth tokens or is connected with tools.
 
 Upstream's empty-list result also says to run `/doctor`, `claude mcp --help` or read Claude Code's
-documentation; TDDAgents has none of them, so it says only that no server is configured. Not
-ported: the agent-only servers (`agent-server-menu`) and claude.ai connectors.
+documentation; TDDAgents has none of them, so it names where servers are configured instead (the
+project's `.mcp.json`, the global config's `mcpServers`; user decision 2026-11-02: TDDAgents
+equivalents where a route exists). Not ported: the agent-only servers (`agent-server-menu`) and
+claude.ai connectors.
 """
 
 from __future__ import annotations
@@ -25,7 +27,13 @@ from app.components.mcp.mcp_tool_list_view import select_tool, server_tools
 from app.components.mcp.types import BACK, Complete, McpPanelContext, ServerInfo
 from app.services.mcp.utils import filter_tools_by_server
 
-NO_SERVERS = "No MCP servers configured."
+
+def no_servers_message() -> str:
+    """The empty-list result, pointing at where TDDAgents reads MCP servers from."""
+    from app.services.mcp.config import MCP_JSON_FILENAME, get_global_config_path
+
+    return (f"No MCP servers configured. Add servers to the project's {MCP_JSON_FILENAME}, or to "
+            f'"mcpServers" in {get_global_config_path()} to use them in every project.')
 
 
 async def prepare_servers(context: McpPanelContext) -> list[ServerInfo]:
@@ -67,9 +75,9 @@ async def run_mcp_settings(io: DialogIO, context: McpPanelContext) -> str:
     """`MCPSettings`: the dialog, until it closes; its result is what the REPL shows."""
     servers = await prepare_servers(context)
     if not servers:
-        return NO_SERVERS
+        return no_servers_message()
     while True:
-        picked = await select_server(io, servers, context.cwd, context.managed_dir)
+        picked = await select_server(io, servers, context.cwd, context.managed_dir, context.log_file)
         if isinstance(picked, Cancelled):
             return DISMISSED
         server = picked
@@ -83,7 +91,7 @@ async def run_mcp_settings(io: DialogIO, context: McpPanelContext) -> str:
             server = next((s for s in await prepare_servers(context) if s.name == server.name), server)
         servers = await prepare_servers(context)
         if not servers:
-            return NO_SERVERS
+            return no_servers_message()
 
 
-__all__ = ["NO_SERVERS", "prepare_servers", "run_mcp_settings"]
+__all__ = ["no_servers_message", "prepare_servers", "run_mcp_settings"]

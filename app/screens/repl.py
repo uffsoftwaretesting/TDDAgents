@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
@@ -540,7 +541,11 @@ class Repl:
 
         mcp = self.run.mcp
         locations = mcp.settings_locations() if mcp.settings_locations is not None else None
-        return McpPanelContext(mcp=mcp, cwd=mcp.cwd, managed_dir=getattr(locations, "managed_dir", None))
+        workspace = getattr(getattr(self.run, "ctx", None), "workspace", None)
+        run_dir = getattr(workspace, "run_dir", None)
+        log_file = Path(run_dir) / "metrics_and_logging" / "execution_logs.txt" if run_dir is not None else None
+        return McpPanelContext(mcp=mcp, cwd=mcp.cwd, managed_dir=getattr(locations, "managed_dir", None),
+                               log_file=log_file)
 
     async def _mcp(self, args: str) -> None:
         """`/mcp`: the dialog holds the screen until it closes, then its result is shown."""

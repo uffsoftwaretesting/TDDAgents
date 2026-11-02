@@ -7,10 +7,11 @@ are numbered in upstream's display order (project, local, user, enterprise, then
 `dynamic` servers last); picking a number opens that server's menu, Esc closes the dialog with
 `MCP dialog dismissed`.
 
-Not ported: the claude.ai connectors section and the agent-only servers (`Agent MCPs`, agents'
-`mcpServers`), which TDDAgents has neither of; `McpParsingWarnings`; and the footer's
-`--debug` hint and documentation link, which point at Claude Code (TDDAgents writes its log to
-the session's `metrics_and_logging/execution_logs.txt`).
+With a failed server, upstream's footer hint "Run claude --debug to see error logs" becomes where
+TDDAgents writes the session's log (`metrics_and_logging/execution_logs.txt`; user decision
+2026-11-02: TDDAgents equivalents where a route exists). Not ported: the claude.ai connectors
+section and the agent-only servers (`Agent MCPs`, agents' `mcpServers`), which TDDAgents has
+neither of; `McpParsingWarnings`; and the footer's documentation link (no TDDAgents page).
 """
 
 from __future__ import annotations
@@ -77,9 +78,13 @@ def server_status(client: object) -> str:
 
 
 def render_list_panel(
-    servers: Sequence[ServerInfo], cwd: str | Path, managed_dir: str | Path | None = None
+    servers: Sequence[ServerInfo], cwd: str | Path, managed_dir: str | Path | None = None,
+    log_file: str | Path | None = None,
 ) -> list[str]:
-    """`Manage MCP servers`, the server count, and each scope's heading and numbered rows."""
+    """
+    `Manage MCP servers`, the server count, each scope's heading and numbered rows, and, when a
+    server failed, where its error is logged.
+    """
     rows = selectable_servers(servers)
     groups = group_servers_by_scope(servers)
     lines = ["Manage MCP servers", f"{len(servers)} {plural(len(servers), 'server')}"]
@@ -90,15 +95,18 @@ def render_list_panel(
         label, path = get_scope_heading(scope, cwd, managed_dir)
         lines += ["", f"  {label}" + (f" ({path})" if path else "")]
         lines += [f"  {rows.index(server) + 1}. {server.name} · {server_status(server.client)}" for server in group]
+    if log_file is not None and any(getattr(s.client, "type", None) == "failed" for s in servers):
+        lines += ["", f"※ Error logs are in {log_file}"]
     return lines
 
 
 async def select_server(
-    io: DialogIO, servers: Sequence[ServerInfo], cwd: str | Path, managed_dir: str | Path | None = None
+    io: DialogIO, servers: Sequence[ServerInfo], cwd: str | Path, managed_dir: str | Path | None = None,
+    log_file: str | Path | None = None,
 ) -> ServerInfo | Cancelled:
     """The list, then the server picked, or `CANCELLED` on Esc."""
     rows = selectable_servers(servers)
-    text = "\n".join([*render_list_panel(servers, cwd, managed_dir), choice_hint(len(rows), "cancel")])
+    text = "\n".join([*render_list_panel(servers, cwd, managed_dir, log_file), choice_hint(len(rows), "cancel")])
 
     def parse(line: str) -> int | None:
         stripped = line.strip()
