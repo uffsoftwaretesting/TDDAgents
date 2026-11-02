@@ -41,7 +41,10 @@ touches a matching path (`activate_conditional_skills_for_paths`, called by `Rea
 Upstream keeps this state in module globals memoized by cwd; here one `SkillRegistry` per run
 holds it, including the per-agent `sent_skill_names` of the skill-listing attachment.
 
-Not ported: legacy `/commands/` directories, plugin and MCP skills, `--add-dir` skill dirs,
+Plugin commands and skills (`app/utils/plugins/load_plugin_commands.py`) follow the skill
+directories (`loadAllCommands`' order); the run swaps them in with `set_plugin_commands`.
+
+Not ported: legacy `/commands/` directories, MCP skills, `--add-dir` skill dirs,
 dynamic skill-dir discovery (`discoverSkillDirsForPaths`), bare mode, effort and `shell`.
 """
 
@@ -75,10 +78,10 @@ class SkillCommand:
     name: str
     description: str
     markdown_content: str
-    #: `bundled`, `policySettings`, `userSettings` or `projectSettings`.
+    #: `bundled`, `policySettings`, `userSettings`, `projectSettings` or `plugin`.
     source: str
-    #: `bundled` or `skills`.
-    loaded_from: str
+    #: `bundled`, `skills` or `plugin`; `None` for a plugin's `commands/` entry (upstream's `undefined`).
+    loaded_from: str | None
     skill_root: str | None
     display_name: str | None = None
     has_user_specified_description: bool = False
@@ -307,24 +310,49 @@ class SkillRegistry:
     def __init__(self, commands: Iterable[SkillCommand], conditional: Iterable[SkillCommand] = (),
                  *, model: str | None = None) -> None:
         self._base = list(commands)
+        #: `getPluginCommands` + `getPluginSkills`: replaced as a whole by `set_plugin_commands`.
+        self._plugin: list[SkillCommand] = []
         self._conditional = {c.name: c for c in conditional}
         self._dynamic: dict[str, SkillCommand] = {}
         self.model = model
         #: `attachments.ts` -> `sentSkillNames`, keyed by agent id (`""` is the main thread).
         self.sent_skill_names: dict[str | None, set[str]] = {}
 
+    def set_plugin_commands(self, commands: Iterable[SkillCommand]) -> None:
+        """
+        The enabled plugins' commands and skills (`loadAllCommands`' `pluginCommands`,
+        `pluginSkills`), swapped in whole: at startup and after every `refresh_active_plugins`
+        (`clearCommandsCache` + `getCommands`).
+        """
+        self._plugin = list(commands)
+
+    def plugin_commands(self) -> list[SkillCommand]:
+        """The plugin commands and skills currently loaded."""
+        return list(self._plugin)
+
     def commands(self) -> list[SkillCommand]:
-        """`getCommands`: the base commands, then activated skills no base command shadows."""
-        names = {c.name for c in self._base}
-        return [*self._base, *(c for c in self._dynamic.values() if c.name not in names)]
+        """
+        `getCommands`: the base commands (bundled, then the skill directories), the plugin
+        commands and skills, then activated skills no earlier command shadows.
+        """
+        base = [*self._base, *self._plugin]
+        names = {c.name for c in base}
+        return [*base, *(c for c in self._dynamic.values() if c.name not in names)]
 
     def find_command(self, name: str) -> SkillCommand | None:
         """`findCommand`: the first command whose name or user-facing name matches."""
         return next((c for c in self.commands() if name in (c.name, c.user_facing_name())), None)
 
     def get_skill_tool_commands(self) -> list[SkillCommand]:
-        """`getSkillToolCommands`: what the model may invoke (bundled and skills-dir only here)."""
-        return [c for c in self.commands() if not c.disable_model_invocation]
+        """
+        `getSkillToolCommands`: what the model may invoke. Bundled and skills-directory entries
+        always; a plugin command only with a description of its own or a `when_to_use`.
+        """
+        return [
+            c for c in self.commands()
+            if not c.disable_model_invocation
+            and (c.loaded_from in ("bundled", "skills") or c.has_user_specified_description or bool(c.when_to_use))
+        ]
 
     def activate_conditional_skills_for_paths(self, file_paths: Iterable[str], cwd: str) -> list[str]:
         """`activateConditionalSkillsForPaths`: gitignore-style matching, relative to `cwd`."""

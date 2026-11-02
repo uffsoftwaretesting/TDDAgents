@@ -11,13 +11,14 @@ An updated or uninstalled version gets a `.orphaned_at` marker and is deleted on
 is older than seven days (concurrent sessions may still use it); a version installed again
 loses its marker.
 
-Seams (`clear_all_plugin_caches` / `clear_all_caches` call only caches that exist so far):
-`clearPluginCache` (the loader's memoized `loadAllPlugins`) is called; stage 3 adds
-`clearPluginCommandCache`, `clearPluginAgentCache`, `clearPluginHookCache` with
-`pruneRemovedPluginHooks`, `clearPluginOutputStyleCache`, `clearAllOutputStylesCache`, and in
-`clear_all_caches` upstream's `clearCommandsCache`, `clearAgentDefinitionsCache`,
-`clearPromptCache` (SkillTool) and `resetSentSkillNames`. This repository has no process-wide
-equivalent of those four yet (the skill registry and its `sent_skill_names` live per session).
+`clear_all_plugin_caches` clears the loader's memo (`clearPluginCache`), the plugin commands,
+skills (`clearCommandsCache`'s plugin half), agents and hooks memos, starts the background
+`pruneRemovedPluginHooks`, and clears the plugin options. Not ported: `clearPluginOutputStyleCache`
+and `clearAllOutputStylesCache` (TDDAgents has no output styles), and `clear_all_caches`'
+`clearAgentDefinitionsCache`, `clearPromptCache` (SkillTool) and `resetSentSkillNames`: those
+have no process-wide state here (agent definitions are read from disk on each use; the skill
+registry and its `sent_skill_names` live per run, and the run resets them when it refreshes its
+plugins, `DevelopmentRun.refresh_plugins`).
 """
 
 from __future__ import annotations
@@ -29,6 +30,15 @@ import time
 from pathlib import Path
 
 from app.utils.plugins.installed_plugins_manager import load_installed_plugins_from_disk
+from app.utils.plugins.load_plugin_agents import clear_plugin_agent_cache
+from app.utils.plugins.load_plugin_commands import (
+    clear_plugin_command_cache,
+    clear_plugin_skills_cache,
+)
+from app.utils.plugins.load_plugin_hooks import (
+    clear_plugin_hook_cache,
+    prune_removed_plugin_hooks_in_background,
+)
 from app.utils.plugins.plugin_loader import clear_plugin_cache, get_plugin_cache_path
 from app.utils.plugins.plugin_options_storage import clear_plugin_options_cache
 from app.utils.plugins.zip_cache import is_plugin_zip_cache_enabled
@@ -41,17 +51,20 @@ CLEANUP_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 
 def clear_all_plugin_caches() -> None:
-    """`clearAllPluginCaches` (see the module docstring for the caches stage 3 adds)."""
+    """`clearAllPluginCaches`."""
     clear_plugin_cache()
-    # Stage 3 seam: clearPluginCommandCache, clearPluginAgentCache, clearPluginHookCache, then the
-    # fire-and-forget pruneRemovedPluginHooks.
+    clear_plugin_command_cache()
+    clear_plugin_agent_cache()
+    clear_plugin_hook_cache()
+    # Prune-only and fire-and-forget: disabled plugins' hooks stop at once, new ones wait for a reload.
+    prune_removed_plugin_hooks_in_background()
     clear_plugin_options_cache()
-    # Stage 3 seam: clearPluginOutputStyleCache, clearAllOutputStylesCache.
 
 
 def clear_all_caches() -> None:
-    """`clearAllCaches`."""
+    """`clearAllCaches`: the plugin caches, then `clearCommandsCache`'s plugin skills."""
     clear_all_plugin_caches()
+    clear_plugin_skills_cache()
 
 
 def _now_ms() -> float:

@@ -143,10 +143,17 @@ HookCommand: TypeAlias = CommandHook | PromptHook | AgentHook | HttpHook | Callb
 
 @dataclass(frozen=True, slots=True)
 class HookMatcher:
-    """`HookMatcherSchema`: an optional pattern and the hooks it selects."""
+    """
+    `HookMatcherSchema`: an optional pattern and the hooks it selects. A plugin's matcher
+    (`PluginHookMatcher`, `loadPluginHooks.ts`) also carries its plugin's directory, name and id.
+    """
 
     hooks: tuple[HookCommand, ...]
     matcher: str | None = None
+    #: `PluginHookMatcher.pluginRoot` / `pluginName` / `pluginId`; unset for every other matcher.
+    plugin_root: str | None = None
+    plugin_name: str | None = None
+    plugin_id: str | None = None
 
 
 #: `HooksSettings`: event name -> its matchers, in configuration order.

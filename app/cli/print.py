@@ -731,7 +731,7 @@ async def connect_mcp_servers(root_dir: Path, locations: SettingsLocations, **ma
     from app.services.mcp.config import get_claude_code_mcp_configs
     from app.services.mcp.mcp_connection_manager import McpConnectionManager
 
-    configs, errors = get_claude_code_mcp_configs(root_dir, locations)
+    configs, errors = await get_claude_code_mcp_configs(root_dir, locations)
     for error in errors:
         logger.warning("MCP config error: %s", error)
     manager = McpConnectionManager(cwd=str(root_dir), **manager_options)

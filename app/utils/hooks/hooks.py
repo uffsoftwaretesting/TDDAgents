@@ -59,11 +59,15 @@ Ported from `reference/claude-code/src/utils/hooks.ts` -> `execCommandHook` (and
 * Async: `async`/`asyncRewake` in the config, or a first stdout line that parses as
   `{"async": true}`, backgrounds the process (see `utils/hooks/async_hook_registry.py`) and returns at once.
 
-Not ported: Windows path conversion and the `.sh` auto-prefix (this build is POSIX-only), the
-plugin variables (`CLAUDE_PLUGIN_ROOT`, plugin options — there are no plugins),
-`CLAUDE_ENV_FILE` (it feeds the persistent shell environment upstream's Bash tool sources,
-which this Bash tool does not have), `CLAUDE_CODE_SHELL_PREFIX`, and the interactive
-prompt-request protocol (a headless run has no one to answer it).
+A plugin's hook (`PluginHookContext`) runs with `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`
+and `${user_config.X}` substituted in its command and `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`
+and `CLAUDE_PLUGIN_OPTION_<KEY>` in its environment (the plugin format's names, kept verbatim).
+
+Not ported: Windows path conversion and the `.sh` auto-prefix (this build is POSIX-only), a
+skill hook's `CLAUDE_PLUGIN_ROOT` (`skillRoot`), `CLAUDE_ENV_FILE` (it feeds the persistent
+shell environment upstream's Bash tool sources, which this Bash tool does not have),
+`CLAUDE_CODE_SHELL_PREFIX`, and the interactive prompt-request protocol (a headless run has no
+one to answer it).
 
 A hook's child process, captured while it runs.
 
@@ -180,8 +184,13 @@ class HookDispatcher:
     http_executor: HttpHookExecutor | None = None
     #: Session-scoped matchers (an agent's or skill's frontmatter hooks, function hooks), by event.
     session_matchers: dict[str, list[HookMatcher]] = field(default_factory=dict)
-    #: `registerHookCallbacks` (`bootstrap/state.ts`): an SDK host's callback hooks, by event.
+    #: `registerHookCallbacks` (`bootstrap/state.ts`): an SDK host's callback hooks and the plugins'
+    #: hooks (`app/utils/plugins/load_plugin_hooks.py`), by event.
     registered_matchers: dict[str, list[HookMatcher]] = field(default_factory=dict)
+    #: The run's settings: where a plugin hook's saved options are read, and the plugins loaded.
+    settings_locations: Any = None
+    #: The plugin-hook generation this dispatcher registered (`loadPluginHooks`' memo, per run).
+    plugin_hooks_generation: int | None = None
     #: `hookEvents.ts`: the run's hook lifecycle events (`hook_started` / `hook_response`).
     events: HookEventEmitter = field(default_factory=HookEventEmitter)
     #: Hook work started fire-and-forget (upstream's `void executeStopFailureHooks(...)`),
@@ -234,9 +243,20 @@ class HookDispatcher:
                 or bool(self.registered_matchers.get(event)))
 
     def register_hook_callbacks(self, hooks: Mapping[str, Sequence[HookMatcher]]) -> None:
-        """`registerHookCallbacks`: add the SDK host's callback matchers to every later lookup."""
+        """`registerHookCallbacks`: add callback (or plugin) matchers to every later lookup."""
         for event, matchers in hooks.items():
             self.registered_matchers.setdefault(event, []).extend(matchers)
+
+    def clear_registered_plugin_hooks(self) -> None:
+        """`clearRegisteredPluginHooks`: drop the plugins' matchers, keep the SDK callbacks."""
+        kept = {event: [m for m in matchers if m.plugin_root is None]
+                for event, matchers in self.registered_matchers.items()}
+        self.registered_matchers = {event: matchers for event, matchers in kept.items() if matchers}
+
+    def _with_locations(self, plugin: PluginHookContext | None) -> PluginHookContext | None:
+        if plugin is None or plugin.locations is not None:
+            return plugin
+        return replace(plugin, locations=self.settings_locations)
 
     def matching(
         self, hook_event: str, hook_input: Mapping[str, Any], tools: Sequence[Any] | None
@@ -281,7 +301,7 @@ class HookDispatcher:
                 m.hook, index, hook_event, hook_name, json_input, tool_use_id, signal,
                 timeout_ms, tool_context, messages, force_sync,
                 str(hook_input.get("agent_type")) if hook_input.get("agent_type") is not None else None,
-                bound_prompt,
+                bound_prompt, plugin=_plugin_context(m),
             )
 
         permission_behavior: str | None = None
@@ -330,6 +350,8 @@ class HookDispatcher:
         force_sync: bool,
         agent_type: str | None,
         request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]] | None = None,
+        *,
+        plugin: PluginHookContext | None = None,
     ) -> HookResult:
         """One hook of `executeHooks`' parallel batch. Never raises."""
         started = time.monotonic()
@@ -375,7 +397,7 @@ class HookDispatcher:
             if isinstance(hook, (HttpHook, CommandHook)):
                 return await self._run_reported(
                     hook, index, hook_event, hook_name, json_input, tool_use_id, signal, timeout_ms, force_sync,
-                    started, request_prompt)
+                    started, request_prompt, plugin=plugin)
             if isinstance(hook, CallbackHook):
                 return await self._run_callback(hook, hook_event, json_input, tool_use_id, signal, timeout_ms)
             if isinstance(hook, FunctionHook):
@@ -383,7 +405,7 @@ class HookDispatcher:
                                                 messages)
             return await self._run_command(
                 hook, index, hook_event, hook_name, json_input, tool_use_id, signal, timeout_ms, force_sync, started,
-                request_prompt,
+                request_prompt, plugin=plugin,
             )
         except Exception as exc:  # noqa: BLE001 - upstream turns any failure into a non-blocking error
             return non_blocking(f"Failed to run: {exc}")
@@ -392,6 +414,8 @@ class HookDispatcher:
         self, hook: HttpHook | CommandHook, index: int, hook_event: str, hook_name: str, json_input: str,
         tool_use_id: str, signal: Any, timeout_ms: int, force_sync: bool, started: float,
         request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]] | None,
+        *,
+        plugin: PluginHookContext | None = None,
     ) -> HookResult:
         """A command or HTTP hook between `emitHookStarted` and `emitHookResponse`."""
         hook_id = str(uuid.uuid4())
@@ -401,7 +425,7 @@ class HookDispatcher:
         else:
             result = await self._run_command(
                 hook, index, hook_event, hook_name, json_input, tool_use_id, signal, timeout_ms, force_sync, started,
-                request_prompt,
+                request_prompt, plugin=plugin,
             )
         attachment = result.attachment
         stdout = (attachment.stdout if attachment is not None else None) or ""
@@ -519,12 +543,15 @@ class HookDispatcher:
         force_sync: bool,
         started: float,
         request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]] | None = None,
+        *,
+        plugin: PluginHookContext | None = None,
     ) -> HookResult:
         command_timeout = int(hook.timeout * 1000) if hook.timeout else timeout_ms
         result: CommandHookResult = await exec_command_hook(
             hook, hook_event, hook_name, json_input, signal,
             cwd=self.cwd, project_dir=self.project_dir, registry=self.registry,
             timeout_ms=command_timeout, force_sync=force_sync, request_prompt=request_prompt,
+            plugin=self._with_locations(plugin),
         )
         duration = int((time.monotonic() - started) * 1000)
         command = hook_display_text(hook)
@@ -621,7 +648,8 @@ class HookDispatcher:
             return []
         json_input = json.dumps(hook_input)
 
-        async def run(index: int, hook: HookCommand) -> HookOutsideReplResult:
+        async def run(index: int, matched_hook: MatchedHook) -> HookOutsideReplResult:
+            hook = matched_hook.hook
             if isinstance(hook, PromptHook):
                 return HookOutsideReplResult(
                     command=hook.prompt, succeeded=False,
@@ -640,9 +668,10 @@ class HookDispatcher:
                 return HookOutsideReplResult(command="function", succeeded=False,
                                              output="Internal error: function hook executed outside REPL context",
                                              blocked=False)
-            return await self._outside_command(hook, hook_event, hook_name, json_input, signal, timeout_ms)
+            return await self._outside_command(hook, hook_event, hook_name, json_input, signal, timeout_ms,
+                                               plugin=_plugin_context(matched_hook))
 
-        return list(await asyncio.gather(*(run(i, m.hook) for i, m in enumerate(matched))))
+        return list(await asyncio.gather(*(run(i, m) for i, m in enumerate(matched))))
 
     async def _outside_callback(
         self, hook: CallbackHook, hook_event: str, json_input: str, signal: Any, timeout_ms: int
@@ -689,13 +718,15 @@ class HookDispatcher:
             return HookOutsideReplResult(command=hook.url, succeeded=False, output=str(exc), blocked=False)
 
     async def _outside_command(
-        self, hook: CommandHook, hook_event: str, hook_name: str, json_input: str, signal: Any, timeout_ms: int
+        self, hook: CommandHook, hook_event: str, hook_name: str, json_input: str, signal: Any, timeout_ms: int,
+        *, plugin: PluginHookContext | None = None,
     ) -> HookOutsideReplResult:
         command_timeout = int(hook.timeout * 1000) if hook.timeout else timeout_ms
         try:
             result = await exec_command_hook(
                 hook, hook_event, hook_name, json_input, signal,
                 cwd=self.cwd, project_dir=self.project_dir, registry=self.registry, timeout_ms=command_timeout,
+                plugin=self._with_locations(plugin),
             )
             if result.aborted:
                 return HookOutsideReplResult(
@@ -1401,11 +1432,22 @@ def _find_tool(tools: Sequence[Any] | None, name: str) -> Any:
 
 
 @dataclass(frozen=True, slots=True)
+class PluginHookContext:
+    """`execCommandHook`'s `pluginRoot` / `pluginId`, and the run's settings for the plugin's options."""
+
+    root: str
+    plugin_id: str | None = None
+    locations: Any = None
+
+
+@dataclass(frozen=True, slots=True)
 class MatchedHook:
-    """`MatchedHook`: a hook and where it came from (`settings` for every hook here)."""
+    """`MatchedHook`: a hook, its plugin context (a plugin's hook), and where it came from."""
 
     hook: HookCommand
     hook_source: str = "settings"
+    plugin_root: str | None = None
+    plugin_id: str | None = None
 
 
 def get_hooks_config(
@@ -1415,13 +1457,16 @@ def get_hooks_config(
     registered_matchers: Mapping[str, Sequence[HookMatcher]] | None = None,
 ) -> list[HookMatcher]:
     """
-    `getHooksConfig`: the snapshot's matchers, then the registered ones (an SDK host's callbacks,
-    `registerHookCallbacks`), then session-scoped ones (an agent's or a skill's frontmatter hooks,
-    function hooks), which a managed-only policy excludes.
+    `getHooksConfig`: the snapshot's matchers, then the registered ones (an SDK host's callbacks
+    and the plugins' hooks, `registerHookCallbacks`; a managed-only policy drops the plugins'),
+    then session-scoped ones (an agent's or a skill's frontmatter hooks, function hooks), which a
+    managed-only policy excludes.
     """
     matchers = list(snapshot.matchers_for(hook_event))
     if registered_matchers:
-        matchers.extend(registered_matchers.get(hook_event, ()))
+        # A managed-only policy skips the plugins' hooks (they carry `plugin_root`), not the SDK's.
+        matchers.extend(m for m in registered_matchers.get(hook_event, ())
+                        if not (snapshot.managed_only and m.plugin_root is not None))
     if not snapshot.managed_only and session_matchers:
         matchers.extend(session_matchers.get(hook_event, ()))
     return matchers
@@ -1439,19 +1484,36 @@ def _dedup_key(hook: HookCommand) -> tuple[str, ...]:
 
 
 def _dedup(hooks: list[MatchedHook]) -> list[MatchedHook]:
-    """Group by type in upstream's order; within a type the last duplicate wins its slot."""
+    """
+    Group by type in upstream's order; within a type the last duplicate wins its slot. The key is
+    namespaced by the plugin root (`hookDedupKey`), so two plugins' same template never collapse.
+    """
     ordered: list[MatchedHook] = []
     for kind in ("command", "prompt", "agent", "http"):
         by_key: dict[tuple[str, ...], MatchedHook] = {}
         for matched in hooks:
             if matched.hook.type == kind:
                 # A dict, like a JS Map, keeps the first position and takes the last value.
-                by_key[_dedup_key(matched.hook)] = matched
+                by_key[(matched.plugin_root or "", *_dedup_key(matched.hook))] = matched
         ordered.extend(by_key.values())
     # Callback and function hooks are unique by nature: never deduplicated, in their order.
     ordered.extend(m for m in hooks if m.hook.type == "callback")
     ordered.extend(m for m in hooks if m.hook.type == "function")
     return ordered
+
+
+def _hook_source(matcher: HookMatcher) -> str:
+    """`getMatchingHooks`' `hookSource`: `plugin:<name>` for a plugin's hook, else `settings`."""
+    if matcher.plugin_root is None:
+        return "settings"
+    return f"plugin:{matcher.plugin_name}" if matcher.plugin_name is not None else "plugin"
+
+
+def _plugin_context(matched: MatchedHook) -> PluginHookContext | None:
+    """A matched plugin hook's directory and id, for the command it runs."""
+    if matched.plugin_root is None:
+        return None
+    return PluginHookContext(root=matched.plugin_root, plugin_id=matched.plugin_id)
 
 
 def get_matching_hooks(
@@ -1468,7 +1530,10 @@ def get_matching_hooks(
         match_query = match_query_for(hook_input)
         if match_query:
             hook_matchers = [m for m in hook_matchers if not m.matcher or matches_pattern(match_query, m.matcher)]
-        matched = [MatchedHook(hook=hook) for m in hook_matchers for hook in m.hooks]
+        matched = [
+            MatchedHook(hook=hook, hook_source=_hook_source(m), plugin_root=m.plugin_root, plugin_id=m.plugin_id)
+            for m in hook_matchers for hook in m.hooks
+        ]
         unique = _dedup(matched)
 
         if any(m.hook.if_condition for m in unique):
@@ -1536,6 +1601,49 @@ def hook_env(project_dir: str) -> dict[str, str]:
     return env
 
 
+async def plugin_hook_command(hook: CommandHook, plugin: PluginHookContext) -> tuple[CommandHook, dict[str, str]]:
+    """
+    `execCommandHook`'s plugin half: `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}` and then
+    `${user_config.X}` substituted in the command (plugin variables first, so a user value is
+    opaque), and the child's `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA` and `CLAUDE_PLUGIN_OPTION_<KEY>`.
+    A plugin directory that no longer exists raises (a missing script's exit 2 would read as a block).
+    """
+    from app.utils.plugins.plugin_directories import get_plugin_data_dir
+    from app.utils.plugins.plugin_options_storage import (
+        load_plugin_options,
+        substitute_user_config_variables,
+    )
+
+    if not os.path.exists(plugin.root):
+        suffix = f" ({plugin.plugin_id} — run /plugin to reinstall)" if plugin.plugin_id else ""
+        raise RuntimeError(f"Plugin directory does not exist: {plugin.root}{suffix}")
+    command = hook.command.replace("${CLAUDE_PLUGIN_ROOT}", plugin.root)
+    env = {"CLAUDE_PLUGIN_ROOT": plugin.root}
+    options: Mapping[str, Any] | None = None
+    if plugin.plugin_id:
+        data_dir = get_plugin_data_dir(plugin.plugin_id)
+        command = command.replace("${CLAUDE_PLUGIN_DATA}", data_dir)
+        env["CLAUDE_PLUGIN_DATA"] = data_dir
+        if plugin.locations is not None:
+            options = load_plugin_options(plugin.plugin_id, plugin.locations)
+            command = substitute_user_config_variables(command, options)
+    for key, value in (options or {}).items():
+        env_key = re.sub(r"[^A-Za-z0-9_]", "_", key).upper()
+        env[f"CLAUDE_PLUGIN_OPTION_{env_key}"] = _option_text(value)
+    return replace(hook, command=command), env
+
+
+def _option_text(value: Any) -> str:
+    """`String(value)`: JS's rendering of a stored option."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return ",".join(_option_text(v) for v in value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def safe_cwd(cwd: str, project_dir: str) -> str:
     """The working directory, or the project root when the working directory is missing."""
     return cwd if Path(cwd).is_dir() else project_dir
@@ -1579,6 +1687,7 @@ async def exec_command_hook(
     timeout_ms: int | None = None,
     force_sync: bool = False,
     request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]] | None = None,
+    plugin: PluginHookContext | None = None,
 ) -> CommandHookResult:
     """
     `execCommandHook`. Failures to start or to talk to the child become a status-1 result
@@ -1592,8 +1701,14 @@ async def exec_command_hook(
     hook_id = hook_id or str(uuid.uuid4())
     if timeout_ms is None:
         timeout_ms = int(hook.timeout * 1000) if hook.timeout else TOOL_HOOK_EXECUTION_TIMEOUT_MS
+    env = hook_env(project_dir)
+    if plugin is not None:
+        # Raises when the plugin directory is gone or a `${user_config.X}` is missing: the caller
+        # turns it into a non-blocking error, as upstream's throw.
+        hook, plugin_env = await plugin_hook_command(hook, plugin)
+        env.update(plugin_env)
     try:
-        process = await _spawn(hook, safe_cwd(cwd, project_dir), hook_env(project_dir))
+        process = await _spawn(hook, safe_cwd(cwd, project_dir), env)
     except Exception as exc:  # noqa: BLE001 - upstream reports any spawn error as status 1
         message = f"Error occurred while executing hook command: {exc}"
         return CommandHookResult(stdout="", stderr=message, output=message, status=1)

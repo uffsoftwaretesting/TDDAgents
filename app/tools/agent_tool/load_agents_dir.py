@@ -20,7 +20,8 @@ Agent definitions from Markdown (`reference/claude-code/src/tools/AgentTool/load
 * `get_agent_definitions_with_overrides` is `getAgentDefinitionsWithOverrides` +
   `getActiveAgentsFromList`: the built-in roster in `app/prompts/agents/`, then user
   (`~/.tddagents/agents/`), then project (`.tddagents/agents/`), a later source replacing an
-  earlier agent of the same name. No prompt registry is consulted.
+  earlier agent of the same name, with the plugin agents (given by the caller) between the
+  built-ins and the user's. No prompt registry is consulted.
 
 Not ported (no subsystem here): `color`, `effort`, `isolation`, `mcpServers`,
 `initialPrompt`, and `omitClaudeMd` on file agents (upstream sets it on built-ins only).
@@ -31,7 +32,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -89,7 +90,9 @@ class AgentDefinition:
     #: Kept for `app/utils/frontmatter_parser.py`'s duplicate parser; nothing reads them.
     fork_from: str | None = None
     revert_on_red: bool | None = None
-    source: str = "built-in"  # "built-in", "user", "project", "synthetic"
+    source: str = "built-in"  # "built-in", "plugin", "user", "project", "flagSettings", "synthetic"
+    #: A plugin agent's plugin id (`name@marketplace`, upstream's `plugin`).
+    plugin: str | None = None
     base_dir: str = ""
     raw_frontmatter: dict[str, Any] = field(default_factory=dict)
 
@@ -202,6 +205,22 @@ def parse_agent_tools_from_frontmatter(value: Any) -> tuple[str, ...] | None:
     return tuple(parsed)
 
 
+def parse_agent_phase(raw_phase: Any, name: str) -> TddPhase | None:
+    """The TDD `phase` field: unset is `None`; an invalid value raises `AgentFrontmatterError`."""
+    if raw_phase is None:
+        return None
+    norm_phase = str(raw_phase).strip().upper()
+    if norm_phase == "POST_GREEN":  # the plan's name for REFACTOR (§4.5)
+        norm_phase = "REFACTOR"
+    try:
+        return TddPhase(norm_phase)
+    except ValueError:
+        allowed = [p.value for p in TddPhase] + ["post_green"]
+        raise AgentFrontmatterError(
+            f"Invalid phase '{raw_phase}' in agent '{name}'. Allowed phases: {allowed}"
+        ) from None
+
+
 def load_agent_definition(
     content: str,
     vars: Mapping[str, Any] | None = None,
@@ -225,19 +244,7 @@ def load_agent_definition(
         return None
     description = description.replace("\\n", "\n")
 
-    phase: TddPhase | None = None
-    raw_phase = fm.get("phase")
-    if raw_phase is not None:
-        norm_phase = str(raw_phase).strip().upper()
-        if norm_phase == "POST_GREEN":  # the plan's name for REFACTOR (§4.5)
-            norm_phase = "REFACTOR"
-        try:
-            phase = TddPhase(norm_phase)
-        except ValueError:
-            allowed = [p.value for p in TddPhase] + ["post_green"]
-            raise AgentFrontmatterError(
-                f"Invalid phase '{raw_phase}' in agent '{name}'. Allowed phases: {allowed}"
-            ) from None
+    phase = parse_agent_phase(fm.get("phase"), name)
 
     model: str | None = None
     raw_model = fm.get("model")
@@ -432,13 +439,19 @@ def get_agent_definitions_with_overrides(
     user_home: Path | str | None = None,
     built_in_dir: Path | str | None = None,
     vars: Mapping[str, Any] | None = None,
+    plugin_agents: Iterable[AgentDefinition] = (),
 ) -> dict[str, AgentDefinition]:
-    """`getAgentDefinitionsWithOverrides`: the active agents, built-in < user < project."""
+    """
+    `getAgentDefinitionsWithOverrides` + `getActiveAgentsFromList`: the active agents, built-in <
+    plugin < user < project. `plugin_agents` are the enabled plugins' agents
+    (`app/utils/plugins/load_plugin_agents.py`), loaded by the caller (upstream's `loadPluginAgents`).
+    """
     definitions: dict[str, AgentDefinition] = {}
     definitions.update(_scan_agent_dir(Path(built_in_dir or BUILT_IN_AGENTS_DIR), "built-in", vars))
     if not is_verification_agent_enabled():
         # `getBuiltInAgents`: the verifier joins the built-ins only behind its gate.
         definitions.pop(VERIFICATION_AGENT_TYPE, None)
+    definitions.update({agent.name: agent for agent in plugin_agents})
     home = Path(user_home) if user_home is not None else Path.home()
     definitions.update(_scan_agent_dir(home / ".tddagents" / "agents", "user", vars))
     project = Path(project_dir) if project_dir is not None else Path.cwd()

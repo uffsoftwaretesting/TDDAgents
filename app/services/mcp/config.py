@@ -4,8 +4,9 @@ Where a run's MCP servers come from (Phase 8).
 Ported from `reference/claude-code/src/services/mcp/config.ts` -> `parseMcpConfig`,
 `parseMcpConfigFromFilePath`, `expandEnvVars`, `getMcpConfigsByScope`,
 `getClaudeCodeMcpConfigs`, `getEnterpriseMcpFilePath`, `doesEnterpriseMcpConfigExist`,
-`isMcpServerDenied` / `isMcpServerAllowedByPolicy`, `isMcpServerDisabled`; and
-`services/mcp/utils.ts` -> `getProjectMcpServerStatus`.
+`isMcpServerDenied` / `isMcpServerAllowedByPolicy`, `isMcpServerDisabled`, `unwrapCcrProxyUrl`,
+`getMcpServerSignature`, `dedupPluginMcpServers`; and `services/mcp/utils.ts` ->
+`getProjectMcpServerStatus`.
 
 Scopes, lowest to highest precedence: user (`mcpServers` in the global config file), project
 (every `.mcp.json` from the filesystem root down to the cwd, nearer files winning), local (the
@@ -16,8 +17,17 @@ as `CLAUDE_CONFIG_DIR` does for `getGlobalClaudeFile`). The project key is the c
 else the cwd (`getProjectPathForConfig`).
 
 Project servers need approval, and a TDDAgents run is always non-interactive, so — exactly as
-`claude -p` — they are approved unless `disabledMcpjsonServers` names them. Not ported: plugin
-servers and their dedup, claude.ai connectors, dynamic `--mcp-config` servers, the Windows
+`claude -p` — they are approved unless `disabledMcpjsonServers` names them.
+
+The enabled plugins' servers (`app/utils/plugins/mcp_plugin_integration.py`, read through
+`load_all_plugins_cache_only`) sit below every other scope, and are kept even when the policy
+restricts MCP to plugins (`strictPluginOnlyCustomization`). A plugin server that would launch
+the same process or reach the same URL as an enabled manual server, or an earlier plugin's, is
+dropped (`dedupPluginMcpServers`). `get_claude_code_mcp_configs` is therefore async, as
+upstream's. The plugin MCP errors, upstream's second result, are logged here (the run reads
+the config errors only).
+
+Not ported: claude.ai connectors, dynamic `--mcp-config` servers, the Windows
 `npx` warning, and writing configs (`addMcpConfig` / `removeMcpConfig`).
 """
 
@@ -30,6 +40,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import parse_qs, urlparse
 
 from app.services.mcp.env_expansion import expand_env_vars_in_string
 from app.services.mcp.normalization import normalize_name_for_mcp
@@ -340,39 +351,134 @@ def get_mcp_config_by_name(name: str, cwd: str | Path, locations: SettingsLocati
     return None
 
 
-def get_claude_code_mcp_configs(
-    cwd: str | Path, locations: SettingsLocations
+#: `CCR_PROXY_PATH_MARKERS`.
+CCR_PROXY_PATH_MARKERS = ("/v2/session_ingress/shttp/mcp/", "/v2/ccr-sessions/")
+#: The plugin load errors upstream logs as MCP errors (`getClaudeCodeMcpConfigs`).
+_MCP_PLUGIN_ERROR_TYPES = ("mcp-config-invalid", "mcpb-download-failed", "mcpb-extract-failed",
+                           "mcpb-invalid-manifest")
+
+
+def unwrap_ccr_proxy_url(url: str) -> str:
+    """`unwrapCcrProxyUrl`: a session-ingress proxy URL's original `mcp_url`, else the URL itself."""
+    if not any(marker in url for marker in CCR_PROXY_PATH_MARKERS):
+        return url
+    try:
+        original = parse_qs(urlparse(url).query).get("mcp_url")
+    except ValueError:
+        return url
+    return original[0] if original and original[0] else url
+
+
+def get_mcp_server_signature(config: McpServerConfig) -> str | None:
+    """`getMcpServerSignature`: `stdio:<command array>` or `url:<url>`; `None` for neither (sdk)."""
+    if config.type in (None, "stdio"):
+        return "stdio:" + json.dumps([config.command, *config.args], separators=(",", ":"))
+    if config.url:
+        return f"url:{unwrap_ccr_proxy_url(config.url)}"
+    return None
+
+
+def dedup_plugin_mcp_servers(
+    plugin_servers: Mapping[str, McpServerConfig], manual_servers: Mapping[str, McpServerConfig]
+) -> tuple[dict[str, McpServerConfig], list[tuple[str, str]]]:
+    """
+    `dedupPluginMcpServers`: drop each plugin server whose signature matches a manual server
+    (manual wins) or an earlier plugin's (first wins). Returns the kept servers and the
+    `(name, duplicateOf)` pairs suppressed.
+    """
+    manual_sigs: dict[str, str] = {}
+    for name, config in manual_servers.items():
+        sig = get_mcp_server_signature(config)
+        if sig is not None and sig not in manual_sigs:
+            manual_sigs[sig] = name
+    servers: dict[str, McpServerConfig] = {}
+    suppressed: list[tuple[str, str]] = []
+    seen: dict[str, str] = {}
+    for name, config in plugin_servers.items():
+        sig = get_mcp_server_signature(config)
+        if sig is None:
+            servers[name] = config
+            continue
+        duplicate = manual_sigs.get(sig)
+        if duplicate is None:
+            duplicate = seen.get(sig)
+        if duplicate is not None:
+            logger.debug('Suppressing plugin MCP server "%s": duplicates "%s"', name, duplicate)
+            suppressed.append((name, duplicate))
+            continue
+        seen[sig] = name
+        servers[name] = config
+    return servers, suppressed
+
+
+async def _plugin_mcp_servers(locations: SettingsLocations) -> dict[str, McpServerConfig]:
+    """The enabled plugins' servers (`getPluginMcpServers` for each), their load errors logged."""
+    from app.types.plugin import PluginError, get_plugin_error_message
+    from app.utils.plugins.mcp_plugin_integration import get_plugin_mcp_servers
+    from app.utils.plugins.plugin_loader import load_all_plugins_cache_only
+
+    result = await load_all_plugins_cache_only(locations)
+    for error in result.errors:
+        if error["type"] in _MCP_PLUGIN_ERROR_TYPES:
+            logger.error("Plugin MCP loading error - %s: %s", error["type"], get_plugin_error_message(error))
+        else:
+            logger.debug("Plugin not available for MCP: %s - error type: %s", error["source"], error["type"])
+    mcp_errors: list[PluginError] = []
+    servers: dict[str, McpServerConfig] = {}
+    for plugin in result.enabled:
+        found = await get_plugin_mcp_servers(plugin, mcp_errors, locations)
+        if found:
+            servers.update(found)
+    for error in mcp_errors:
+        logger.error("Plugin MCP server error - %s: %s", error["type"], get_plugin_error_message(error))
+    return servers
+
+
+async def get_claude_code_mcp_configs(
+    cwd: str | Path, locations: SettingsLocations, dynamic_servers: Mapping[str, McpServerConfig] | None = None
 ) -> tuple[dict[str, McpServerConfig], list[ValidationError]]:
-    """`getClaudeCodeMcpConfigs`: the run's servers, merged, approved and filtered by policy."""
+    """
+    `getClaudeCodeMcpConfigs`: the run's servers — plugin < user < approved project < local —
+    deduplicated, approved and filtered by policy. `dynamic_servers` only count as dedup targets.
+    """
     merged = load_settings(locations)
     policy = get_settings_for_source(PermissionRuleSource.POLICY_SETTINGS, locations) or {}
     enterprise, enterprise_errors = get_mcp_configs_by_scope("enterprise", cwd, locations)
     if (Path(locations.managed_dir) / MANAGED_MCP_FILENAME).is_file() and not enterprise_errors:
         return {n: c for n, c in enterprise.items() if is_mcp_server_allowed_by_policy(n, c, merged, policy)}, []
-    if is_restricted_to_plugin_only(policy, "mcp"):
-        return {}, []
-    user, user_errors = get_mcp_configs_by_scope("user", cwd, locations)
-    project, project_errors = get_mcp_configs_by_scope("project", cwd, locations)
-    local, local_errors = get_mcp_configs_by_scope("local", cwd, locations)
+    locked = is_restricted_to_plugin_only(policy, "mcp")
+    none: tuple[dict[str, McpServerConfig], list[ValidationError]] = ({}, [])
+    user, user_errors = none if locked else get_mcp_configs_by_scope("user", cwd, locations)
+    project, project_errors = none if locked else get_mcp_configs_by_scope("project", cwd, locations)
+    local, local_errors = none if locked else get_mcp_configs_by_scope("local", cwd, locations)
+    plugin_servers = await _plugin_mcp_servers(locations)
     approved = {n: c for n, c in project.items() if get_project_mcp_server_status(n, merged) == "approved"}
-    servers = {**user, **approved, **local}
-    filtered = {
-        name: config for name, config in servers.items()
-        if not is_mcp_server_disabled(name, cwd) and is_mcp_server_allowed_by_policy(name, config, merged, policy)
-    }
+
+    def enabled(name: str, config: McpServerConfig) -> bool:
+        return not is_mcp_server_disabled(name, cwd) and is_mcp_server_allowed_by_policy(name, config, merged, policy)
+
+    manual = {n: c for n, c in {**user, **approved, **local, **(dynamic_servers or {})}.items() if enabled(n, c)}
+    enabled_plugin = {n: c for n, c in plugin_servers.items() if enabled(n, c)}
+    deduped, _suppressed = dedup_plugin_mcp_servers(enabled_plugin, manual)
+    deduped.update({n: c for n, c in plugin_servers.items() if n not in enabled_plugin})
+    servers = {**deduped, **user, **approved, **local}
+    filtered = {name: config for name, config in servers.items() if enabled(name, config)}
     return filtered, [*user_errors, *project_errors, *local_errors]
 
 
 __all__ = [
+    "CCR_PROXY_PATH_MARKERS",
     "GLOBAL_CONFIG_FILENAME",
     "MANAGED_MCP_FILENAME",
     "MCP_JSON_FILENAME",
     "SCHEMA_ERROR",
+    "dedup_plugin_mcp_servers",
     "filter_mcp_servers_by_policy",
     "get_claude_code_mcp_configs",
     "get_mcp_config_by_name",
     "get_global_config_path",
     "get_mcp_configs_by_scope",
+    "get_mcp_server_signature",
     "get_project_config_key",
     "get_project_mcp_server_status",
     "is_mcp_server_allowed_by_policy",
@@ -380,4 +486,5 @@ __all__ = [
     "parse_mcp_config",
     "parse_mcp_config_from_file_path",
     "set_mcp_server_enabled",
+    "unwrap_ccr_proxy_url",
 ]
