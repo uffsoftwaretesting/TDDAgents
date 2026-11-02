@@ -21,13 +21,16 @@ An sse/http server that answered 401 within the last 15 minutes (`is_mcp_auth_ca
 that was probed before but holds no token (`has_mcp_discovery_but_no_token`), is recorded as
 `needs-auth` without a connection attempt, as upstream's `processServer` does.
 
+`elicitation_callback` and `on_elicitation_complete` (see `elicitation_handler.py`) are passed to
+every connection the manager makes, the first ones and the reconnections alike.
+
 `reconnect_mcp_server_impl` is `client.ts` -> `reconnectMcpServerImpl` (kept here, beside the
 tool building it shares, because `client.py` cannot import the tool modules that import it):
 connect again, then the server's tools and resources.
 
 Not ported: the auth tool (`createMcpAuthTool`, offered beside a `needs-auth` server), MCP
-prompts as commands and MCP skills, plugin servers, `list_changed` notifications, and the
-per-server analytics.
+prompts as commands and MCP skills, plugin servers, `list_changed`
+notifications, and the per-server analytics.
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from app.services.mcp.client import (
     parse_int_env,
 )
 from app.services.mcp.config import is_mcp_server_disabled
+from app.services.mcp.elicitation_handler import ElicitationCallback, OnElicitationComplete
 from app.services.mcp.types import (
     ConnectedMCPServer,
     DisabledMCPServer,
@@ -119,6 +123,10 @@ class McpConnectionManager:
     transport_factory: TransportFactory = open_transport
     clients: list[MCPServerConnection] = field(default_factory=list)
     tools: list[Any] = field(default_factory=list)
+    #: The connections' elicitation callback (`None`: every elicitation is answered `cancel`).
+    elicitation_callback: ElicitationCallback | None = None
+    #: The connections' `notifications/elicitation/complete` handler.
+    on_elicitation_complete: OnElicitationComplete | None = None
     _resource_tools_added: bool = False
 
     async def connect(self, configs: Mapping[str, McpServerConfig]) -> None:
@@ -145,7 +153,9 @@ class McpConnectionManager:
             self.clients.append(NeedsAuthMCPServer(name=name, config=config))
             return
         try:
-            client = await connect_to_server(name, config, cwd=self.cwd, transport_factory=self.transport_factory)
+            client = await connect_to_server(
+                name, config, cwd=self.cwd, transport_factory=self.transport_factory,
+                elicitation_callback=self.elicitation_callback, on_elicitation_complete=self.on_elicitation_complete)
             self.clients.append(client)
             if not isinstance(client, ConnectedMCPServer):
                 return
@@ -158,6 +168,12 @@ class McpConnectionManager:
         except Exception as exc:  # noqa: BLE001 - upstream records the server as failed
             logger.warning("MCP server %s: error fetching tools/resources: %s", name, exc)
             self.clients.append(FailedMCPServer(name=name, config=config, error=str(exc)))
+
+    async def reconnect(self, name: str, config: McpServerConfig) -> ReconnectResult:
+        """`reconnectMcpServerImpl(name, config)` with this manager's cwd, transport and elicitation."""
+        return await reconnect_mcp_server_impl(
+            name, config, cwd=self.cwd, transport_factory=self.transport_factory,
+            elicitation_callback=self.elicitation_callback, on_elicitation_complete=self.on_elicitation_complete)
 
     async def aclose(self) -> None:
         """Close every connected session (upstream's cleanup at session end)."""
@@ -181,11 +197,15 @@ async def reconnect_mcp_server_impl(
     *,
     cwd: str | Path,
     transport_factory: TransportFactory = open_transport,
+    elicitation_callback: ElicitationCallback | None = None,
+    on_elicitation_complete: OnElicitationComplete | None = None,
 ) -> ReconnectResult:
     """`reconnectMcpServerImpl`: a fresh connection; its tools and resources when connected."""
     try:
         clear_keychain_cache()
-        client = await connect_to_server(name, config, cwd=cwd, transport_factory=transport_factory)
+        client = await connect_to_server(
+            name, config, cwd=cwd, transport_factory=transport_factory, elicitation_callback=elicitation_callback,
+            on_elicitation_complete=on_elicitation_complete)
         if not isinstance(client, ConnectedMCPServer):
             return ReconnectResult(client=client)
         supports_resources = bool(getattr(client.capabilities, "resources", None))
