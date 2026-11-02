@@ -180,6 +180,12 @@ async def _develop_interactive(
         # `showSetupScreens`: the trust dialog, before any of the project's settings, hooks or MCP servers run.
         project = project_root_of(workspace, opts.get("project_root"))
         await show_trust_dialog(io, project, escape)
+        # Then the project's pending `.mcp.json` servers are approved or rejected, before any connects.
+        from app.interactive_helpers import setup_settings_locations, show_mcpjson_server_approvals
+
+        await show_mcpjson_server_approvals(io, escape, setup_settings_locations(
+            project, home=opts.get("home"), managed_dir=opts.get("managed_dir"),
+            settings_path=opts.get("settings_path")))
         async with open_session_run(run_id=session_run_id(thread_id), plan=TddPlan(), workspace=workspace,
                                     planning=True, can_use_tool=build_interactive_can_use_tool(ask, ask_questions),
                                     **opts) as run:

@@ -582,10 +582,12 @@ async def open_session_run(
 
     #: The session's live MCP servers (configured, SDK, dynamic): the pools read them at each refresh.
     session_mcp = SessionMcp(manager=None, cwd=str(root_dir),
-                             settings_locations=lambda: run_settings_locations(config, root_dir, home, managed_dir))
+                             settings_locations=lambda: run_settings_locations(config, root_dir, home, managed_dir),
+                             is_non_interactive_session=bootstrap.get_is_non_interactive_session())
     session_mcp.connect_options = session_mcp.elicitation_options()
     mcp = await connect_mcp_servers(
-        root_dir, run_settings_locations(config, root_dir, home, managed_dir), **session_mcp.connect_options,
+        root_dir, run_settings_locations(config, root_dir, home, managed_dir),
+        is_non_interactive_session=bootstrap.get_is_non_interactive_session(), **session_mcp.connect_options,
         # The auth tool's reconnect swapped a server's client and tools in the manager's lists.
         on_reconnect=lambda _name, _result: session_mcp.on_change())
     session_mcp.manager = mcp
@@ -804,17 +806,21 @@ def interrupt_on_now_priority(engine: QueryEngine, queue: CommandQueue) -> None:
         engine.interrupt("interrupt")
 
 
-async def connect_mcp_servers(root_dir: Path, locations: SettingsLocations, **manager_options: Any) -> Any:
+async def connect_mcp_servers(
+    root_dir: Path, locations: SettingsLocations, *, is_non_interactive_session: bool, **manager_options: Any
+) -> Any:
     """
     `getClaudeCodeMcpConfigs` + `getMcpToolsCommandsAndResources` for the run: every configured
-    server connected (a server that fails is recorded, never fatal), headless as `claude -p`,
-    so project servers load without an approval prompt. `manager_options` are
-    `McpConnectionManager` fields (the elicitation callbacks, `on_reconnect`).
+    server connected (a server that fails is recorded, never fatal). A non-interactive run loads
+    the project's servers without an approval prompt, as `claude -p`; an interactive one only the
+    approved ones (asked after the trust dialog, `app/services/mcp_server_approval.py`).
+    `manager_options` are `McpConnectionManager` fields (the elicitation callbacks, `on_reconnect`).
     """
     from app.services.mcp.config import get_claude_code_mcp_configs
     from app.services.mcp.mcp_connection_manager import McpConnectionManager
 
-    configs, errors = await get_claude_code_mcp_configs(root_dir, locations)
+    configs, errors = await get_claude_code_mcp_configs(
+        root_dir, locations, is_non_interactive_session=is_non_interactive_session)
     for error in errors:
         logger.warning("MCP config error: %s", error)
     manager = McpConnectionManager(cwd=str(root_dir), **manager_options)

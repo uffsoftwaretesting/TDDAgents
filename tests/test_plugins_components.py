@@ -425,11 +425,13 @@ def test_claude_code_configs_merge_plugin_servers_below_the_users(tmp_path, loca
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     root = make_toolkit(tmp_path / "kit")
     inline(root)
-    servers, _ = run(mcp_config.get_claude_code_mcp_configs(locations.project_root, locations))
+    servers, _ = run(mcp_config.get_claude_code_mcp_configs(
+        locations.project_root, locations, is_non_interactive_session=True))
     assert list(servers) == ["plugin:kit:files"]
     write_json(locations.managed_dir / "managed-settings.json", {"strictPluginOnlyCustomization": ["mcp"]})
     write_json(locations.project_root / ".mcp.json", {"mcpServers": {"proj": {"command": "p"}}})
-    servers, _ = run(mcp_config.get_claude_code_mcp_configs(locations.project_root, locations))
+    servers, _ = run(mcp_config.get_claude_code_mcp_configs(
+        locations.project_root, locations, is_non_interactive_session=True))
     assert list(servers) == ["plugin:kit:files"]
 
 

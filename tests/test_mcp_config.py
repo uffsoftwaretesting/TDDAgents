@@ -37,6 +37,11 @@ STDIO = {"command": "node", "args": ["server.js"]}
 HTTP = {"type": "http", "url": "https://api.example.com/mcp", "headers": {"X": "1"}}
 
 
+def _configs(cwd: Path, loc: SettingsLocations, *, interactive: bool = False) -> dict[str, McpServerConfig]:
+    """The run's servers; a `-p` run's (`getIsNonInteractiveSession()`) unless `interactive`."""
+    return asyncio.run(get_claude_code_mcp_configs(cwd, loc, is_non_interactive_session=not interactive))[0]
+
+
 class TestParse:
     def test_server_types(self):
         config, errors = parse_mcp_config({"mcpServers": {
@@ -159,39 +164,74 @@ class TestMerged:
 
     def test_local_beats_project_beats_user(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch)
-        servers, _ = asyncio.run(get_claude_code_mcp_configs(cwd, loc))
+        servers = _configs(cwd, loc)
         assert set(servers) == {"p", "u", "l", "shared"}
         assert (servers["shared"].command, servers["shared"].scope) == ("local", "local")
 
     def test_rejected_project_servers_are_dropped(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch, settings={"disabledMcpjsonServers": ["p"]})
-        assert "p" not in asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0]
+        assert "p" not in _configs(cwd, loc)
 
     def test_disabled_servers_are_dropped(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch, global_extra={"disabledMcpServers": ["u"]})
-        assert "u" not in asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0]
+        assert "u" not in _configs(cwd, loc)
 
     def test_an_enterprise_file_is_exclusive(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch)
         _write(tmp_path / "etc" / "managed-mcp.json", {"mcpServers": {"corp": STDIO}})
-        assert list(asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0]) == ["corp"]
+        assert list(_configs(cwd, loc)) == ["corp"]
 
     def test_plugin_only_customization_locks_user_editable_scopes(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch, policy={"strictPluginOnlyCustomization": ["mcp"]})
-        assert asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0] == {}
+        assert _configs(cwd, loc) == {}
 
     def test_policy_denies_by_name(self, tmp_path, monkeypatch):
         cwd, loc = self._setup(tmp_path, monkeypatch, policy={"deniedMcpServers": [{"serverName": "u"}]})
-        assert "u" not in asyncio.run(get_claude_code_mcp_configs(cwd, loc))[0]
+        assert "u" not in _configs(cwd, loc)
 
 
 class TestProjectApproval:
-    def test_statuses(self):
-        assert get_project_mcp_server_status("my srv", {"disabledMcpjsonServers": ["my_srv"]}) == "rejected"
-        assert get_project_mcp_server_status("s", {"enabledMcpjsonServers": ["s"]}) == "approved"
-        assert get_project_mcp_server_status("s", {"enableAllProjectMcpServers": True}) == "approved"
-        # Headless (`claude -p`): no approval popup, project servers load.
-        assert get_project_mcp_server_status("s", {}) == "approved"
+    def _status(self, tmp_path: Path, settings: dict[str, object] | None = None, *, source: str = "settings.json",
+                interactive: bool = True) -> str:
+        loc = _locations(tmp_path)
+        if settings is not None:
+            path = (loc.user_config_dir / "settings.json" if source == "user"
+                    else loc.project_root / ".tddagents" / source)
+            _write(path, settings)
+        return get_project_mcp_server_status("my srv", loc, is_non_interactive_session=not interactive)
+
+    def test_rejected_wins_and_names_are_normalized(self, tmp_path):
+        assert self._status(tmp_path, {"disabledMcpjsonServers": ["my_srv"], "enabledMcpjsonServers": ["my srv"],
+                                       "enableAllProjectMcpServers": True}) == "rejected"
+
+    @pytest.mark.parametrize("settings", [{"enabledMcpjsonServers": ["other", "my_srv"]},
+                                          {"enableAllProjectMcpServers": True}])
+    def test_approved_by_name_or_for_every_server(self, tmp_path, settings):
+        assert self._status(tmp_path, settings) == "approved"
+
+    @pytest.mark.parametrize("settings", [None, {}, {"enabledMcpjsonServers": ["other"]},
+                                          {"disabledMcpjsonServers": "my srv"}, {"enableAllProjectMcpServers": False}])
+    def test_unanswered_is_pending_interactively(self, tmp_path, settings):
+        assert self._status(tmp_path, settings) == "pending"
+
+    def test_headless_approves_what_is_not_rejected(self, tmp_path):
+        # `claude -p`: no approval popup, project servers load.
+        assert self._status(tmp_path, interactive=False) == "approved"
+        assert self._status(tmp_path, {"disabledMcpjsonServers": ["my srv"]}, interactive=False) == "rejected"
+
+    @pytest.mark.parametrize("source", ["user", "settings.local.json"])
+    def test_an_accepted_bypass_dialog_approves(self, tmp_path, source):
+        assert self._status(tmp_path, {"skipDangerousModePermissionPrompt": True}, source=source) == "approved"
+
+    def test_the_project_cannot_accept_the_bypass_dialog(self, tmp_path):
+        assert self._status(tmp_path, {"skipDangerousModePermissionPrompt": True}) == "pending"
+
+    def test_an_interactive_run_leaves_pending_project_servers_out(self, tmp_path, monkeypatch):
+        cwd, loc = TestMerged()._setup(tmp_path, monkeypatch)
+        assert set(_configs(cwd, loc, interactive=True)) == {"u", "l", "shared"}
+        _write(cwd / ".tddagents" / "settings.local.json", {"enabledMcpjsonServers": ["p"]})
+        servers = _configs(cwd, loc, interactive=True)
+        assert set(servers) == {"p", "u", "l", "shared"} and servers["shared"].scope == "local"
 
 
 class TestPolicy:
@@ -399,7 +439,7 @@ class TestScopeExpansion:
         _write(tmp_path / "etc" / "managed-mcp.json", {"mcpServers": {"corp": STDIO, "other": STDIO}})
         _write(tmp_path / "etc" / "managed-settings.json", {"deniedMcpServers": [{"serverName": "other"}]})
         (tmp_path / "proj").mkdir()
-        assert list(asyncio.run(get_claude_code_mcp_configs(tmp_path / "proj", _locations(tmp_path)))[0]) == ["corp"]
+        assert list(_configs(tmp_path / "proj", _locations(tmp_path))) == ["corp"]
 
 
 @pytest.mark.parametrize("kind", ["sse", "http", "ws", "sse-ide", "ws-ide", "claudeai-proxy"])

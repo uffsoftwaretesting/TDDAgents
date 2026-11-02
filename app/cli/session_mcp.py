@@ -78,6 +78,9 @@ class SessionMcp:
     send_mcp_message: SendMcpMessage | None = None
     #: The run's settings locations, read when `mcp_set_servers` applies the enterprise policy.
     settings_locations: Callable[[], Any] | None = None
+    #: `getIsNonInteractiveSession()` for the configured servers read again (an unanswered
+    #: project server is approved only without a terminal). The default is upstream's initial `STATE`.
+    is_non_interactive_session: bool = True
     #: `connect_to_server` / `reconnect_mcp_server_impl` keyword arguments (e.g. the elicitation callback).
     connect_options: dict[str, Any] = field(default_factory=dict)
     #: The run's hook dispatcher, for the Elicitation / ElicitationResult / Notification hooks.
@@ -353,7 +356,8 @@ class SessionMcp:
         if self.settings_locations is None:
             return {"added": [], "removed": []}
         async with self._lock:
-            configs, _ = await get_claude_code_mcp_configs(self.cwd, self.settings_locations())
+            configs, _ = await get_claude_code_mcp_configs(
+                self.cwd, self.settings_locations(), is_non_interactive_session=self.is_non_interactive_session)
             stale = [c for c in self.manager.clients if _is_stale(c.config, configs.get(c.name))]
             for client in stale:
                 if isinstance(client, ConnectedMCPServer) and client.cleanup is not None:
