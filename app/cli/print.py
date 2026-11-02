@@ -1018,7 +1018,20 @@ async def run_headless(
     blocks = input_blocks if input_blocks is not None else (stdin_blocks() if stream_input else _no_input())
     sio = StructuredIO(blocks, options.replay_user_messages, write_stdout=write_stdout)
     host_asks = stream_input or options.permission_prompt_tool == "stdio"
-    can_use_tool = sio.create_can_use_tool() if host_asks else None
+    can_use_tool = None
+    if host_asks:
+        # `onPermissionPrompt`: the session waits on the host (`requires_action`) until it answers.
+        def on_permission_prompt(details: Mapping[str, Any]) -> None:
+            if streaming_ref:
+                streaming_ref[0]._session_state("requires_action")
+
+        def on_permission_state(details: Any) -> None:
+            if streaming_ref and details is None:
+                streaming_ref[0]._session_state("running")
+
+        sio.on_permission_state = on_permission_state
+        can_use_tool = sio.create_can_use_tool(on_permission_prompt)
+    streaming_ref: list[HeadlessStreaming] = []
     async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan(), workspace=workspace,
                                 planning=True, can_use_tool=can_use_tool, interactive=False,
                                 **run_options) as run:
@@ -1026,6 +1039,7 @@ async def run_headless(
         if options.json_schema is not None:
             use_json_schema(run, options.json_schema)
         streaming = HeadlessStreaming(sio, run, options, session_id)
+        streaming_ref.append(streaming)
         await streaming.load_initial_messages(request, prompt, stream_input=stream_input)
         needs_full_array = options.output_format == "json" and options.verbose
         messages: list[dict[str, Any]] = []
@@ -1270,6 +1284,16 @@ class HeadlessStreaming:
 
         self.sio.set_unexpected_response_callback(orphan)
 
+    def _drain_sdk_events(self) -> None:
+        """`drainSdkEvents`: the queued task and session-state events, onto the stream."""
+        for event in self.run_.store.get().sdk_events.drain(self.session_id):
+            self.output.enqueue(event)
+
+    def _session_state(self, session_state: str) -> None:
+        from app.utils.sdk_event_queue import notify_session_state_changed
+
+        notify_session_state_changed(self.run_.store.get(), session_state)
+
     def _system(self, subtype: str, **fields: Any) -> dict[str, Any]:
         return {"type": "system", "subtype": subtype, **fields, "session_id": self.session_id,
                 "uuid": str(uuid.uuid4())}
@@ -1464,13 +1488,16 @@ class HeadlessStreaming:
         while self._background:
             await asyncio.gather(*list(self._background), return_exceptions=True)
         await self.run_.ctx.hook_dispatcher.registry.finalize_pending()
+        self._drain_sdk_events()
         self.output.done()
 
     # ── run() ────────────────────────────────────────────────────────────────
 
     async def _run(self) -> None:
+        self._session_state("running")
         try:
             while True:
+                self._drain_sdk_events()
                 await self._drain_command_queue()
                 has_running = _has_running_background_task(self.run_.store)
                 queued = self.queue.peek(_is_main_thread) is not None
@@ -1490,6 +1517,8 @@ class HeadlessStreaming:
             return
         finally:
             self.running = False
+            self._session_state("idle")
+            self._drain_sdk_events()
         if self.queue.peek(_is_main_thread) is not None:
             self._kick()
             return
@@ -1549,6 +1578,7 @@ class HeadlessStreaming:
                                     user_messages=user_messages):
             if run.on_message is not None:
                 run.on_message(event)
+            self._drain_sdk_events()
             for message in sdk_messages_for_event(event, self.session_id,
                                                   replay_user_messages=self.options.replay_user_messages):
                 if message.get("type") == "result" and self._agents_running():

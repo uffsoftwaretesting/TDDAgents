@@ -18,6 +18,7 @@ from app.tdd.plan import TddPlan
 from app.types.permissions import ToolPermissionContext
 from app.utils.file_history import FileHistoryState
 from app.utils.permissions.denial_tracking import DenialTrackingState
+from app.utils.sdk_event_queue import SdkEventQueue
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +82,8 @@ class AppState:
     #: Upstream's process-wide `STATE` reads (`getSessionId`, `getOriginalCwd`,
     #: `getIsNonInteractiveSession`), per run here: set once when the run is opened.
     bootstrap: SessionBootstrap = field(default_factory=SessionBootstrap)
+    #: `sdkEventQueue.ts`'s queue, the run's: task and session-state events for the SDK stream.
+    sdk_events: SdkEventQueue = field(default_factory=SdkEventQueue, compare=False)
 
 
 @dataclass(slots=True)

@@ -376,7 +376,18 @@ async def run_async_agent_lifecycle(
         async for message in stream:
             messages.append(message)
             update_progress_from_message(tracker, message, resolve_activity, tools, context)
-            update_agent_progress(task_id, get_progress_update(tracker), root_set_app_state)
+            progress = get_progress_update(tracker)
+            update_agent_progress(task_id, progress, root_set_app_state)
+            last_tool = _last_tool_use_name(message)
+            if last_tool is not None and context is not None:
+                # `runAsyncAgentLifecycle` -> `emitTaskProgress`, after each message that calls a tool.
+                from app.utils.sdk_event_queue import emit_task_progress
+
+                activity = progress.last_activity.activity_description if progress.last_activity else None
+                emit_task_progress(
+                    context.get_app_state(), task_id=task_id, tool_use_id=tool_use_id,
+                    description=activity or description, start_time=start_time, total_tokens=progress.token_count,
+                    tool_uses=progress.tool_use_count, last_tool_name=last_tool, now=now())
         if cancel.cancelled:
             kill_async_agent(task_id, root_set_app_state, now())
             notify(status="killed", final_message=extract_partial_result(messages))
@@ -392,6 +403,12 @@ async def run_async_agent_lifecycle(
         logger.warning("Background agent %s failed: %s", task_id, exc)
         fail_agent_task(task_id, str(exc), root_set_app_state, now())
         notify(status="failed", error=str(exc))
+
+
+def _last_tool_use_name(message: Any) -> str | None:
+    """`getLastToolUseName`: the last tool an assistant message calls."""
+    calls = getattr(message, "tool_calls", None) if isinstance(message, AIMessage) else None
+    return str(calls[-1].get("name")) if calls else None
 
 
 #: Running background lifecycles, held so the event loop does not drop them mid-run (upstream's

@@ -112,6 +112,31 @@ def test_a_background_agent_updates_its_progress_per_message():
     assert progressed[0].last_activity.activity_description == "Reading x.py"
 
 
+def test_a_background_agent_reports_task_progress_to_the_sdk():
+    """`runAsyncAgentLifecycle` -> `emitTaskProgress`: after each message that calls a tool."""
+    from app.bootstrap.state import SessionBootstrap
+    from app.tool import tool_context_for
+
+    store = AppStateStore(state=replace(AppStateStore().get(), bootstrap=SessionBootstrap(is_interactive=False)))
+    task = LocalAgentTaskState(id="b1", type="local_agent", status="running", description="d",
+                               output_file="", start_time=0.0, agent_id="b1")
+    store.update(lambda s: replace(s, tasks={"b1": task}))
+
+    async def stream() -> Any:
+        yield _calls(("ReadFile", "1", {"file_path": "x.py"}))
+        yield ToolMessage(content="ok", tool_call_id="1")
+        yield AIMessage(content="done")
+
+    asyncio.run(run_async_agent_lifecycle(
+        task_id="b1", cancel=CancelToken(), stream=stream(), description="d", agent_type="general",
+        start_time=0.0, root_set_app_state=store.update, queue=None, output_file="/dev/null", tool_use_id="tu",
+        now=lambda: 2.0, tools=TOOLS, context=tool_context_for(store)))
+    (event,) = [e for e in store.get().sdk_events.drain("s") if e["subtype"] == "task_progress"]
+    assert (event["task_id"], event["tool_use_id"], event["description"], event["last_tool_name"]) == (
+        "b1", "tu", "Reading x.py", "ReadFile")
+    assert event["usage"] == {"total_tokens": 0, "tool_uses": 1, "duration_ms": 2000}
+
+
 # ── extractLastToolInfo ──────────────────────────────────────────────────────
 
 def test_the_last_finished_tool_with_its_summary():

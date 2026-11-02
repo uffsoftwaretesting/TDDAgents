@@ -33,8 +33,18 @@ def update_task_state(task_id: str, set_app_state: SetAppState, updater: Callabl
 
 
 def register_task(task: Any, set_app_state: SetAppState) -> None:
-    """`registerTask`: add the task, or replace the one with its id (a resumed agent)."""
-    set_app_state(lambda state: replace(state, tasks={**state.tasks, task.id: task}))
+    """
+    `registerTask`: add the task, or replace the one with its id (a resumed agent). A new task (not a
+    replacement) is announced to the SDK stream (`task_started`).
+    """
+    from app.utils.sdk_event_queue import emit_task_started
+
+    def register(state: AppState) -> AppState:
+        if task.id not in state.tasks:
+            emit_task_started(state, task)
+        return replace(state, tasks={**state.tasks, task.id: task})
+
+    set_app_state(register)
 
 
 def get_running_tasks(state: AppState) -> list[Any]:
