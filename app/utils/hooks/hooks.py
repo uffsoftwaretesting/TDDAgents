@@ -6,7 +6,9 @@ Ported from `reference/claude-code/src/utils/hooks.ts` -> `createBaseHookInput`,
 `executePostToolHooks`, `executePostToolUseFailureHooks`, `executePermissionRequestHooks`,
 `executeStopHooks`, `executeStopFailureHooks`, `executeUserPromptSubmitHooks`,
 `executeSessionStartHooks`, `executeSubagentStartHooks`, `executePreCompactHooks`,
-`executePostCompactHooks`, `executeSessionEndHooks`.
+`executePostCompactHooks`, `executeSessionEndHooks`, `executeNotificationHooks`,
+`executeElicitationHooks`, `executeElicitationResultHooks` (with `parseElicitationHookOutput`,
+`ElicitationHookResult`, `ElicitationResultHookResult`).
 
 `HookDispatcher` holds what upstream keeps in module state for a session — the frozen config
 snapshot, the session id, the working and project directories, the async-hook registry — and
@@ -115,6 +117,7 @@ from app.types.hooks import (
     parse_hook_output,
     parse_http_hook_output,
     parse_prompt_request,
+    validate_hook_json,
 )
 from app.utils.hooks.async_hook_registry import AsyncHookRegistry
 from app.utils.hooks.hook_events import (
@@ -1165,6 +1168,169 @@ async def execute_stop_failure_hooks(
     await dispatcher.execute_hooks_outside_repl(hook_input, match_query=resolved, timeout_ms=timeout_ms)
 
 
+async def execute_notification_hooks(
+    dispatcher: HookDispatcher | None,
+    message: str,
+    notification_type: str,
+    title: str | None = None,
+    timeout_ms: int = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+) -> None:
+    """`executeNotificationHooks`: report a notification to the hooks matching its type."""
+    if dispatcher is None:
+        return
+    hook_input: dict[str, Any] = {
+        **dispatcher.create_base_hook_input(None),
+        "hook_event_name": HookEvent.NOTIFICATION.value,
+        "message": message,
+        "notification_type": notification_type,
+    }
+    if title is not None:
+        hook_input["title"] = title
+    await dispatcher.execute_hooks_outside_repl(hook_input, match_query=notification_type, timeout_ms=timeout_ms)
+
+
+@dataclass(frozen=True, slots=True)
+class ElicitationResponse:
+    """`ElicitationResponse`: the `action` (accept, decline, cancel) and `content` a hook gives."""
+
+    action: str
+    content: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ElicitationHookResult:
+    """`ElicitationHookResult`."""
+
+    elicitation_response: ElicitationResponse | None = None
+    blocking_error: HookBlockingError | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ElicitationResultHookResult:
+    """`ElicitationResultHookResult`."""
+
+    elicitation_result_response: ElicitationResponse | None = None
+    blocking_error: HookBlockingError | None = None
+
+
+def parse_elicitation_hook_output(
+    result: HookOutsideReplResult, expected_event_name: str
+) -> tuple[ElicitationResponse | None, HookBlockingError | None]:
+    """
+    `parseElicitationHookOutput`: exit code 2 blocks; otherwise a JSON document whose
+    `hookSpecificOutput` names `expected_event_name` may answer with an `action` (a `decline`
+    also blocks), and a top-level `decision: "block"` blocks. Anything else says nothing.
+    """
+    if result.blocked and not result.succeeded:
+        return None, HookBlockingError(blocking_error=result.output or "Elicitation blocked by hook",
+                                       command=result.command)
+    trimmed = result.output.strip()
+    if not trimmed.startswith("{"):
+        return None, None
+    try:
+        parsed, _error = validate_hook_json(trimmed)
+    except ValueError:
+        return None, None
+    if parsed is None or is_async_hook_json_output(parsed):
+        return None, None
+    if parsed.get("decision") == "block" or result.blocked:
+        return None, HookBlockingError(blocking_error=parsed.get("reason") or "Elicitation blocked by hook",
+                                       command=result.command)
+    specific = parsed.get("hookSpecificOutput")
+    if not isinstance(specific, Mapping) or specific.get("hookEventName") != expected_event_name:
+        return None, None
+    action = specific.get("action")
+    if not action:
+        return None, None
+    response = ElicitationResponse(action=str(action), content=specific.get("content"))
+    if action != "decline":
+        return response, None
+    default = "Elicitation denied by hook" if expected_event_name == "Elicitation" else (
+        "Elicitation result blocked by hook")
+    return response, HookBlockingError(blocking_error=parsed.get("reason") or default, command=result.command)
+
+
+def _fold_elicitation_results(
+    results: Sequence[HookOutsideReplResult], expected_event_name: str
+) -> tuple[ElicitationResponse | None, HookBlockingError | None]:
+    """The last response and the last blocking error over every hook's result, as upstream's loop."""
+    response: ElicitationResponse | None = None
+    blocking_error: HookBlockingError | None = None
+    for result in results:
+        parsed_response, parsed_blocking = parse_elicitation_hook_output(result, expected_event_name)
+        if parsed_blocking is not None:
+            blocking_error = parsed_blocking
+        if parsed_response is not None:
+            response = parsed_response
+    return response, blocking_error
+
+
+def _drop_none(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """`JSON.stringify` leaves `undefined` fields out of the hook input."""
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+async def execute_elicitation_hooks(
+    dispatcher: HookDispatcher | None,
+    server_name: str,
+    message: str,
+    *,
+    requested_schema: Mapping[str, Any] | None = None,
+    permission_mode: str | None = None,
+    signal: Any = None,
+    timeout_ms: int = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+    mode: str | None = None,
+    url: str | None = None,
+    elicitation_id: str | None = None,
+) -> ElicitationHookResult:
+    """`executeElicitationHooks`: hooks may answer an MCP server's elicitation, or block it."""
+    if dispatcher is None:
+        return ElicitationHookResult()
+    hook_input = {
+        **dispatcher.create_base_hook_input(permission_mode),
+        "hook_event_name": HookEvent.ELICITATION.value,
+        "mcp_server_name": server_name,
+        "message": message,
+        **_drop_none({"mode": mode, "url": url, "elicitation_id": elicitation_id,
+                      "requested_schema": dict(requested_schema) if requested_schema is not None else None}),
+    }
+    results = await dispatcher.execute_hooks_outside_repl(
+        hook_input, match_query=server_name, signal=signal, timeout_ms=timeout_ms
+    )
+    response, blocking_error = _fold_elicitation_results(results, HookEvent.ELICITATION.value)
+    return ElicitationHookResult(elicitation_response=response, blocking_error=blocking_error)
+
+
+async def execute_elicitation_result_hooks(
+    dispatcher: HookDispatcher | None,
+    server_name: str,
+    action: str,
+    *,
+    content: Mapping[str, Any] | None = None,
+    permission_mode: str | None = None,
+    signal: Any = None,
+    timeout_ms: int = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+    mode: str | None = None,
+    elicitation_id: str | None = None,
+) -> ElicitationResultHookResult:
+    """`executeElicitationResultHooks`: hooks see the user's answer and may override or block it."""
+    if dispatcher is None:
+        return ElicitationResultHookResult()
+    hook_input = {
+        **dispatcher.create_base_hook_input(permission_mode),
+        "hook_event_name": HookEvent.ELICITATION_RESULT.value,
+        "mcp_server_name": server_name,
+        **_drop_none({"elicitation_id": elicitation_id, "mode": mode}),
+        "action": action,
+        **_drop_none({"content": dict(content) if content is not None else None}),
+    }
+    results = await dispatcher.execute_hooks_outside_repl(
+        hook_input, match_query=server_name, signal=signal, timeout_ms=timeout_ms
+    )
+    response, blocking_error = _fold_elicitation_results(results, HookEvent.ELICITATION_RESULT.value)
+    return ElicitationResultHookResult(elicitation_result_response=response, blocking_error=blocking_error)
+
+
 _SIMPLE_MATCHER = re.compile(r"^[a-zA-Z0-9_|]+$")
 
 IfConditionMatcher = Callable[[str], bool]
@@ -1569,6 +1735,9 @@ __all__ = [
     "PROJECT_DIR_ENV",
     "AgentHookExecutor",
     "CommandHookResult",
+    "ElicitationHookResult",
+    "ElicitationResponse",
+    "ElicitationResultHookResult",
     "HookDispatcher",
     "HookOutsideReplResult",
     "HttpHookExecutor",
@@ -1578,6 +1747,9 @@ __all__ = [
     "PromptHookExecutor",
     "dispatcher_of",
     "exec_command_hook",
+    "execute_elicitation_hooks",
+    "execute_elicitation_result_hooks",
+    "execute_notification_hooks",
     "execute_permission_denied_hooks",
     "execute_permission_request_hooks",
     "execute_post_compact_hooks",
@@ -1598,6 +1770,7 @@ __all__ = [
     "hook_env",
     "last_assistant_text",
     "matches_pattern",
+    "parse_elicitation_hook_output",
     "prepare_if_condition_matcher",
     "safe_cwd",
 ]

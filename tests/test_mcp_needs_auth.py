@@ -261,7 +261,9 @@ def test_the_manager_skips_servers_known_to_need_auth(monkeypatch):
     manager = mm.McpConnectionManager(cwd="/w", transport_factory=no_transport)
     asyncio.run(manager.connect({"cached": cached, "probed": probed}))
     assert sorted((c.name, c.type) for c in manager.clients) == [("cached", "needs-auth"), ("probed", "needs-auth")]
-    assert attempted == [] and manager.tools == []
+    # `processServer`: a skipped needs-auth server gets `createMcpAuthTool`'s pseudo-tool instead.
+    assert attempted == []
+    assert sorted(t.name for t in manager.tools) == ["mcp__cached__authenticate", "mcp__probed__authenticate"]
 
 
 def test_the_needs_auth_skip_is_only_for_remote_servers():

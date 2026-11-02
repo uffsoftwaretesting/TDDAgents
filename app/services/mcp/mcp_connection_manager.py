@@ -19,15 +19,25 @@ others. The resource tools join the pool once, with the first server that suppor
 
 An sse/http server that answered 401 within the last 15 minutes (`is_mcp_auth_cached`), or
 that was probed before but holds no token (`has_mcp_discovery_but_no_token`), is recorded as
-`needs-auth` without a connection attempt, as upstream's `processServer` does.
+`needs-auth` without a connection attempt, as upstream's `processServer` does. A `needs-auth`
+server, skipped or answering 401, gets `createMcpAuthTool`'s `mcp__<server>__authenticate` in
+`tools` instead of its own (`tools/mcp_auth_tool/`). When that tool's OAuth flow succeeds, the
+manager reconnects the server (`reconnect`) and applies the result (`apply_reconnect`, the
+`setAppState` update upstream's tool makes): the server's entry in `clients` is replaced, and
+every `mcp__<server>__` tool in `tools` (the auth tool among them) gives way to the reconnected
+server's tools, both lists updated in place. Then `on_reconnect(server_name, result)`, when the
+run set one, lets the run refresh what it derived from them (its tool pool, its context's
+`mcp_clients`). `aclose` cancels an auth flow still running in the background.
+
+`elicitation_callback` and `on_elicitation_complete` (see `elicitation_handler.py`) are passed to
+every connection the manager makes, the first ones and the reconnections alike.
 
 `reconnect_mcp_server_impl` is `client.ts` -> `reconnectMcpServerImpl` (kept here, beside the
 tool building it shares, because `client.py` cannot import the tool modules that import it):
 connect again, then the server's tools and resources.
 
-Not ported: the auth tool (`createMcpAuthTool`, offered beside a `needs-auth` server), MCP
-prompts as commands and MCP skills, plugin servers, `list_changed` notifications, and the
-per-server analytics.
+Not ported: MCP prompts as commands and MCP skills, plugin servers, `list_changed`
+notifications, and the per-server analytics.
 """
 
 from __future__ import annotations
@@ -50,6 +60,8 @@ from app.services.mcp.client import (
     parse_int_env,
 )
 from app.services.mcp.config import is_mcp_server_disabled
+from app.services.mcp.elicitation_handler import ElicitationCallback, OnElicitationComplete
+from app.services.mcp.normalization import get_mcp_prefix
 from app.services.mcp.types import (
     ConnectedMCPServer,
     DisabledMCPServer,
@@ -62,6 +74,7 @@ from app.services.mcp.types import (
 from app.tools.list_mcp_resources_tool.list_mcp_resources_tool import (
     build_list_mcp_resources_tool,
 )
+from app.tools.mcp_auth_tool.mcp_auth_tool import create_mcp_auth_tool
 from app.tools.mcp_tool.mcp_tool import build_mcp_tool
 from app.tools.read_mcp_resource_tool.read_mcp_resource_tool import (
     build_read_mcp_resource_tool,
@@ -119,7 +132,15 @@ class McpConnectionManager:
     transport_factory: TransportFactory = open_transport
     clients: list[MCPServerConnection] = field(default_factory=list)
     tools: list[Any] = field(default_factory=list)
+    #: The connections' elicitation callback (`None`: every elicitation is answered `cancel`).
+    elicitation_callback: ElicitationCallback | None = None
+    #: The connections' `notifications/elicitation/complete` handler.
+    on_elicitation_complete: OnElicitationComplete | None = None
+    #: Told after an auth tool's reconnect is applied: `(server_name, result)`.
+    on_reconnect: Callable[[str, ReconnectResult], None] | None = None
     _resource_tools_added: bool = False
+    #: The auth tools' background OAuth continuations.
+    _auth_flows: set[asyncio.Task[None]] = field(default_factory=set)
 
     async def connect(self, configs: Mapping[str, McpServerConfig]) -> None:
         """`getMcpToolsCommandsAndResources`: connect every server and collect its tools."""
@@ -143,11 +164,16 @@ class McpConnectionManager:
         ):
             logger.debug("MCP server %s: Skipping connection (cached needs-auth)", name)
             self.clients.append(NeedsAuthMCPServer(name=name, config=config))
+            self.tools.append(self._auth_tool(name, config))
             return
         try:
-            client = await connect_to_server(name, config, cwd=self.cwd, transport_factory=self.transport_factory)
+            client = await connect_to_server(
+                name, config, cwd=self.cwd, transport_factory=self.transport_factory,
+                elicitation_callback=self.elicitation_callback, on_elicitation_complete=self.on_elicitation_complete)
             self.clients.append(client)
             if not isinstance(client, ConnectedMCPServer):
+                if isinstance(client, NeedsAuthMCPServer):
+                    self.tools.append(self._auth_tool(name, config))
                 return
             definitions = await fetch_tools_for_client(client)
             built = [build_mcp_tool(client, d) for d in definitions]
@@ -159,8 +185,33 @@ class McpConnectionManager:
             logger.warning("MCP server %s: error fetching tools/resources: %s", name, exc)
             self.clients.append(FailedMCPServer(name=name, config=config, error=str(exc)))
 
+    def _auth_tool(self, name: str, config: McpServerConfig) -> Any:
+        """`createMcpAuthTool(name, config)`, reconnecting through this manager."""
+        return create_mcp_auth_tool(name, config, reconnect=self.reconnect, apply_reconnect=self.apply_reconnect,
+                                    background=self._auth_flows)
+
+    async def reconnect(self, name: str, config: McpServerConfig) -> ReconnectResult:
+        """`reconnectMcpServerImpl(name, config)` with this manager's cwd, transport and elicitation."""
+        return await reconnect_mcp_server_impl(
+            name, config, cwd=self.cwd, transport_factory=self.transport_factory,
+            elicitation_callback=self.elicitation_callback, on_elicitation_complete=self.on_elicitation_complete)
+
+    def apply_reconnect(self, name: str, result: ReconnectResult) -> None:
+        """
+        The auth tool's `setAppState` update: the server's client replaced, its `mcp__<server>__`
+        tools replaced by the reconnected ones, then `on_reconnect`.
+        """
+        self.clients[:] = [result.client if c.name == name else c for c in self.clients]
+        prefix = get_mcp_prefix(name)
+        self.tools[:] = [*(t for t in self.tools if not str(getattr(t, "name", "")).startswith(prefix)), *result.tools]
+        if self.on_reconnect is not None:
+            self.on_reconnect(name, result)
+
     async def aclose(self) -> None:
         """Close every connected session (upstream's cleanup at session end)."""
+        for flow in list(self._auth_flows):
+            flow.cancel()
+        await asyncio.gather(*list(self._auth_flows), return_exceptions=True)
         cleanups = [c.cleanup for c in self.clients if isinstance(c, ConnectedMCPServer) and c.cleanup]
         await asyncio.gather(*(cleanup() for cleanup in cleanups), return_exceptions=True)
 
@@ -181,11 +232,15 @@ async def reconnect_mcp_server_impl(
     *,
     cwd: str | Path,
     transport_factory: TransportFactory = open_transport,
+    elicitation_callback: ElicitationCallback | None = None,
+    on_elicitation_complete: OnElicitationComplete | None = None,
 ) -> ReconnectResult:
     """`reconnectMcpServerImpl`: a fresh connection; its tools and resources when connected."""
     try:
         clear_keychain_cache()
-        client = await connect_to_server(name, config, cwd=cwd, transport_factory=transport_factory)
+        client = await connect_to_server(
+            name, config, cwd=cwd, transport_factory=transport_factory, elicitation_callback=elicitation_callback,
+            on_elicitation_complete=on_elicitation_complete)
         if not isinstance(client, ConnectedMCPServer):
             return ReconnectResult(client=client)
         supports_resources = bool(getattr(client.capabilities, "resources", None))

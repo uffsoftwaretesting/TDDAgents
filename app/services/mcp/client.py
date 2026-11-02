@@ -6,8 +6,12 @@ Ported from `reference/claude-code/src/services/mcp/client.ts`:
 * `connectToServer` -> `connect_to_server`: the transport, a `Client` advertising `roots`
   and `elicitation`, the `MCP_TIMEOUT` race (`TDDAGENTS_MCP_TIMEOUT`, 30 000 ms), the
   instructions cap (`MAX_MCP_DESCRIPTION_LENGTH`), and a failure returned as a
-  `FailedMCPServer`. `roots/list` answers the original cwd. Elicitation is answered `cancel`,
-  as upstream's handler does in a non-interactive session.
+  `FailedMCPServer`. `roots/list` answers the original cwd. An elicitation goes to the
+  `elicitation_callback` the caller supplies (`elicitation_handler.build_elicitation_callback`,
+  print.ts's `registerElicitationHandlers` handler, bound to the server's name); without one it is
+  answered `cancel`. A server's `notifications/elicitation/complete` goes to
+  `on_elicitation_complete(server_name, elicitation_id)` when given, through the session's
+  `message_handler` (the SDK surfaces it there).
 * `fetchToolsForClient` / `fetchResourcesForClient` -> `fetch_tools_for_client` /
   `fetch_resources_for_client`: empty when the server lacks the capability or the request
   fails.
@@ -35,9 +39,9 @@ Not ported: `McpAuthError` (a 401 on a tool call of a connected server, which up
 `toolExecution.ts` turns into a `needs-auth` entry of `AppState.mcp.clients`; TDDAgents' AppState
 holds no MCP clients),
 `McpSessionExpiredError`'s reconnect-and-retry and
-`ensureConnectedClient`'s memoized reconnect (a failed session stays failed for the run), URL
-elicitation, progress events, image resizing (`maybeResizeAndDownsampleImageBuffer`), the IDE
-special cases and analytics.
+`ensureConnectedClient`'s memoized reconnect (a failed session stays failed for the run),
+`callMCPToolWithUrlElicitationRetry` (the -32042 URL-elicitation retry), progress events, image
+resizing (`maybeResizeAndDownsampleImageBuffer`), the IDE special cases and analytics.
 
 The transport each MCP server type connects over (Phase 8).
 
@@ -86,7 +90,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 from mcp.client._transport import TransportStreams
@@ -97,6 +101,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.message import SessionMessage
 from mcp.types import (
+    ElicitCompleteNotification,
     ElicitRequestParams,
     ElicitResult,
     Implementation,
@@ -133,6 +138,11 @@ from app.utils.mcp_validation import (
     truncate_mcp_content_if_needed,
 )
 from app.utils.tool_result_storage import config_home, tool_results_dir
+
+if TYPE_CHECKING:
+    from mcp.client.session import ElicitationFnT, MessageHandlerFnT
+
+    from app.services.mcp.elicitation_handler import ElicitationCallback, OnElicitationComplete
 
 logger = logging.getLogger(__name__)
 
@@ -425,6 +435,31 @@ async def _cancel_elicitation(context: ClientRequestContext, params: ElicitReque
     return ElicitResult(action="cancel")
 
 
+def _elicitation_callback(name: str, callback: ElicitationCallback | None) -> ElicitationFnT:
+    """The session's elicitation callback: the caller's, bound to the server's name, else `cancel`."""
+    if callback is None:
+        return _cancel_elicitation
+
+    async def elicit(context: ClientRequestContext, params: ElicitRequestParams) -> ElicitResult:
+        return await callback(name, params)
+
+    return elicit
+
+
+def _message_handler(
+    name: str, on_elicitation_complete: OnElicitationComplete | None
+) -> MessageHandlerFnT | None:
+    """The session's notification tee: an `elicitation/complete` reaches `on_elicitation_complete`."""
+    if on_elicitation_complete is None:
+        return None
+
+    async def handle(message: Any) -> None:
+        if isinstance(message, ElicitCompleteNotification):
+            await on_elicitation_complete(name, message.params.elicitation_id)
+
+    return handle
+
+
 def _roots_callback(cwd: str | Path) -> ListRootsFnT:
     async def list_roots(context: ClientRequestContext) -> ListRootsResult:
         return ListRootsResult(roots=[Root(uri=FileUrl(f"file://{Path(cwd).resolve()}"))])
@@ -438,6 +473,8 @@ async def connect_to_server(
     *,
     cwd: str | Path,
     transport_factory: TransportFactory = open_transport,
+    elicitation_callback: ElicitationCallback | None = None,
+    on_elicitation_complete: OnElicitationComplete | None = None,
 ) -> MCPServerConnection:
     """
     `connectToServer`: a `ConnectedMCPServer` whose `cleanup` closes it, a `NeedsAuthMCPServer`
@@ -454,8 +491,9 @@ async def connect_to_server(
                 ClientSession(
                     streams[0],
                     streams[1],
-                    elicitation_callback=_cancel_elicitation,
+                    elicitation_callback=_elicitation_callback(name, elicitation_callback),
                     list_roots_callback=_roots_callback(cwd),
+                    message_handler=_message_handler(name, on_elicitation_complete),
                     client_info=Implementation(name="tddagents", title="TDDAgents", version=client_version()),
                 ) as session,
             ):
