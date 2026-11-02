@@ -4,7 +4,7 @@ A run's MCP connections (Phase 8).
 Ported from `reference/claude-code/src/services/mcp/client.ts` ->
 `getMcpToolsCommandsAndResources` (with `processBatched`, `isLocalMcpServer`,
 `getMcpServerConnectionBatchSize`, `getRemoteMcpServerConnectionBatchSize`,
-`isIncludedMcpTool`) and the session-end `clearServerCache` cleanup.
+`isIncludedMcpTool`), `reconnectMcpServerImpl`, and the session-end `clearServerCache` cleanup.
 
 `McpConnectionManager.connect` takes the run's configs (`config.get_claude_code_mcp_configs`)
 and connects local (stdio) servers three at a time and remote ones twenty at a time
@@ -17,8 +17,17 @@ others. The resource tools join the pool once, with the first server that suppor
 `utils/attachments.py` and the resource tools read each entry's `type`, `name` and
 `instructions`. `aclose` closes every connected session; the runner calls it when the run ends.
 
-Not ported: `needs-auth` and the auth tool, MCP prompts as commands and MCP skills, plugin
-servers, `list_changed` notifications and reconnection, and the per-server analytics.
+An sse/http server that answered 401 within the last 15 minutes (`is_mcp_auth_cached`), or
+that was probed before but holds no token (`has_mcp_discovery_but_no_token`), is recorded as
+`needs-auth` without a connection attempt, as upstream's `processServer` does.
+
+`reconnect_mcp_server_impl` is `client.ts` -> `reconnectMcpServerImpl` (kept here, beside the
+tool building it shares, because `client.py` cannot import the tool modules that import it):
+connect again, then the server's tools and resources.
+
+Not ported: the auth tool (`createMcpAuthTool`, offered beside a `needs-auth` server), MCP
+prompts as commands and MCP skills, plugin servers, `list_changed` notifications, and the
+per-server analytics.
 """
 
 from __future__ import annotations
@@ -30,10 +39,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.services.mcp.auth import has_mcp_discovery_but_no_token
 from app.services.mcp.client import (
     TransportFactory,
     connect_to_server,
+    fetch_resources_for_client,
     fetch_tools_for_client,
+    is_mcp_auth_cached,
     open_transport,
     parse_int_env,
 )
@@ -44,6 +56,8 @@ from app.services.mcp.types import (
     FailedMCPServer,
     McpServerConfig,
     MCPServerConnection,
+    NeedsAuthMCPServer,
+    ServerResource,
 )
 from app.tools.list_mcp_resources_tool.list_mcp_resources_tool import (
     build_list_mcp_resources_tool,
@@ -52,6 +66,7 @@ from app.tools.mcp_tool.mcp_tool import build_mcp_tool
 from app.tools.read_mcp_resource_tool.read_mcp_resource_tool import (
     build_read_mcp_resource_tool,
 )
+from app.utils.secure_storage.index import clear_keychain_cache
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +138,12 @@ class McpConnectionManager:
 
     async def _process_server(self, entry: tuple[str, McpServerConfig]) -> None:
         name, config = entry
+        if config.type in ("sse", "http") and (
+            is_mcp_auth_cached(name) or has_mcp_discovery_but_no_token(name, config)
+        ):
+            logger.debug("MCP server %s: Skipping connection (cached needs-auth)", name)
+            self.clients.append(NeedsAuthMCPServer(name=name, config=config))
+            return
         try:
             client = await connect_to_server(name, config, cwd=self.cwd, transport_factory=self.transport_factory)
             self.clients.append(client)
@@ -144,6 +165,41 @@ class McpConnectionManager:
         await asyncio.gather(*(cleanup() for cleanup in cleanups), return_exceptions=True)
 
 
+@dataclass
+class ReconnectResult:
+    """`reconnectMcpServerImpl`'s `{ client, tools, commands, resources? }` (no MCP commands here)."""
+
+    client: MCPServerConnection
+    tools: list[Any] = field(default_factory=list)
+    commands: list[Any] = field(default_factory=list)
+    resources: list[ServerResource] | None = None
+
+
+async def reconnect_mcp_server_impl(
+    name: str,
+    config: McpServerConfig,
+    *,
+    cwd: str | Path,
+    transport_factory: TransportFactory = open_transport,
+) -> ReconnectResult:
+    """`reconnectMcpServerImpl`: a fresh connection; its tools and resources when connected."""
+    try:
+        clear_keychain_cache()
+        client = await connect_to_server(name, config, cwd=cwd, transport_factory=transport_factory)
+        if not isinstance(client, ConnectedMCPServer):
+            return ReconnectResult(client=client)
+        supports_resources = bool(getattr(client.capabilities, "resources", None))
+        definitions = await fetch_tools_for_client(client)
+        tools: list[Any] = [t for t in (build_mcp_tool(client, d) for d in definitions) if is_included_mcp_tool(t.name)]
+        resources = await fetch_resources_for_client(client) if supports_resources else []
+        if supports_resources:
+            tools.extend((build_list_mcp_resources_tool(), build_read_mcp_resource_tool()))
+        return ReconnectResult(client=client, tools=tools, resources=resources or None)
+    except Exception as exc:  # noqa: BLE001 - upstream answers a failed client
+        logger.warning("MCP server %s: error during reconnection: %s", name, exc)
+        return ReconnectResult(client=FailedMCPServer(name=name, config=config))
+
+
 __all__ = [
     "ALLOWED_IDE_TOOLS",
     "DEFAULT_LOCAL_BATCH_SIZE",
@@ -151,9 +207,11 @@ __all__ = [
     "LOCAL_BATCH_SIZE_ENV",
     "REMOTE_BATCH_SIZE_ENV",
     "McpConnectionManager",
+    "ReconnectResult",
     "get_mcp_server_connection_batch_size",
     "get_remote_mcp_server_connection_batch_size",
     "is_included_mcp_tool",
     "is_local_mcp_server",
     "process_batched",
+    "reconnect_mcp_server_impl",
 ]
