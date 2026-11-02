@@ -181,7 +181,10 @@ def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]
     """
     system = SystemMessage(content="\n\n".join(request_system_texts(state, config)))
     # The compact boundary is a bookkeeping record (upstream's `system` message), never input.
-    sendable = [m for m in state.messages if not is_compact_boundary_message(m)]
+    from app.utils.messages import is_signal_attachment_message
+
+    # `normalizeMessagesForAPI`: an attachment with no text for the model (a signal) is dropped.
+    sendable = [m for m in state.messages if not is_compact_boundary_message(m) and not is_signal_attachment_message(m)]
     history = prepend_user_context(
         reorder_attachments_for_api(merge_split_assistant_messages(sendable)), request_user_context(state, config))
     return [system, *history]

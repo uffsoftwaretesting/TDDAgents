@@ -58,6 +58,7 @@ class TestTheSpellings:
             "aborted_tools",
             "stop_hook_prevented",
             "hook_stopped",
+            "max_turns",
         }
 
     def test_the_two_vocabularies_do_not_overlap(self):

@@ -489,3 +489,28 @@ def test_the_host_answers_a_question(python_workspace: Any, tmp_path: Path) -> N
     (answer,) = [m for m in model.seen[1].messages if isinstance(m, ToolMessage)]
     assert "Large" in str(answer.content)
     assert lines_of(written)[-1]["result"] == "Large it is."
+
+
+def test_initialize_registers_the_hosts_hook_callbacks(python_workspace: Any, tmp_path: Path) -> None:
+    hooks = {"Stop": [{"matcher": None, "hookCallbackIds": ["cb-stop"], "timeout": 5}]}
+    feed = Feed(control("i", "initialize", hooks=hooks), user("finish", "u1"))
+    written: list[str] = []
+    callbacks: list[dict[str, Any]] = []
+
+    def write(text: str) -> None:
+        written.append(text)
+        for message in lines_of([text]):
+            request = message.get("request") or {}
+            if message.get("type") == "control_request" and request.get("subtype") == "hook_callback":
+                callbacks.append(request)
+                feed.send({"type": "control_response", "response": {
+                    "subtype": "success", "request_id": message["request_id"], "response": {}}})
+            if message.get("type") == "result":
+                feed.close()
+
+    asyncio.run(run_headless("sj-hooks", None, workspace=python_workspace, options=STREAM,
+                             input_blocks=feed.blocks(), write_stdout=write,
+                             **run_options(tmp_path, Model([[AIMessage(content="All done.")]]))))
+    (callback,) = callbacks
+    assert callback["callback_id"] == "cb-stop" and callback["input"]["hook_event_name"] == "Stop"
+    assert lines_of(written)[-1]["result"] == "All done."

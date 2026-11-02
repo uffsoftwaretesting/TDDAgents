@@ -365,3 +365,63 @@ def test_a_second_turn_continues_the_transcript_chain(tmp_path):
     assert [e["message"]["data"]["content"] for e in entries] == [
         "task", "first", "<task-notification>done</task-notification>", "second"]
     assert all(b["parentUuid"] == a["uuid"] for a, b in itertools.pairwise(entries))
+
+
+# ── the opt-in ceilings: --max-turns / --max-budget-usd (user decision 2026-11-01) ──
+
+def _ceiling_engine(model, tools=None, cost=None, **ceilings):
+    deps = make_fake_deps(model, tools)
+    return QueryEngine(CONFIG, deps, transcript=FakeTranscript(), cost_tracker=cost, session_id="s1",
+                       now=lambda: 100.0, uuid=lambda: "res-uuid", **ceilings)
+
+
+def test_max_turns_ends_the_run_with_upstreams_result():
+    engine = _ceiling_engine(FakeModel([[asks_for("RunTests", "c1")], [AIMessage(content="never")]]),
+                             FakeTools(), max_turns=1)
+    events = _run(engine, _state())
+    terminated = [e for e in events if isinstance(e, Terminated)]
+    assert terminated == [Terminated(reason=Terminal.MAX_TURNS)]
+    result = events[-1]
+    assert (result.subtype, result.is_error, result.num_turns, result.errors, result.terminal_reason) == (
+        "error_max_turns", True, 2, ("Reached maximum number of turns (1)",), "max_turns")
+    # The signal is the engine's, never history the next turn would send.
+    from app.utils.attachments import attachment_of
+
+    assert not any((attachment_of(m) or {}).get("type") == "max_turns_reached" for m in engine.get_messages())
+
+
+def test_without_max_turns_there_is_no_ceiling():
+    engine = _ceiling_engine(FakeModel([[asks_for("RunTests", "c1")], [asks_for("RunTests", "c2")],
+                                        [AIMessage(content="done")]]), FakeTools())
+    result = _run(engine, _state())[-1]
+    assert (result.subtype, result.terminal_reason) == ("success", "completed")
+
+
+def test_the_budget_ends_the_run_once_the_cost_reaches_it():
+    class Cost(FakeCost):
+        total_cost_usd = 0.5
+
+    engine = _ceiling_engine(FakeModel([[asks_for("RunTests", "c1")], [AIMessage(content="never")]]),
+                             FakeTools(), cost=Cost(), max_budget_usd=0.5)
+    events = _run(engine, _state())
+    result = events[-1]
+    assert (result.subtype, result.is_error, result.errors) == (
+        "error_max_budget_usd", True, ("Reached maximum budget ($0.5)",))
+    assert len([e for e in events if isinstance(e, AIMessage)]) == 1
+    under = _ceiling_engine(FakeModel([[AIMessage(content="ok")]]), cost=Cost(), max_budget_usd=0.75)
+    assert _run(under, _state())[-1].subtype == "success"
+
+
+def test_the_ceiling_flags():
+    import argparse
+
+    import pytest
+
+    import app.main as entry
+
+    args = entry.parse_args(["-p", "x", "--max-turns", "3", "--max-budget-usd", "1.5"])
+    options = entry.headless_options(args)
+    assert (options.max_turns, options.max_budget_usd) == (3, 1.5)
+    for bad in ("0", "-1", "abc"):
+        with pytest.raises(argparse.ArgumentTypeError, match="--max-budget-usd must be a positive number"):
+            entry.max_budget_usd(bad)

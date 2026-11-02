@@ -185,6 +185,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Re-emit user messages from stdin back on stdout for acknowledgment (only works with "
                              "--input-format=stream-json and --output-format=stream-json)")
     parser.add_argument("--permission-prompt-tool", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--max-turns", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--json-schema", type=json_schema_flag, default=None,
+                        help='JSON Schema for structured output validation. Example: '
+                             '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}')
+    parser.add_argument("--max-budget-usd", type=max_budget_usd, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--system-prompt", default=None, help="System prompt to use for the session")
     parser.add_argument("--system-prompt-file", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--append-system-prompt", default=None,
@@ -194,6 +199,30 @@ def build_parser() -> argparse.ArgumentParser:
     # hidden from the help (`.hideHelp()`).
     parser.add_argument("--rewind-files", default=None, metavar="<user-message-id>", help=argparse.SUPPRESS)
     return parser
+
+
+def max_budget_usd(value: str) -> float:
+    """`--max-budget-usd`'s parser (`main.tsx`): a positive number."""
+    try:
+        amount = float(value)
+    except ValueError:
+        amount = float("nan")
+    if not amount > 0:
+        raise argparse.ArgumentTypeError("--max-budget-usd must be a positive number greater than 0")
+    return amount
+
+
+def json_schema_flag(value: str) -> dict[str, Any]:
+    """`--json-schema`'s `jsonParse`: a JSON object."""
+    import json
+
+    try:
+        parsed = json.loads(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"--json-schema is not valid JSON: {error}") from error
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("--json-schema must be a JSON object")
+    return parsed
 
 
 #: `--output-format`'s choices.
@@ -229,6 +258,9 @@ def headless_options(args: argparse.Namespace) -> HeadlessOptions:
         replay_user_messages=bool(args.replay_user_messages),
         include_hook_events=bool(args.include_hook_events),
         permission_prompt_tool=args.permission_prompt_tool,
+        max_turns=args.max_turns,
+        max_budget_usd=args.max_budget_usd,
+        json_schema=args.json_schema,
     )
 
 

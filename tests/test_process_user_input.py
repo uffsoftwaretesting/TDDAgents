@@ -288,7 +288,8 @@ def _run(engine: QueryEngine) -> Any:
     return SimpleNamespace(engine=engine, ctx=engine.context, store=None, run_id="r", stopped_reason=None,
                            on_message=shown.append, shown=shown, config=engine.config, deps=engine.deps,
                            transcript=engine.transcript, messages=engine.mutable_messages,
-                           user_specified_model=None)
+                           user_specified_model=None, max_turns=None, max_budget_usd=None,
+                           json_schema=None)
 
 
 def test_a_turn_a_hook_stopped_ends_hook_stopped_with_the_prompt_kept():

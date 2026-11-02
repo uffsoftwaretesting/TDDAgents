@@ -259,10 +259,23 @@ def create_structured_output_tool(holder: StructuredOutputHolder) -> Any:
     """`createStructuredOutputTool`: `SyntheticOutputTool` with the hook response schema."""
     from app.tool import PermissionResult, ToolResult, build_tool
 
+    import jsonschema
+
+    from app.tools.synthetic_output_tool.synthetic_output_tool import (
+        STRUCTURED_OUTPUT_PROVIDED,
+        schema_errors,
+    )
+
+    validator = jsonschema.validators.validator_for(STRUCTURED_OUTPUT_INPUT_SCHEMA)(STRUCTURED_OUTPUT_INPUT_SCHEMA)
+
     def call(args: dict[str, Any], context: Any) -> ToolResult:
         holder.calls.append(dict(args))
+        # `createSyntheticOutputTool`'s `call`: the input is checked against the schema there.
+        errors = schema_errors(validator, args)
+        if errors is not None:
+            return ToolResult(content=f"Output does not match required schema: {errors}", is_error=True)
         holder.data = dict(args)
-        return ToolResult(content="Structured output provided successfully")
+        return ToolResult(content=STRUCTURED_OUTPUT_PROVIDED)
 
     return build_tool(
         name=SYNTHETIC_OUTPUT_TOOL_NAME,

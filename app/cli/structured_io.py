@@ -434,7 +434,9 @@ class StructuredIO:
                 print(f"Error in hook callback {callback_id}: {error}", file=sys.stderr)
                 return {}
 
-        return SdkHookCallback(callback=callback, timeout=timeout)
+        from app.schemas.hooks import CallbackHook
+
+        return CallbackHook(callback=callback, timeout=timeout)
 
     async def handle_elicitation(
         self, server_name: str, message: str, requested_schema: Mapping[str, Any] | None = None,
@@ -473,15 +475,6 @@ class StructuredIO:
         response = await self.send_request(
             {"subtype": "mcp_message", "server_name": server_name, "message": dict(message)}, _mcp_response)
         return response["mcp_response"]
-
-
-@dataclass(frozen=True, slots=True)
-class SdkHookCallback:
-    """`HookCallback` of type `callback`: a hook the SDK host runs."""
-
-    callback: Callable[..., Awaitable[dict[str, Any]]]
-    timeout: float | None = None
-    type: str = "callback"
 
 
 def _swallow(task: asyncio.Future[Any]) -> None:
@@ -567,7 +560,6 @@ __all__ = [
     "STREAM_CLOSED_BEFORE_RESPONSE",
     "ControlRequestError",
     "RequestAbortedError",
-    "SdkHookCallback",
     "StreamClosedError",
     "StructuredIO",
     "build_requires_action_details",

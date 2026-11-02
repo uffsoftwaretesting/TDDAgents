@@ -217,6 +217,44 @@ def is_attachment_message(message: Any) -> bool:
     return isinstance(kwargs, Mapping) and isinstance(kwargs.get(ATTACHMENT_KEY), Mapping)
 
 
+def is_signal_attachment_message(message: Any) -> bool:
+    """
+    An attachment the model never sees (`normalizeAttachmentForAPI` gives it no text, so
+    `normalizeMessagesForAPI` drops it): one whose message has no content, such as
+    `structured_output` or `max_turns_reached`.
+    """
+    return is_attachment_message(message) and not getattr(message, "content", None)
+
+
+def count_tool_calls(messages: Sequence[Any], tool_name: str, max_count: int | None = None) -> int:
+    """`countToolCalls`: the assistant messages that call `tool_name` (stopping at `max_count`)."""
+    count = 0
+    for message in messages:
+        if getattr(message, "type", None) == "ai" and any(
+                call.get("name") == tool_name for call in getattr(message, "tool_calls", None) or ()):
+            count += 1
+            if max_count and count >= max_count:
+                return count
+    return count
+
+
+def has_successful_tool_call(messages: Sequence[Any], tool_name: str) -> bool:
+    """`hasSuccessfulToolCall`: the latest call of `tool_name` has a result that is not an error."""
+    latest: str | None = None
+    for message in reversed(messages):
+        if getattr(message, "type", None) == "ai":
+            call = next((c for c in getattr(message, "tool_calls", None) or () if c.get("name") == tool_name), None)
+            if call is not None:
+                latest = str(call.get("id"))
+                break
+    if latest is None:
+        return False
+    for message in reversed(messages):
+        if getattr(message, "type", None) == "tool" and getattr(message, "tool_call_id", None) == latest:
+            return getattr(message, "status", None) != "error"
+    return False
+
+
 def _as_blocks(content: Any) -> list[Any]:
     if isinstance(content, list):
         return list(content)

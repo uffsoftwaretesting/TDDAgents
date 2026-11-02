@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import time
 import uuid as uuid_module
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
@@ -59,7 +59,8 @@ from app.services.compact.compact import is_compact_boundary_message
 from app.utils.attachments import attachment_of
 from app.utils.conversation_recovery import NO_RESPONSE_REQUESTED
 from app.utils.file_history import file_history_enabled, file_history_make_snapshot
-from app.utils.messages import Message
+from app.tools.synthetic_output_tool.synthetic_output_tool import SYNTHETIC_OUTPUT_TOOL_NAME
+from app.utils.messages import Message, count_tool_calls, has_successful_tool_call
 from app.utils.process_user_input.process_user_input import (
     ProcessUserInputResult,
     process_user_input,
@@ -90,7 +91,8 @@ class TranscriptRecorder(Protocol):
 class ResultMessage:
     """`SDKResultMessage`, the fields a headless run can fill."""
 
-    subtype: Literal["success", "error_during_execution"]
+    subtype: Literal["success", "error_during_execution", "error_max_turns", "error_max_budget_usd",
+                     "error_max_structured_output_retries"]
     is_error: bool
     duration_ms: int
     duration_api_ms: int
@@ -106,7 +108,42 @@ class ResultMessage:
     errors: tuple[str, ...] = ()
     #: `permission_denials`: `{tool_name, tool_use_id, tool_input}` for every call not allowed.
     permission_denials: tuple[dict[str, Any], ...] = ()
+    #: `structured_output`: what `StructuredOutput` returned, under `--json-schema`.
+    structured_output: Any = None
     type: Literal["result"] = field(default="result")
+
+
+#: `MAX_STRUCTURED_OUTPUT_RETRIES`'s default (`QueryEngine.ts`).
+DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES = 5
+#: The enforcement hook's id: one per run, re-registered by each `ask`.
+STRUCTURED_OUTPUT_ENFORCEMENT_ID = "structured-output-enforcement"
+
+
+def max_structured_output_retries() -> int:
+    """`parseInt(process.env.MAX_STRUCTURED_OUTPUT_RETRIES || '5', 10)`."""
+    import os
+
+    try:
+        return int(os.environ.get("MAX_STRUCTURED_OUTPUT_RETRIES") or DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES)
+    except ValueError:
+        return DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES
+
+
+def register_structured_output_enforcement(context: Any) -> None:
+    """
+    `registerStructuredOutputEnforcement` (`hookHelpers.ts`): a Stop function hook that blocks until
+    `StructuredOutput` succeeded. Registered once per run (upstream adds one per `submitMessage`).
+    """
+    from app.utils.hooks.session_hooks import add_function_hook, remove_function_hook
+
+    dispatcher = getattr(context, "hook_dispatcher", None)
+    if dispatcher is None:
+        return
+    remove_function_hook(dispatcher, "Stop", STRUCTURED_OUTPUT_ENFORCEMENT_ID)
+    add_function_hook(
+        dispatcher, "Stop", "", lambda messages: has_successful_tool_call(messages, SYNTHETIC_OUTPUT_TOOL_NAME),
+        f"You MUST call the {SYNTHETIC_OUTPUT_TOOL_NAME} tool to complete this request. Call this tool now.",
+        timeout=5000, hook_id=STRUCTURED_OUTPUT_ENFORCEMENT_ID)
 
 
 def normalize_stop_reason(message: Any) -> str | None:
@@ -180,6 +217,9 @@ class QueryEngine:
         read_file_cache: dict[str, Any] | None = None,
         user_specified_model: str | None = None,
         persist_session: bool = True,
+        max_turns: int | None = None,
+        max_budget_usd: float | None = None,
+        json_schema: Mapping[str, Any] | None = None,
         now: Callable[[], float] = time.time,
         uuid: Callable[[], str] = lambda: str(uuid_module.uuid4()),
     ) -> None:
@@ -189,6 +229,12 @@ class QueryEngine:
         self.session_id = session_id
         self.cost_tracker = cost_tracker
         self.persist_session = persist_session
+        #: `QueryEngineConfig.maxTurns` / `maxBudgetUsd`: opt-in (`--max-turns`, `--max-budget-usd`,
+        #: user decision 2026-11-01); `None` is unbounded.
+        self.max_turns = max_turns
+        self.max_budget_usd = max_budget_usd
+        #: `QueryEngineConfig.jsonSchema`: the structured output the turn must end with.
+        self.json_schema = json_schema
         self._now = now
         self._uuid = uuid
         self.terminal: Terminated | None = None
@@ -288,6 +334,8 @@ class QueryEngine:
             # `parseUserSpecifiedModel(userSpecifiedModel)` is the turn's main-loop model.
             turn_ctx = replace(turn_ctx, main_loop_model=parse_user_specified_model(self.user_specified_model))
         turn_ctx = context_with_allowed_tools(turn_ctx, result.allowed_tools)
+        if self.json_schema is not None and any(t.name == SYNTHETIC_OUTPUT_TOOL_NAME for t in turn_ctx.tools):
+            register_structured_output_enforcement(turn_ctx)
         if result.model:
             current = turn_ctx.main_loop_model or self.config.model
             turn_ctx = replace(turn_ctx, main_loop_model=resolve_skill_model_override(result.model, current))
@@ -324,9 +372,22 @@ class QueryEngine:
         turn_count = 1
         last_stop_reason: str | None = None
         last_relevant: Message | None = None
+        max_turns_reached: Mapping[str, Any] | None = None
+        structured_output: Any = None
+        budget = self.max_budget_usd
+        initial_structured_calls = (
+            count_tool_calls(self.mutable_messages, SYNTHETIC_OUTPUT_TOOL_NAME) if self.json_schema is not None else 0)
         self.running = True
+        events = run_loop(state, self.config, self.deps, max_turns=self.max_turns)
         try:
-            async for event in run_loop(state, self.config, self.deps):
+            async for event in events:
+                signal = attachment_of(event) if isinstance(event, BaseMessage) else None
+                if signal is not None and signal.get("type") == "max_turns_reached":
+                    # A signal for the engine, never history: the loop's `Terminated` follows.
+                    max_turns_reached = signal
+                    continue
+                if signal is not None and signal.get("type") == "structured_output":
+                    structured_output = signal.get("data")
                 if isinstance(event, BaseMessage):
                     boundary = is_compact_boundary_message(event)
                     if boundary or isinstance(event, (AIMessage, HumanMessage, ToolMessage)):
@@ -343,17 +404,53 @@ class QueryEngine:
                 elif isinstance(event, Terminated):
                     self.terminal = event
                 yield event
+                if self.json_schema is not None and isinstance(event, (HumanMessage, ToolMessage)):
+                    # `QueryEngine.ts`: the structured-output retry limit, checked on user messages.
+                    calls = count_tool_calls(self.mutable_messages, SYNTHETIC_OUTPUT_TOOL_NAME)
+                    retries = max_structured_output_retries()
+                    if calls - initial_structured_calls >= retries:
+                        self.result = self._ceiling_result(
+                            "error_max_structured_output_retries", start, turn_count, last_stop_reason,
+                            f"Failed to provide valid structured output after {retries} attempts")
+                        yield self.result
+                        return
+                if budget is not None and self.cost_tracker is not None and (
+                        float(self.cost_tracker.total_cost_usd) >= budget):
+                    # `QueryEngine.ts`: the USD budget is checked after every message.
+                    self.result = self._ceiling_result(
+                        "error_max_budget_usd", start, turn_count, last_stop_reason,
+                        f"Reached maximum budget (${budget:g})")
+                    yield self.result
+                    return
         finally:
             self.running = False
+            # A run left mid-flight (the budget) is closed, as abandoning upstream's generator ends it.
+            close = getattr(events, "aclose", None)
+            if close is not None:
+                await close()
 
-        self.result = self._build_result(start, turn_count, last_stop_reason, last_relevant)
+        if max_turns_reached is not None:
+            self.result = self._ceiling_result(
+                "error_max_turns", start, int(max_turns_reached.get("turnCount") or turn_count), last_stop_reason,
+                f"Reached maximum number of turns ({max_turns_reached.get('maxTurns')})")
+        else:
+            self.result = self._build_result(start, turn_count, last_stop_reason, last_relevant)
+            if structured_output is not None:
+                self.result = replace(self.result, structured_output=structured_output)
         yield self.result
 
-    def _build_result(
-        self, start: float, turn_count: int, stop_reason: str | None, result: Message | None
+    def _ceiling_result(
+        self, subtype: Literal["error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"],
+        start: float, num_turns: int,
+        stop_reason: str | None, error: str,
     ) -> ResultMessage:
+        """The `error_max_turns` / `error_max_budget_usd` result (`QueryEngine.ts`)."""
+        common = self._common_fields(start, num_turns, stop_reason)
+        return ResultMessage(subtype=subtype, is_error=True, errors=(error,), **common)
+
+    def _common_fields(self, start: float, turn_count: int, stop_reason: str | None) -> dict[str, Any]:
         tracker = self.cost_tracker
-        common: dict[str, Any] = {
+        return {
             "duration_ms": round((self._now() - start) * 1000),
             "duration_api_ms": int(tracker.total_api_duration_ms) if tracker is not None else 0,
             "num_turns": turn_count,
@@ -366,6 +463,11 @@ class QueryEngine:
             "uuid": self._uuid(),
             "permission_denials": tuple(self.permission_denials),
         }
+
+    def _build_result(
+        self, start: float, turn_count: int, stop_reason: str | None, result: Message | None
+    ) -> ResultMessage:
+        common = self._common_fields(start, turn_count, stop_reason)
         if not is_result_successful(result, stop_reason):
             result_type = "undefined" if result is None else "assistant" if isinstance(result, AIMessage) else "user"
             content_type = _last_content_type(result) if isinstance(result, AIMessage) else "n/a"
@@ -399,6 +501,9 @@ async def ask(
     is_meta: bool = False,
     persist_session: bool = True,
     on_engine: Callable[[QueryEngine], None] | None = None,
+    max_turns: int | None = None,
+    max_budget_usd: float | None = None,
+    json_schema: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[Any]:
     """
     `QueryEngine.ts` -> `ask`: one prompt through a new engine over `mutable_messages` (the
@@ -412,6 +517,7 @@ async def ask(
         config, deps, transcript=transcript, session_id=session_id, cost_tracker=cost_tracker, context=context,
         initial_messages=mutable_messages, read_file_cache=dict(get_read_file_cache()),
         user_specified_model=user_specified_model, persist_session=persist_session,
+        max_turns=max_turns, max_budget_usd=max_budget_usd, json_schema=json_schema,
     )
     if on_engine is not None:
         on_engine(engine)

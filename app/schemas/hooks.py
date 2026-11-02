@@ -15,7 +15,7 @@ rules in the same files are already loaded that way).
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 from urllib.parse import urlparse
@@ -97,7 +97,48 @@ class HttpHook:
         return "http"
 
 
-HookCommand: TypeAlias = CommandHook | PromptHook | AgentHook | HttpHook
+@dataclass(frozen=True, slots=True, eq=False)
+class CallbackHook:
+    """
+    `HookCallback` (`src/types/hooks.ts`): a hook that is a function, never read from settings —
+    an SDK host's (`StructuredIO.createHookCallback`, registered by `initialize`). `callback` is
+    `(hook_input, tool_use_id, signal) -> hook JSON output`; `timeout` is in seconds, as a
+    command hook's.
+    """
+
+    callback: Callable[..., Awaitable[Mapping[str, Any]]]
+    timeout: float | None = None
+    #: `internal`: a hook TDDAgents itself registered (not counted as the user's).
+    internal: bool = False
+    #: Never set: a callback hook has no `if` condition.
+    if_condition: str | None = None
+
+    @property
+    def type(self) -> str:
+        return "callback"
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class FunctionHook:
+    """
+    `FunctionHook` (`src/utils/hooks/sessionHooks.ts`): a session hook whose `callback` judges the
+    conversation (`messages -> bool`, possibly awaitable); a false answer blocks with
+    `error_message`. `timeout` is in milliseconds, as upstream's (`executeFunctionHook`).
+    """
+
+    callback: Callable[[Sequence[Any]], Any]
+    error_message: str
+    id: str
+    timeout: float | None = None
+    #: Never set: a function hook has no `if` condition.
+    if_condition: str | None = None
+
+    @property
+    def type(self) -> str:
+        return "function"
+
+
+HookCommand: TypeAlias = CommandHook | PromptHook | AgentHook | HttpHook | CallbackHook | FunctionHook
 
 
 @dataclass(frozen=True, slots=True)

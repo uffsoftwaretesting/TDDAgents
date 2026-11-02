@@ -18,8 +18,9 @@ unchanged.
 reasons and ten terminal ones. Four of those are produced by subsystems this architecture
 does not have — the context-collapse drain, the token-budget continuation, and the 8k->64k
 output-token escalation, which needs an output cap to escalate away from and this loop sets
-no caps — and two more (`max_turns`, `image_error`) need a turn ceiling and image inputs
-respectively, neither of which exists here. A member no site can produce is a member no test
+no caps — and `image_error` needs image inputs, which do not exist here. `max_turns` exists
+since 2026-11-01, behind the opt-in `--max-turns` (user decision): a run without it has no turn
+ceiling. A member no site can produce is a member no test
 can cover, which is the same objection that retired the recovery counters; they are left out
 until a part of this plan produces them, at which point the spelling is waiting here.
 """
@@ -91,6 +92,9 @@ class Terminal(StrEnum):
     #: A PostToolUse hook signalled that the run must not continue. Distinct from the
     #: above: it comes from the tool path, after a tool has already run. Part H3.
     HOOK_STOPPED = "hook_stopped"
+
+    #: The next turn would pass `--max-turns` (opt-in; `RunConfig.max_turns`, `None` = unbounded).
+    MAX_TURNS = "max_turns"
 
 
 @dataclass(frozen=True, slots=True)

@@ -331,6 +331,13 @@ class DevelopmentRun:
     on_message: Callable[[Any], None] | None = None
     #: The run's `events.jsonl` sink (`TransitionEventRecorder`).
     recorder: Any = None
+    #: `--max-turns` / `--max-budget-usd` for every `ask` (opt-in; `None` is unbounded).
+    max_turns: int | None = None
+    max_budget_usd: float | None = None
+    #: `--json-schema` (or `initialize.jsonSchema`): the structured output every `ask` asks for.
+    json_schema: dict[str, Any] | None = None
+    #: The pool's post-filter additions (`StructuredOutput`); `refresh_tools` appends them.
+    session_tools: list[Any] = field(default_factory=list)
 
 
 def session_run_id(session_id: Any) -> str:
@@ -421,6 +428,8 @@ async def open_session_run(
         # `mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included.
         main_mcp = apply_coordinator_tool_filter(mcp.tools) if coordinator else list(mcp.tools)
         pool_cache: dict[str, Any] = {"key": None, "tools": ()}
+        #: Tools added after the pool's filtering, as `main.tsx` adds `StructuredOutput`.
+        session_tools: list[Tool] = []
 
         def refresh_tools() -> tuple[Tool, ...]:
             """
@@ -437,12 +446,13 @@ async def open_session_run(
             current = state.phase_ledger if state.tdd_plan.current is not None else None
             permission_context = state.tool_permission_context
             in_plan = permission_context.mode == PermissionMode.PLAN
-            key = (current.phase if current is not None else None, in_plan, permission_context.always_deny_rules)
+            key = (current.phase if current is not None else None, in_plan, permission_context.always_deny_rules,
+                   tuple(id(tool) for tool in session_tools))
             if key != pool_cache["key"]:
                 pool_cache["key"] = key
                 tools, extra = (planning_tools, list(mcp.tools)) if in_plan else (built_ins, main_mcp)
-                pool_cache["tools"] = assemble_tool_pool(
-                    tools, extra, phase_ledger=current, permission_context=permission_context)
+                pool_cache["tools"] = (*assemble_tool_pool(
+                    tools, extra, phase_ledger=current, permission_context=permission_context), *session_tools)
             tools_now: tuple[Tool, ...] = pool_cache["tools"]
             return tools_now
 
@@ -510,6 +520,7 @@ async def open_session_run(
         engine = QueryEngine(config, run_deps, transcript=transcript, session_id=run_id,
                              cost_tracker=ctx.cost_tracker, context=ctx)
         run = DevelopmentRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine,
+                             session_tools=session_tools,
                              transcript=transcript, deps=run_deps, messages=engine.mutable_messages,
                              recorder=recorder)
         unsubscribe = ctx.command_queue.subscribe(lambda: interrupt_on_now_priority(run.engine, ctx.command_queue))
@@ -603,7 +614,8 @@ def ask_turn(
         context=run.ctx, mutable_messages=run.messages, get_read_file_cache=lambda: run.ctx.read_file_state,
         set_read_file_cache=set_read_file_cache, user_specified_model=run.user_specified_model,
         cost_tracker=run.ctx.cost_tracker, prefix=prefix, is_meta=is_meta, on_engine=take_engine,
-        user_messages=user_messages,
+        user_messages=user_messages, max_turns=run.max_turns, max_budget_usd=run.max_budget_usd,
+        json_schema=run.json_schema,
     )
 
 
@@ -865,6 +877,11 @@ class HeadlessOptions:
     #: `thinkingConfig`: `None` (the default), `{"type": "disabled"}` or `{"type": "enabled", "budgetTokens": n}`.
     thinking_config: dict[str, Any] | None = None
     prompt_suggestions: bool = False
+    #: `--max-turns` / `--max-budget-usd` (opt-in ceilings, user decision 2026-11-01).
+    max_turns: int | None = None
+    max_budget_usd: float | None = None
+    #: `--json-schema`: the final answer as JSON matching it (`StructuredOutput`).
+    json_schema: dict[str, Any] | None = None
 
 
 async def _no_input() -> AsyncIterator[str]:
@@ -909,6 +926,9 @@ async def run_headless(
     async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan(), workspace=workspace,
                                 planning=True, can_use_tool=can_use_tool, interactive=False,
                                 **run_options) as run:
+        run.max_turns, run.max_budget_usd = options.max_turns, options.max_budget_usd
+        if options.json_schema is not None:
+            use_json_schema(run, options.json_schema)
         streaming = HeadlessStreaming(sio, run, options)
         await streaming.load_initial_messages(request, prompt, stream_input=stream_input)
         needs_full_array = options.output_format == "json" and options.verbose
@@ -923,13 +943,31 @@ async def run_headless(
                 last = message
         result = last if last is not None and last.get("type") == "result" else None
         try:
-            text = final_output(options, last, messages)
+            text = final_output(options, last, messages, max_turns=options.max_turns,
+                                max_budget_usd=options.max_budget_usd)
         except NoMessagesReturned as error:
             logger.error("%s", error)
             text = None
         if text is not None:
             (write_stdout or _stdout_write)(text)
         return outcome_of(run, streaming.terminal, question=awaiting_user_answer(run.messages), result=result)
+
+
+def use_json_schema(run: DevelopmentRun, json_schema: Mapping[str, Any]) -> bool:
+    """
+    `main.tsx` / `print.ts`: `StructuredOutput` for `json_schema` joins the pool after its filtering,
+    and every later `ask` asks for it. An invalid schema adds nothing (logged), as upstream.
+    """
+    from app.tools.synthetic_output_tool.synthetic_output_tool import create_synthetic_output_tool
+
+    tool = create_synthetic_output_tool(json_schema)
+    if isinstance(tool, str):
+        logger.error("Invalid JSON schema: %s", tool)
+        return False
+    run.json_schema = dict(json_schema)
+    run.session_tools.append(tool)
+    run.ctx.tools = run.ctx.refresh_tools()
+    return True
 
 
 def _stdout_write(text: str) -> None:
@@ -1517,6 +1555,10 @@ class HeadlessStreaming:
             self.run_.ctx.append_system_prompt = self.options.append_system_prompt
         if request.get("promptSuggestions") is not None:
             self.options.prompt_suggestions = bool(request["promptSuggestions"])
+        if request.get("jsonSchema") and self.run_.json_schema is None:
+            use_json_schema(self.run_, request["jsonSchema"])
+        if request.get("hooks"):
+            self.run_.ctx.hook_dispatcher.register_hook_callbacks(self._sdk_hook_matchers(request["hooks"]))
         agents = self.agent_definitions()
         commands = [c for c in get_commands(self.run_.ctx.skill_registry) if not c.is_hidden]
         self.respond(message, {
@@ -1534,6 +1576,20 @@ class HeadlessStreaming:
         self.initialized = True
         if self.queue.peek(_is_main_thread) is not None:
             self._kick()
+
+    def _sdk_hook_matchers(self, hooks: Mapping[str, Any]) -> dict[str, list[Any]]:
+        """`initialize.hooks`: each matcher's callback ids as hooks the host answers (`hook_callback`)."""
+        from app.schemas.hooks import HookMatcher
+
+        registered: dict[str, list[Any]] = {}
+        for event, matchers in hooks.items():
+            registered[str(event)] = [
+                HookMatcher(hooks=tuple(self.sio.create_hook_callback(str(callback_id), matcher.get("timeout"))
+                                        for callback_id in matcher.get("hookCallbackIds") or ()),
+                            matcher=matcher.get("matcher"))
+                for matcher in matchers or ()
+            ]
+        return registered
 
     async def _control_set_permission_mode(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         """`handleSetPermissionMode`."""
@@ -1790,6 +1846,7 @@ __all__ = [
     "parse_task_notification",
     "prompt_from_content",
     "run_headless",
+    "use_json_schema",
     "restore_resumed_state",
     "run_permission_context",
     "run_rewind_files",

@@ -149,7 +149,8 @@ def test_a_queued_notification_goes_through_process_user_input(monkeypatch):
     shown: list[Any] = []
     run = SimpleNamespace(ctx=ctx, store=AppStateStore(), engine=engine, config=CONFIG, deps=engine.deps,
                           transcript=engine.transcript, run_id="s", messages=[HumanMessage(content="start")],
-                          user_specified_model=None, on_message=shown.append)
+                          user_specified_model=None, on_message=shown.append, max_turns=None,
+                          max_budget_usd=None, json_schema=None)
     asyncio.run(wait_for_background_work(run))  # type: ignore[arg-type]
     assert d.seen[0][1]["prompt"] == "<task-notification>done</task-notification>"
     sent = model.seen[0].messages

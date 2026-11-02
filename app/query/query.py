@@ -230,11 +230,22 @@ def refresh_tool_pool(context: Any) -> Any:
     return replace(context, tools=tuple(refreshed))
 
 
+def max_turns_reached_message(max_turns: int, turn_count: int) -> Any:
+    """`createAttachmentMessage({type: 'max_turns_reached', maxTurns, turnCount})`."""
+    from app.utils.attachments import Attachment, create_signal_attachment_message
+
+    return create_signal_attachment_message(
+        Attachment("max_turns_reached", {"maxTurns": max_turns, "turnCount": turn_count}))
+
+
 async def run_loop(
-    state: LoopState, config: RunConfig, deps: LoopDeps
+    state: LoopState, config: RunConfig, deps: LoopDeps, *, max_turns: int | None = None
 ) -> AsyncIterator[LoopEvent]:
     """
     Run until a terminal reason is reached.
+
+    `max_turns` is upstream's `query({ maxTurns })` entry argument, the opt-in `--max-turns` (user
+    decision 2026-11-01): `None` (the default) is no turn ceiling.
 
     The iteration reads its inputs from `state` at the top and, at each continue site,
     assigns a **complete new** `LoopState`. Nothing is mutated in place and no field is
@@ -585,6 +596,9 @@ async def run_loop(
         if state.tool_context.cancel.cancelled or turn_controller.signal.aborted:
             if abort_reason(state.tool_context, turn_controller) != "interrupt":
                 yield create_user_interruption_message(tool_use=True)
+            # `query.ts`: check maxTurns before returning when aborted.
+            if max_turns and state.turn_count + 1 > max_turns:
+                yield max_turns_reached_message(max_turns, state.turn_count + 1)
             term = Terminated(reason=Terminal.ABORTED_TOOLS)
             deps.emit_event(term)
             yield term
@@ -628,6 +642,14 @@ async def run_loop(
         # continue. For this loop it is what re-derives the phase-filtered pool, so a
         # `RunTests` call that moved RED to GREEN changes the tools the next turn is offered.
         refreshed_context = refresh_tool_pool(state.tool_context)
+
+        # `query.ts`: the max-turns ceiling (opt-in, `--max-turns`).
+        if max_turns and state.turn_count + 1 > max_turns:
+            yield max_turns_reached_message(max_turns, state.turn_count + 1)
+            term = Terminated(reason=Terminal.MAX_TURNS)
+            deps.emit_event(term)
+            yield term
+            return
 
         state = LoopState(
             messages=(*messages_for_query, *assistant_messages, *tool_results),

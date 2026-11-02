@@ -499,6 +499,14 @@ def normalize_attachment_for_api(attachment: Attachment) -> list[str]:
     return []
 
 
+def create_signal_attachment_message(attachment: Attachment) -> Message:
+    """
+    `createAttachmentMessage` for an attachment the model never sees (`normalizeAttachmentForAPI`
+    gives it no text): a signal to the engine, such as `max_turns_reached`.
+    """
+    return HumanMessage(content="", additional_kwargs={"is_meta": True, ATTACHMENT_KEY: attachment.as_dict()})
+
+
 def create_attachment_messages(attachment: Attachment) -> list[Message]:
     """`createAttachmentMessage` + `normalizeAttachmentForAPI`: the meta messages, wrapped."""
     record = attachment.as_dict()

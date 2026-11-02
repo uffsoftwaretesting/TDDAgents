@@ -81,6 +81,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import inspect
 import json
 import logging
 import os
@@ -96,7 +97,9 @@ from typing import Any
 from app.schemas.hooks import (
     DEFAULT_HOOK_SHELL,
     AgentHook,
+    CallbackHook,
     CommandHook,
+    FunctionHook,
     HookCommand,
     HookMatcher,
     HttpHook,
@@ -171,8 +174,10 @@ class HookDispatcher:
     prompt_executor: PromptHookExecutor | None = None
     agent_executor: AgentHookExecutor | None = None
     http_executor: HttpHookExecutor | None = None
-    #: Session-scoped matchers (an agent's or skill's frontmatter hooks), by event.
+    #: Session-scoped matchers (an agent's or skill's frontmatter hooks, function hooks), by event.
     session_matchers: dict[str, list[HookMatcher]] = field(default_factory=dict)
+    #: `registerHookCallbacks` (`bootstrap/state.ts`): an SDK host's callback hooks, by event.
+    registered_matchers: dict[str, list[HookMatcher]] = field(default_factory=dict)
     #: Hook work started fire-and-forget (upstream's `void executeStopFailureHooks(...)`),
     #: kept so it is not garbage-collected and can be drained before the run ends.
     background: set[asyncio.Future[Any]] = field(default_factory=set)
@@ -219,12 +224,19 @@ class HookDispatcher:
 
     def has_hook_for_event(self, event: str) -> bool:
         """`hasHookForEvent`: over-approximates, never under-approximates."""
-        return self.snapshot.has_hook_for_event(event) or bool(self.session_matchers.get(event))
+        return (self.snapshot.has_hook_for_event(event) or bool(self.session_matchers.get(event))
+                or bool(self.registered_matchers.get(event)))
+
+    def register_hook_callbacks(self, hooks: Mapping[str, Sequence[HookMatcher]]) -> None:
+        """`registerHookCallbacks`: add the SDK host's callback matchers to every later lookup."""
+        for event, matchers in hooks.items():
+            self.registered_matchers.setdefault(event, []).extend(matchers)
 
     def matching(
         self, hook_event: str, hook_input: Mapping[str, Any], tools: Sequence[Any] | None
     ) -> list[MatchedHook]:
-        return get_matching_hooks(self.snapshot, hook_event, hook_input, tools, self.session_matchers)
+        return get_matching_hooks(self.snapshot, hook_event, hook_input, tools, self.session_matchers,
+                                  self.registered_matchers)
 
     # ── executeHooks ─────────────────────────────────────────────────────────
 
@@ -356,12 +368,58 @@ class HookDispatcher:
                 return _with_timing(result, command_text, elapsed())
             if isinstance(hook, HttpHook):
                 return await self._run_http(hook, hook_event, hook_name, json_input, tool_use_id, signal)
+            if isinstance(hook, CallbackHook):
+                return await self._run_callback(hook, hook_event, json_input, tool_use_id, signal, timeout_ms)
+            if isinstance(hook, FunctionHook):
+                return await self._run_function(hook, hook_event, hook_name, tool_use_id, signal, timeout_ms,
+                                                messages)
             return await self._run_command(
                 hook, index, hook_event, hook_name, json_input, tool_use_id, signal, timeout_ms, force_sync, started,
                 request_prompt,
             )
         except Exception as exc:  # noqa: BLE001 - upstream turns any failure into a non-blocking error
             return non_blocking(f"Failed to run: {exc}")
+
+    async def _run_callback(
+        self, hook: CallbackHook, hook_event: str, json_input: str, tool_use_id: str, signal: Any, timeout_ms: int,
+    ) -> HookResult:
+        """`executeHookCallback`: the callback's JSON output, processed as a command hook's."""
+        timeout = hook.timeout if hook.timeout else timeout_ms / 1000
+        output = await asyncio.wait_for(hook.callback(json.loads(json_input), tool_use_id, signal), timeout)
+        if is_async_hook_json_output(output):
+            return HookResult(hook=hook, outcome="success")
+        processed = hook_result_from_json(
+            hook, dict(output), command="callback", hook_name=f"{hook_event}:Callback", tool_use_id=tool_use_id,
+            hook_event=hook_event, expected_hook_event=hook_event, stdout=None, stderr=None, exit_code=None)
+        return replace(processed, outcome="success")
+
+    async def _run_function(
+        self, hook: FunctionHook, hook_event: str, hook_name: str, tool_use_id: str, signal: Any, timeout_ms: int,
+        messages: Sequence[Message] | None,
+    ) -> HookResult:
+        """`executeFunctionHook`: the callback judges the messages; false blocks with its message."""
+        def error(content: str) -> HookResult:
+            return HookResult(hook=hook, outcome="non_blocking_error", attachment=HookAttachment(
+                type="hook_error_during_execution", hook_name=hook_name, tool_use_id=tool_use_id,
+                hook_event=hook_event, content=content))
+
+        if messages is None:
+            return error("Messages not provided for function hook")
+        if is_aborted(signal):
+            return HookResult(hook=hook, outcome="cancelled")
+        timeout = (hook.timeout if hook.timeout is not None else timeout_ms) / 1000
+        try:
+            answer = hook.callback(list(messages))
+            passed = await asyncio.wait_for(answer, timeout) if inspect.isawaitable(answer) else answer
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            return HookResult(hook=hook, outcome="cancelled")
+        except Exception as exc:  # noqa: BLE001 - upstream logs it and reports a non-blocking error
+            logger.error("Function hook failed: %s", exc)
+            return error(str(exc) or "Function hook execution error")
+        if passed:
+            return HookResult(hook=hook, outcome="success")
+        return HookResult(hook=hook, outcome="blocking",
+                          blocking_error=HookBlockingError(blocking_error=hook.error_message, command="function"))
 
     async def _run_http(
         self, hook: HttpHook, hook_event: str, hook_name: str, json_input: str, tool_use_id: str, signal: Any
@@ -542,9 +600,32 @@ class HookDispatcher:
                 )
             if isinstance(hook, HttpHook):
                 return await self._outside_http(hook, hook_event, json_input, signal)
+            if isinstance(hook, CallbackHook):
+                return await self._outside_callback(hook, hook_event, json_input, signal, timeout_ms)
+            if isinstance(hook, FunctionHook):
+                return HookOutsideReplResult(command="function", succeeded=False,
+                                             output="Internal error: function hook executed outside REPL context",
+                                             blocked=False)
             return await self._outside_command(hook, hook_event, hook_name, json_input, signal, timeout_ms)
 
         return list(await asyncio.gather(*(run(i, m.hook) for i, m in enumerate(matched))))
+
+    async def _outside_callback(
+        self, hook: CallbackHook, hook_event: str, json_input: str, signal: Any, timeout_ms: int
+    ) -> HookOutsideReplResult:
+        """`executeHooksOutsideREPL`'s callback branch."""
+        timeout = hook.timeout if hook.timeout else timeout_ms / 1000
+        try:
+            output = await asyncio.wait_for(hook.callback(json.loads(json_input), str(uuid.uuid4()), signal), timeout)
+        except Exception as exc:  # noqa: BLE001 - upstream reports the failure as the hook's output
+            return HookOutsideReplResult(command="callback", succeeded=False, output=str(exc), blocked=False)
+        if is_async_hook_json_output(output):
+            return HookOutsideReplResult(command="callback", succeeded=True, output="", blocked=False)
+        specific = output.get("hookSpecificOutput") or {}
+        text = (specific.get("worktreePath") if hook_event == "WorktreeCreate"
+                and specific.get("hookEventName") == "WorktreeCreate" else output.get("systemMessage")) or ""
+        return HookOutsideReplResult(command="callback", succeeded=True, output=str(text),
+                                     blocked=output.get("decision") == "block")
 
     async def _outside_http(
         self, hook: HttpHook, hook_event: str, json_input: str, signal: Any
@@ -1134,12 +1215,16 @@ def get_hooks_config(
     snapshot: HooksConfigSnapshot,
     hook_event: str,
     session_matchers: Mapping[str, Sequence[HookMatcher]] | None = None,
+    registered_matchers: Mapping[str, Sequence[HookMatcher]] | None = None,
 ) -> list[HookMatcher]:
     """
-    `getHooksConfig`: the snapshot's matchers, then session-scoped ones (an agent's or a
-    skill's frontmatter hooks), which a managed-only policy excludes.
+    `getHooksConfig`: the snapshot's matchers, then the registered ones (an SDK host's callbacks,
+    `registerHookCallbacks`), then session-scoped ones (an agent's or a skill's frontmatter hooks,
+    function hooks), which a managed-only policy excludes.
     """
     matchers = list(snapshot.matchers_for(hook_event))
+    if registered_matchers:
+        matchers.extend(registered_matchers.get(hook_event, ()))
     if not snapshot.managed_only and session_matchers:
         matchers.extend(session_matchers.get(hook_event, ()))
     return matchers
@@ -1151,6 +1236,8 @@ def _dedup_key(hook: HookCommand) -> tuple[str, ...]:
         return ("command", hook.shell or DEFAULT_HOOK_SHELL, hook.command, condition)
     if isinstance(hook, HttpHook):
         return ("http", hook.url, condition)
+    if isinstance(hook, (CallbackHook, FunctionHook)):
+        return (hook.type, str(id(hook)))
     return (hook.type, hook.prompt, condition)
 
 
@@ -1164,6 +1251,9 @@ def _dedup(hooks: list[MatchedHook]) -> list[MatchedHook]:
                 # A dict, like a JS Map, keeps the first position and takes the last value.
                 by_key[_dedup_key(matched.hook)] = matched
         ordered.extend(by_key.values())
+    # Callback and function hooks are unique by nature: never deduplicated, in their order.
+    ordered.extend(m for m in hooks if m.hook.type == "callback")
+    ordered.extend(m for m in hooks if m.hook.type == "function")
     return ordered
 
 
@@ -1173,10 +1263,11 @@ def get_matching_hooks(
     hook_input: Mapping[str, Any],
     tools: Sequence[Any] | None = None,
     session_matchers: Mapping[str, Sequence[HookMatcher]] | None = None,
+    registered_matchers: Mapping[str, Sequence[HookMatcher]] | None = None,
 ) -> list[MatchedHook]:
     """`getMatchingHooks`. Never raises: a failure here means no hooks, as upstream."""
     try:
-        hook_matchers = get_hooks_config(snapshot, hook_event, session_matchers)
+        hook_matchers = get_hooks_config(snapshot, hook_event, session_matchers, registered_matchers)
         match_query = match_query_for(hook_input)
         if match_query:
             hook_matchers = [m for m in hook_matchers if not m.matcher or matches_pattern(match_query, m.matcher)]
@@ -1211,6 +1302,8 @@ def get_matching_hooks(
 
 def hook_display_text(hook: HookCommand) -> str:
     """`getHookDisplayText`: the status message when set, else the command/prompt/url."""
+    if isinstance(hook, (CallbackHook, FunctionHook)):
+        return hook.type
     if hook.status_message:
         return hook.status_message
     if isinstance(hook, CommandHook):

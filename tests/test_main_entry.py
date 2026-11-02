@@ -376,6 +376,10 @@ def test_parser_help_and_metadata() -> None:
         "replay_user_messages": "Re-emit user messages from stdin back on stdout for acknowledgment (only works "
                                 "with --input-format=stream-json and --output-format=stream-json)",
         "permission_prompt_tool": argparse.SUPPRESS,
+        "max_turns": argparse.SUPPRESS,
+        "max_budget_usd": argparse.SUPPRESS,
+        "json_schema": 'JSON Schema for structured output validation. Example: '
+                       '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}',
         "system_prompt": "System prompt to use for the session",
         "system_prompt_file": argparse.SUPPRESS,
         "append_system_prompt": "Append a system prompt to the default system prompt",

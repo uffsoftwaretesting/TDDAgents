@@ -160,8 +160,12 @@ async def _run_tool_use(
     #    `validateInput`, before hooks and before permissions: "surprisingly, the model is
     #    not great at generating valid input". The model sees the humanized message; the
     #    raw one goes to the transcript. An MCP tool's schema is `z.object({}).passthrough()`
-    #    (`MCPTool.ts`): its server's JSON schema reaches the model, its server validates.
-    schema = None if getattr(tool, "is_mcp", False) else getattr(tool, "input_schema", None)
+    #    (`MCPTool.ts`): its server's JSON schema reaches the model, its server validates. So is
+    #    `StructuredOutput`'s (`SyntheticOutputTool.ts`), whose `call` validates the caller's schema.
+    from app.tools.synthetic_output_tool.synthetic_output_tool import SYNTHETIC_OUTPUT_TOOL_NAME
+
+    passthrough = getattr(tool, "is_mcp", False) or tool_name == SYNTHETIC_OUTPUT_TOOL_NAME
+    schema = None if passthrough else getattr(tool, "input_schema", None)
     schema_error = validate_against_schema(tool_name, schema, tool_args)
     if schema_error is not None:
         msg = ToolMessage(
