@@ -455,7 +455,8 @@ def test_plugin_error_messages():
                                      "dependency": "d@m", "reason": "not-found"}) == (
         'Dependency "d@m" is not found in any configured marketplace')
     assert get_plugin_error_message({"type": "plugin-cache-miss", "source": "s", "plugin": "p",
-                                     "installPath": "/x"}) == 'Plugin "p" not cached at /x — run /plugins to refresh'
+                                     "installPath": "/x"}) == (
+        'Plugin "p" not cached at /x — run /reload-plugins to refresh')
 
 
 def test_the_plugin_package_folder_is_renamed_tddagents_plugin() -> None:

@@ -331,8 +331,10 @@ def test_a_plugin_hook_command_gets_its_variables_and_options(tmp_path, location
     assert resolved.command == f"run {root} {data_dir} 3"
     assert (env["CLAUDE_PLUGIN_ROOT"], env["CLAUDE_PLUGIN_OPTION_LEVEL"], env["CLAUDE_PLUGIN_OPTION_LOUD_MODE"]) == (
         str(root), "3", "true")
-    with pytest.raises(RuntimeError, match="Plugin directory does not exist"):
-        run(plugin_hook_command(hook, PluginHookContext(str(tmp_path / "gone"), "p@m", locations)))
+    gone = tmp_path / "gone"
+    with pytest.raises(RuntimeError) as raised:
+        run(plugin_hook_command(hook, PluginHookContext(str(gone), "p@m", locations)))
+    assert str(raised.value) == f"Plugin directory does not exist: {gone} (p@m — run /reload-plugins to reinstall)"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell")

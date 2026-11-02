@@ -203,7 +203,7 @@ def fake_open_session_run(opened: list[Any], checks: list[Any]) -> Any:
         locations = SimpleNamespace(project_root=Path(kwargs["project_root"]))
         yield SimpleNamespace(
             on_message=None, ctx=SimpleNamespace(), mcp=SimpleNamespace(settings_locations=lambda: locations),
-            store=SimpleNamespace(update=lambda f: None))
+            store=SimpleNamespace(update=lambda f: None), refresh_plugins=None)
 
     return open_run
 
@@ -226,7 +226,7 @@ def drive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lines: list[str | Non
     monkeypatch.setattr("app.screens.repl.Repl", Repl)
     monkeypatch.setattr("app.cli.print.outcome_of", lambda run, terminal: terminal)
 
-    async def startup_checks(set_app_state: Any, locations: Any, *, trust_accepted: bool) -> None:
+    async def startup_checks(set_app_state: Any, locations: Any, *, trust_accepted: bool, refresh: Any) -> None:
         checks.append((locations.project_root, trust_accepted))
 
     monkeypatch.setattr("app.utils.plugins.perform_startup_checks.perform_startup_checks", startup_checks)

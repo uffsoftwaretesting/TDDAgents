@@ -14,7 +14,7 @@ Divergence: the `tengu_marketplace_background_install` analytics event is not po
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -69,11 +69,18 @@ def set_needs_refresh(set_app_state: SetAppState) -> None:
     set_app_state(update)
 
 
-async def perform_background_plugin_installations(set_app_state: SetAppState, locations: SettingsLocations) -> None:
+async def perform_background_plugin_installations(
+    set_app_state: SetAppState, locations: SettingsLocations,
+    refresh: Callable[[], Awaitable[Any]] | None = None,
+) -> None:
     """
     `performBackgroundPluginInstallations`: mark the missing and changed marketplaces pending,
     reconcile them (progress into `installation_status`), then refresh after a new install or
     flag `needs_refresh` after updates. Any failure is logged, never raised.
+
+    `refresh` is the session's own `refreshActivePlugins` (the run's `refresh_plugins`: hooks,
+    commands, agents and MCP servers reloaded, as upstream's REPL picks up the AppState change);
+    without it the plugins are refreshed alone.
     """
     logger.debug("performBackgroundPluginInstallations called")
     try:
@@ -110,7 +117,10 @@ async def perform_background_plugin_installations(set_app_state: SetAppState, lo
             clear_marketplaces_cache()
             logger.debug("Auto-refreshing plugins after %d new marketplace(s) installed", len(result.installed))
             try:
-                await refresh_active_plugins(set_app_state, locations)
+                if refresh is not None:
+                    await refresh()
+                else:
+                    await refresh_active_plugins(set_app_state, locations)
             except Exception as exc:  # noqa: BLE001 - falls back to the needs-refresh notice, as upstream
                 logger.warning("Auto-refresh failed, falling back to needsRefresh: %s", exc)
                 clear_plugin_cache("performBackgroundPluginInstallations: auto-refresh failed")

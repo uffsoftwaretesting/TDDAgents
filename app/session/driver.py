@@ -202,7 +202,8 @@ def start_plugin_checks(run: Any) -> None:
     locations = run.mcp.settings_locations()
     project = locations.project_root
     task = asyncio.ensure_future(perform_startup_checks(
-        run.store.update, locations, trust_accepted=check_has_trust_dialog_accepted(project)))
+        run.store.update, locations, trust_accepted=check_has_trust_dialog_accepted(project),
+        refresh=run.refresh_plugins))
     _STARTUP_CHECKS.add(task)
     task.add_done_callback(_STARTUP_CHECKS.discard)
 

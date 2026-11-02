@@ -14,6 +14,8 @@ Settings come from the run's `SettingsLocations`.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.services.plugins.plugin_installation_manager import (
     perform_background_plugin_installations,
@@ -28,7 +30,8 @@ logger = logging.getLogger("TDDOrchestrator.Plugins")
 
 
 async def perform_startup_checks(
-    set_app_state: SetAppState, locations: SettingsLocations, *, trust_accepted: bool
+    set_app_state: SetAppState, locations: SettingsLocations, *, trust_accepted: bool,
+    refresh: Callable[[], Awaitable[Any]] | None = None,
 ) -> None:
     """
     `performStartupChecks`: without trust, nothing; otherwise register the seed marketplaces
@@ -45,7 +48,7 @@ async def perform_startup_checks(
             clear_marketplaces_cache()
             clear_plugin_cache("performStartupChecks: seed marketplaces changed")
             set_needs_refresh(set_app_state)
-        await perform_background_plugin_installations(set_app_state, locations)
+        await perform_background_plugin_installations(set_app_state, locations, refresh)
     except Exception as exc:  # noqa: BLE001 - startup checks never block the session
         logger.debug("Error initiating background plugin installations: %s", exc)
 

@@ -398,7 +398,8 @@ def get_plugin_error_message(error: PluginError) -> str:
         )
         return f'Dependency "{e["dependency"]}" is {hint}'
     if kind == "plugin-cache-miss":
-        return f'Plugin "{e["plugin"]}" not cached at {e["installPath"]} — run /plugins to refresh'
+        # Upstream: "run /plugins to refresh" (no /plugins here; user decision 2026-11-02).
+        return f'Plugin "{e["plugin"]}" not cached at {e["installPath"]} — run /reload-plugins to refresh'
     return str(e.get("error", kind))
 
 

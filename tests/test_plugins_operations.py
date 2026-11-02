@@ -389,7 +389,7 @@ def test_plugin_validate(tmp_path):
 
 def test_main_dispatches_the_plugin_subcommand(team, tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(main_module, "plugin_cli_locations", lambda: SettingsLocations(
+    monkeypatch.setattr(main_module, "plugin_cli_locations", lambda thread_id=None: SettingsLocations(
         project_root=tmp_path / "project", home=tmp_path / "home", managed_dir=tmp_path / "managed"))
     assert main_module.main(["plugin", "install", "alpha@team"]) == 0
     assert main_module.main(["plugins", "list", "--json"]) == 0
@@ -414,3 +414,35 @@ def test_the_cli_project_is_the_current_directory(tmp_path, monkeypatch):
     from app.main import plugin_cli_locations as real
 
     assert real().project_root == tmp_path
+
+
+def test_thread_id_targets_that_sessions_project_folder(tmp_path, monkeypatch, capsys):
+    from app.main import plugin_cli_locations as real
+
+    monkeypatch.chdir(tmp_path)
+    workspaces = tmp_path / "workspaces"
+    monkeypatch.setenv("TDDAGENTS_WORKSPACES_DIR", str(workspaces))
+    project = workspaces / "tdd-a" / "project"
+    project.mkdir(parents=True)
+    assert real("tdd-a").project_root == project.resolve()
+    # A forked session's project is a link to its source's folder.
+    (workspaces / "tdd-fork").mkdir()
+    (workspaces / "tdd-fork" / "project").symlink_to(project)
+    assert real("tdd-fork").project_root == project.resolve()
+    with pytest.raises(LookupError, match="^No session found with thread id: tdd-none$"):
+        real("tdd-none")
+    assert main_module.main(["plugin", "--thread-id", "tdd-none", "list"]) == 1
+    assert capsys.readouterr().err.strip() == "No session found with thread id: tdd-none"
+
+
+def test_main_passes_the_thread_id_to_the_locations(tmp_path, monkeypatch):
+    seen: list[Any] = []
+
+    def locations(thread_id: Any = None) -> SettingsLocations:
+        seen.append(thread_id)
+        return SettingsLocations(project_root=tmp_path / "p", home=tmp_path / "home", managed_dir=tmp_path / "m")
+
+    monkeypatch.setattr(main_module, "plugin_cli_locations", locations)
+    assert main_module.main(["plugin", "--thread-id", "tdd-x", "list"]) == 0
+    assert main_module.main(["plugin", "list"]) == 0
+    assert seen == ["tdd-x", None]

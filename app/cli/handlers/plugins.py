@@ -9,7 +9,8 @@ Ported from `reference/claude-code/src/cli/handlers/plugins.ts` -> `handleMarket
 
 Each handler returns the exit code (upstream exits the process) and writes through `out` / `err`.
 The settings are `locations`: upstream reads its process-wide settings from the directory it runs
-in, so the CLI's project is the current directory (`app/main.py` `plugin_cli_locations`).
+in, so the CLI's project is the current directory, or a session's project folder with `--thread-id`
+(`app/main.py` `plugin_cli_locations`).
 
 Divergences: the `tengu_*` analytics events are not ported, and `plugin list --available` has no
 install counts (`installCounts.ts`, a network fetch, is not ported). `--cowork` keeps upstream's

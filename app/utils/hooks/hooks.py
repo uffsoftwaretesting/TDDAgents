@@ -1615,7 +1615,8 @@ async def plugin_hook_command(hook: CommandHook, plugin: PluginHookContext) -> t
     )
 
     if not os.path.exists(plugin.root):
-        suffix = f" ({plugin.plugin_id} — run /plugin to reinstall)" if plugin.plugin_id else ""
+        # Upstream: "run /plugin to reinstall" (no /plugin here; user decision 2026-11-02).
+        suffix = f" ({plugin.plugin_id} — run /reload-plugins to reinstall)" if plugin.plugin_id else ""
         raise RuntimeError(f"Plugin directory does not exist: {plugin.root}{suffix}")
     command = hook.command.replace("${CLAUDE_PLUGIN_ROOT}", plugin.root)
     env = {"CLAUDE_PLUGIN_ROOT": plugin.root}

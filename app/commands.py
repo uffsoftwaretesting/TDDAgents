@@ -248,7 +248,10 @@ def reload_plugins_message(result: Any) -> str:
     ]
     message = "Reloaded: " + " · ".join(parts)
     if result.error_count > 0:
-        message += f"\n{n(result.error_count, 'error')} during load. Run /doctor for details."
+        from app.services.plugins.plugin_operations import PLUGIN_CLI
+
+        # Upstream: "Run /doctor for details." (no /doctor here; user decision 2026-11-02).
+        message += f"\n{n(result.error_count, 'error')} during load. Run `{PLUGIN_CLI} list` for details."
     return message
 
 

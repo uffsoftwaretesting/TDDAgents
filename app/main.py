@@ -34,7 +34,9 @@ this process only (upstream's session plugins, `<name>@inline`).
 `plugin …` (alias `plugins`) is upstream's `claude plugin` subcommand (`main.tsx`'s `pluginCmd`,
 handlers in `app/cli/handlers/plugins.py`): `validate`, `list`, `install`, `uninstall`, `enable`,
 `disable`, `update`, and `marketplace add|list|remove|update`. It runs without a session; its
-project scope is the directory it runs in, as upstream's (`plugin_cli_locations`).
+project scope is the directory it runs in, as upstream's, or with `--thread-id <id>` that session's
+project folder (user decision 2026-11-02: the session projects live outside the repository;
+`plugin_cli_locations`).
 """
 
 import argparse
@@ -680,6 +682,9 @@ def build_plugin_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.main plugin", description="Manage TDDAgents plugins")
     parser.add_argument("--plugin-dir", dest="plugin_dir", action="append", default=[], metavar="<path>",
                         help="Load plugins from a directory for this session only")
+    parser.add_argument("--thread-id", dest="thread_id", default=None, metavar="<id>",
+                        help="Use that session's project folder for the project and local scopes "
+                             "(default: the current directory)")
     commands = parser.add_subparsers(dest="command", required=True)
 
     def command(name: str, help_text: str, aliases: Sequence[str] = ()) -> argparse.ArgumentParser:
@@ -735,14 +740,22 @@ def build_plugin_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def plugin_cli_locations() -> Any:
+def plugin_cli_locations(thread_id: str | None = None) -> Any:
     """
     The settings the `plugin` subcommand reads and writes: upstream's process settings, whose
-    project is the directory the command runs in (`getOriginalCwd()`).
+    project is the directory the command runs in (`getOriginalCwd()`), or, with `--thread-id`,
+    that session's project folder (`<workspaces root>/<thread id>/project`, a fork's link resolved).
+    An unknown thread raises `LookupError`.
     """
     from app.utils.settings.settings import MANAGED_DIR, SettingsLocations
+    from app.workspace.local import PROJECT_DIRNAME, workspaces_root
 
-    return SettingsLocations(project_root=Path.cwd(), managed_dir=Path(MANAGED_DIR))
+    project = Path.cwd()
+    if thread_id is not None:
+        project = (workspaces_root() / thread_id / PROJECT_DIRNAME).resolve()
+        if not project.is_dir():
+            raise LookupError(f"No session found with thread id: {thread_id}")
+    return SettingsLocations(project_root=project, managed_dir=Path(MANAGED_DIR))
 
 
 def run_plugin_command(argv: Sequence[str]) -> int:
@@ -753,7 +766,11 @@ def run_plugin_command(argv: Sequence[str]) -> int:
 
     args = build_plugin_parser().parse_args(list(argv))
     apply_plugin_dirs(args.plugin_dir)
-    locations = plugin_cli_locations()
+    try:
+        locations = plugin_cli_locations(args.thread_id)
+    except LookupError as error:
+        print(error, file=sys.stderr)
+        return 1
     command = args.command
     if command == "validate":
         work: Any = handlers.plugin_validate_handler(args.path, cowork=args.cowork)

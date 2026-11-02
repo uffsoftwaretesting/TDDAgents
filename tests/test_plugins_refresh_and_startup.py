@@ -214,10 +214,10 @@ def test_updates_only_flag_needs_refresh_and_a_failed_refresh_falls_back(tmp_pat
 
 
 def test_startup_checks_need_trust_and_flag_a_seed_change(locations, monkeypatch):
-    calls: list[str] = []
+    calls: list[Any] = []
 
-    async def background(_: Any, __: SettingsLocations) -> None:
-        calls.append("background")
+    async def background(_: Any, __: SettingsLocations, refresh: Any) -> None:
+        calls.append(("background", refresh))
 
     async def seeds_changed() -> bool:
         return True
@@ -228,7 +228,34 @@ def test_startup_checks_need_trust_and_flag_a_seed_change(locations, monkeypatch
     run(psc.perform_startup_checks(store.update, locations, trust_accepted=False))
     assert calls == [] and store.get().plugins.needs_refresh is False
     run(psc.perform_startup_checks(store.update, locations, trust_accepted=True))
-    assert calls == ["background"] and store.get().plugins.needs_refresh is True
+    assert calls == [("background", None)] and store.get().plugins.needs_refresh is True
+
+    async def session_refresh() -> None:
+        pass
+
+    run(psc.perform_startup_checks(store.update, locations, trust_accepted=True, refresh=session_refresh))
+    assert calls[-1] == ("background", session_refresh)
+
+
+def test_a_new_install_refreshes_through_the_sessions_refresh(locations, monkeypatch):
+    user_settings(locations, extraKnownMarketplaces={"m": {"source": {"source": "github", "repo": "o/r"}}})
+
+    async def installed(_: SettingsLocations, __: Any = None) -> ReconcileResult:
+        return ReconcileResult(installed=["m"])
+
+    async def plain_refresh(*_: Any) -> Any:
+        raise AssertionError("the plain refresh must not run when the session gives its own")
+
+    refreshed: list[str] = []
+
+    async def session_refresh() -> None:
+        refreshed.append("session")
+
+    monkeypatch.setattr(pim, "reconcile_marketplaces", installed)
+    monkeypatch.setattr(pim, "refresh_active_plugins", plain_refresh)
+    store = AppStateStore(state=AppState())
+    run(pim.perform_background_plugin_installations(store.update, locations, session_refresh))
+    assert refreshed == ["session"] and store.get().plugins.needs_refresh is False
 
 
 # ── pluginStartupCheck ────────────────────────────────────────────────────────
