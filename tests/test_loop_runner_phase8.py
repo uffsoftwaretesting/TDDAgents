@@ -394,9 +394,10 @@ def test_the_runner_hands_its_scopes_to_skills_mcp_and_the_task_tools(python_wor
         captured["send"] = kw
         return real_send(**kw)
 
-    async def connect(root: Any, locations: Any) -> Any:
+    async def connect(root: Any, locations: Any, **options: Any) -> Any:
         captured["locations"] = locations
-        return await real_connect(root, locations)
+        captured["mcp_options"] = options
+        return await real_connect(root, locations, **options)
 
     monkeypatch.setattr(skill_loader, "get_skill_registry", registry)
     monkeypatch.setattr(skill_tool_mod, "build_skill_tool", skill)
@@ -423,6 +424,12 @@ def test_the_runner_hands_its_scopes_to_skills_mcp_and_the_task_tools(python_wor
     locations = captured["locations"]
     assert (locations.project_root, locations.home, locations.managed_dir) == (
         project, tmp_path / "home", tmp_path / "etc")
+    # Every configured server routes its elicitations through the session; the auth tool's reconnect
+    # refreshes the pools.
+    options = captured["mcp_options"]
+    assert set(options) == {"elicitation_callback", "on_elicitation_complete", "on_reconnect"}
+    assert options["elicitation_callback"].__name__ == "elicit"
+    assert options["on_elicitation_complete"].__name__ == "elicitation_complete"
 
 
 def test_the_mcp_tools_survive_a_phase_move(python_workspace, tmp_path, monkeypatch):
