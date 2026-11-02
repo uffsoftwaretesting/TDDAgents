@@ -162,14 +162,19 @@ def test_copy_plugin_to_versioned_cache_errors(tmp_path: Path):
         asyncio.run(copy_plugin_to_versioned_cache(str(empty), "q@m", "1"))
 
 
-def test_zip_cache_mode_is_stage_two(tmp_path: Path, monkeypatch: Any):
+def test_zip_cache_mode_caches_a_zip_and_removes_the_directory(tmp_path: Path, monkeypatch: Any):
+    import zipfile
+
     monkeypatch.setenv("TDDAGENTS_PLUGIN_USE_ZIP_CACHE", "1")
     src = tmp_path / "src"
-    _write(src / "f")
-    with pytest.raises(NotImplementedError, match="stage 2"):
-        asyncio.run(copy_plugin_to_versioned_cache(str(src), "p@m", "1"))
-    # Refused before any copy: no directory is left for a later run without the switch to reuse.
+    _write(src / "f", "payload")
+    _write(src / ".git" / "HEAD", "ref")
+    result = asyncio.run(copy_plugin_to_versioned_cache(str(src), "p@m", "1"))
+    assert result == get_versioned_zip_cache_path("p@m", "1")
     assert not os.path.exists(get_versioned_cache_path("p@m", "1"))
+    with zipfile.ZipFile(result) as archive:
+        assert archive.namelist() == ["f"]
+        assert archive.read("f") == b"payload"
     # An existing zip is returned as is.
     zip_path = get_versioned_zip_cache_path("p@m", "2")
     _write(Path(zip_path), "zip")
@@ -249,11 +254,11 @@ def test_git_clone_a_ref_and_a_sha(tmp_path: Path):
 
 def test_install_from_git_subdir_extracts_only_the_subdirectory(tmp_path: Path):
     repo = tmp_path / "mono"
-    sha = make_repo(repo, {"tools/plug/.claude-plugin/plugin.json": manifest("plug"), "other/x.txt": "x"})
+    sha = make_repo(repo, {"tools/plug/.tddagents-plugin/plugin.json": manifest("plug"), "other/x.txt": "x"})
     target = tmp_path / "target"
     resolved = asyncio.run(install_from_git_subdir(f"file://{repo}", str(target), "tools/plug"))
     assert resolved == sha
-    assert (target / ".claude-plugin" / "plugin.json").exists()
+    assert (target / ".tddagents-plugin" / "plugin.json").exists()
     assert not (target / "other").exists()
     assert not (tmp_path / "target.clone").exists()
     with pytest.raises(RuntimeError, match="Subdirectory 'missing' not found in repository"):
@@ -290,7 +295,7 @@ def test_temporary_cache_names(source: Any, prefix: str):
 
 def test_cache_plugin_reads_the_manifest_and_names_the_cache_after_it(tmp_path: Path):
     src = tmp_path / "src"
-    _write(src / ".claude-plugin" / "plugin.json", manifest("My Plug".replace(" ", "-"), version="1.0", extra=1))
+    _write(src / ".tddagents-plugin" / "plugin.json", manifest("My Plug".replace(" ", "-"), version="1.0", extra=1))
     cached = asyncio.run(cache_plugin(str(src)))
     assert cached.path == os.path.join(get_plugin_cache_path(), "My-Plug")
     assert cached.manifest == {"name": "My-Plug", "version": "1.0"}
@@ -317,11 +322,11 @@ def test_cache_plugin_legacy_manifest_then_given_then_default(tmp_path: Path):
 
 def test_cache_plugin_invalid_and_corrupt_manifests_raise_and_clean_nothing_up(tmp_path: Path):
     bad = tmp_path / "bad"
-    _write(bad / ".claude-plugin" / "plugin.json", json.dumps({"name": "has space"}))
+    _write(bad / ".tddagents-plugin" / "plugin.json", json.dumps({"name": "has space"}))
     with pytest.raises(RuntimeError, match="invalid manifest file at .*Validation errors: name: Plugin name cannot"):
         asyncio.run(cache_plugin(str(bad)))
     corrupt = tmp_path / "corrupt"
-    _write(corrupt / ".claude-plugin" / "plugin.json", "{nope")
+    _write(corrupt / ".tddagents-plugin" / "plugin.json", "{nope")
     with pytest.raises(RuntimeError, match="corrupt manifest file at .*JSON parse error"):
         asyncio.run(cache_plugin(str(corrupt)))
 
@@ -336,7 +341,7 @@ def test_cache_plugin_failed_install_removes_the_temp_dir():
 
 def test_cache_plugin_from_git_subdir_keeps_the_resolved_sha(tmp_path: Path):
     repo = tmp_path / "mono"
-    sha = make_repo(repo, {"p/.claude-plugin/plugin.json": manifest("subp")})
+    sha = make_repo(repo, {"p/.tddagents-plugin/plugin.json": manifest("subp")})
     cached = asyncio.run(cache_plugin({"source": "git-subdir", "url": f"file://{repo}", "path": "p"}))
     assert cached.git_commit_sha == sha
     assert cached.path.endswith("subp")

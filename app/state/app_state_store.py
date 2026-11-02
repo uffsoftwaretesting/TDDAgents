@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from app.bootstrap.state import SessionBootstrap
 from app.tdd.ledger import PhaseLedger, TestRunRecord
@@ -19,6 +19,56 @@ from app.types.permissions import ToolPermissionContext
 from app.utils.file_history import FileHistoryState
 from app.utils.permissions.denial_tracking import DenialTrackingState
 from app.utils.sdk_event_queue import SdkEventQueue
+
+if TYPE_CHECKING:
+    from app.types.plugin import LoadedPlugin, PluginError
+
+#: An installation's progress (`installationStatus` entries).
+InstallationState = Literal["pending", "installing", "installed", "failed"]
+
+
+@dataclass(frozen=True, slots=True)
+class MarketplaceInstallationStatus:
+    """`AppState.plugins.installationStatus.marketplaces[]`."""
+
+    name: str
+    status: InstallationState
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PluginInstallationStatus:
+    """`AppState.plugins.installationStatus.plugins[]`."""
+
+    id: str
+    name: str
+    status: InstallationState
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InstallationStatus:
+    """`AppState.plugins.installationStatus`: the background marketplace/plugin installations."""
+
+    marketplaces: tuple[MarketplaceInstallationStatus, ...] = ()
+    plugins: tuple[PluginInstallationStatus, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PluginsState:
+    """
+    Upstream `appState.plugins`: the loaded plugins, their commands, the plugin errors, the
+    background installation status, and `needs_refresh` (plugin state on disk changed and the
+    active components are stale until `/reload-plugins` or `refresh_active_plugins`).
+    `commands` stays empty until the stage-3 command integration fills it.
+    """
+
+    enabled: tuple[LoadedPlugin, ...] = ()
+    disabled: tuple[LoadedPlugin, ...] = ()
+    commands: tuple[Any, ...] = ()
+    errors: tuple[PluginError, ...] = ()
+    installation_status: InstallationStatus = field(default_factory=InstallationStatus)
+    needs_refresh: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +134,11 @@ class AppState:
     bootstrap: SessionBootstrap = field(default_factory=SessionBootstrap)
     #: `sdkEventQueue.ts`'s queue, the run's: task and session-state events for the SDK stream.
     sdk_events: SdkEventQueue = field(default_factory=SdkEventQueue, compare=False)
+    #: Upstream `appState.plugins` (`app/utils/plugins/refresh.py` writes it).
+    plugins: PluginsState = field(default_factory=PluginsState)
+    #: Upstream `appState.mcp.pluginReconnectKey`: bumped by `refresh_active_plugins` so the MCP
+    #: connections pick up plugin servers (the stage-3 MCP integration reads it).
+    mcp_plugin_reconnect_key: int = 0
 
 
 @dataclass(slots=True)

@@ -229,10 +229,10 @@ def test_delete_plugin_cache_removes_the_version_and_an_empty_plugin_dir():
 
 def test_initialize_and_sync_from_enabled_plugins(tmp_path: Path, locations: SettingsLocations, monkeypatch: Any):
     market = tmp_path / "market"
-    make_repo(market, {"plugins/loc/.claude-plugin/plugin.json": manifest("loc", version="2.5")})
+    make_repo(market, {"plugins/loc/.tddagents-plugin/plugin.json": manifest("loc", version="2.5")})
     cached = Path(get_plugin_cache_path()) / "ext"
-    (cached / ".claude-plugin").mkdir(parents=True)
-    (cached / ".claude-plugin" / "plugin.json").write_text(manifest("ext"))
+    (cached / ".tddagents-plugin").mkdir(parents=True)
+    (cached / ".tddagents-plugin" / "plugin.json").write_text(manifest("ext"))
     entries = {
         "loc@m": {"name": "loc", "source": "./plugins/loc"},
         "ext@m": {"name": "ext", "source": {"source": "github", "repo": "o/r"}, "version": "9.9"},

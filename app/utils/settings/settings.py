@@ -7,7 +7,8 @@ Ported from claude-code v2.1.88:
 * `src/utils/settings/managedPath.ts` -> `getManagedFilePath`, `getManagedSettingsDropInDir`
 * `src/utils/settings/settings.ts` -> `getSettingsFilePathForSource`,
   `getSettingsRootPathForSource`, `loadManagedFileSettings`, `loadSettingsFromDisk`,
-  `settingsMergeCustomizer`, `getInitialSettings` (`getSettings_DEPRECATED`)
+  `settingsMergeCustomizer`, `getInitialSettings` (`getSettings_DEPRECATED`); the plugin settings
+  base layer is `app/utils/settings/settings_cache.py`
 * `src/utils/permissions/permissionRuleParser.ts` -> `permissionRuleValueFromString`,
   `unescapeRuleContent`, `normalizeLegacyToolName`
 * `src/utils/permissions/permissionsLoader.ts` -> `shouldAllowManagedPermissionRulesOnly`,
@@ -57,6 +58,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permission_rule_parser import escape_rule_content
+from app.utils.settings.settings_cache import get_plugin_settings_base
 from app.utils.settings.types import parse_plugin_settings
 
 logger = logging.getLogger("TDDOrchestrator.Permissions")
@@ -347,8 +349,14 @@ def get_settings_for_source(source: PermissionRuleSource, locations: SettingsLoc
 
 
 def load_settings(locations: SettingsLocations) -> dict[str, Any]:
-    """`loadSettingsFromDisk`: every source merged in order, each file read once."""
+    """
+    `loadSettingsFromDisk`: the plugin settings base (`settings_cache`), then every source merged
+    in order over it, each file read once.
+    """
     merged: dict[str, Any] = {}
+    plugin_settings = get_plugin_settings_base()
+    if plugin_settings:
+        merged = merge_settings(merged, plugin_settings)
     seen: set[Path] = set()
     for source in SETTING_SOURCES:
         if source != PermissionRuleSource.POLICY_SETTINGS:

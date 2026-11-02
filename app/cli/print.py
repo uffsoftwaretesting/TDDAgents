@@ -360,6 +360,42 @@ def run_settings_locations(
     )
 
 
+#: The fire-and-forget plugin bookkeeping tasks (upstream's `void` promises), kept referenced.
+_PLUGIN_STARTUP_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _spawn_plugin_task(coro: Any) -> None:
+    task: asyncio.Task[None] = asyncio.ensure_future(coro)
+    _PLUGIN_STARTUP_TASKS.add(task)
+    task.add_done_callback(_PLUGIN_STARTUP_TASKS.discard)
+
+
+async def initialize_plugins_at_startup(locations: SettingsLocations, *, interactive: bool) -> None:
+    """
+    `main.tsx`'s plugin bookkeeping at startup: sync the versioned plugin registry
+    (`initializeVersionedPlugins`), then garbage-collect orphaned plugin versions
+    (`cleanupOrphanedPluginVersionsInBackground`). A non-interactive run awaits the sync and
+    leaves the cleanup in the background; an interactive one runs both in the background.
+    Upstream then warms the Grep/Glob exclusions (`getGlobExclusionsForPluginCache`); here they
+    are computed on first use instead (a ripgrep scan at every session start buys nothing yet).
+    """
+    from app.utils.plugins.cache_utils import cleanup_orphaned_plugin_versions_in_background
+    from app.utils.plugins.installed_plugins_manager import initialize_versioned_plugins
+
+    async def initialize_then_cleanup() -> None:
+        await initialize_versioned_plugins(locations)
+        await cleanup_orphaned_plugin_versions_in_background()
+
+    try:
+        if interactive:
+            _spawn_plugin_task(initialize_then_cleanup())
+        else:
+            await initialize_versioned_plugins(locations)
+            _spawn_plugin_task(cleanup_orphaned_plugin_versions_in_background())
+    except Exception as exc:  # noqa: BLE001 - plugin bookkeeping never stops a session from opening
+        logger.error("Plugin startup bookkeeping failed: %s", exc)
+
+
 def run_agent_memory_store(run_dir: Path | None) -> tuple[AgentMemoryStore, Path | None]:
     """
     The run's agent-memory store (Part I5), rooted **outside** the workspace: under the
@@ -494,6 +530,9 @@ async def open_session_run(
 
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
     skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
+    await initialize_plugins_at_startup(
+        run_settings_locations(config, root_dir, home, managed_dir), interactive=is_interactive
+    )
     from app.cli.session_mcp import SessionMcp
 
     #: The session's live MCP servers (configured, SDK, dynamic): the pools read them at each refresh.

@@ -28,7 +28,8 @@ the session's files back as they were when that user message was sent, then exit
 `--thread-id` continues a session from its transcript, TDD plan and plan file. It runs in the
 thread's own project; `--permission-mode`, `--settings` and `--dangerously-skip-permissions` are
 upstream's startup flags for it, and `--coordinator` turns on coordinator mode
-(`TDDAGENTS_COORDINATOR_MODE`).
+(`TDDAGENTS_COORDINATOR_MODE`). `--plugin-dir <path>` (repeatable) loads a plugin directory for
+this process only (upstream's session plugins, `<name>@inline`).
 """
 
 import argparse
@@ -215,7 +216,25 @@ def build_parser() -> argparse.ArgumentParser:
     # `main.tsx`: "Restore files to state at the specified user message and exit (requires --resume)",
     # hidden from the help (`.hideHelp()`).
     parser.add_argument("--rewind-files", default=None, metavar="<user-message-id>", help=argparse.SUPPRESS)
+    # `main.tsx`: one directory per flag, repeatable; collected in order.
+    parser.add_argument("--plugin-dir", dest="plugin_dir", action="append", default=[], metavar="<path>",
+                        help="Load plugins from a directory for this session only "
+                             "(repeatable: --plugin-dir A --plugin-dir B)")
     return parser
+
+
+def apply_plugin_dirs(plugin_dirs: Sequence[str]) -> None:
+    """
+    `main.tsx`'s preAction for `--plugin-dir`: the directories become the session's inline
+    plugins (`setInlinePlugins`), and the plugin loader's memo is cleared.
+    """
+    if not plugin_dirs:
+        return
+    from app.bootstrap.state import set_inline_plugins
+    from app.utils.plugins.plugin_loader import clear_plugin_cache
+
+    set_inline_plugins(list(plugin_dirs))
+    clear_plugin_cache("preAction: --plugin-dir inline plugins")
 
 
 def max_budget_usd(value: str) -> float:
@@ -649,6 +668,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.coordinator:
         os.environ["TDDAGENTS_COORDINATOR_MODE"] = "1"
+    apply_plugin_dirs(args.plugin_dir)
     if not args.print:
         return run_main(args)
     # `-p`: stdout carries only what `runHeadless` writes; everything else goes to stderr.

@@ -12,7 +12,7 @@ is older than seven days (concurrent sessions may still use it); a version insta
 loses its marker.
 
 Seams (`clear_all_plugin_caches` / `clear_all_caches` call only caches that exist so far):
-stage 2 adds `clearPluginCache` (the loader's memoized `loadAllPlugins`); stage 3 adds
+`clearPluginCache` (the loader's memoized `loadAllPlugins`) is called; stage 3 adds
 `clearPluginCommandCache`, `clearPluginAgentCache`, `clearPluginHookCache` with
 `pruneRemovedPluginHooks`, `clearPluginOutputStyleCache`, `clearAllOutputStylesCache`, and in
 `clear_all_caches` upstream's `clearCommandsCache`, `clearAgentDefinitionsCache`,
@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 
 from app.utils.plugins.installed_plugins_manager import load_installed_plugins_from_disk
-from app.utils.plugins.plugin_loader import get_plugin_cache_path
+from app.utils.plugins.plugin_loader import clear_plugin_cache, get_plugin_cache_path
 from app.utils.plugins.plugin_options_storage import clear_plugin_options_cache
 from app.utils.plugins.zip_cache import is_plugin_zip_cache_enabled
 
@@ -41,8 +41,12 @@ CLEANUP_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 
 def clear_all_plugin_caches() -> None:
-    """`clearAllPluginCaches` (see the module docstring for the caches later stages add)."""
+    """`clearAllPluginCaches` (see the module docstring for the caches stage 3 adds)."""
+    clear_plugin_cache()
+    # Stage 3 seam: clearPluginCommandCache, clearPluginAgentCache, clearPluginHookCache, then the
+    # fire-and-forget pruneRemovedPluginHooks.
     clear_plugin_options_cache()
+    # Stage 3 seam: clearPluginOutputStyleCache, clearAllOutputStylesCache.
 
 
 def clear_all_caches() -> None:

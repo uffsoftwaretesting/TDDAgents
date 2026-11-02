@@ -35,6 +35,7 @@ from app.utils.plugins.official_marketplace import (
 )
 from app.utils.plugins.parse_marketplace_input import parse_marketplace_input
 from app.utils.plugins.plugin_directories import (
+    PLUGIN_PACKAGE_DIR,
     delete_plugin_data_dir,
     get_plugin_data_dir,
     get_plugin_data_dir_size,
@@ -455,3 +456,8 @@ def test_plugin_error_messages():
         'Dependency "d@m" is not found in any configured marketplace')
     assert get_plugin_error_message({"type": "plugin-cache-miss", "source": "s", "plugin": "p",
                                      "installPath": "/x"}) == 'Plugin "p" not cached at /x — run /plugins to refresh'
+
+
+def test_the_plugin_package_folder_is_renamed_tddagents_plugin() -> None:
+    """User decision (2026-11-02): upstream's `.claude-plugin/` is `.tddagents-plugin/`."""
+    assert PLUGIN_PACKAGE_DIR == ".tddagents-plugin"

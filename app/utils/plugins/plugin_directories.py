@@ -33,6 +33,13 @@ PLUGIN_CACHE_DIR_ENV = "TDDAGENTS_PLUGIN_CACHE_DIR"
 PLUGIN_SEED_DIR_ENV = "TDDAGENTS_PLUGIN_SEED_DIR"
 USE_COWORK_PLUGINS_ENV = "TDDAGENTS_USE_COWORK_PLUGINS"
 
+#: The plugin package folder, upstream's `.claude-plugin/`: it holds a plugin's `plugin.json`
+#: and a marketplace's `marketplace.json`. **Recorded divergence (user decision, 2026-11-02)**:
+#: TDDAgents renames it to `.tddagents-plugin/` everywhere (manifest and marketplace lookups,
+#: validation, the loader), so a package written for upstream needs its folder renamed before
+#: TDDAgents reads it. Every path to that folder is built from this one constant.
+PLUGIN_PACKAGE_DIR = ".tddagents-plugin"
+
 _use_cowork_plugins = False
 
 

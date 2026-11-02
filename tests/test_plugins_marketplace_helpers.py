@@ -183,8 +183,8 @@ def test_allowlist_by_exact_source_host_pattern_and_path_pattern(locations: Sett
 
 def test_graceful_load_skips_blocked_and_collects_failures(tmp_path: Path, locations: SettingsLocations):
     root = tmp_path / "good"
-    (root / ".claude-plugin").mkdir(parents=True)
-    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+    (root / ".tddagents-plugin").mkdir(parents=True)
+    (root / ".tddagents-plugin" / "marketplace.json").write_text(json.dumps(
         {"name": "good", "owner": {"name": "O"}, "plugins": []}))
     asyncio.run(mm.add_marketplace_source({"source": "directory", "path": str(root)}, locations))
     config: dict[str, Any] = dict(asyncio.run(mm.load_known_marketplaces_config()))

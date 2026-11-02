@@ -83,6 +83,25 @@ def test_parse_args_flags() -> None:
     assert entry.parse_args(["--print"]).print is True
 
 
+def test_plugin_dir_is_repeatable_and_becomes_the_inline_plugins(monkeypatch: Any) -> None:
+    from app.bootstrap.state import get_inline_plugins, set_inline_plugins
+    from app.utils.plugins import plugin_loader
+
+    assert entry.parse_args([]).plugin_dir == []
+    args = entry.parse_args(["--plugin-dir", "a", "--plugin-dir", "b"])
+    assert args.plugin_dir == ["a", "b"]
+    reasons: list[str | None] = []
+    monkeypatch.setattr(plugin_loader, "clear_plugin_cache", lambda reason=None: reasons.append(reason))
+    try:
+        entry.apply_plugin_dirs([])
+        assert get_inline_plugins() == [] and reasons == []
+        entry.apply_plugin_dirs(args.plugin_dir)
+        assert get_inline_plugins() == ["a", "b"]
+        assert reasons == ["preAction: --plugin-dir inline plugins"]
+    finally:
+        set_inline_plugins([])
+
+
 def test_parse_args_rejects_an_unknown_mode() -> None:
     with pytest.raises(SystemExit):
         entry.parse_args(["--permission-mode", "workspace_write"])
@@ -394,6 +413,8 @@ def test_parser_help_and_metadata() -> None:
         "append_system_prompt": "Append a system prompt to the default system prompt",
         "append_system_prompt_file": argparse.SUPPRESS,
         "rewind_files": argparse.SUPPRESS,
+        "plugin_dir": "Load plugins from a directory for this session only "
+                      "(repeatable: --plugin-dir A --plugin-dir B)",
     }
     flags = {action.dest: tuple(action.option_strings) for action in parser._actions}
     assert flags["print"] == ("-p", "--print")

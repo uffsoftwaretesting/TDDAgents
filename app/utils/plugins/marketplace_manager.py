@@ -18,9 +18,9 @@ Ported from `reference/claude-code/src/utils/plugins/marketplaceManager.ts` -> `
 
 Layout, under the plugins directory (`<config home>/plugins`, upstream `~/.claude/plugins`):
 `known_marketplaces.json` (the state layer) and `marketplaces/<name>` (a git checkout or local
-copy holding `.claude-plugin/marketplace.json`, or the downloaded `marketplace.json` itself for a
-`url` source). The marketplace format keeps upstream's `.claude-plugin/` directory name: it is the
-plugin package format, shared with upstream's marketplaces, not TDDAgents' config directory.
+copy holding `<PLUGIN_PACKAGE_DIR>/marketplace.json`, or the downloaded `marketplace.json` itself for
+a `url` source). The package folder is upstream's `.claude-plugin/` renamed `.tddagents-plugin/`
+(recorded divergence, see `PLUGIN_PACKAGE_DIR` in `plugin_directories.py`).
 
 Functions that read settings take the run's `locations` (upstream reads its process-wide
 settings): `get_declared_marketplaces`, `get_marketplace_declaring_source`,
@@ -93,6 +93,7 @@ from app.utils.plugins.official_marketplace import (
     OFFICIAL_MARKETPLACE_SOURCE,
 )
 from app.utils.plugins.plugin_directories import (
+    PLUGIN_PACKAGE_DIR,
     delete_plugin_data_dir,
     get_plugin_seed_dirs,
     get_plugins_directory,
@@ -129,7 +130,7 @@ MarketplaceProgressCallback = Callable[[str], None]
 KNOWN_MARKETPLACES_FILENAME = "known_marketplaces.json"
 MARKETPLACES_DIRNAME = "marketplaces"
 #: The manifest's place inside a marketplace repository.
-MARKETPLACE_MANIFEST_RELATIVE = ".claude-plugin/marketplace.json"
+MARKETPLACE_MANIFEST_RELATIVE = f"{PLUGIN_PACKAGE_DIR}/marketplace.json"
 PLUGIN_GIT_TIMEOUT_ENV = "TDDAGENTS_PLUGIN_GIT_TIMEOUT_MS"
 REMOTE_ENV = "TDDAGENTS_REMOTE"
 #: `GIT_NO_PROMPT_ENV`: no terminal credential prompts, no askpass GUI.
@@ -959,11 +960,11 @@ async def load_and_cache_marketplace(
             temporary_cache_path = os.path.dirname(os.path.dirname(abs_path))
         elif kind == "directory":
             abs_path = os.path.abspath(source["path"])
-            marketplace_path = os.path.join(abs_path, ".claude-plugin", "marketplace.json")
+            marketplace_path = os.path.join(abs_path, PLUGIN_PACKAGE_DIR, "marketplace.json")
             temporary_cache_path = abs_path
         elif kind == "settings":
             temporary_cache_path = os.path.join(cache_dir, source["name"])
-            marketplace_path = os.path.join(temporary_cache_path, ".claude-plugin", "marketplace.json")
+            marketplace_path = os.path.join(temporary_cache_path, PLUGIN_PACKAGE_DIR, "marketplace.json")
             os.makedirs(os.path.dirname(marketplace_path), exist_ok=True)
             synthetic = {
                 "name": source["name"],
@@ -1159,10 +1160,10 @@ async def remove_marketplace_source(name: str, locations: SettingsLocations) -> 
 
 async def read_cached_marketplace(install_location: str) -> PluginMarketplace:
     """
-    `readCachedMarketplace`: `<location>/.claude-plugin/marketplace.json`, else the location
+    `readCachedMarketplace`: `<location>/<PLUGIN_PACKAGE_DIR>/marketplace.json`, else the location
     itself when it is a file (ENOTDIR) or the nested file is missing (ENOENT).
     """
-    nested = os.path.join(install_location, ".claude-plugin", "marketplace.json")
+    nested = os.path.join(install_location, PLUGIN_PACKAGE_DIR, "marketplace.json")
     try:
         return cast(PluginMarketplace, await parse_file_with_schema(nested, PluginMarketplaceSchema))
     except (FileNotFoundError, NotADirectoryError):

@@ -2,12 +2,16 @@
 The session's working directory: where the shell is now, and where the session started.
 
 Ported from `reference/claude-code/src/bootstrap/state.ts` -> `getOriginalCwd`, `getCwdState`,
-`setCwd`, and (`SessionBootstrap`) `getSessionId`, `getIsNonInteractiveSession`. Upstream keeps
+`setCwd`, `setInlinePlugins`, `getInlinePlugins`, and (`SessionBootstrap`) `getSessionId`,
+`getIsNonInteractiveSession`. Upstream keeps
 these in the process-wide `STATE`, one session per process. A TDDAgents process can hold
 several sessions (the test suite, the experiment drivers), each over its own workspace, so the
 working directory is kept per workspace object: the original directory is the workspace's root
 (`permission_cwd`), and the tracked one starts there. A workspace that goes away takes its entry
 with it (weak keys). The session's identity is a `SessionBootstrap` value on the run's `AppState`.
+
+The `--plugin-dir` directories (`inlinePlugins`) stay process-wide, as upstream: the flag is a
+property of the process invocation, set once by `app/main.py` before any plugin load.
 """
 
 from __future__ import annotations
@@ -20,6 +24,18 @@ from typing import Any
 _CWD: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
 #: Workspaces that cannot be weakly referenced (a `SimpleNamespace` stand-in), by identity.
 _CWD_BY_ID: dict[int, str] = {}
+#: `STATE.inlinePlugins`: the `--plugin-dir` directories, in flag order.
+_INLINE_PLUGINS: list[str] = []
+
+
+def set_inline_plugins(plugins: list[str]) -> None:
+    """`setInlinePlugins`."""
+    _INLINE_PLUGINS[:] = plugins
+
+
+def get_inline_plugins() -> list[str]:
+    """`getInlinePlugins`."""
+    return list(_INLINE_PLUGINS)
 
 
 def get_original_cwd(workspace: Any) -> str:

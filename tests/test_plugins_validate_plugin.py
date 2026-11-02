@@ -25,7 +25,7 @@ GOOD_MANIFEST = {"name": "my-plugin", "version": "1.0.0", "description": "d", "a
 # ── plugin.json ───────────────────────────────────────────────────────────────
 
 def test_clean_plugin_manifest_has_no_errors_or_warnings(tmp_path):
-    path = _write(tmp_path / ".claude-plugin" / "plugin.json", GOOD_MANIFEST)
+    path = _write(tmp_path / ".tddagents-plugin" / "plugin.json", GOOD_MANIFEST)
     result = asyncio.run(vp.validate_plugin_manifest(path))
     assert result.success is True
     assert result.errors == [] and result.warnings == []
@@ -133,7 +133,7 @@ def test_marketplace_source_traversal_hints(tmp_path):
     messages = {e.path: e.message for e in result.errors}
     assert messages["plugins[0].source"] == (
         'Path contains "..": ../../plugins/a. Plugin source paths are resolved relative to the marketplace root '
-        "(the directory containing .claude-plugin/), not relative to marketplace.json. "
+        "(the directory containing .tddagents-plugin/), not relative to marketplace.json. "
         'Use "./plugins/a" instead of "../../plugins/a".'
     )
     assert messages["plugins[1].source"].endswith('Use "./plugins/my-plugin" instead of "./x/../y".')
@@ -155,19 +155,19 @@ def test_marketplace_duplicates_empty_and_metadata_warnings(tmp_path):
 
 def test_marketplace_entry_version_mismatch_warning(tmp_path):
     root = tmp_path / "repo"
-    _write(root / "plugins" / "a" / ".claude-plugin" / "plugin.json", {"name": "a", "version": "2.0.0"})
-    _write(root / "plugins" / "b" / ".claude-plugin" / "plugin.json", {"name": "b", "version": "1.0.0"})
+    _write(root / "plugins" / "a" / ".tddagents-plugin" / "plugin.json", {"name": "a", "version": "2.0.0"})
+    _write(root / "plugins" / "b" / ".tddagents-plugin" / "plugin.json", {"name": "b", "version": "1.0.0"})
     data = _marketplace(plugins=[
         {"name": "a", "source": "./plugins/a", "version": "1.0.0"},
         {"name": "b", "source": "./plugins/b", "version": "1.0.0"},
         {"name": "c", "source": "./plugins/missing", "version": "1.0.0"},
     ])
-    path = _write(root / ".claude-plugin" / "marketplace.json", data)
+    path = _write(root / ".tddagents-plugin" / "marketplace.json", data)
     result = asyncio.run(vp.validate_marketplace_manifest(path))
     assert result.success is True
     assert [w.path for w in result.warnings] == ["plugins[0].version"]
     assert result.warnings[0].message.startswith(
-        'Entry declares version "1.0.0" but ./plugins/a/.claude-plugin/plugin.json says "2.0.0".'
+        'Entry declares version "1.0.0" but ./plugins/a/.tddagents-plugin/plugin.json says "2.0.0".'
     )
 
 
@@ -266,11 +266,11 @@ def test_collect_markdown_missing_dir_is_empty(tmp_path):
 
 def test_directory_prefers_marketplace_then_plugin_then_reports_none(tmp_path):
     both = tmp_path / "both"
-    _write(both / ".claude-plugin" / "marketplace.json", _marketplace())
-    _write(both / ".claude-plugin" / "plugin.json", GOOD_MANIFEST)
+    _write(both / ".tddagents-plugin" / "marketplace.json", _marketplace())
+    _write(both / ".tddagents-plugin" / "plugin.json", GOOD_MANIFEST)
     assert asyncio.run(vp.validate_manifest(str(both))).file_type == "marketplace"
     plugin_only = tmp_path / "plugin"
-    _write(plugin_only / ".claude-plugin" / "plugin.json", GOOD_MANIFEST)
+    _write(plugin_only / ".tddagents-plugin" / "plugin.json", GOOD_MANIFEST)
     assert asyncio.run(vp.validate_manifest(str(plugin_only))).file_type == "plugin"
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -282,7 +282,7 @@ def test_directory_prefers_marketplace_then_plugin_then_reports_none(tmp_path):
 def test_detect_manifest_type():
     assert vp.detect_manifest_type("/a/plugin.json") == "plugin"
     assert vp.detect_manifest_type("/a/marketplace.json") == "marketplace"
-    assert vp.detect_manifest_type("/a/.claude-plugin/x.json") == "plugin"
+    assert vp.detect_manifest_type("/a/.tddagents-plugin/x.json") == "plugin"
     assert vp.detect_manifest_type("/a/x.json") == "unknown"
 
 

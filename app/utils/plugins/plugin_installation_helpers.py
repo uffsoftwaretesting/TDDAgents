@@ -10,7 +10,7 @@ Ported from `reference/claude-code/src/utils/plugins/pluginInstallationHelpers.t
 for project/local installs) is `locations.project_root`.
 
 Divergences: the `tengu_plugin_installed` analytics event (and `buildPluginTelemetryFields`) is
-not ported. The zip cache is stage 2 (`app/utils/plugins/zip_cache.py`).
+not ported.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from app.utils.plugins.marketplace_manager import (
     get_marketplace_cache_only,
     get_plugin_by_id,
 )
+from app.utils.plugins.plugin_directories import PLUGIN_PACKAGE_DIR
 from app.utils.plugins.plugin_identifier import (
     InstallableScope,
     parse_plugin_identifier,
@@ -63,7 +64,6 @@ from app.utils.plugins.schemas import (
 from app.utils.plugins.zip_cache import (
     convert_directory_to_zip_in_place,
     is_plugin_zip_cache_enabled,
-    require_zip_cache_port,
 )
 from app.utils.settings.settings import SettingsLocations, get_settings_for_source
 
@@ -104,7 +104,6 @@ async def cache_and_register_plugin(
     `cacheAndRegisterPlugin`: cache the plugin, compute its version, move it to
     `cache/<marketplace>/<plugin>/<version>/` and record it in installed_plugins.json.
     """
-    require_zip_cache_port()
     source: Any = local_source_path if isinstance(entry["source"], str) and local_source_path else entry["source"]
     cached = await cache_plugin(source, manifest=entry)
     path_for_git_sha = local_source_path or cached.path
@@ -128,7 +127,7 @@ async def cache_and_register_plugin(
             # Marketplace name equals plugin name: the target is inside the cached directory.
             temp_path = os.path.join(
                 os.path.dirname(cached.path),
-                f".claude-plugin-temp-{int(time.time() * 1000)}-{secrets.token_hex(4)}",
+                f"{PLUGIN_PACKAGE_DIR}-temp-{int(time.time() * 1000)}-{secrets.token_hex(4)}",
             )
             os.rename(cached.path, temp_path)
             os.makedirs(os.path.dirname(versioned_path), exist_ok=True)
