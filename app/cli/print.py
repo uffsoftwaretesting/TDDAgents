@@ -1444,7 +1444,9 @@ class HeadlessStreaming:
         self._kick()
 
     async def _finish(self) -> None:
-        """The stream's end: background hooks finalized, then `output.done()`."""
+        """The stream's end: detached handlers answered, background hooks finalized, then `output.done()`."""
+        while self._background:
+            await asyncio.gather(*list(self._background), return_exceptions=True)
         await self.run_.ctx.hook_dispatcher.registry.finalize_pending()
         self.output.done()
 
@@ -1832,6 +1834,47 @@ class HeadlessStreaming:
         if "model" in incoming:
             self.run_.user_specified_model = str(incoming["model"]) if incoming["model"] is not None else None
         self.respond(message)
+
+    async def _control_generate_session_title(
+        self, message: Mapping[str, Any], request: Mapping[str, Any]
+    ) -> None:
+        """Fire-and-forget, as upstream: the small fast model's call never blocks the stdin loop."""
+        from app.utils.session_title import generate_session_title
+
+        run = self.run_
+
+        async def answer() -> None:
+            title = await generate_session_title(str(request.get("description") or ""),
+                                                 run.deps.query_haiku(run.ctx))
+            if title and request.get("persist"):
+                try:
+                    run.transcript.save_ai_generated_title(title)
+                except OSError as error:
+                    logger.error("saveAiGeneratedTitle failed: %s", error)
+            self.respond(message, {"title": title})
+
+        self._spawn(answer())
+
+    async def _control_side_question(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        """Fire-and-forget, as upstream: one forked model call over the conversation, which stays as it was."""
+        from app.query.state import initial_loop_state
+        from app.tool import CancelToken
+        from app.utils.side_question import run_side_question
+
+        run = self.run_
+
+        async def answer() -> None:
+            try:
+                ctx = replace(run.ctx, messages=tuple(run.messages), cancel=CancelToken())
+                state = initial_loop_state(tuple(run.messages), ctx)
+                response = await run_side_question(str(request.get("question") or ""), state, run.config,
+                                                   run.deps.call_model)
+            except Exception as error:  # noqa: BLE001 - upstream answers the request with the error
+                self.respond_error(message, str(error))
+                return
+            self.respond(message, {"response": response})
+
+        self._spawn(answer())
 
     async def _control_claude_authenticate(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         self.respond_error(message, CLAUDE_AUTH_UNAVAILABLE)

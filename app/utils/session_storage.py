@@ -372,6 +372,10 @@ class TranscriptStore:
             "isSnapshotUpdate": is_snapshot_update,
         })
 
+    def save_ai_generated_title(self, title: str) -> None:
+        """`saveAiGeneratedTitle`: an `ai-title` entry for the session."""
+        self._append_metadata_entry({"type": "ai-title", "aiTitle": title, "sessionId": self.session_id})
+
     def _append_metadata_entry(self, entry: dict[str, Any]) -> None:
         """`appendEntry` for an entry that is not a message: no dedup, always appended."""
         if self._skip_persistence():
