@@ -45,6 +45,7 @@ answer an 'ask'.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -54,7 +55,7 @@ from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from langchain_core.messages import HumanMessage
 
@@ -406,6 +407,8 @@ class DevelopmentRun:
     json_schema: dict[str, Any] | None = None
     #: The pool's post-filter additions (`StructuredOutput`); `refresh_tools` appends them.
     session_tools: list[Any] = field(default_factory=list)
+    #: Every MCP tool the run connected (`appState.mcp.tools`).
+    mcp_tools: list[Any] = field(default_factory=list)
     #: The session's `flagSettings` agents (`--agents`, `initialize.agents`), and how to add more.
     extra_agents: dict[str, Any] = field(default_factory=dict)
     add_agent_definitions: Callable[[Mapping[str, Any]], None] | None = None
@@ -442,6 +445,7 @@ async def open_session_run(
     thinking: str | None = None,
     max_thinking_tokens: int | None = None,
     agents: Mapping[str, Any] | None = None,
+    hidden_tool_names: Sequence[str] = (),
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -534,8 +538,10 @@ async def open_session_run(
             if key != pool_cache["key"]:
                 pool_cache["key"] = key
                 tools, extra = (planning_tools, list(mcp.tools)) if in_plan else (built_ins, main_mcp)
-                pool_cache["tools"] = (*assemble_tool_pool(
-                    tools, extra, phase_ledger=current, permission_context=permission_context), *session_tools)
+                # `--permission-prompt-tool`: the tool that answers permission asks is never the model's.
+                assembled = assemble_tool_pool(
+                    tools, extra, phase_ledger=current, permission_context=permission_context)
+                pool_cache["tools"] = (*(t for t in assembled if t.name not in hidden_tool_names), *session_tools)
             tools_now: tuple[Tool, ...] = pool_cache["tools"]
             return tools_now
 
@@ -616,6 +622,7 @@ async def open_session_run(
 
         run = DevelopmentRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine,
                              add_agent_definitions=add_agent_definitions, extra_agents=extra_agents,
+                             mcp_tools=list(mcp.tools),
                              session_tools=session_tools,
                              transcript=transcript, deps=run_deps, messages=engine.mutable_messages,
                              recorder=recorder)
@@ -1018,7 +1025,12 @@ async def run_headless(
     blocks = input_blocks if input_blocks is not None else (stdin_blocks() if stream_input else _no_input())
     sio = StructuredIO(blocks, options.replay_user_messages, write_stdout=write_stdout)
     host_asks = stream_input or options.permission_prompt_tool == "stdio"
-    can_use_tool = None
+    can_use_tool: Any = None
+    run_ref: list[DevelopmentRun] = []
+    prompt_tool = options.permission_prompt_tool
+    if prompt_tool and prompt_tool != "stdio":
+        can_use_tool = get_permission_prompt_tool_can_use_tool(prompt_tool, lambda: run_ref[0].mcp_tools)
+        run_options = {**run_options, "hidden_tool_names": (prompt_tool,)}
     if host_asks:
         # `onPermissionPrompt`: the session waits on the host (`requires_action`) until it answers.
         def on_permission_prompt(details: Mapping[str, Any]) -> None:
@@ -1038,6 +1050,7 @@ async def run_headless(
         run.max_turns, run.max_budget_usd = options.max_turns, options.max_budget_usd
         if options.json_schema is not None:
             use_json_schema(run, options.json_schema)
+        run_ref.append(run)
         streaming = HeadlessStreaming(sio, run, options, session_id)
         streaming_ref.append(streaming)
         await streaming.load_initial_messages(request, prompt, stream_input=stream_input)
@@ -1078,6 +1091,103 @@ def use_json_schema(run: DevelopmentRun, json_schema: Mapping[str, Any]) -> bool
     run.session_tools.append(tool)
     run.ctx.tools = run.ctx.refresh_tools()
     return True
+
+
+class PermissionPromptToolError(RuntimeError):
+    """`--permission-prompt-tool` names no MCP tool (upstream exits 1 with this message)."""
+
+
+#: The decision when the turn is aborted while the prompt tool decides.
+PERMISSION_PROMPT_ABORTED = "Permission prompt was aborted."
+
+
+def create_can_use_tool_with_permission_prompt(prompt_tool: Any) -> Callable[..., Any]:
+    """
+    `createCanUseToolWithPermissionPrompt`: an 'ask' is answered by an MCP tool, called with
+    `{tool_name, input, tool_use_id}` and raced against the turn's abort; its text is the JSON of an
+    `allow` / `deny` (`PermissionPromptToolResultSchema`). **TDDAgents**: a changed input is re-checked
+    against the rule-based gate (the TDD phase tier among it), as a host's answer is.
+    """
+    from app.cli.structured_io import _decision_from_host
+    from app.types.permissions import PermissionBehavior, PermissionResult
+    from app.utils.permissions.permission_prompt_tool_result_schema import parse_permission_prompt_output
+
+    def aborted() -> PermissionResult:
+        return PermissionResult(behavior=PermissionBehavior.DENY, message=PERMISSION_PROMPT_ABORTED, decision_reason={
+            "type": "permissionPromptTool", "permissionPromptToolName": prompt_tool.name, "toolResult": None})
+
+    async def can_use_tool(tool: Any, input_args: dict[str, Any], result: Any, context: Any,
+                           tool_use_id: str) -> Any:
+        if result.behavior in (PermissionBehavior.ALLOW, PermissionBehavior.DENY):
+            return result
+        if context.cancel.cancelled:
+            return aborted()
+        abort: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+
+        def on_abort() -> None:
+            if not abort.done():
+                abort.set_result("aborted")
+
+        remove = context.cancel.add_listener(on_abort)
+        answer: asyncio.Future[str] = asyncio.ensure_future(_call_tool(
+            prompt_tool, {"tool_name": tool.name, "input": input_args, "tool_use_id": tool_use_id}, context))
+        try:
+            await asyncio.wait([answer, abort], return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            remove()
+        if not answer.done() or context.cancel.cancelled:
+            answer.cancel()
+            return aborted()
+        text = answer.result()
+        if not isinstance(text, str) or not text:
+            raise PermissionPromptToolError(
+                'Permission prompt tool returned an invalid result. Expected a single text block param with '
+                'type="text" and a string text value.')
+        parsed = parse_permission_prompt_output(json.loads(text))
+        return await _decision_from_host(parsed, prompt_tool, input_args, context)
+
+    return can_use_tool
+
+
+async def _call_tool(tool: Tool, args: dict[str, Any], context: Any) -> str:
+    called = tool.call(args, context)
+    result = await called if asyncio.iscoroutine(called) else called
+    return str(getattr(result, "content", result))
+
+
+def _exit_with(error: str) -> NoReturn:
+    """`process.stderr.write(error); gracefulShutdownSync(1)`."""
+    import sys
+
+    sys.stderr.write(f"{error}\n")
+    raise SystemExit(1)
+
+
+def get_permission_prompt_tool_can_use_tool(
+    name: str, get_mcp_tools: Callable[[], Sequence[Any]]
+) -> Callable[..., Any]:
+    """
+    `getCanUseToolFn` for an MCP tool name: looked up at the first ask (MCP servers may still be
+    connecting at startup); a missing or non-MCP tool ends the run with upstream's error.
+    """
+    from app.tool import tool_matches_name
+
+    resolved: list[Callable[..., Any]] = []
+
+    async def can_use_tool(*args: Any) -> Any:
+        if not resolved:
+            tools = list(get_mcp_tools())
+            found = next((t for t in tools if tool_matches_name(t, name)), None)
+            if found is None:
+                available = ", ".join(t.name for t in tools) or "none"
+                _exit_with(f"Error: MCP tool {name} (passed via --permission-prompt-tool) not found. "
+                           f"Available MCP tools: {available}")
+            if not getattr(found, "is_mcp", False):
+                _exit_with(f"Error: tool {name} (passed via --permission-prompt-tool) must be an MCP tool")
+            resolved.append(create_can_use_tool_with_permission_prompt(found))
+        return await resolved[0](*args)
+
+    return can_use_tool
 
 
 def _stdout_write(text: str) -> None:
@@ -2040,6 +2150,10 @@ __all__ = [
     "parse_task_notification",
     "prompt_from_content",
     "NoConversationFound",
+    "PERMISSION_PROMPT_ABORTED",
+    "PermissionPromptToolError",
+    "create_can_use_tool_with_permission_prompt",
+    "get_permission_prompt_tool_can_use_tool",
     "fork_thread",
     "most_recent_thread",
     "run_headless",
