@@ -7,8 +7,9 @@ Ported from claude-code v2.1.88:
 * `src/utils/settings/managedPath.ts` -> `getManagedFilePath`, `getManagedSettingsDropInDir`
 * `src/utils/settings/settings.ts` -> `getSettingsFilePathForSource`,
   `getSettingsRootPathForSource`, `loadManagedFileSettings`, `loadSettingsFromDisk`,
-  `settingsMergeCustomizer`, `getInitialSettings` (`getSettings_DEPRECATED`); the plugin settings
-  base layer is `app/utils/settings/settings_cache.py`
+  `settingsMergeCustomizer`, `getInitialSettings` (`getSettings_DEPRECATED`),
+  `hasSkipDangerousModePermissionPrompt`, `getSettingsWithErrors` (its ignored files only,
+  `get_settings_file_errors`); the plugin settings base layer is `app/utils/settings/settings_cache.py`
 * `src/utils/permissions/permissionRuleParser.ts` -> `permissionRuleValueFromString`,
   `unescapeRuleContent`, `normalizeLegacyToolName`
 * `src/utils/permissions/permissionsLoader.ts` -> `shouldAllowManagedPermissionRulesOnly`,
@@ -378,6 +379,40 @@ def get_initial_settings(locations: SettingsLocations) -> dict[str, Any]:
     return load_settings(locations)
 
 
+def get_settings_file_errors(locations: SettingsLocations) -> list[Path]:
+    """
+    `getSettingsWithErrors`' errors, as far as the lenient reading here records them: every
+    settings file that exists but is ignored (malformed JSON, not an object, or failing the
+    hooks / plugin schema; `parse_settings_file`). Upstream's per-field Zod issues have no
+    equivalent: an unknown or mistyped key is skipped when read, never reported.
+    """
+    invalid: list[Path] = []
+    for source in SETTING_SOURCES:
+        path = settings_file_path_for_source(source, locations)
+        if path is not None and path.is_file() and parse_settings_file(path) is None:
+            invalid.append(path)
+    return invalid
+
+
+#: The sources `hasSkipDangerousModePermissionPrompt` trusts: never `projectSettings`.
+SKIP_DANGEROUS_MODE_PROMPT_SOURCES: tuple[PermissionRuleSource, ...] = (
+    PermissionRuleSource.USER_SETTINGS,
+    PermissionRuleSource.LOCAL_SETTINGS,
+    PermissionRuleSource.FLAG_SETTINGS,
+    PermissionRuleSource.POLICY_SETTINGS,
+)
+
+
+def has_skip_dangerous_mode_permission_prompt(locations: SettingsLocations) -> bool:
+    """
+    `hasSkipDangerousModePermissionPrompt`: a trusted source accepted the bypass-permissions
+    dialog (`skipDangerousModePermissionPrompt`). Project settings are excluded on purpose: a
+    repository must not accept it on the user's behalf.
+    """
+    return any((get_settings_for_source(source, locations) or {}).get("skipDangerousModePermissionPrompt")
+               for source in SKIP_DANGEROUS_MODE_PROMPT_SOURCES)
+
+
 # ── rules ─────────────────────────────────────────────────────────────────────
 
 def should_allow_managed_permission_rules_only(locations: SettingsLocations) -> bool:
@@ -633,13 +668,16 @@ __all__ = [
     "SETTINGS_FILENAME",
     "SETTINGS_SOURCES",
     "SETTING_SOURCES",
+    "SKIP_DANGEROUS_MODE_PROMPT_SOURCES",
     "SUPPORTED_RULE_BEHAVIORS",
     "SettingsLocations",
     "build_tool_permission_context",
     "escape_rule_content",
     "get_initial_settings",
     "get_permission_rules_for_source",
+    "get_settings_file_errors",
     "get_settings_for_source",
+    "has_skip_dangerous_mode_permission_prompt",
     "initial_permission_mode_from_cli",
     "initialize_tool_permission_context",
     "load_all_permission_rules_from_disk",

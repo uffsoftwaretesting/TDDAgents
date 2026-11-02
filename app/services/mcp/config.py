@@ -16,8 +16,10 @@ exclusive: when it exists, it is the only source. The global config file mirrors
 as `CLAUDE_CONFIG_DIR` does for `getGlobalClaudeFile`). The project key is the cwd's git root,
 else the cwd (`getProjectPathForConfig`).
 
-Project servers need approval, and a TDDAgents run is always non-interactive, so — exactly as
-`claude -p` — they are approved unless `disabledMcpjsonServers` names them.
+Project servers need approval (`get_project_mcp_server_status`), and only the approved ones reach
+the run. A non-interactive session (`-p`, the SDK) approves every one `disabledMcpjsonServers`
+does not name, exactly as `claude -p`; the REPL asks about the pending ones after the trust
+dialog (`app/services/mcp_server_approval.py`) and leaves an unanswered one out.
 
 The enabled plugins' servers (`app/utils/plugins/mcp_plugin_integration.py`, read through
 `load_all_plugins_cache_only`) sit below every other scope, and are kept even when the policy
@@ -55,6 +57,7 @@ from app.utils.hooks.hooks_config_snapshot import is_restricted_to_plugin_only
 from app.utils.settings.settings import (
     SettingsLocations,
     get_settings_for_source,
+    has_skip_dangerous_mode_permission_prompt,
     load_settings,
 )
 
@@ -213,13 +216,38 @@ def get_mcp_configs_by_scope(
     return config or {}, errors
 
 
-def get_project_mcp_server_status(name: str, settings: Mapping[str, Any]) -> Literal["approved", "rejected"]:
-    """`getProjectMcpServerStatus` for a non-interactive session: never `pending`."""
+def get_project_mcp_server_status(
+    name: str, locations: SettingsLocations, *, is_non_interactive_session: bool
+) -> Literal["approved", "rejected", "pending"]:
+    """
+    `getProjectMcpServerStatus`: a `.mcp.json` server's approval, from the merged settings.
+    Rejected when `disabledMcpjsonServers` names it; approved when `enabledMcpjsonServers` names
+    it or `enableAllProjectMcpServers` is set (names compared normalized, `normalizeNameForMCP`),
+    when a trusted source accepted the bypass-permissions dialog, or when the session is
+    non-interactive (`-p`, the SDK: nobody can be asked). Otherwise it is pending, asked after the
+    trust dialog (`app/services/mcp_server_approval.py`). Upstream's
+    `isSettingSourceEnabled('projectSettings')` conjunct always holds here: every settings source
+    is enabled (there is no `--setting-sources`).
+    """
+    settings = load_settings(locations)
     normalized = normalize_name_for_mcp(name)
-    disabled = settings.get("disabledMcpjsonServers") or []
-    if any(normalize_name_for_mcp(str(n)) == normalized for n in disabled):
+
+    def lists(key: str) -> bool:
+        listed = settings.get(key)
+        return isinstance(listed, list) and any(normalize_name_for_mcp(str(n)) == normalized for n in listed)
+
+    if lists("disabledMcpjsonServers"):
         return "rejected"
-    return "approved"
+    if lists("enabledMcpjsonServers") or settings.get("enableAllProjectMcpServers"):
+        return "approved"
+    # Under bypass permissions there is no approval popup: approved once a trusted source (never
+    # the project's own settings) has accepted the bypass dialog.
+    if has_skip_dangerous_mode_permission_prompt(locations):
+        return "approved"
+    # Nobody to ask in a non-interactive session (`claude -p`, the SDK).
+    if is_non_interactive_session:
+        return "approved"
+    return "pending"
 
 
 def is_mcp_server_disabled(name: str, cwd: str | Path) -> bool:
@@ -435,11 +463,14 @@ async def _plugin_mcp_servers(locations: SettingsLocations) -> dict[str, McpServ
 
 
 async def get_claude_code_mcp_configs(
-    cwd: str | Path, locations: SettingsLocations, dynamic_servers: Mapping[str, McpServerConfig] | None = None
+    cwd: str | Path, locations: SettingsLocations, dynamic_servers: Mapping[str, McpServerConfig] | None = None,
+    *, is_non_interactive_session: bool,
 ) -> tuple[dict[str, McpServerConfig], list[ValidationError]]:
     """
     `getClaudeCodeMcpConfigs`: the run's servers — plugin < user < approved project < local —
     deduplicated, approved and filtered by policy. `dynamic_servers` only count as dedup targets.
+    `is_non_interactive_session` is upstream's `getIsNonInteractiveSession()`: it decides whether
+    a project server nobody has answered for is approved.
     """
     merged = load_settings(locations)
     policy = get_settings_for_source(PermissionRuleSource.POLICY_SETTINGS, locations) or {}
@@ -452,7 +483,8 @@ async def get_claude_code_mcp_configs(
     project, project_errors = none if locked else get_mcp_configs_by_scope("project", cwd, locations)
     local, local_errors = none if locked else get_mcp_configs_by_scope("local", cwd, locations)
     plugin_servers = await _plugin_mcp_servers(locations)
-    approved = {n: c for n, c in project.items() if get_project_mcp_server_status(n, merged) == "approved"}
+    approved = {n: c for n, c in project.items() if get_project_mcp_server_status(
+        n, locations, is_non_interactive_session=is_non_interactive_session) == "approved"}
 
     def enabled(name: str, config: McpServerConfig) -> bool:
         return not is_mcp_server_disabled(name, cwd) and is_mcp_server_allowed_by_policy(name, config, merged, policy)

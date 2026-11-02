@@ -427,6 +427,8 @@ def test_the_runner_hands_its_scopes_to_skills_mcp_and_the_task_tools(python_wor
     # Every configured server routes its elicitations through the session; the auth tool's reconnect
     # refreshes the pools.
     options = captured["mcp_options"]
+    # A run without a terminal approves the project's unanswered `.mcp.json` servers (`claude -p`).
+    assert options.pop("is_non_interactive_session") is True
     assert set(options) == {"elicitation_callback", "on_elicitation_complete", "on_reconnect"}
     assert options["elicitation_callback"].__name__ == "elicit"
     assert options["on_elicitation_complete"].__name__ == "elicitation_complete"
