@@ -10,10 +10,10 @@ marketplaces whose source the zip cache cannot hold are skipped, their JSONs are
 cache, and the session's extraction directory is removed at process exit (upstream's
 `registerCleanup`, here `atexit`).
 
-Seam (stage 3): delisting uninstalls through `uninstallPluginOp`
-(`src/services/plugins/pluginOperations.ts`), passed as `uninstall_plugin_op` until stage 3
-ports it (see `plugin_blocklist.detect_and_uninstall_delisted_plugins`). Settings come from the
-run's `SettingsLocations`. Divergence: the `tengu_headless_plugin_install` analytics event and
+Delisting uninstalls through `uninstallPluginOp` (`app/services/plugins/plugin_operations.py`),
+bound to the run's settings unless the caller passes another `uninstall_plugin_op` (see
+`plugin_blocklist.detect_and_uninstall_delisted_plugins`). Settings come from the run's
+`SettingsLocations`. Divergence: the `tengu_headless_plugin_install` analytics event and
 the diagnostics timing are not ported.
 """
 
@@ -23,7 +23,7 @@ import asyncio
 import atexit
 import logging
 import os
-from typing import Any
+from typing import Any, cast
 
 from app.utils.plugins.marketplace_manager import (
     clear_marketplaces_cache,
@@ -31,6 +31,7 @@ from app.utils.plugins.marketplace_manager import (
     register_seed_marketplaces,
 )
 from app.utils.plugins.plugin_blocklist import UninstallPluginOp, detect_and_uninstall_delisted_plugins
+from app.utils.plugins.plugin_identifier import InstallableScope
 from app.utils.plugins.plugin_loader import clear_plugin_cache
 from app.utils.plugins.reconciler import ReconcileOptions, ReconcileProgressEvent, reconcile_marketplaces
 from app.utils.plugins.zip_cache import (
@@ -68,14 +69,26 @@ def _skip_unsupported(_name: str, source: dict[str, Any]) -> bool:
     return not is_marketplace_source_supported_by_zip_cache(source)
 
 
+def _default_uninstall_plugin_op(locations: SettingsLocations) -> UninstallPluginOp:
+    """The ported `uninstallPluginOp`, bound to the run's settings."""
+    from app.services.plugins.plugin_operations import uninstall_plugin_op
+
+    async def uninstall(plugin_id: str, scope: str) -> object:
+        return await uninstall_plugin_op(plugin_id, cast(InstallableScope, scope), locations=locations)
+
+    return uninstall
+
+
 async def install_plugins_for_headless(
-    locations: SettingsLocations, *, uninstall_plugin_op: UninstallPluginOp
+    locations: SettingsLocations, *, uninstall_plugin_op: UninstallPluginOp | None = None
 ) -> bool:
     """
     `installPluginsForHeadless`: register the seed marketplaces, reconcile the declared ones,
     sync the zip cache, uninstall newly delisted plugins. True when anything changed (the
     caller then refreshes the plugin state); any failure is logged and reads as False.
     """
+    if uninstall_plugin_op is None:
+        uninstall_plugin_op = _default_uninstall_plugin_op(locations)
     zip_cache_mode = is_plugin_zip_cache_enabled()
     logger.debug("installPluginsForHeadless: starting%s", " (zip cache mode)" if zip_cache_mode else "")
     seed_changed = await register_seed_marketplaces()

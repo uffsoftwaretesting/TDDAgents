@@ -5,10 +5,10 @@ and flag them.
 Ported from `reference/claude-code/src/utils/plugins/pluginBlocklist.ts` -> `detectDelistedPlugins`,
 `detectAndUninstallDelistedPlugins`.
 
-Seam: upstream calls `uninstallPluginOp` (`src/services/plugins/pluginOperations.ts`), which stage 3
-ports. Until then `detect_and_uninstall_delisted_plugins` takes it as the required keyword
-argument `uninstall_plugin_op(plugin_id, scope)`; stage 3 passes its port (or makes it the
-default).
+Upstream calls `uninstallPluginOp` (`src/services/plugins/pluginOperations.ts`, here
+`app/services/plugins/plugin_operations.py`); since this module has no settings locations,
+`detect_and_uninstall_delisted_plugins` takes it bound as the keyword argument
+`uninstall_plugin_op(plugin_id, scope)` (`headless_plugin_install.py` passes the port).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from app.utils.plugins.schemas import InstalledPluginsFileV2, PluginMarketplace
 
 logger = logging.getLogger("TDDOrchestrator.Plugins")
 
-#: `uninstallPluginOp(pluginId, scope)` (stage 3).
+#: `uninstallPluginOp(pluginId, scope)`, bound to the run's settings.
 UninstallPluginOp = Callable[[str, str], Awaitable[object]]
 
 _USER_SCOPES = ("user", "project", "local")
