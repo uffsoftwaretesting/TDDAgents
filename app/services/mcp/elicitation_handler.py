@@ -28,10 +28,12 @@ The hooks are reached through the run's `HookDispatcher`, passed in as the first
 The Python SDK's elicitation callback receives no abort signal: a request the server cancels
 cancels the callback's task instead, so the hooks run without one.
 
-Not ported: `registerElicitationHandler`, the REPL's path, which queues the request in
-`AppState.elicitation` for the React `ElicitationDialog` (with its URL-mode waiting state,
-`findElicitationInQueue` and the completion flag the dialog reacts to), and the analytics events
-(`tengu_mcp_elicitation_shown`, `tengu_mcp_elicitation_response`).
+The REPL uses the same callback: its `ask_host` is the terminal dialog
+(`app/screens/repl.py` -> `ask_elicitation`, `app/components/mcp/elicitation_dialog.py`), and its
+`emit` dismisses a URL dialog still waiting (upstream's `findElicitationInQueue` and `completed`
+flag). Not ported: `registerElicitationHandler`'s `AppState.elicitation` queue itself (the REPL
+shows one dialog at a time instead), and the analytics events (`tengu_mcp_elicitation_shown`,
+`tengu_mcp_elicitation_response`).
 """
 
 from __future__ import annotations

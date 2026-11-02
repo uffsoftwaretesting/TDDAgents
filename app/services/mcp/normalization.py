@@ -3,9 +3,9 @@ MCP names (Phase 8).
 
 Ported from `reference/claude-code/src/services/mcp/normalization.ts` -> `normalizeNameForMCP`
 and `mcpStringUtils.ts` -> `mcpInfoFromString`, `getMcpPrefix`, `buildMcpToolName`,
-`getMcpDisplayName`. Tool names follow the API's `^[a-zA-Z0-9_-]{1,64}$`; a model-facing MCP
-tool is `mcp__<server>__<tool>`, which is also the name permission rules, hook matchers and
-agent `tools` lists use.
+`getMcpDisplayName`, `extractMcpToolDisplayName`. Tool names follow the API's
+`^[a-zA-Z0-9_-]{1,64}$`; a model-facing MCP tool is `mcp__<server>__<tool>`, which is also the
+name permission rules, hook matchers and agent `tools` lists use.
 """
 
 from __future__ import annotations
@@ -51,9 +51,17 @@ def get_mcp_display_name(full_name: str, server_name: str) -> str:
     return full_name.replace(get_mcp_prefix(server_name), "", 1)
 
 
+def extract_mcp_tool_display_name(user_facing_name: str) -> str:
+    """`extractMcpToolDisplayName`: `<server> - <tool> (MCP)` without the suffix and the server."""
+    without_suffix = re.sub(r"\s*\(MCP\)\s*$", "", user_facing_name).strip()
+    dash = without_suffix.find(" - ")
+    return without_suffix[dash + 3:].strip() if dash != -1 else without_suffix
+
+
 __all__ = [
     "CLAUDEAI_SERVER_PREFIX",
     "build_mcp_tool_name",
+    "extract_mcp_tool_display_name",
     "get_mcp_display_name",
     "get_mcp_prefix",
     "mcp_info_from_string",

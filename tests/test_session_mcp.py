@@ -533,3 +533,37 @@ def test_a_configured_servers_elicitation_reaches_the_host(python_workspace: Any
     assert out[-1]["result"] == "Hello Ada."
     complete = [m for m in out if m.get("subtype") == "elicitation_complete"]
     assert [(m["mcp_server_name"], m["elicitation_id"]) for m in complete] == [("probe", "eid-1")]
+
+
+def test_find_client_and_a_close_that_fails_is_ignored(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    async def failing() -> None:
+        raise RuntimeError("already gone")
+
+    async def impl(name: str, config: Any, **kwargs: Any) -> ReconnectResult:
+        return ReconnectResult(client=connected(name))
+
+    monkeypatch.setattr("app.cli.session_mcp.reconnect_mcp_server_impl", impl)
+    session = SessionMcp(manager=manager(connected("a", cleanup=failing)), cwd=str(tmp_path))
+    assert session.find_client("a") is session.manager.clients[0] and session.find_client("z") is None
+    result = asyncio.run(session.reconnect("a", STDIO))
+    assert session.manager.clients == [result.client]
+    session.manager.clients = [connected("a", cleanup=failing)]
+    asyncio.run(session.disable("a", STDIO))
+    assert session.manager.clients == [DisabledMCPServer(name="a", config=STDIO)]
+
+
+def test_clear_server_records_it_failed_and_drops_its_tools() -> None:
+    cleanup = Cleanup()
+    changes: list[int] = []
+    session = SessionMcp(manager=manager(connected("a", cleanup=cleanup), connected("b"),
+                                         tools=[tool("mcp__a__x"), tool("mcp__b__y")]),
+                         cwd=".", on_change=lambda: changes.append(1))
+    session.dynamic_clients = [connected("a")]
+    session.dynamic_tools = [tool("mcp__a__z"), tool("mcp__d__w")]
+    asyncio.run(session.clear_server("a", STDIO))
+    assert cleanup.calls == 1 and changes == [1]
+    assert session.manager.clients[0] == FailedMCPServer(name="a", config=STDIO)
+    assert session.manager.clients[1].type == "connected"
+    assert session.dynamic_clients == [FailedMCPServer(name="a", config=STDIO)]
+    assert [t.name for t in session.manager.tools] == ["mcp__b__y"]
+    assert [t.name for t in session.dynamic_tools] == ["mcp__d__w"]

@@ -31,11 +31,12 @@ module, not a package, so it lives in this module. Not ported: the context-colla
 | `/resume` | Undo `/pause` and continue the plan |
 | `/requirements <request>` | Enter plan mode and plan the new request (upstream's `/plan <description>`) |
 | `/context` | Show current context usage |
+| `/mcp` | Manage MCP servers; `/mcp enable [server]`, `/mcp disable [server]`, `/mcp reconnect <server>` |
 | `/help` | This list |
 | `/exit`, `/quit` | Leave (the session can be continued with `--thread-id`) |
 
 As upstream, a slash command never runs mid-turn: one typed while the agents work waits for
-the turn to end. `/help`, `/plan` (showing), `/pause` and `/exit` are immediate.
+the turn to end. `/help`, `/plan` (showing), `/pause`, `/mcp` and `/exit` are immediate.
 """
 
 from __future__ import annotations
@@ -61,10 +62,10 @@ from app.utils.format import format_tokens
 from app.utils.messages import Message
 from app.utils.settings.constants import get_source_display_name
 
-COMMANDS = ("plan", "pause", "resume", "requirements", "context", "help", "exit", "quit")
+COMMANDS = ("plan", "pause", "resume", "requirements", "context", "mcp", "help", "exit", "quit")
 
 #: Commands that run even while a turn is in flight (upstream's `immediate`).
-IMMEDIATE = frozenset({"help", "pause", "exit", "quit"})
+IMMEDIATE = frozenset({"help", "pause", "mcp", "exit", "quit"})
 
 HELP_TEXT = """Commands:
   /plan                         show the TDD plan
@@ -76,6 +77,7 @@ HELP_TEXT = """Commands:
   /resume                       continue the plan
   /requirements <request>       enter plan mode and plan a new request
   /context                      show current context usage
+  /mcp                          manage MCP servers ([enable|disable [server-name]])
   /help                         this list
   /exit, /quit                  leave (continue later with --thread-id)
 Anything else is a message to the agents; Esc interrupts them."""
@@ -106,6 +108,8 @@ BUILT_IN_DESCRIPTIONS: dict[str, str] = {
     "requirements": "Enter plan mode and plan a new request",
     #: `contextNonInteractive.description`.
     "context": "Show current context usage",
+    #: `commands/mcp/index.ts`.
+    "mcp": "Manage MCP servers",
     "help": "Show the commands",
     "exit": "Leave (continue later with --thread-id)",
 }

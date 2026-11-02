@@ -18,7 +18,14 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
   several, for a multiSelect question) picks, any other text is the user's own answer, and Esc
   declines.
 * **Slash commands** (`app/commands.py`): never run mid-turn, as upstream's queue processor;
-  the immediate ones (`/help`, `/plan`, `/pause`, `/exit`) do.
+  the immediate ones (`/help`, `/plan`, `/pause`, `/mcp`, `/exit`) do.
+* **Dialogs** (`app/components/design_system/dialog.py`): `/mcp` (`app/components/mcp/mcp_command.py`)
+  and an MCP server's elicitation (`app/components/mcp/elicitation_dialog.py`, upstream's
+  `ElicitationDialog`, set as the session's `SessionMcp.ask_host`; the Elicitation hooks still run
+  first) take the screen like a permission question, one at a time, answered by the lines typed. Esc
+  closes them without aborting the turn, as upstream's dialogs keep Esc to themselves. A URL
+  elicitation accepted stays on screen, waiting for the server's completion notification
+  (`SessionMcp.emit_elicitation_complete`) or the user, while the server already has its answer.
 
 The session opens in plan mode (the Analyst): the model plans, asks with `AskUserQuestion`, and
 asks for the plan's approval with `ExitPlanMode`, which `ask_permission` shows with upstream's
@@ -212,12 +219,29 @@ def parse_question_answer(question: Mapping[str, Any], line: str) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class PendingAnswer:
-    """A question waiting for the next line: how to read it, what to say when it reads nothing, and Esc's answer."""
+    """
+    A question waiting for the next line: how to read it, what to say when it reads nothing, Esc's
+    answer, and whether Esc also aborts the turn (a permission question) or only closes it (a dialog).
+    """
 
     parse: Callable[[str], Any]
     future: asyncio.Future[Any]
     retry: str
     cancelled: Any
+    aborts_turn: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ReplDialog:
+    """`DialogIO` over the REPL: a dialog's questions are pending answers whose Esc only closes the dialog."""
+
+    repl: Repl
+
+    def write(self, text: str) -> None:
+        self.repl.io.write(text)
+
+    async def ask(self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any) -> Any:
+        return await self.repl.prompt(text, parse, retry, cancelled, aborts_turn=False)
 
 
 def turn_end_text(terminal: Terminal, plan: TddPlan, paused: bool) -> str:
@@ -260,6 +284,17 @@ class Repl:
         run.ctx.on_progress = self._on_progress
         if hook_prompts_enabled():
             run.ctx.request_prompt = self.request_prompt
+        #: The dialogs running as their own tasks (`/mcp`, an elicitation's waiting phase), kept referenced.
+        self._dialog_tasks: set[asyncio.Future[Any]] = set()
+        #: An accepted URL elicitation's completion, by `(server, elicitation id)`.
+        self._elicitation_waits: dict[tuple[str, str], asyncio.Event] = {}
+        #: `queryHaiku` for an elicitation's natural-language dates; built from the run when first needed.
+        self.query_haiku: Callable[[str, str], Awaitable[str]] | None = None
+        self.open_browser: Callable[[str], Awaitable[bool]] | None = None
+        mcp = getattr(run, "mcp", None)
+        if mcp is not None:
+            mcp.ask_host = self.ask_elicitation
+            mcp.emit_elicitation_complete = self.elicitation_complete
         store = getattr(run, "store", None)
         if store is not None:
             store.subscribe(self._on_state_change)
@@ -313,15 +348,22 @@ class Repl:
 
     # ── permissions ────────────────────────────────────────────────────────
 
+    async def prompt(
+        self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any, *, aborts_turn: bool = True
+    ) -> Any:
+        """Show `text` and wait for the next line it accepts; the caller holds the screen (`_asking`)."""
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        self.pending = PendingAnswer(parse=parse, future=future, retry=retry, cancelled=cancelled,
+                                     aborts_turn=aborts_turn)
+        self.io.write(text)
+        try:
+            return await future
+        finally:
+            self.pending = None
+
     async def _wait_for_answer(self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any) -> Any:
         async with self._asking:
-            future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-            self.pending = PendingAnswer(parse=parse, future=future, retry=retry, cancelled=cancelled)
-            self.io.write(text)
-            try:
-                return await future
-            finally:
-                self.pending = None
+            return await self.prompt(text, parse, retry, cancelled)
 
     async def ask_permission(self, prompt: PermissionPrompt) -> PermissionAnswer:
         """The run's `canUseTool` prompt: shown now, answered by the next line typed."""
@@ -389,9 +431,14 @@ class Repl:
             await self.run_command(command)
 
     def interrupt(self) -> None:
-        """Esc: a pending question is answered No, and the turn is aborted (upstream `onReject` + abort)."""
+        """
+        Esc: a pending question is answered No, and the turn is aborted (upstream `onReject` + abort);
+        a dialog's question is only closed.
+        """
         if self.pending is not None and not self.pending.future.done():
             self.pending.future.set_result(self.pending.cancelled)
+            if not self.pending.aborts_turn:
+                return
         if self.busy:
             self.run.engine.interrupt()
 
@@ -470,9 +517,121 @@ class Repl:
             await self._requirements(command.args)
         elif name == "context":
             await self._context()
+        elif name == "mcp":
+            self._spawn_dialog(self._mcp(command.args))
         else:  # exit, quit
             self.exiting = True
             await self._stop_turn()
+
+    # ── dialogs ────────────────────────────────────────────────────────────
+
+    def _spawn_dialog(self, dialog: Coroutine[Any, Any, None]) -> None:
+        """Run a dialog beside the input loop, which keeps reading the lines that answer it."""
+        task = asyncio.ensure_future(dialog)
+        self._dialog_tasks.add(task)
+        task.add_done_callback(self._dialog_tasks.discard)
+
+    def _panel_context(self) -> Any:
+        """What the `/mcp` menus act on: the session's MCP servers, its project folder and policy directory."""
+        from app.components.mcp.types import McpPanelContext
+
+        mcp = self.run.mcp
+        locations = mcp.settings_locations() if mcp.settings_locations is not None else None
+        return McpPanelContext(mcp=mcp, cwd=mcp.cwd, managed_dir=getattr(locations, "managed_dir", None))
+
+    async def _mcp(self, args: str) -> None:
+        """`/mcp`: the dialog holds the screen until it closes, then its result is shown."""
+        from app.components.mcp.mcp_command import call
+
+        if getattr(self.run, "mcp", None) is None:
+            self.io.write("No MCP servers configured.")
+            return
+        async with self._asking:
+            try:
+                result = await call(ReplDialog(self), self._panel_context(), args)
+            except Exception as error:  # noqa: BLE001 - a failed /mcp is reported, and the session goes on
+                logger.exception("/mcp failed")
+                result = f"Error: {error}"
+        if result:
+            self.io.write(result)
+
+    async def _query_haiku(self, system_prompt: str, user_prompt: str) -> str:
+        if self.query_haiku is None:
+            from app.services.api.claude import query_haiku_for
+
+            self.query_haiku = query_haiku_for(self.run.ctx)
+        return await self.query_haiku(system_prompt, user_prompt)
+
+    async def _open_browser(self, url: str) -> bool:
+        if self.open_browser is None:
+            from app.utils.browser import open_browser
+
+            self.open_browser = open_browser
+        return await self.open_browser(url)
+
+    async def ask_elicitation(
+        self, server_name: str, message: str, requested_schema: Mapping[str, Any] | None, mode: str,
+        url: str | None, elicitation_id: str | None,
+    ) -> dict[str, Any]:
+        """
+        `SessionMcp.ask_host` at the terminal (upstream's REPL queue and `ElicitationDialog`): the
+        user's `{action, content?}`. An accepted URL keeps the dialog in its waiting phase, on its own
+        task, until it is dismissed or the server confirms completion.
+        """
+        from app.components.mcp.elicitation_dialog import (
+            ElicitationRequestEvent,
+            run_form_dialog,
+            run_url_prompt,
+            waiting_state_for,
+        )
+
+        event = ElicitationRequestEvent(server_name, message, requested_schema, mode, url, elicitation_id,
+                                        waiting_state_for(elicitation_id) if mode == "url" else None)
+        completed = asyncio.Event()
+        key = (server_name, elicitation_id) if elicitation_id else None
+        if key is not None:
+            self._elicitation_waits[key] = completed
+        waiting = False
+        try:
+            await self._asking.acquire()
+        except BaseException:
+            if key is not None:
+                self._elicitation_waits.pop(key, None)
+            raise
+        try:
+            if mode == "url":
+                response = await run_url_prompt(ReplDialog(self), event, self._open_browser)
+            else:
+                response = await run_form_dialog(ReplDialog(self), event, self._query_haiku)
+            waiting = mode == "url" and response.get("action") == "accept"
+            if waiting:
+                self._spawn_dialog(self._elicitation_waiting(event, completed, key))
+            return response
+        finally:
+            if not waiting:
+                self._asking.release()
+                if key is not None:
+                    self._elicitation_waits.pop(key, None)
+
+    async def _elicitation_waiting(self, event: Any, completed: asyncio.Event, key: tuple[str, str] | None) -> None:
+        """The URL dialog's waiting phase; the screen is released when it is dismissed."""
+        from app.components.mcp.elicitation_dialog import run_url_waiting
+
+        try:
+            await run_url_waiting(ReplDialog(self), event, self._open_browser, completed)
+        finally:
+            if key is not None:
+                self._elicitation_waits.pop(key, None)
+            self._asking.release()
+
+    def elicitation_complete(self, server_name: str, elicitation_id: str) -> None:
+        """A server's `notifications/elicitation/complete`: its URL dialog, if still on screen, is dismissed."""
+        completed = self._elicitation_waits.get((server_name, elicitation_id))
+        if completed is None:
+            logger.debug("MCP server %s: Ignoring completion notification for unknown elicitation: %s",
+                         server_name, elicitation_id)
+            return
+        completed.set()
 
     def _plan_command(self, args: str) -> None:
         if not args:
@@ -529,4 +688,7 @@ class Repl:
                 break
             await self.handle_line(line)
         await self._stop_turn()
+        for task in list(self._dialog_tasks):
+            task.cancel()
+        await asyncio.gather(*self._dialog_tasks, return_exceptions=True)
         return self.last_terminal
