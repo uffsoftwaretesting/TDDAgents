@@ -15,6 +15,8 @@ Ported from `reference/claude-code/src/services/mcp/client.ts`:
   100 000 000 ms), `isError` raised as `McpToolCallError` with the first text block, and
   `processMCPResult`.
 * `transformResultContent`, `inferCompactSchema`, `transformMCPResult`, `processMCPResult`.
+* `MCP_AUTH_CACHE_TTL_MS`, `getMcpAuthCachePath`, `isMcpAuthCached`, `setMcpAuthCacheEntry`,
+  `clearMcpAuthCache`, `handleRemoteAuthFailure`.
 
 The SDK's session lives in anyio task scopes, which must be entered and left by one task.
 Each connection therefore owns a holder task that opens the transport and the session, waits
@@ -23,7 +25,16 @@ for `cleanup()`, and closes them in order — the shape of upstream's `client.cl
 Image blocks use the Anthropic shape (`{"type": "image", "source": {...}}`) internally, as
 upstream's `ContentBlockParam`; the tool's result mapper turns them into LangChain blocks.
 
-Not ported: OAuth and `needs-auth`, `McpSessionExpiredError`'s reconnect-and-retry and
+Auth (`ClaudeAuthProvider` from `auth.py`): an sse/http connection that fails because the
+server wants credentials (`UnauthorizedError`) becomes `NeedsAuthMCPServer` through
+`handleRemoteAuthFailure`, which also records the server in the 15-minute needs-auth cache
+(`mcp-needs-auth-cache.json` in the config home: `isMcpAuthCached`, `setMcpAuthCacheEntry`,
+`clearMcpAuthCache`; writes are serialized by a lock, upstream's promise chain).
+
+Not ported: `McpAuthError` (a 401 on a tool call of a connected server, which upstream's
+`toolExecution.ts` turns into a `needs-auth` entry of `AppState.mcp.clients`; TDDAgents' AppState
+holds no MCP clients),
+`McpSessionExpiredError`'s reconnect-and-retry and
 `ensureConnectedClient`'s memoized reconnect (a failed session stays failed for the run), URL
 elicitation, progress events, image resizing (`maybeResizeAndDownsampleImageBuffer`), the IDE
 special cases and analytics.
@@ -49,7 +60,12 @@ to put an in-memory server where a process or a socket would be.
 * **ws** follows the 1.x SDK's `websocket_client` (subprotocol `mcp`, one JSON-RPC message per
   text frame): `mcp` 2.x ships no WebSocket client, and upstream supports the type.
 
-Not ported: OAuth (`ClaudeAuthProvider`), the session-ingress token, proxy and mTLS options,
+* **sse** / **http** carry a `ClaudeAuthProvider` through `McpTransportAuth` (the SDK's `auth=`
+  hook): `Bearer` from the stored tokens, `auth()` on a 401, step-up on a 403. A failure the
+  bridge recorded replaces the transport's own error, so `connect_to_server` sees upstream's
+  `UnauthorizedError`.
+
+Not ported: the session-ingress token, proxy and mTLS options,
 `CLAUDE_CODE_SHELL_PREFIX`, and the IDE / claude.ai / in-process transports.
 """
 
@@ -64,6 +80,7 @@ import re
 import secrets
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -89,12 +106,19 @@ from mcp.types import (
 )
 from pydantic import FileUrl
 
+from app.services.mcp.auth import (
+    ClaudeAuthProvider,
+    McpTransportAuth,
+    create_auth_fetch,
+)
 from app.services.mcp.normalization import normalize_name_for_mcp
+from app.services.mcp.sdk_auth import UnauthorizedError
 from app.services.mcp.types import (
     ConnectedMCPServer,
     FailedMCPServer,
     McpServerConfig,
     MCPServerConnection,
+    NeedsAuthMCPServer,
     ServerResource,
 )
 from app.utils.mcp_validation import (
@@ -108,7 +132,7 @@ from app.utils.mcp_validation import (
     persist_binary_content,
     truncate_mcp_content_if_needed,
 )
-from app.utils.tool_result_storage import tool_results_dir
+from app.utils.tool_result_storage import config_home, tool_results_dir
 
 logger = logging.getLogger(__name__)
 
@@ -190,11 +214,29 @@ async def _stdio(name: str, config: McpServerConfig) -> AsyncIterator[TransportS
             raise
 
 
+def transport_auth(name: str, config: McpServerConfig, headers: Mapping[str, str]) -> McpTransportAuth:
+    """`new ClaudeAuthProvider(name, serverRef)` handed to the transport as its `authProvider`."""
+    return McpTransportAuth(ClaudeAuthProvider(name, config), str(config.url), create_auth_fetch(headers))
+
+
+@asynccontextmanager
+async def _reraise_auth_failure(auth: McpTransportAuth) -> AsyncIterator[None]:
+    """The transport's `UnauthorizedError` (or `auth()` error) in place of the 401 it produced."""
+    try:
+        yield
+    except Exception as exc:
+        if auth.failure is not None and auth.failure is not exc:
+            raise auth.failure from exc
+        raise
+
+
 @asynccontextmanager
 async def _http(name: str, config: McpServerConfig) -> AsyncIterator[TransportStreams]:
     headers = {"User-Agent": get_mcp_user_agent(), **get_mcp_server_headers(name, config)}
+    auth = transport_auth(name, config, headers)
     async with (
-        create_mcp_http_client(headers=headers) as http_client,
+        _reraise_auth_failure(auth),
+        create_mcp_http_client(headers=headers, auth=auth) as http_client,
         streamable_http_client(str(config.url), http_client=http_client) as streams,
     ):
         yield streams
@@ -203,7 +245,8 @@ async def _http(name: str, config: McpServerConfig) -> AsyncIterator[TransportSt
 @asynccontextmanager
 async def _sse(name: str, config: McpServerConfig) -> AsyncIterator[TransportStreams]:
     headers = {"User-Agent": get_mcp_user_agent(), **get_mcp_server_headers(name, config)}
-    async with sse_client(str(config.url), headers=headers) as streams:
+    auth = transport_auth(name, config, headers)
+    async with _reraise_auth_failure(auth), sse_client(str(config.url), headers=headers, auth=auth) as streams:
         yield streams
 
 
@@ -312,6 +355,72 @@ class McpToolCallError(Exception):
         self.meta = meta
 
 
+#: `MCP_AUTH_CACHE_TTL_MS` (15 minutes).
+MCP_AUTH_CACHE_TTL_MS = 15 * 60 * 1000
+MCP_AUTH_CACHE_FILE = "mcp-needs-auth-cache.json"
+_auth_cache_lock = threading.Lock()
+
+
+def get_mcp_auth_cache_path() -> Path:
+    """`getMcpAuthCachePath`."""
+    return config_home() / MCP_AUTH_CACHE_FILE
+
+
+def _read_mcp_auth_cache() -> dict[str, Any]:
+    """`getMcpAuthCache`: `{}` for a missing or unparsable file."""
+    try:
+        data = json.loads(get_mcp_auth_cache_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def is_mcp_auth_cached(server_id: str) -> bool:
+    """`isMcpAuthCached`: a needs-auth entry younger than the TTL."""
+    entry = _read_mcp_auth_cache().get(server_id)
+    if not isinstance(entry, dict) or not isinstance(entry.get("timestamp"), (int, float)):
+        return False
+    return bool(time.time() * 1000 - entry["timestamp"] < MCP_AUTH_CACHE_TTL_MS)
+
+
+def set_mcp_auth_cache_entry(server_id: str) -> None:
+    """`setMcpAuthCacheEntry`: serialized read-modify-write, best effort."""
+    with _auth_cache_lock:
+        try:
+            cache = _read_mcp_auth_cache()
+            cache[server_id] = {"timestamp": int(time.time() * 1000)}
+            path = get_mcp_auth_cache_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(cache), encoding="utf-8")
+        except OSError:
+            pass
+
+
+def clear_mcp_auth_cache() -> None:
+    """`clearMcpAuthCache`."""
+    try:
+        get_mcp_auth_cache_path().unlink()
+    except OSError:
+        pass
+
+
+async def handle_remote_auth_failure(name: str, config: McpServerConfig, transport_type: str) -> NeedsAuthMCPServer:
+    """`handleRemoteAuthFailure`: cache the needs-auth entry and answer the `needs-auth` state."""
+    label = {"sse": "SSE", "http": "HTTP", "claudeai-proxy": "claude.ai proxy"}[transport_type]
+    logger.debug("MCP server %s: Authentication required for %s server", name, label)
+    set_mcp_auth_cache_entry(name)
+    return NeedsAuthMCPServer(name=name, config=config)
+
+
+def _is_unauthorized(error: BaseException | None) -> bool:
+    """`error instanceof UnauthorizedError`, looking inside anyio's exception groups."""
+    if isinstance(error, UnauthorizedError):
+        return True
+    if isinstance(error, BaseExceptionGroup):
+        return any(_is_unauthorized(e) for e in error.exceptions)
+    return False
+
+
 async def _cancel_elicitation(context: ClientRequestContext, params: ElicitRequestParams) -> ElicitResult:
     return ElicitResult(action="cancel")
 
@@ -330,7 +439,10 @@ async def connect_to_server(
     cwd: str | Path,
     transport_factory: TransportFactory = open_transport,
 ) -> MCPServerConnection:
-    """`connectToServer`: a `ConnectedMCPServer` whose `cleanup` closes it, or a `FailedMCPServer`."""
+    """
+    `connectToServer`: a `ConnectedMCPServer` whose `cleanup` closes it, a `NeedsAuthMCPServer`
+    (an sse/http server answering `UnauthorizedError`), or a `FailedMCPServer`.
+    """
     ready = asyncio.Event()
     stop = asyncio.Event()
     box: dict[str, Any] = {}
@@ -370,6 +482,8 @@ async def connect_to_server(
     if "session" not in box:
         await asyncio.gather(task, return_exceptions=True)
         error = box.get("error")
+        if config.type in ("sse", "http") and _is_unauthorized(error):
+            return await handle_remote_auth_failure(name, config, str(config.type))
         logger.warning("MCP server %s failed to connect: %s", name, error)
         return FailedMCPServer(name=name, config=config, error=str(error) if error is not None else None)
 
@@ -682,28 +796,36 @@ __all__ = [
     "IMAGE_MIME_TYPES",
     "LARGE_OUTPUT_FILES_ENV",
     "MAX_MCP_DESCRIPTION_LENGTH",
+    "MCP_AUTH_CACHE_FILE",
+    "MCP_AUTH_CACHE_TTL_MS",
     "MCP_TIMEOUT_ENV",
     "MCP_TOOL_TIMEOUT_ENV",
     "McpToolCallError",
     "TransportFactory",
     "call_mcp_tool",
+    "clear_mcp_auth_cache",
     "client_version",
     "connect_to_server",
     "fetch_resources_for_client",
     "fetch_tools_for_client",
     "get_connection_timeout_ms",
+    "get_mcp_auth_cache_path",
     "get_mcp_headers_from_helper",
     "get_mcp_instructions",
     "get_mcp_server_headers",
     "get_mcp_tool_timeout_ms",
     "get_mcp_user_agent",
+    "handle_remote_auth_failure",
     "infer_compact_schema",
+    "is_mcp_auth_cached",
     "open_transport",
     "parse_int_env",
     "process_mcp_result",
     "read_resource",
+    "set_mcp_auth_cache_entry",
     "transform_mcp_result",
     "transform_result_content",
+    "transport_auth",
     "truncate_description",
     "websocket_client",
 ]
