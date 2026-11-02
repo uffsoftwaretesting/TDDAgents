@@ -6,7 +6,9 @@ opens in plan mode (the Analyst, `app/tools/exit_plan_mode_tool/`) and develops 
 asked anything, so the plan's approval is denied and a headless session plans without developing,
 as upstream's `-p`. Interactively (`develop_interactive`) the conversation is the REPL
 (`app/screens/repl.py`), where the user answers the Analyst's questions, approves the plan and
-talks to the agents while they work.
+talks to the agents while they work. Before it opens, the project folder must be trusted
+(`app/components/trust_dialog/trust_dialog.py`, upstream's `showSetupScreens`); then the plugin
+startup checks run in the background (`performStartupChecks`, as `REPL.tsx` runs them on mount).
 
 A session is resumed as upstream resumes one: its transcript, its TDD plan sidecar and its plan
 file (`app/cli/print.py`), found again through the thread id. A session never restarts.
@@ -14,6 +16,7 @@ file (`app/cli/print.py`), found again through the thread id. A session never re
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import uuid
@@ -134,7 +137,8 @@ async def _develop_interactive(
     thread_id: str, request: str | None, workspace: Any, options: SessionOptions,
     io_factory: Callable[[Callable[[], None]], Any] | None, prompt: str | None, run_options: dict[str, Any],
 ) -> DevelopmentOutcome:
-    from app.cli.print import open_session_run, outcome_of, session_run_id
+    from app.cli.print import open_session_run, outcome_of, project_root_of, session_run_id
+    from app.components.trust_dialog.trust_dialog import show_trust_dialog
     from app.hooks.use_can_use_tool import (
         PermissionAnswer,
         PermissionPrompt,
@@ -162,15 +166,49 @@ async def _develop_interactive(
         return await holder["repl"].ask_questions(questions)
 
     opts = {**development_run_options(options), **run_options}
-    async with open_session_run(run_id=session_run_id(thread_id), plan=TddPlan(), workspace=workspace,
-                                planning=True, can_use_tool=build_interactive_can_use_tool(ask, ask_questions),
-                                **opts) as run:
-        io = io_factory(lambda: holder["repl"].interrupt())
-        repl = Repl(run, io, verbose=options.verbose)
-        holder["repl"] = repl
-        with io:
+    escape = asyncio.Event()
+
+    def on_interrupt() -> None:
+        # Esc: the REPL's once it is open; before that, the trust dialog's.
+        if "repl" in holder:
+            holder["repl"].interrupt()
+        else:
+            escape.set()
+
+    io = io_factory(on_interrupt)
+    with io:
+        # `showSetupScreens`: the trust dialog, before any of the project's settings, hooks or MCP servers run.
+        project = project_root_of(workspace, opts.get("project_root"))
+        await show_trust_dialog(io, project, escape)
+        async with open_session_run(run_id=session_run_id(thread_id), plan=TddPlan(), workspace=workspace,
+                                    planning=True, can_use_tool=build_interactive_can_use_tool(ask, ask_questions),
+                                    **opts) as run:
+            repl = Repl(run, io, verbose=options.verbose)
+            holder["repl"] = repl
+            start_plugin_checks(run)
             terminal = await repl.run_session(request, prompt)
-        return outcome_of(run, terminal)
+            return outcome_of(run, terminal)
+
+
+def start_plugin_checks(run: Any) -> None:
+    """
+    `REPL.tsx`'s mount effect: `performStartupChecks` in the background, after the trust dialog (the
+    marketplaces and plugins the settings declare are installed only with the folder trusted).
+    """
+    from app.utils.config import check_has_trust_dialog_accepted
+    from app.utils.plugins.perform_startup_checks import perform_startup_checks
+
+    # The run's own settings locations (its project, user home and policy directory).
+    locations = run.mcp.settings_locations()
+    project = locations.project_root
+    task = asyncio.ensure_future(perform_startup_checks(
+        run.store.update, locations, trust_accepted=check_has_trust_dialog_accepted(project)))
+    _STARTUP_CHECKS.add(task)
+    task.add_done_callback(_STARTUP_CHECKS.discard)
+
+
+#: The background `performStartupChecks` (upstream's `void`), kept referenced.
+_STARTUP_CHECKS: set[asyncio.Future[None]] = set()
 
 
 __all__ = [
@@ -182,4 +220,5 @@ __all__ = [
     "development_run_options",
     "fresh_thread_id",
     "session_exists",
+    "start_plugin_checks",
 ]

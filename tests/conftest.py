@@ -72,6 +72,23 @@ def _offline_token_counts(monkeypatch: Any) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _trusted_session() -> Any:
+    """
+    Upstream skips its setup screens under test (`showSetupScreens`: `"production" === 'test'`):
+    every test's process trusts its folder (`sessionTrustAccepted`), so an interactive session opens
+    without the trust dialog. A test of the dialog turns it off (`set_session_trust_accepted(False)`).
+    """
+    from app.bootstrap.state import set_session_trust_accepted
+    from app.utils.config import reset_trust_dialog_accepted_cache_for_testing
+
+    set_session_trust_accepted(True)
+    reset_trust_dialog_accepted_cache_for_testing()
+    yield
+    set_session_trust_accepted(False)
+    reset_trust_dialog_accepted_cache_for_testing()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_bundled_skills_root(tmp_path_factory: Any, monkeypatch: Any) -> Any:
     """
     Launching a bundled skill extracts its files under the per-process bundled-skills root

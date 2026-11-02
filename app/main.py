@@ -50,6 +50,7 @@ if __package__ in (None, ""):
 from dotenv import load_dotenv
 
 from app.cli.print import DevelopmentOutcome, HeadlessOptions
+from app.components.trust_dialog.trust_dialog import TrustDialogExit
 from app.query.transitions import Terminal
 from app.session.driver import (
     SessionOptions,
@@ -757,6 +758,9 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
         except KeyboardInterrupt:
             print(f"\n🛑 Interrupted. Continue later with --thread-id {thread_id}.")
             return 130
+        except TrustDialogExit as refused:
+            # The trust dialog's "No, exit" (1) or Esc (0): `gracefulShutdownSync(code)`, no session.
+            return refused.exit_code
         report(thread_id, workspace, request, outcome)
         if outcome.question:
             print(waiting_text(thread_id, outcome.question, args.print))
