@@ -34,6 +34,7 @@ from typing import Any, Literal
 import yaml
 
 from app.utils.claudemd import FRONTMATTER_REGEX
+from app.utils.plugins.plugin_directories import PLUGIN_PACKAGE_DIR
 from app.utils.plugins.schemas import (
     PluginHooksSchema,
     PluginManifest,
@@ -85,14 +86,14 @@ class ValidationResult:
 
 
 def detect_manifest_type(file_path: str) -> Literal["plugin", "marketplace", "unknown"]:
-    """`detectManifestType`: by file name, then by a `.claude-plugin` parent directory."""
+    """`detectManifestType`: by file name, then by a plugin package folder (`PLUGIN_PACKAGE_DIR`) parent."""
     file_name = os.path.basename(file_path)
     dir_name = os.path.basename(os.path.dirname(file_path))
     if file_name == "plugin.json":
         return "plugin"
     if file_name == "marketplace.json":
         return "marketplace"
-    if dir_name == ".claude-plugin":
+    if dir_name == PLUGIN_PACKAGE_DIR:
         return "plugin"
     return "unknown"
 
@@ -118,7 +119,7 @@ def marketplace_source_hint(p: str) -> str:
     corrected = f"./{stripped}" if stripped != p else "./plugins/my-plugin"
     return (
         "Plugin source paths are resolved relative to the marketplace root (the directory "
-        "containing .claude-plugin/), not relative to marketplace.json. "
+        f"containing {PLUGIN_PACKAGE_DIR}/), not relative to marketplace.json. "
         f'Use "{corrected}" instead of "{p}".'
     )
 
@@ -284,14 +285,14 @@ async def validate_marketplace_manifest(file_path: str) -> ValidationResult:
                 ))
         manifest_dir = os.path.dirname(absolute_path)
         marketplace_root = (
-            os.path.dirname(manifest_dir) if os.path.basename(manifest_dir) == ".claude-plugin" else manifest_dir
+            os.path.dirname(manifest_dir) if os.path.basename(manifest_dir) == PLUGIN_PACKAGE_DIR else manifest_dir
         )
         for i, entry in enumerate(plugins):
             source = entry["source"]
             entry_version = entry.get("version")
             if not entry_version or not isinstance(source, str) or not source.startswith("./"):
                 continue
-            plugin_json = os.path.join(marketplace_root, source, ".claude-plugin", "plugin.json")
+            plugin_json = os.path.join(marketplace_root, source, PLUGIN_PACKAGE_DIR, "plugin.json")
             try:
                 declared: Any = json.loads(_read_text(plugin_json))
             except (OSError, ValueError):
@@ -301,7 +302,7 @@ async def validate_marketplace_manifest(file_path: str) -> ValidationResult:
                 warnings.append(ValidationWarning(
                     path=f"plugins[{i}].version",
                     message=(
-                        f'Entry declares version "{entry_version}" but {source}/.claude-plugin/plugin.json says '
+                        f'Entry declares version "{entry_version}" but {source}/{PLUGIN_PACKAGE_DIR}/plugin.json says '
                         f'"{manifest_version}". At install time, plugin.json wins (calculatePluginVersion '
                         "precedence) — the entry version is silently ignored. "
                         f'Update this entry to "{manifest_version}" to match.'
@@ -509,11 +510,11 @@ async def validate_manifest(file_path: str) -> ValidationResult:
         is_directory = False
     if is_directory:
         marketplace_result = await validate_marketplace_manifest(
-            os.path.join(absolute_path, ".claude-plugin", "marketplace.json")
+            os.path.join(absolute_path, PLUGIN_PACKAGE_DIR, "marketplace.json")
         )
         if not marketplace_result.errors or marketplace_result.errors[0].code != "ENOENT":
             return marketplace_result
-        plugin_result = await validate_plugin_manifest(os.path.join(absolute_path, ".claude-plugin", "plugin.json"))
+        plugin_result = await validate_plugin_manifest(os.path.join(absolute_path, PLUGIN_PACKAGE_DIR, "plugin.json"))
         if not plugin_result.errors or plugin_result.errors[0].code != "ENOENT":
             return plugin_result
         return ValidationResult(
@@ -521,8 +522,8 @@ async def validate_manifest(file_path: str) -> ValidationResult:
             errors=[ValidationError(
                 path="directory",
                 message=(
-                    "No manifest found in directory. Expected .claude-plugin/marketplace.json or "
-                    ".claude-plugin/plugin.json"
+                    f"No manifest found in directory. Expected {PLUGIN_PACKAGE_DIR}/marketplace.json or "
+                    f"{PLUGIN_PACKAGE_DIR}/plugin.json"
                 ),
             )],
             file_path=absolute_path,

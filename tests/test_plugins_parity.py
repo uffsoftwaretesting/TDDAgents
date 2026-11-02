@@ -252,7 +252,7 @@ def test_walk_logs_a_failing_callback_and_continues(tmp_path: Path, caplog):
 
 
 def test_invalid_utf8_reads_with_replacement_characters(tmp_path: Path):
-    manifest = tmp_path / ".claude-plugin" / "plugin.json"
+    manifest = tmp_path / ".tddagents-plugin" / "plugin.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_bytes(b'{"name": "p\xff"}')
     result = asyncio.run(vp.validate_plugin_manifest(str(manifest)))
@@ -300,8 +300,8 @@ def test_http_get_rejects_non_2xx_and_parses_json_or_keeps_text(monkeypatch):
 
 def test_concurrent_first_loads_share_one_load(tmp_path: Path, locations: SettingsLocations, monkeypatch):
     root = tmp_path / "mkt"
-    (root / ".claude-plugin").mkdir(parents=True)
-    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+    (root / ".tddagents-plugin").mkdir(parents=True)
+    (root / ".tddagents-plugin" / "marketplace.json").write_text(json.dumps(
         {"name": "team", "owner": {"name": "o"}, "plugins": []}))
     asyncio.run(mm.add_marketplace_source({"source": "directory", "path": str(root)}, locations))
     mm.clear_marketplaces_cache()

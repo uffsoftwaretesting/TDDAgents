@@ -42,6 +42,7 @@ from app.utils.plugins.marketplace_manager import (
     get_marketplace_cache_only,
     get_plugin_by_id,
 )
+from app.utils.plugins.plugin_directories import PLUGIN_PACKAGE_DIR
 from app.utils.plugins.plugin_identifier import (
     InstallableScope,
     parse_plugin_identifier,
@@ -128,7 +129,7 @@ async def cache_and_register_plugin(
             # Marketplace name equals plugin name: the target is inside the cached directory.
             temp_path = os.path.join(
                 os.path.dirname(cached.path),
-                f".claude-plugin-temp-{int(time.time() * 1000)}-{secrets.token_hex(4)}",
+                f"{PLUGIN_PACKAGE_DIR}-temp-{int(time.time() * 1000)}-{secrets.token_hex(4)}",
             )
             os.rename(cached.path, temp_path)
             os.makedirs(os.path.dirname(versioned_path), exist_ok=True)

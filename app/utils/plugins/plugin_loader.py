@@ -16,8 +16,8 @@ Ported from `reference/claude-code/src/utils/plugins/pluginLoader.ts` -> `getPlu
 `assemblePluginLoadResult`, `clearPluginCache`, `cachePluginSettings`.
 
 Product substitutions: `CLAUDE_CODE_REMOTE` is `TDDAGENTS_REMOTE` (HTTPS GitHub URLs instead of
-SSH). The plugin format directory `.claude-plugin/` is kept: it is the plugin package format,
-shared with upstream's marketplaces.
+SSH). The plugin package folder is upstream's `.claude-plugin/` renamed `.tddagents-plugin/`
+(recorded divergence, see `PLUGIN_PACKAGE_DIR` in `plugin_directories.py`).
 
 Divergences: the fetch telemetry (`logPluginFetch`, `classifyFetchError`) is not ported. Git and
 npm run in the process directory (upstream's `useCwd`), see `app/utils/exec_file_no_throw.py`.
@@ -46,6 +46,7 @@ from app.utils.fs_operations import rm
 from app.utils.git.git import git_exe
 from app.utils.plugins.git_availability import check_git_available
 from app.utils.plugins.plugin_directories import (
+    PLUGIN_PACKAGE_DIR,
     get_plugin_seed_dirs,
     get_plugins_directory,
 )
@@ -490,7 +491,7 @@ def _read_manifest_for_cache(path: str) -> PluginManifest:
 async def cache_plugin(source: Any, *, manifest: Mapping[str, Any] | None = None) -> CachedPlugin:
     """
     `cachePlugin`: fetch `source` into a temporary cache directory, read its manifest
-    (`.claude-plugin/plugin.json`, then `plugin.json`, else `manifest`, else a minimal one),
+    (`<PLUGIN_PACKAGE_DIR>/plugin.json`, then `plugin.json`, else `manifest`, else a minimal one),
     then move it to `<cache>/<sanitized manifest name>`.
     """
     cache_path = get_plugin_cache_path()
@@ -529,7 +530,7 @@ async def cache_plugin(source: Any, *, manifest: Mapping[str, Any] | None = None
                 logger.error("Failed to clean up installation: %s", cleanup_error)
         raise
 
-    manifest_path = os.path.join(temp_path, ".claude-plugin", "plugin.json")
+    manifest_path = os.path.join(temp_path, PLUGIN_PACKAGE_DIR, "plugin.json")
     legacy_manifest_path = os.path.join(temp_path, "plugin.json")
     loaded: PluginManifest
     if _path_exists(manifest_path):

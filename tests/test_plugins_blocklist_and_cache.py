@@ -56,10 +56,10 @@ def test_detect_delisted_plugins_matches_the_marketplace_suffix():
 
 
 def make_marketplace(root: Path, name: str, listed: list[str], force: bool) -> Path:
-    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".tddagents-plugin").mkdir(parents=True)
     manifest = {"name": name, "owner": {"name": "o"}, "forceRemoveDeletedPlugins": force,
                 "plugins": [{"name": n, "source": f"./{n}"} for n in listed]}
-    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(manifest))
+    (root / ".tddagents-plugin" / "marketplace.json").write_text(json.dumps(manifest))
     return root
 
 
@@ -95,7 +95,7 @@ def test_delisted_plugins_are_uninstalled_from_user_scopes_and_flagged(tmp_path,
 def test_an_unavailable_marketplace_is_logged_and_skipped(tmp_path, locations, caplog):
     root = make_marketplace(tmp_path / "strict", "strict", [], True)
     asyncio.run(mm.add_marketplace_source({"source": "directory", "path": str(root)}, locations))
-    (root / ".claude-plugin" / "marketplace.json").unlink()
+    (root / ".tddagents-plugin" / "marketplace.json").unlink()
     mm.clear_marketplaces_cache()
     install("gone@strict", "user")
 

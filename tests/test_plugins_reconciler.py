@@ -31,9 +31,9 @@ def locations(tmp_path: Path) -> SettingsLocations:
 
 
 def make_marketplace(root: Path, name: str) -> Path:
-    (root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+    (root / ".tddagents-plugin").mkdir(parents=True, exist_ok=True)
     manifest = {"name": name, "owner": {"name": "Owner"}, "plugins": [{"name": "p", "source": "./p"}]}
-    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(manifest))
+    (root / ".tddagents-plugin" / "marketplace.json").write_text(json.dumps(manifest))
     return root
 
 

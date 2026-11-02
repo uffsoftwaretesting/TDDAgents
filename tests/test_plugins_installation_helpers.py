@@ -52,13 +52,13 @@ ENTRIES: list[dict[str, Any]] = [
 @pytest.fixture
 def marketplace(tmp_path: Path, locations: SettingsLocations) -> Path:
     root = tmp_path / "mkt"
-    (root / ".claude-plugin").mkdir(parents=True)
-    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+    (root / ".tddagents-plugin").mkdir(parents=True)
+    (root / ".tddagents-plugin" / "marketplace.json").write_text(json.dumps(
         {"name": "team", "owner": {"name": "O"}, "plugins": ENTRIES}))
     for entry in ENTRIES:
         plugin = root / entry["source"]
-        (plugin / ".claude-plugin").mkdir(parents=True)
-        (plugin / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": entry["name"]}))
+        (plugin / ".tddagents-plugin").mkdir(parents=True)
+        (plugin / ".tddagents-plugin" / "plugin.json").write_text(json.dumps({"name": entry["name"]}))
         (plugin / "README.md").write_text(entry["name"])
     asyncio.run(mm.add_marketplace_source({"source": "directory", "path": str(root)}, locations))
     return root
@@ -190,12 +190,12 @@ def test_settings_write_failure_and_unexpected_errors(marketplace, locations, mo
 
 def test_a_plugin_named_like_its_marketplace_moves_into_its_own_subdirectory(tmp_path: Path):
     source = tmp_path / "same"
-    (source / ".claude-plugin").mkdir(parents=True)
-    (source / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "same", "version": "2.0.0"}))
+    (source / ".tddagents-plugin").mkdir(parents=True)
+    (source / ".tddagents-plugin" / "plugin.json").write_text(json.dumps({"name": "same", "version": "2.0.0"}))
     path = asyncio.run(pih.cache_and_register_plugin(
         "same@same", {"name": "same", "source": "./same"}, "user", None, str(source)))
     assert path == get_versioned_cache_path("same@same", "2.0.0")
-    assert json.loads((Path(path) / ".claude-plugin" / "plugin.json").read_text())["name"] == "same"
+    assert json.loads((Path(path) / ".tddagents-plugin" / "plugin.json").read_text())["name"] == "same"
     assert sorted(os.listdir(Path(get_plugin_cache_path()) / "same")) == ["same"]
 
 

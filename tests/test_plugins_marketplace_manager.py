@@ -52,8 +52,8 @@ def manifest(name: str, plugins: list[dict[str, Any]] | None = None) -> dict[str
 
 
 def make_marketplace_dir(root: Path, name: str, plugins: list[dict[str, Any]] | None = None) -> Path:
-    (root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
-    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(manifest(name, plugins)))
+    (root / ".tddagents-plugin").mkdir(parents=True, exist_ok=True)
+    (root / ".tddagents-plugin" / "marketplace.json").write_text(json.dumps(manifest(name, plugins)))
     return root
 
 
@@ -134,14 +134,15 @@ def test_add_relative_directory_resolves_against_the_process_directory(tmp_path,
 
 def test_add_file_source_reads_the_json_path(tmp_path, locations):
     root = make_marketplace_dir(tmp_path / "f", "file-mkt")
-    path = root / ".claude-plugin" / "marketplace.json"
+    path = root / ".tddagents-plugin" / "marketplace.json"
     result = run(mm.add_marketplace_source({"source": "file", "path": str(path)}, locations))
     assert result.name == "file-mkt"
     assert known_config()["file-mkt"]["installLocation"] == str(root)
 
 
 def test_add_missing_directory_reports_the_checked_path(tmp_path, locations):
-    with pytest.raises(RuntimeError, match="Marketplace file not found at .*nowhere/.claude-plugin/marketplace.json"):
+    expected = "Marketplace file not found at .*nowhere/.tddagents-plugin/marketplace.json"
+    with pytest.raises(RuntimeError, match=expected):
         run(mm.add_marketplace_source({"source": "directory", "path": str(tmp_path / "nowhere")}, locations))
 
 
@@ -192,7 +193,7 @@ def test_settings_source_synthesizes_the_manifest_in_the_cache(locations):
               "plugins": [{"name": "p", "source": {"source": "github", "repo": "o/p"}}]}
     result = run(mm.add_marketplace_source(source, locations))
     assert result.name == "inline-mkt"
-    cached = Path(mm.get_marketplaces_cache_dir()) / "inline-mkt" / ".claude-plugin" / "marketplace.json"
+    cached = Path(mm.get_marketplaces_cache_dir()) / "inline-mkt" / ".tddagents-plugin" / "marketplace.json"
     assert json.loads(cached.read_text())["owner"] == {"name": "settings"}
     marketplace = run(mm.get_marketplace("inline-mkt"))
     assert marketplace["plugins"][0]["strict"] is True
@@ -285,7 +286,7 @@ def test_get_plugin_by_id_and_cache_only(tmp_path, locations):
 def test_cache_only_returns_none_when_the_cache_is_broken(tmp_path, locations):
     root = make_marketplace_dir(tmp_path / "mkt", "m1")
     run(mm.add_marketplace_source({"source": "directory", "path": str(root)}, locations))
-    (root / ".claude-plugin" / "marketplace.json").write_text("{broken")
+    (root / ".tddagents-plugin" / "marketplace.json").write_text("{broken")
     assert run(mm.get_marketplace_cache_only("m1")) is None
     assert run(mm.get_plugin_by_id_cache_only("p1@m1")) is None
 
@@ -448,7 +449,7 @@ def test_remove_keeps_a_users_local_directory(tmp_path, locations, fake_cleanup)
     root = make_marketplace_dir(tmp_path / "mkt", "m1")
     run(mm.add_marketplace_source({"source": "directory", "path": str(root)}, locations))
     run(mm.remove_marketplace_source("m1", locations))
-    assert (root / ".claude-plugin" / "marketplace.json").exists()
+    assert (root / ".tddagents-plugin" / "marketplace.json").exists()
 
 
 # ── seed directories ──────────────────────────────────────────────────────────
@@ -499,7 +500,7 @@ def test_refresh_skips_settings_sources_and_validates_local_ones(tmp_path, locat
     progress: list[str] = []
     run(mm.refresh_marketplace("loc", progress.append))
     assert progress == ["Validating local marketplace"]
-    (root / ".claude-plugin" / "marketplace.json").unlink()
+    (root / ".tddagents-plugin" / "marketplace.json").unlink()
     with pytest.raises(RuntimeError, match="^Failed to refresh marketplace 'loc': "):
         run(mm.refresh_marketplace("loc"))
     with pytest.raises(ValueError, match="^Marketplace 'zz' not found. Available marketplaces: "):
@@ -552,7 +553,7 @@ def test_git_source_clones_renames_and_refreshes(locations, bare_repo):
     assert result.name == "git-mkt"
     location = Path(mm.get_marketplaces_cache_dir()) / "git-mkt"
     assert known_config()["git-mkt"]["installLocation"] == str(location)
-    assert (location / ".claude-plugin" / "marketplace.json").exists()
+    assert (location / ".tddagents-plugin" / "marketplace.json").exists()
     assert any(p.startswith("Cloning repository (timeout: 120s): file://") for p in progress)
     assert [n for n in os.listdir(mm.get_marketplaces_cache_dir())] == ["git-mkt"]
 

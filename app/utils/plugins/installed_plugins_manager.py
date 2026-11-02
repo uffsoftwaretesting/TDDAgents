@@ -36,7 +36,7 @@ from typing import Any, cast
 from app.utils.fs_operations import rm
 from app.utils.git.git_filesystem import get_head_for_dir
 from app.utils.plugins.marketplace_manager import get_plugin_by_id
-from app.utils.plugins.plugin_directories import get_plugins_directory
+from app.utils.plugins.plugin_directories import PLUGIN_PACKAGE_DIR, get_plugins_directory
 from app.utils.plugins.plugin_identifier import (
     EDITABLE_SETTING_SOURCES,
     InstallableScope,
@@ -587,9 +587,9 @@ async def get_git_commit_sha(dir_path: str) -> str | None:
 
 
 def _get_plugin_version_from_manifest(plugin_cache_path: str, plugin_id: str) -> str:
-    """`getPluginVersionFromManifest`: `.claude-plugin/plugin.json`'s `version`, else `unknown`."""
+    """`getPluginVersionFromManifest`: `<PLUGIN_PACKAGE_DIR>/plugin.json`'s `version`, else `unknown`."""
     try:
-        manifest_path = os.path.join(plugin_cache_path, ".claude-plugin", "plugin.json")
+        manifest_path = os.path.join(plugin_cache_path, PLUGIN_PACKAGE_DIR, "plugin.json")
         with open(manifest_path, encoding="utf-8", errors="replace") as handle:
             manifest = json.loads(handle.read())
         version = manifest.get("version") if isinstance(manifest, dict) else None
@@ -679,7 +679,7 @@ async def migrate_from_enabled_plugins(locations: SettingsLocations) -> None:
                 except FileNotFoundError:
                     logger.debug("External plugin %s not in cache, skipping", plugin_id)
                     continue
-                if ".claude-plugin" in dir_entries:
+                if PLUGIN_PACKAGE_DIR in dir_entries:
                     version = _get_plugin_version_from_manifest(plugin_cache_path, plugin_id)
                 git_commit_sha = await get_git_commit_sha(plugin_cache_path)
             if version == "unknown" and entry.get("version"):
