@@ -216,6 +216,46 @@ def is_mcp_server_disabled(name: str, cwd: str | Path) -> bool:
     return name in (_project_config(cwd).get("disabledMcpServers") or [])
 
 
+def set_mcp_server_enabled(name: str, enabled: bool, cwd: str | Path) -> None:
+    """
+    `setMcpServerEnabled` (`saveCurrentProjectConfig`): the server leaves or joins the project's
+    `disabledMcpServers`. Upstream's default-disabled built-ins (`enabledMcpServers`) do not exist here.
+    """
+    data = _read_global_config()
+    raw_projects = data.get("projects")
+    projects: dict[str, Any] = dict(raw_projects) if isinstance(raw_projects, dict) else {}
+    key = get_project_config_key(cwd)
+    entry = dict(projects.get(key) or {})
+    previous = list(entry.get("disabledMcpServers") or [])
+    if enabled:
+        updated = [n for n in previous if n != name]
+    else:
+        updated = previous if name in previous else [*previous, name]
+    if updated == previous:
+        return
+    entry["disabledMcpServers"] = updated
+    data["projects"] = {**projects, key: entry}
+    path = get_global_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def filter_mcp_servers_by_policy(
+    servers: Mapping[str, McpServerConfig], locations: SettingsLocations
+) -> tuple[dict[str, McpServerConfig], list[str]]:
+    """`filterMcpServersByPolicy`: the servers the policy allows, and the names it blocks."""
+    merged = load_settings(locations)
+    policy = get_settings_for_source(PermissionRuleSource.POLICY_SETTINGS, locations) or {}
+    allowed: dict[str, McpServerConfig] = {}
+    blocked: list[str] = []
+    for name, config in servers.items():
+        if is_mcp_server_allowed_by_policy(name, config, merged, policy):
+            allowed[name] = config
+        else:
+            blocked.append(name)
+    return allowed, blocked
+
+
 def _command_array(config: McpServerConfig) -> list[str] | None:
     if config.transport != "stdio" or not config.command:
         return None
@@ -280,6 +320,26 @@ def is_mcp_server_allowed_by_policy(
     return by_name
 
 
+def get_mcp_config_by_name(name: str, cwd: str | Path, locations: SettingsLocations) -> McpServerConfig | None:
+    """
+    `getMcpConfigByName`: a configured server by name, enterprise first, then local, project and user
+    (only enterprise when MCP is restricted to plugins).
+    """
+    from app.utils.hooks.hooks_config_snapshot import is_restricted_to_plugin_only
+
+    enterprise, _ = get_mcp_configs_by_scope("enterprise", cwd, locations)
+    policy = get_settings_for_source(PermissionRuleSource.POLICY_SETTINGS, locations)
+    if is_restricted_to_plugin_only(policy, "mcp"):
+        return enterprise.get(name)
+    if name in enterprise:
+        return enterprise[name]
+    for scope in ("local", "project", "user"):
+        servers, _ = get_mcp_configs_by_scope(scope, cwd, locations)
+        if name in servers:
+            return servers[name]
+    return None
+
+
 def get_claude_code_mcp_configs(
     cwd: str | Path, locations: SettingsLocations
 ) -> tuple[dict[str, McpServerConfig], list[ValidationError]]:
@@ -308,7 +368,9 @@ __all__ = [
     "MANAGED_MCP_FILENAME",
     "MCP_JSON_FILENAME",
     "SCHEMA_ERROR",
+    "filter_mcp_servers_by_policy",
     "get_claude_code_mcp_configs",
+    "get_mcp_config_by_name",
     "get_global_config_path",
     "get_mcp_configs_by_scope",
     "get_project_config_key",
@@ -317,4 +379,5 @@ __all__ = [
     "is_mcp_server_disabled",
     "parse_mcp_config",
     "parse_mcp_config_from_file_path",
+    "set_mcp_server_enabled",
 ]

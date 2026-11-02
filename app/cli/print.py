@@ -409,6 +409,8 @@ class DevelopmentRun:
     session_tools: list[Any] = field(default_factory=list)
     #: Every MCP tool the run connected (`appState.mcp.tools`).
     mcp_tools: list[Any] = field(default_factory=list)
+    #: The session's live MCP servers (`app/cli/session_mcp.py`).
+    mcp: Any = None
     #: The session's `flagSettings` agents (`--agents`, `initialize.agents`), and how to add more.
     extra_agents: dict[str, Any] = field(default_factory=dict)
     add_agent_definitions: Callable[[Mapping[str, Any]], None] | None = None
@@ -493,6 +495,11 @@ async def open_session_run(
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
     skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
     mcp = await connect_mcp_servers(root_dir, run_settings_locations(config, root_dir, home, managed_dir))
+    from app.cli.session_mcp import SessionMcp
+
+    #: The session's live MCP servers (configured, SDK, dynamic): the pools read them at each refresh.
+    session_mcp = SessionMcp(manager=mcp, cwd=str(root_dir),
+                             settings_locations=lambda: run_settings_locations(config, root_dir, home, managed_dir))
     try:
         coordinator = is_coordinator_mode(config)
         #: `--agents` / SDK `initialize.agents`: the session's `flagSettings` agents.
@@ -502,18 +509,17 @@ async def open_session_run(
 
         def build_rosters() -> None:
             nonlocal built_ins, planning_tools
+            mcp_tools = session_mcp.all_tools()
             built_ins = main_thread_tools(
-                config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools,
+                config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp_tools,
                 extra_agents=extra_agents)
             planning_tools = (
-                main_thread_tools(config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools,
+                main_thread_tools(config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp_tools,
                                   coordinator_filter=False, extra_agents=extra_agents)
                 if coordinator else built_ins
             )
 
         build_rosters()
-        # `mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included.
-        main_mcp = apply_coordinator_tool_filter(mcp.tools) if coordinator else list(mcp.tools)
         pool_cache: dict[str, Any] = {"key": None, "tools": ()}
         #: Tools added after the pool's filtering, as `main.tsx` adds `StructuredOutput`.
         session_tools: list[Tool] = []
@@ -533,11 +539,14 @@ async def open_session_run(
             current = state.phase_ledger if state.tdd_plan.current is not None else None
             permission_context = state.tool_permission_context
             in_plan = permission_context.mode == PermissionMode.PLAN
+            all_mcp = session_mcp.all_tools()
             key = (current.phase if current is not None else None, in_plan, permission_context.always_deny_rules,
-                   tuple(id(tool) for tool in session_tools))
+                   tuple(id(tool) for tool in session_tools), tuple(id(tool) for tool in all_mcp))
             if key != pool_cache["key"]:
                 pool_cache["key"] = key
-                tools, extra = (planning_tools, list(mcp.tools)) if in_plan else (built_ins, main_mcp)
+                # `mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included.
+                main_mcp = apply_coordinator_tool_filter(all_mcp) if coordinator else all_mcp
+                tools, extra = (planning_tools, all_mcp) if in_plan else (built_ins, main_mcp)
                 # `--permission-prompt-tool`: the tool that answers permission asks is never the model's.
                 assembled = assemble_tool_pool(
                     tools, extra, phase_ledger=current, permission_context=permission_context)
@@ -576,7 +585,7 @@ async def open_session_run(
             transcript_store=transcript,
             command_queue=hook_dispatcher.registry.queue,
             skill_registry=skill_registry,
-            mcp_clients=tuple(mcp.clients),
+            mcp_clients=tuple(session_mcp.all_clients()),
             **coordinator_context(config),
         )
         ctx.can_use_tool = can_use_tool
@@ -620,9 +629,18 @@ async def open_session_run(
             pool_cache["key"] = None
             ctx.tools = refresh_tools()
 
+        def on_mcp_change() -> None:
+            """An MCP server came, went or reconnected: the rosters and the pool are rebuilt."""
+            build_rosters()
+            pool_cache["key"] = None
+            ctx.mcp_clients = tuple(session_mcp.all_clients())
+            ctx.tools = refresh_tools()
+            run.mcp_tools = session_mcp.all_tools()
+
+        session_mcp.on_change = on_mcp_change
         run = DevelopmentRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine,
                              add_agent_definitions=add_agent_definitions, extra_agents=extra_agents,
-                             mcp_tools=list(mcp.tools),
+                             mcp_tools=session_mcp.all_tools(), mcp=session_mcp,
                              session_tools=session_tools,
                              transcript=transcript, deps=run_deps, messages=engine.mutable_messages,
                              recorder=recorder)
@@ -645,6 +663,7 @@ async def open_session_run(
             if memory_root is not None:
                 shutil.rmtree(memory_root, ignore_errors=True)
     finally:
+        await session_mcp.aclose()
         await mcp.aclose()
 
 
@@ -1363,6 +1382,10 @@ class HeadlessStreaming:
         self.pending_seeds: dict[str, Any] = {}
         self.received_uuids: dict[str, None] = {}
         self.flag_settings_inline: dict[str, Any] = {}
+        from app.cli.mcp_auth_control import McpOAuthFlows
+
+        #: The session's in-flight MCP OAuth flows (`activeOAuthFlows`, `oauthCallbackSubmitters`, …).
+        self.oauth_flows = McpOAuthFlows()
         self._run_task: asyncio.Task[None] | None = None
         self._background: set[asyncio.Task[Any]] = set()
         self._unsubscribe: list[Callable[[], None]] = []
@@ -1382,6 +1405,9 @@ class HeadlessStreaming:
             run.recorder.on_entry = self._on_tdd_entry
         if self.options.include_partial_messages:
             run.ctx.on_stream_chunk = self._on_stream_chunk
+        if run.mcp is not None:
+            # `setupSdkMcpClients(…, (name, message) => structuredIO.sendMcpMessage(name, message))`.
+            run.mcp.send_mcp_message = self.sio.send_mcp_message
         dispatcher = run.ctx.hook_dispatcher
         if dispatcher is not None and self.options.output_format == "stream-json" and self.options.verbose:
             # `print.ts`: hook lifecycle events reach the stream; every event only with --include-hook-events.
@@ -1605,6 +1631,8 @@ class HeadlessStreaming:
 
     async def _run(self) -> None:
         self._session_state("running")
+        if self.run_.mcp is not None:
+            await self.run_.mcp.update_sdk()
         try:
             while True:
                 self._drain_sdk_events()
@@ -1815,6 +1843,9 @@ class HeadlessStreaming:
             self.options.prompt_suggestions = bool(request["promptSuggestions"])
         if request.get("jsonSchema") and self.run_.json_schema is None:
             use_json_schema(self.run_, request["jsonSchema"])
+        if request.get("sdkMcpServers") and self.run_.mcp is not None:
+            # SDK MCP servers: placeholder configs, connected by the next run (`updateSdkMcp`).
+            self.run_.mcp.add_sdk_servers([str(name) for name in request["sdkMcpServers"]])
         if request.get("hooks"):
             self.run_.ctx.hook_dispatcher.register_hook_callbacks(self._sdk_hook_matchers(request["hooks"]))
         if request.get("agents") and self.run_.add_agent_definitions is not None:
@@ -1898,7 +1929,9 @@ class HeadlessStreaming:
         self.respond(message)
 
     async def _control_mcp_status(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
-        self.respond(message, {"mcpServers": build_mcp_server_statuses(self.run_.ctx.mcp_clients)})
+        mcp = self.run_.mcp
+        statuses = mcp.statuses() if mcp is not None else build_mcp_server_statuses(self.run_.ctx.mcp_clients)
+        self.respond(message, {"mcpServers": statuses})
 
     async def _control_get_context_usage(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         """`collectContextData` over the conversation, the main loop model and the current tool pool."""
@@ -1928,6 +1961,97 @@ class HeadlessStreaming:
             self.respond(message, result.to_json())
         else:
             self.respond_error(message, result.error or "Unexpected error")
+
+    # ── MCP ──────────────────────────────────────────────────────────────────
+
+    def _answer_reconnect(self, message: Mapping[str, Any], result: Any) -> None:
+        """`mcp_reconnect` / `mcp_toggle`'s answer: success when connected, else why not."""
+        client = result.client
+        kind = getattr(client, "type", None)
+        if kind == "connected":
+            self.respond(message)
+        elif kind == "failed":
+            self.respond_error(message, getattr(client, "error", None) or "Connection failed")
+        else:
+            self.respond_error(message, f"Server status: {kind}")
+
+    async def _control_mcp_reconnect(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        mcp = self.run_.mcp
+        name = str(request.get("serverName"))
+        config = mcp.find_config(name) if mcp is not None else None
+        if config is None:
+            self.respond_error(message, f"Server not found: {name}")
+            return
+        self._answer_reconnect(message, await mcp.reconnect(name, config))
+
+    async def _control_mcp_toggle(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        mcp = self.run_.mcp
+        name = str(request.get("serverName"))
+        config = mcp.find_config(name) if mcp is not None else None
+        if config is None:
+            self.respond_error(message, f"Server not found: {name}")
+            return
+        if not request.get("enabled"):
+            await mcp.disable(name, config)
+            self.respond(message)
+            return
+        self._answer_reconnect(message, await mcp.enable(name, config))
+
+    async def _control_mcp_set_servers(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        """`applyMcpServerChanges`; the SDK servers connect after the answer (no deadlock on the host)."""
+        mcp = self.run_.mcp
+        if mcp is None:
+            self.respond(message, {"added": [], "removed": [], "errors": {}})
+            return
+        response, sdk_changed = await mcp.set_servers(dict(request.get("servers") or {}))
+        self.respond(message, response)
+        if sdk_changed:
+            self._spawn(mcp.update_sdk())
+
+    async def _control_mcp_message(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        """A notification from an SDK server, for its client."""
+        if self.run_.mcp is not None:
+            await self.run_.mcp.deliver(str(request.get("server_name")), dict(request.get("message") or {}))
+        self.respond(message)
+
+    def _respond_outcome(self, message: Mapping[str, Any], outcome: Any) -> None:
+        from app.cli.mcp_auth_control import McpControlError
+
+        if isinstance(outcome, McpControlError):
+            self.respond_error(message, outcome.error)
+        else:
+            self.respond(message, outcome.response)
+
+    def _mcp_auth_dependencies(self) -> dict[str, Any]:
+        from app.services.mcp.config import is_mcp_server_disabled
+
+        mcp = self.run_.mcp
+        cwd = mcp.cwd if mcp is not None else "."
+        return {
+            "find_config": lambda name: mcp.find_config(name) if mcp is not None else None,
+            "reconnect": lambda name, config: _reconnect_only(name, config, cwd),
+            "apply_reconnect": lambda name, result: mcp.apply_reconnect(name, result) if mcp is not None else None,
+            "is_server_disabled": lambda name: is_mcp_server_disabled(name, cwd),
+        }
+
+    async def _control_mcp_authenticate(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        from app.cli.mcp_auth_control import handle_mcp_authenticate
+
+        self._respond_outcome(message, await handle_mcp_authenticate(
+            str(request.get("serverName")), flows=self.oauth_flows, **self._mcp_auth_dependencies()))
+
+    async def _control_mcp_oauth_callback_url(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        from app.cli.mcp_auth_control import handle_mcp_oauth_callback_url
+
+        self._respond_outcome(message, await handle_mcp_oauth_callback_url(
+            str(request.get("serverName")), str(request.get("callbackUrl")), flows=self.oauth_flows))
+
+    async def _control_mcp_clear_auth(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        from app.cli.mcp_auth_control import handle_mcp_clear_auth
+
+        dependencies = self._mcp_auth_dependencies()
+        dependencies.pop("is_server_disabled")
+        self._respond_outcome(message, await handle_mcp_clear_auth(str(request.get("serverName")), **dependencies))
 
     async def _control_cancel_async_message(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         target = request.get("message_uuid")
@@ -2069,22 +2193,78 @@ def _mcp_status(client: Any) -> str:
         kind, "pending")
 
 
-def build_mcp_server_statuses(clients: Sequence[Any]) -> list[dict[str, Any]]:
-    """`buildMcpServerStatuses`: each server's name, status, and what it serves."""
+async def _reconnect_only(name: str, config: Any, cwd: str) -> Any:
+    """`reconnectMcpServerImpl` bound to the session's cwd (the caller applies the result)."""
+    from app.services.mcp.mcp_connection_manager import reconnect_mcp_server_impl
+
+    return await reconnect_mcp_server_impl(name, config, cwd=cwd)
+
+
+def _status_config(config: Any) -> dict[str, Any] | None:
+    """`buildMcpServerStatuses`' `config`: the fields the SDK shows for each transport."""
+    kind = getattr(config, "type", None)
+    if kind in ("sse", "http"):
+        oauth = config.oauth
+        return _defined({"type": kind, "url": config.url, "headers": dict(config.headers) if config.headers else None,
+                         "oauth": _defined(vars(oauth)) if oauth is not None else None})
+    if kind == "claudeai-proxy":
+        return _defined({"type": kind, "url": config.url, "id": getattr(config, "id", None)})
+    if kind in ("stdio", None):
+        return _defined({"type": "stdio", "command": config.command, "args": list(config.args)})
+    return None
+
+
+def _defined(values: Mapping[str, Any]) -> dict[str, Any]:
+    """`JSON.stringify` drops `undefined`."""
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def _server_info(info: Any) -> dict[str, Any] | None:
+    if info is None:
+        return None
+    if hasattr(info, "model_dump"):
+        dumped = info.model_dump(by_alias=True, exclude_none=True)
+        return {key: dumped[key] for key in ("name", "version") if key in dumped}
+    return dict(info) if isinstance(info, Mapping) else None
+
+
+def build_mcp_server_statuses(clients: Sequence[Any], tools: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    """
+    `buildMcpServerStatuses`: each connection's name, status, server info, error, config, scope and
+    (connected only) tools, read from the merged MCP tool list by the server's prefix
+    (`filterToolsByServer`). The caller orders the connections and drops duplicate names.
+    """
+    from app.services.mcp.normalization import normalize_name_for_mcp
+
     statuses = []
     for client in clients:
-        status: dict[str, Any] = {"name": client.name, "status": _mcp_status(client)}
+        connected = getattr(client, "type", None) == "connected"
+        server_tools = None
+        if connected:
+            prefix = f"mcp__{normalize_name_for_mcp(client.name)}__"
+            server_tools = [
+                {"name": getattr(tool, "mcp_tool_name", None) or tool.name,
+                 "annotations": _defined({"readOnly": _hint(tool, "is_read_only"),
+                                          "destructive": _hint(tool, "is_destructive")})}
+                for tool in tools if tool.name.startswith(prefix)
+            ]
         config = getattr(client, "config", None)
-        if config is not None:
-            status["config"] = {k: v for k, v in vars(config).items() if v is not None} if hasattr(
-                config, "__dict__") else {}
-        if getattr(client, "type", None) == "failed" and getattr(client, "error", None):
-            status["error"] = client.error
-        tools = getattr(client, "tools", None)
-        if tools:
-            status["tools"] = [{"name": getattr(t, "name", str(t))} for t in tools]
-        statuses.append(status)
+        statuses.append(_defined({
+            "name": client.name,
+            "status": _mcp_status(client),
+            "serverInfo": _server_info(getattr(client, "server_info", None)) if connected else None,
+            "error": getattr(client, "error", None) if getattr(client, "type", None) == "failed" else None,
+            "config": _status_config(config) if config is not None else None,
+            "scope": getattr(config, "scope", None),
+            "tools": server_tools,
+        }))
     return statuses
+
+
+def _hint(tool: Any, method: str) -> bool | None:
+    """`tool.isReadOnly({}) || undefined`."""
+    check = getattr(tool, method, None)
+    return (bool(check({})) or None) if callable(check) else None
 
 
 async def run_rewind_files(

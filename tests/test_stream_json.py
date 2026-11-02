@@ -257,14 +257,40 @@ def test_last_message_candidates_and_final_output() -> None:
 def test_mcp_server_statuses() -> None:
     from types import SimpleNamespace
 
-    config = SimpleNamespace(type="stdio", command="x", url=None)
-    clients = [SimpleNamespace(name="a", type="connected", config=config, tools=[SimpleNamespace(name="t")]),
-               SimpleNamespace(name="b", type="failed", error="nope"),
-               SimpleNamespace(name="c", type="weird")]
-    assert build_mcp_server_statuses(clients) == [
-        {"name": "a", "status": "connected", "config": {"type": "stdio", "command": "x"}, "tools": [{"name": "t"}]},
-        {"name": "b", "status": "failed", "error": "nope"},
-        {"name": "c", "status": "pending"},
+    from mcp.types import Implementation
+
+    from app.services.mcp.types import (
+        ConnectedMCPServer,
+        DisabledMCPServer,
+        FailedMCPServer,
+        McpOAuthConfig,
+        McpServerConfig,
+    )
+
+    stdio = McpServerConfig(type="stdio", scope="project", command="x", args=("-v",))
+    http = McpServerConfig(type="http", scope="user", url="https://h", headers={"A": "1"},
+                           oauth=McpOAuthConfig(client_id="c"))
+    clients = [
+        ConnectedMCPServer(name="my srv", config=stdio, session=None, capabilities=None,
+                           server_info=Implementation(name="srv", version="2")),
+        FailedMCPServer(name="b", config=http, error="nope"),
+        DisabledMCPServer(name="c", config=McpServerConfig(type="ws", scope="local", url="ws://w")),
+        SimpleNamespace(name="d", type="weird", config=McpServerConfig(type=None, scope="dynamic", command="y")),
+    ]
+    tools = [SimpleNamespace(name="mcp__my_srv__raw", mcp_tool_name="read", is_read_only=lambda _: True,
+                             is_destructive=lambda _: False),
+             SimpleNamespace(name="mcp__my_srv__w", is_destructive=lambda _: True),
+             SimpleNamespace(name="mcp__b__t")]
+    assert build_mcp_server_statuses(clients, tools) == [
+        {"name": "my srv", "status": "connected", "serverInfo": {"name": "srv", "version": "2"},
+         "config": {"type": "stdio", "command": "x", "args": ["-v"]}, "scope": "project",
+         "tools": [{"name": "read", "annotations": {"readOnly": True}},
+                   {"name": "mcp__my_srv__w", "annotations": {"destructive": True}}]},
+        {"name": "b", "status": "failed", "error": "nope", "scope": "user",
+         "config": {"type": "http", "url": "https://h", "headers": {"A": "1"}, "oauth": {"client_id": "c"}}},
+        {"name": "c", "status": "disabled", "scope": "local"},
+        {"name": "d", "status": "pending", "config": {"type": "stdio", "command": "y", "args": []},
+         "scope": "dynamic"},
     ]
 
 
