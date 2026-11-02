@@ -233,6 +233,71 @@ def session_workspace(thread_id: str) -> LocalWorkspace:
     return LocalWorkspace.for_run(thread_id, env=python.write_env_file(workspace.run_dir / "session-env.sh"))
 
 
+class NoConversationFound(LookupError):
+    """`No conversation found ...`: `--continue` or `--resume` named nothing to load."""
+
+
+def thread_transcript(thread_id: str) -> Path:
+    """The thread's transcript path (its project resolved, a fork's link followed), creating nothing."""
+    from app.workspace.local import PROJECT_DIRNAME, workspaces_root
+
+    project = (workspaces_root() / thread_id / PROJECT_DIRNAME).expanduser().resolve()
+    return TranscriptStore(session_run_id(thread_id), str(project)).path
+
+
+def most_recent_thread() -> str | None:
+    """
+    `--continue` (user decision 2026-11-01): the thread whose transcript changed last, across every
+    session, since a session's project is its own folder rather than the current directory.
+    """
+    from app.workspace.local import workspaces_root
+
+    root = workspaces_root()
+    if not root.is_dir():
+        return None
+    latest: tuple[float, str] | None = None
+    for thread_dir in root.iterdir():
+        if not (thread_dir / "project").exists():
+            continue
+        transcript = thread_transcript(thread_dir.name)
+        if transcript.exists():
+            stamp = (transcript.stat().st_mtime, thread_dir.name)
+            latest = stamp if latest is None or stamp > latest else latest
+    return latest[1] if latest is not None else None
+
+
+def fork_thread(source: str, target: str, plans_dir: Path | None = None) -> None:
+    """
+    `--fork-session`, as upstream (user decision 2026-11-01): a new thread over the SAME project
+    folder (its `project` is a link to the source's), with the conversation re-recorded under the
+    new id, the TDD plan sidecar copied, and the plan file copied under a new slug (`copyPlanForFork`).
+    """
+    from app.utils.plans import PLAN_SLUG_FILE_NAME, copy_plan_for_fork, get_plans_directory
+    from app.utils.session_storage import fork_session_transcript
+    from app.utils.session_storage_portable import get_project_dir
+    from app.workspace.local import workspaces_root
+
+    source_transcript = thread_transcript(source)
+    if not source_transcript.exists():
+        raise NoConversationFound(f"No conversation found with session ID: {source}")
+    project = LocalWorkspace.for_run(source).root
+    target_dir = workspaces_root() / target
+    target_dir.mkdir(parents=True, exist_ok=True)
+    link = target_dir / "project"
+    if not link.exists():
+        link.symlink_to(project, target_is_directory=True)
+    old_run, new_run = session_run_id(source), session_run_id(target)
+    fork_session_transcript(source_transcript, TranscriptStore(new_run, str(project)).path, new_run)
+    sessions = get_project_dir(str(project))
+    old_plan, new_plan = plan_path(old_run, str(project)), plan_path(new_run, str(project))
+    if old_plan.exists():
+        new_plan.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(old_plan, new_plan)
+    if (sessions / old_run / PLAN_SLUG_FILE_NAME).exists():
+        directory = plans_dir if plans_dir is not None else get_plans_directory({}, project, config_home())
+        copy_plan_for_fork(sessions / old_run, sessions / new_run, directory)
+
+
 def project_root_of(workspace: Any, project_root: Path | str | None = None) -> Path:
     """
     The project folder settings, skills, agents, MCP servers and hooks are read from: upstream's
@@ -1854,7 +1919,11 @@ __all__ = [
     "join_prompt_commands",
     "parse_task_notification",
     "prompt_from_content",
+    "NoConversationFound",
+    "fork_thread",
+    "most_recent_thread",
     "run_headless",
+    "thread_transcript",
     "use_json_schema",
     "restore_resumed_state",
     "run_permission_context",

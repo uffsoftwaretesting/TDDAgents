@@ -130,7 +130,31 @@ def session_plan_target(context: Any, raw_path: str) -> str | None:
     return normalized if plans.is_session_plan_file(normalized) else None
 
 
+def copy_plan_for_fork(source_session_dir: str | Path, target_session_dir: str | Path, plans_dir: str | Path,
+                       generate: Callable[[], str] = generate_word_slug) -> bool:
+    """
+    `copyPlanForFork`: the fork gets a new slug (never the original's) and a copy of the plan file.
+    `False` when the source has no slug or no plan file.
+    """
+    import shutil
+
+    try:
+        slug = (Path(source_session_dir) / PLAN_SLUG_FILE_NAME).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return False
+    original = Path(plans_dir) / f"{slug}.md"
+    if not slug or not original.exists():
+        return False
+    new_slug = new_plan_slug(Path(plans_dir), generate)
+    sidecar = Path(target_session_dir) / PLAN_SLUG_FILE_NAME
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(new_slug, encoding="utf-8")
+    shutil.copyfile(original, Path(plans_dir) / f"{new_slug}.md")
+    return True
+
+
 __all__ = [
+    "copy_plan_for_fork",
     "MAX_SLUG_RETRIES",
     "PLAN_SLUG_FILE_NAME",
     "SessionPlans",

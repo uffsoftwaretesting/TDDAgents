@@ -84,21 +84,29 @@ class LocalWorkspace:
 
     kind: WorkspaceKind = "local"
 
-    def __init__(self, root: str | os.PathLike[str], env: dict[str, str] | None = None) -> None:
+    def __init__(
+        self, root: str | os.PathLike[str], env: dict[str, str] | None = None,
+        run_dir: str | os.PathLike[str] | None = None,
+    ) -> None:
         self._root = Path(root).expanduser().resolve()
         self._root.mkdir(parents=True, exist_ok=True)
         # Merged into every command, under the per-call `env`: e.g. the session venv's PATH.
         self._env: dict[str, str] = dict(env or {})
+        self._run_dir = Path(run_dir) if run_dir is not None else None
 
     @property
     def run_dir(self) -> Path:
-        """The session's directory: it holds this project and, beside it, the reports."""
-        return self._root.parent
+        """
+        The session's directory: it holds this project and, beside it, the reports. A forked
+        session's project is its source's (`--fork-session`), so its directory is given, not derived.
+        """
+        return self._run_dir if self._run_dir is not None else self._root.parent
 
     @classmethod
     def for_run(cls, thread_id: str, env: dict[str, str] | None = None) -> LocalWorkspace:
-        """A session's project: `<workspaces_root()>/<thread_id>/project`."""
-        return cls(workspaces_root() / thread_id / PROJECT_DIRNAME, env=env)
+        """A session's project: `<workspaces_root()>/<thread_id>/project` (a link, for a fork)."""
+        run_dir = workspaces_root() / thread_id
+        return cls(run_dir / PROJECT_DIRNAME, env=env, run_dir=run_dir)
 
     @property
     def root(self) -> Path:

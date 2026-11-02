@@ -163,6 +163,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--spec", default=None, help="Read the initial request from this file.")
     parser.add_argument("--fresh", action="store_true", help="Forces a new run by generating a random thread_id.")
     parser.add_argument("--thread-id", default=None, help="Explicitly sets the thread_id (continues that session).")
+    # `main.tsx`'s session flags: the thread id is the session id (user decision 2026-11-01).
+    parser.add_argument("-c", "--continue", dest="continue_session", action="store_true",
+                        help="Continue the most recent conversation")
+    parser.add_argument("-r", "--resume", nargs="?", const=True, default=None,
+                        help="Resume a conversation by session ID, or open interactive picker with optional "
+                             "search term")
+    parser.add_argument("--fork-session", action="store_true",
+                        help="When resuming, create a new session ID instead of reusing the original "
+                             "(use with --resume or --continue)")
+    parser.add_argument("--session-id", default=None,
+                        help="Use a specific session ID for the conversation (must be a valid UUID)")
     parser.add_argument("--permission-mode", choices=[str(m) for m in PERMISSION_MODES], default=None)
     parser.add_argument("--settings", default=None, help="A settings file (upstream's flag settings).")
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
@@ -265,6 +276,107 @@ def headless_options(args: argparse.Namespace) -> HeadlessOptions:
         max_budget_usd=args.max_budget_usd,
         json_schema=args.json_schema,
     )
+
+
+class SessionFlagError(ValueError):
+    """A session flag `main.tsx` refuses, with its message."""
+
+
+def recent_threads(term: str | None = None) -> list[str]:
+    """The sessions, most recently active first, whose id or first request contains `term`."""
+    from app.cli.print import thread_transcript
+    from app.workspace.local import workspaces_root
+
+    root = workspaces_root()
+    found: list[tuple[float, str]] = []
+    for thread_dir in (root.iterdir() if root.is_dir() else ()):
+        if not (thread_dir / "project").exists():
+            continue
+        transcript = thread_transcript(thread_dir.name)
+        if not transcript.exists():
+            continue
+        if term and term.lower() not in (thread_dir.name + " " + first_request(thread_dir.name)).lower():
+            continue
+        found.append((transcript.stat().st_mtime, thread_dir.name))
+    return [thread for _, thread in sorted(found, reverse=True)]
+
+
+def first_request(thread_id: str) -> str:
+    """The session's initial request, as its reports recorded it ('' when there is none)."""
+    from app.workspace.local import workspaces_root
+
+    path = workspaces_root() / thread_id / "metrics_and_logging" / "initial_user_prompt.txt"
+    try:
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines()[2:] if line and set(line) != {"="}]
+    except OSError:
+        return ""
+    return " ".join(lines)
+
+
+def pick_thread(term: str | None) -> str | None:
+    """The interactive `--resume` picker: a numbered list of the sessions; `None` when cancelled."""
+    threads = recent_threads(term)
+    if not threads:
+        print("No conversations found to resume.")
+        return None
+    for i, thread in enumerate(threads, start=1):
+        request = first_request(thread)
+        print(f"{i}. {thread}  {request[:70]}")
+    while True:
+        try:
+            choice = input("Select a conversation to resume (empty to cancel): ").strip()
+        except (KeyboardInterrupt, EOFError):
+            return None
+        if not choice:
+            return None
+        if choice.isdigit() and 1 <= int(choice) <= len(threads):
+            return threads[int(choice) - 1]
+        print("❌ Invalid option. Try again.")
+
+
+def resolve_session_flags(args: argparse.Namespace) -> str | None:
+    """
+    `main.tsx` / `print.ts`'s `--continue`, `--resume`, `--session-id` and `--fork-session`: the
+    thread to run (a fork's new one), or `None` when the flags name none. `SessionFlagError` carries
+    upstream's message.
+    """
+    import uuid as uuid_module
+
+    from app.cli.print import fork_thread, most_recent_thread, thread_transcript
+
+    if args.session_id is not None:
+        if (args.continue_session or args.resume) and not args.fork_session:
+            raise SessionFlagError("Error: --session-id can only be used with --continue or --resume if "
+                                   "--fork-session is also specified.")
+        try:
+            uuid_module.UUID(str(args.session_id))
+        except ValueError:
+            raise SessionFlagError("Error: Invalid session ID. Must be a valid UUID.") from None
+        if thread_transcript(str(args.session_id)).exists():
+            raise SessionFlagError(f"Error: Session ID {args.session_id} is already in use.")
+    source: str | None = None
+    if args.continue_session:
+        source = most_recent_thread()
+        if source is None:
+            raise SessionFlagError("No conversation found to continue")
+    elif isinstance(args.resume, str):
+        if thread_transcript(args.resume).exists():
+            source = args.resume
+        elif args.print:
+            raise SessionFlagError(f"No conversation found with session ID: {args.resume}")
+        else:
+            source = pick_thread(args.resume)
+    elif args.resume is True:
+        if args.print:
+            raise SessionFlagError("Error: --resume requires a session ID when used with --print")
+        source = pick_thread(None)
+    if source is None:
+        return str(args.session_id) if args.session_id is not None else None
+    if args.fork_session:
+        target = str(args.session_id) if args.session_id is not None else fresh_thread_id()
+        fork_thread(source, target)
+        return target
+    return source
 
 
 def resolve_thread_id(args: argparse.Namespace, initial_input: str | None) -> str:
@@ -547,6 +659,15 @@ def main(argv: list[str] | None = None) -> int:
 def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
     """The session `main` opens, its reports, and the exit code."""
     stream_input = args.print and args.input_format == "stream-json"
+    try:
+        session_thread = resolve_session_flags(args)
+    except SessionFlagError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    if (args.continue_session or args.resume) and session_thread is None:
+        return 0
+    if session_thread is not None:
+        args.thread_id = session_thread
     initial_input = read_initial_request(args)
     if args.rewind_files and args.print:
         return rewind_files(args, initial_input, write_stdout)

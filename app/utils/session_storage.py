@@ -685,7 +685,26 @@ def get_agent_transcript(path: str | Path, agent_id: str | None = None) -> list[
     return _to_messages(e for e in build_conversation_chain(messages, leaf) if e.get("agentId") == owner)
 
 
+def fork_session_transcript(source: Path, target: Path, session_id: str) -> None:
+    """
+    `--fork-session`: the source session's transcript as the new session's, each entry re-stamped
+    with the new `sessionId` (upstream records the loaded messages again under the new id).
+    """
+    import json
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(source, encoding="utf-8") as reader, open(target, "w", encoding="utf-8") as writer:
+        for line in reader:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            if isinstance(entry, dict) and "sessionId" in entry:
+                entry["sessionId"] = session_id
+            writer.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 __all__ = [
+    "fork_session_transcript",
     "FILE_HISTORY_SNAPSHOT_TYPE",
     "SAVE_HOOK_ADDITIONAL_CONTEXT_ENV",
     "SKIP_PROMPT_HISTORY_ENV",

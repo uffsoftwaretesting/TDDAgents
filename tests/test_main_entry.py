@@ -378,6 +378,11 @@ def test_parser_help_and_metadata() -> None:
         "permission_prompt_tool": argparse.SUPPRESS,
         "max_turns": argparse.SUPPRESS,
         "max_budget_usd": argparse.SUPPRESS,
+        "continue_session": "Continue the most recent conversation",
+        "resume": "Resume a conversation by session ID, or open interactive picker with optional search term",
+        "fork_session": "When resuming, create a new session ID instead of reusing the original "
+                        "(use with --resume or --continue)",
+        "session_id": "Use a specific session ID for the conversation (must be a valid UUID)",
         "thinking": argparse.SUPPRESS,
         "max_thinking_tokens": argparse.SUPPRESS,
         "json_schema": 'JSON Schema for structured output validation. Example: '
