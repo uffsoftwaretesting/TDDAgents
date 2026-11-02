@@ -1258,6 +1258,12 @@ class HeadlessStreaming:
             run.recorder.on_entry = self._on_tdd_entry
         if self.options.include_partial_messages:
             run.ctx.on_stream_chunk = self._on_stream_chunk
+        dispatcher = run.ctx.hook_dispatcher
+        if dispatcher is not None and self.options.output_format == "stream-json" and self.options.verbose:
+            # `print.ts`: hook lifecycle events reach the stream; every event only with --include-hook-events.
+            dispatcher.events.all_hook_events_enabled = self.options.include_hook_events
+            dispatcher.events.register_handler(self._on_hook_event)
+            self._unsubscribe.append(lambda: dispatcher.events.register_handler(None))
 
         async def orphan(message: dict[str, Any]) -> None:
             logger.debug("Ignoring a control_response for an unknown request: %s", message)
@@ -1292,6 +1298,16 @@ class HeadlessStreaming:
                 "items": [{"id": item.id, "text": item.text, "status": str(item.status)} for item in plan.items],
                 "current": current.id if current is not None else None,
             }, self.session_id))
+
+    def _on_hook_event(self, event: Mapping[str, Any]) -> None:
+        """`registerHookEventHandler`'s mapping onto `system/hook_started` and `system/hook_response`."""
+        common = {"hook_id": event["hookId"], "hook_name": event["hookName"], "hook_event": event["hookEvent"]}
+        if event["type"] == "started":
+            self.output.enqueue(self._system("hook_started", **common))
+        else:
+            self.output.enqueue(self._system(
+                "hook_response", **common, output=event["output"], stdout=event["stdout"], stderr=event["stderr"],
+                exit_code=event["exitCode"], outcome=event["outcome"]))
 
     def _on_tdd_entry(self, entry: Any) -> None:
         """A recorded loop transition (`events.jsonl`) as `tdd_transition`."""

@@ -2,6 +2,12 @@
 The hook event vocabulary and each event's match query.
 
 Ported from:
+- `reference/claude-code/src/utils/hooks/hookEvents.ts` -> `ALWAYS_EMITTED_HOOK_EVENTS`,
+  `MAX_PENDING_EVENTS`, the started / response events and their emitter
+  (`registerHookEventHandler`, `emitHookStarted`, `emitHookResponse`, `setAllHookEventsEnabled`),
+  here per run (`HookEventEmitter`, on the run's hook dispatcher) rather than per process. The
+  periodic `progress` event (`startHookProgressInterval`) is not ported: a command hook's output is
+  read when it exits.
 - `reference/claude-code/src/entrypoints/sdk/coreTypes.ts` -> `HOOK_EVENTS` (27 events)
 - `reference/claude-code/src/utils/hooks.ts` -> `getMatchingHooks` (the `matchQuery` switch),
   `TOOL_HOOK_EXECUTION_TIMEOUT_MS`, `SESSION_END_HOOK_TIMEOUT_MS_DEFAULT`
@@ -115,7 +121,58 @@ def match_query_for(hook_input: Mapping[str, Any]) -> str | None:
     return None if value is None else str(value)
 
 
+#: `ALWAYS_EMITTED_HOOK_EVENTS`: emitted even without `--include-hook-events`.
+ALWAYS_EMITTED_HOOK_EVENTS = ("SessionStart", "Setup")
+#: `MAX_PENDING_EVENTS`: what is kept for a handler not registered yet.
+MAX_PENDING_EVENTS = 100
+
+
+class HookEventEmitter:
+    """`hookEvents.ts`' module state, for one run: the handler, the pending events and the switch."""
+
+    def __init__(self) -> None:
+        self.handler: Any = None
+        self.pending: list[dict[str, Any]] = []
+        self.all_hook_events_enabled = False
+
+    def register_handler(self, handler: Any) -> None:
+        """`registerHookEventHandler`: the events waiting so far go to it first."""
+        self.handler = handler
+        if handler is not None and self.pending:
+            pending, self.pending = self.pending, []
+            for event in pending:
+                handler(event)
+
+    def should_emit(self, hook_event: str) -> bool:
+        """`shouldEmit`."""
+        return hook_event in ALWAYS_EMITTED_HOOK_EVENTS or (self.all_hook_events_enabled and is_hook_event(hook_event))
+
+    def _emit(self, event: dict[str, Any]) -> None:
+        if self.handler is not None:
+            self.handler(event)
+            return
+        self.pending.append(event)
+        if len(self.pending) > MAX_PENDING_EVENTS:
+            self.pending.pop(0)
+
+    def emit_started(self, hook_id: str, hook_name: str, hook_event: str) -> None:
+        """`emitHookStarted`."""
+        if self.should_emit(hook_event):
+            self._emit({"type": "started", "hookId": hook_id, "hookName": hook_name, "hookEvent": hook_event})
+
+    def emit_response(self, *, hook_id: str, hook_name: str, hook_event: str, output: str, stdout: str,
+                      stderr: str, exit_code: int | None, outcome: str) -> None:
+        """`emitHookResponse`: `outcome` is `success`, `error` or `cancelled`."""
+        if self.should_emit(hook_event):
+            self._emit({"type": "response", "hookId": hook_id, "hookName": hook_name, "hookEvent": hook_event,
+                        "output": output, "stdout": stdout, "stderr": stderr, "exitCode": exit_code,
+                        "outcome": outcome})
+
+
 __all__ = [
+    "ALWAYS_EMITTED_HOOK_EVENTS",
+    "MAX_PENDING_EVENTS",
+    "HookEventEmitter",
     "HOOK_EVENTS",
     "SESSION_END_HOOK_TIMEOUT_MS_DEFAULT",
     "TOOL_EVENTS",

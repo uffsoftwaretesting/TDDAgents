@@ -118,6 +118,7 @@ from app.types.hooks import (
 )
 from app.utils.hooks.async_hook_registry import AsyncHookRegistry
 from app.utils.hooks.hook_events import (
+    HookEventEmitter,
     SESSION_END_HOOK_TIMEOUT_MS_DEFAULT,
     TOOL_EVENTS,
     TOOL_HOOK_EXECUTION_TIMEOUT_MS,
@@ -178,6 +179,8 @@ class HookDispatcher:
     session_matchers: dict[str, list[HookMatcher]] = field(default_factory=dict)
     #: `registerHookCallbacks` (`bootstrap/state.ts`): an SDK host's callback hooks, by event.
     registered_matchers: dict[str, list[HookMatcher]] = field(default_factory=dict)
+    #: `hookEvents.ts`: the run's hook lifecycle events (`hook_started` / `hook_response`).
+    events: HookEventEmitter = field(default_factory=HookEventEmitter)
     #: Hook work started fire-and-forget (upstream's `void executeStopFailureHooks(...)`),
     #: kept so it is not garbage-collected and can be drained before the run ends.
     background: set[asyncio.Future[Any]] = field(default_factory=set)
@@ -366,8 +369,10 @@ class HookDispatcher:
                     hook, hook_name, hook_event, json_input, signal, tool_context, tool_use_id, messages, agent_type
                 )
                 return _with_timing(result, command_text, elapsed())
-            if isinstance(hook, HttpHook):
-                return await self._run_http(hook, hook_event, hook_name, json_input, tool_use_id, signal)
+            if isinstance(hook, (HttpHook, CommandHook)):
+                return await self._run_reported(
+                    hook, index, hook_event, hook_name, json_input, tool_use_id, signal, timeout_ms, force_sync,
+                    started, request_prompt)
             if isinstance(hook, CallbackHook):
                 return await self._run_callback(hook, hook_event, json_input, tool_use_id, signal, timeout_ms)
             if isinstance(hook, FunctionHook):
@@ -379,6 +384,32 @@ class HookDispatcher:
             )
         except Exception as exc:  # noqa: BLE001 - upstream turns any failure into a non-blocking error
             return non_blocking(f"Failed to run: {exc}")
+
+    async def _run_reported(
+        self, hook: HttpHook | CommandHook, index: int, hook_event: str, hook_name: str, json_input: str,
+        tool_use_id: str, signal: Any, timeout_ms: int, force_sync: bool, started: float,
+        request_prompt: Callable[[PromptRequest], Awaitable[PromptResponse]] | None,
+    ) -> HookResult:
+        """A command or HTTP hook between `emitHookStarted` and `emitHookResponse`."""
+        hook_id = str(uuid.uuid4())
+        self.events.emit_started(hook_id, hook_name, hook_event)
+        if isinstance(hook, HttpHook):
+            result = await self._run_http(hook, hook_event, hook_name, json_input, tool_use_id, signal)
+        else:
+            result = await self._run_command(
+                hook, index, hook_event, hook_name, json_input, tool_use_id, signal, timeout_ms, force_sync, started,
+                request_prompt,
+            )
+        attachment = result.attachment
+        stdout = (attachment.stdout if attachment is not None else None) or ""
+        stderr = (attachment.stderr if attachment is not None else None) or ""
+        if result.blocking_error is not None and not stderr:
+            stderr = result.blocking_error.blocking_error
+        outcome = {"cancelled": "cancelled", "success": "success"}.get(result.outcome, "error")
+        self.events.emit_response(
+            hook_id=hook_id, hook_name=hook_name, hook_event=hook_event, output=stdout + stderr, stdout=stdout,
+            stderr=stderr, exit_code=attachment.exit_code if attachment is not None else None, outcome=outcome)
+        return result
 
     async def _run_callback(
         self, hook: CallbackHook, hook_event: str, json_input: str, tool_use_id: str, signal: Any, timeout_ms: int,
