@@ -669,7 +669,10 @@ class Repl:
         ctx = run.ctx
         model = parse_user_specified_model(run.user_specified_model) if run.user_specified_model else run.config.model
         tools = ctx.refresh_tools() if ctx.refresh_tools is not None else ctx.tools
-        definitions = get_agent_definitions_with_overrides(project_dir=project_root_of(ctx.workspace))
+        # The run's list: the plugin agents and the `--agents` / `initialize.agents` ones included.
+        listed = getattr(run, "get_agent_definitions", None)
+        definitions = listed() if listed is not None else get_agent_definitions_with_overrides(
+            project_dir=project_root_of(ctx.workspace))
         from app.services.token_estimation import api_token_counter
 
         data = await collect_context_data(
@@ -693,17 +696,24 @@ class Repl:
         Start the conversation with `request`, or resume it (with `prompt`, the user's next message),
         and read the user's lines until they leave. A resumed session with nothing to say waits.
         """
+        from app.hooks.notifs.use_plugin_autoupdate_notification import use_plugin_autoupdate_notification
+
         in_plan = self.run.store.get().tool_permission_context.mode == PermissionMode.PLAN
         header = PLAN_MODE_ON if in_plan else f"TDD plan:\n{render_plan(self.plan)}"
         self.io.write(f"{header}\n\n{HELP_TEXT}")
-        self._start(start_session(self.run, request, prompt))
-        while not self.exiting:
-            line = await self.io.read_line(PROMPT)
-            if line is None:
-                break
-            await self.handle_line(line)
-        await self._stop_turn()
-        for task in list(self._dialog_tasks):
-            task.cancel()
-        await asyncio.gather(*self._dialog_tasks, return_exceptions=True)
+        # `usePluginAutoupdateNotification`: registered while the REPL runs.
+        unsubscribe = use_plugin_autoupdate_notification(self.io.write)
+        try:
+            self._start(start_session(self.run, request, prompt))
+            while not self.exiting:
+                line = await self.io.read_line(PROMPT)
+                if line is None:
+                    break
+                await self.handle_line(line)
+            await self._stop_turn()
+            for task in list(self._dialog_tasks):
+                task.cancel()
+            await asyncio.gather(*self._dialog_tasks, return_exceptions=True)
+        finally:
+            unsubscribe()
         return self.last_terminal

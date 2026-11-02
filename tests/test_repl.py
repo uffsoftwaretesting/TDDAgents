@@ -426,7 +426,12 @@ def test_context_reports_the_sessions_context_usage(python_workspace, tmp_path, 
     model = Model([[AIMessage(content="planned the calculator")]])
 
     async def script(repl: Repl, io: FakeIO) -> None:
+        from app.tools.agent_tool.load_agents_dir import parse_agents_from_json
+
         await until(lambda: not repl.busy and repl.last_terminal is not None)
+        # An agent only the run knows (`--agents`): /context counts the Agent tool's list.
+        repl.run.extra_agents.update(parse_agents_from_json(
+            {"flag-reviewer": {"description": "Reviews diffs", "prompt": "Review the diff."}}))
         io.lines.put_nowait("/context")
         await until(lambda: any(line.startswith("## Context Usage\n") for line in io.out))
         io.lines.put_nowait("/exit")
@@ -437,6 +442,24 @@ def test_context_reports_the_sessions_context_usage(python_workspace, tmp_path, 
     for row in ("| System prompt |", "| System tools |", "| Messages |", "| Free space |", "| Autocompact buffer |",
                 "### Skills\n"):
         assert row in report
+    assert "| flag-reviewer | Flag |" in report
+
+
+def test_a_plugin_autoupdate_is_announced_while_the_repl_runs(python_workspace, tmp_path):
+    import app.utils.plugins.plugin_autoupdate as autoupdate
+
+    autoupdate._reset_for_tests()
+    model = Model([[AIMessage(content="ok")]])
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: not repl.busy and repl.last_terminal is not None)
+        assert autoupdate._plugin_update_callback is not None
+        autoupdate._plugin_update_callback(["lint@team"])
+        io.lines.put_nowait("/exit")
+
+    _, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    assert "Plugin updated: lint · Run /reload-plugins to apply" in io.out
+    assert autoupdate._plugin_update_callback is None
 
 
 def test_resume_unpauses_and_continues(python_workspace, tmp_path):
