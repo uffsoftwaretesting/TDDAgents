@@ -150,6 +150,7 @@ def main_thread_tools(
     skill_registry: Any = None,
     mcp_tools: Sequence[Tool] = (),
     coordinator_filter: bool = True,
+    extra_agents: Mapping[str, Any] | None = None,
 ) -> list[Tool]:
     """
     The main thread's roster: the built-ins plus the Agent tool, as upstream's main thread
@@ -189,6 +190,8 @@ def main_thread_tools(
     built_ins = build_builtin_tools()
     coordinator = is_coordinator_mode(config)
     definitions = get_agent_definitions_with_overrides(project_dir=project_root, user_home=home)
+    # `--agents` / `initialize.agents` (`flagSettings`) override the user's and the project's.
+    definitions.update(extra_agents or {})
     if skill_registry is not None:
         from app.tools.skill_tool.skill_tool import build_skill_tool
 
@@ -403,6 +406,9 @@ class DevelopmentRun:
     json_schema: dict[str, Any] | None = None
     #: The pool's post-filter additions (`StructuredOutput`); `refresh_tools` appends them.
     session_tools: list[Any] = field(default_factory=list)
+    #: The session's `flagSettings` agents (`--agents`, `initialize.agents`), and how to add more.
+    extra_agents: dict[str, Any] = field(default_factory=dict)
+    add_agent_definitions: Callable[[Mapping[str, Any]], None] | None = None
 
 
 def session_run_id(session_id: Any) -> str:
@@ -435,6 +441,7 @@ async def open_session_run(
     interactive: bool | None = None,
     thinking: str | None = None,
     max_thinking_tokens: int | None = None,
+    agents: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -484,14 +491,23 @@ async def open_session_run(
     mcp = await connect_mcp_servers(root_dir, run_settings_locations(config, root_dir, home, managed_dir))
     try:
         coordinator = is_coordinator_mode(config)
-        built_ins = main_thread_tools(
-            config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools
-        )
-        planning_tools = (
-            main_thread_tools(config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools,
-                              coordinator_filter=False)
-            if coordinator else built_ins
-        )
+        #: `--agents` / SDK `initialize.agents`: the session's `flagSettings` agents.
+        extra_agents: dict[str, Any] = dict(agents or {})
+        built_ins: list[Tool] = []
+        planning_tools: list[Tool] = []
+
+        def build_rosters() -> None:
+            nonlocal built_ins, planning_tools
+            built_ins = main_thread_tools(
+                config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools,
+                extra_agents=extra_agents)
+            planning_tools = (
+                main_thread_tools(config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp.tools,
+                                  coordinator_filter=False, extra_agents=extra_agents)
+                if coordinator else built_ins
+            )
+
+        build_rosters()
         # `mergeAndFilterTools`: the coordinator filter runs over the merged pool, MCP included.
         main_mcp = apply_coordinator_tool_filter(mcp.tools) if coordinator else list(mcp.tools)
         pool_cache: dict[str, Any] = {"key": None, "tools": ()}
@@ -590,7 +606,16 @@ async def open_session_run(
         run_deps = replace(deps, emit_event=_both(recorder, deps.emit_event))
         engine = QueryEngine(config, run_deps, transcript=transcript, session_id=run_id,
                              cost_tracker=ctx.cost_tracker, context=ctx)
+
+        def add_agent_definitions(new: Mapping[str, Any]) -> None:
+            """`initialize.agents`: merged into the rosters, the Agent tool rebuilt with them."""
+            extra_agents.update(new)
+            build_rosters()
+            pool_cache["key"] = None
+            ctx.tools = refresh_tools()
+
         run = DevelopmentRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine,
+                             add_agent_definitions=add_agent_definitions, extra_agents=extra_agents,
                              session_tools=session_tools,
                              transcript=transcript, deps=run_deps, messages=engine.mutable_messages,
                              recorder=recorder)
@@ -1567,7 +1592,9 @@ class HeadlessStreaming:
     def agent_definitions(self) -> dict[str, Any]:
         from app.tools.agent_tool.load_agents_dir import get_agent_definitions_with_overrides
 
-        return get_agent_definitions_with_overrides(project_root_of(self.run_.ctx.workspace))
+        definitions = get_agent_definitions_with_overrides(project_root_of(self.run_.ctx.workspace))
+        definitions.update(self.run_.extra_agents)
+        return definitions
 
     # ── control requests ─────────────────────────────────────────────────────
 
@@ -1632,12 +1659,16 @@ class HeadlessStreaming:
             use_json_schema(self.run_, request["jsonSchema"])
         if request.get("hooks"):
             self.run_.ctx.hook_dispatcher.register_hook_callbacks(self._sdk_hook_matchers(request["hooks"]))
+        if request.get("agents") and self.run_.add_agent_definitions is not None:
+            from app.tools.agent_tool.load_agents_dir import parse_agents_from_json
+
+            self.run_.add_agent_definitions(parse_agents_from_json(request["agents"]))
         agents = self.agent_definitions()
         commands = [c for c in get_commands(self.run_.ctx.skill_registry) if not c.is_hidden]
         self.respond(message, {
             "commands": [{"name": c.user_facing_name(), "description": format_description_with_source(c),
                           "argumentHint": ""} for c in commands],
-            "agents": [{"name": name, "description": getattr(a, "when_to_use", ""),
+            "agents": [{"name": name, "description": a.description,
                         **({"model": a.model} if getattr(a, "model", None) not in (None, "inherit") else {})}
                        for name, a in agents.items()],
             "output_style": DEFAULT_OUTPUT_STYLE,

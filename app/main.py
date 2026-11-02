@@ -200,6 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--thinking", choices=("enabled", "adaptive", "disabled"), default=None,
                         help=argparse.SUPPRESS)
     parser.add_argument("--max-thinking-tokens", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--agents", type=agents_flag, default=None,
+                        help='JSON object defining custom agents (e.g. \'{"reviewer": {"description": '
+                             '"Reviews code", "prompt": "You are a code reviewer"}}\')')
     parser.add_argument("--json-schema", type=json_schema_flag, default=None,
                         help='JSON Schema for structured output validation. Example: '
                              '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}')
@@ -237,6 +240,19 @@ def json_schema_flag(value: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise argparse.ArgumentTypeError("--json-schema must be a JSON object")
     return parsed
+
+
+def agents_flag(value: str) -> dict[str, Any]:
+    """`--agents`: the JSON object of agents, parsed (`parseAgentsFromJson`, source `flagSettings`)."""
+    import json
+
+    from app.tools.agent_tool.load_agents_dir import parse_agents_from_json
+
+    try:
+        parsed = json.loads(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"--agents is not valid JSON: {error}") from error
+    return dict(parse_agents_from_json(parsed))
 
 
 #: `--output-format`'s choices.
@@ -400,6 +416,7 @@ def session_options(args: argparse.Namespace) -> SessionOptions:
         append_system_prompt=system_prompt_flag(args.append_system_prompt, args.append_system_prompt_file),
         thinking=args.thinking,
         max_thinking_tokens=args.max_thinking_tokens,
+        agents=args.agents,
     )
 
 

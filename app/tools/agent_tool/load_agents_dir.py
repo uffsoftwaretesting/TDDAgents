@@ -364,6 +364,51 @@ def _scan_agent_dir(
     return agents
 
 
+#: `AgentJsonSchema`'s keys, as the Markdown frontmatter names them (`--agents` / SDK `initialize.agents`).
+AGENT_JSON_KEYS: tuple[str, ...] = (
+    "tools", "disallowedTools", "model", "effort", "permissionMode", "mcpServers", "hooks", "maxTurns", "skills",
+    "initialPrompt", "memory", "background", "isolation",
+)
+
+
+def parse_agent_from_json(
+    name: str, definition: Any, source: str = "flagSettings"
+) -> AgentDefinition | None:
+    """
+    `parseAgentFromJson`: one JSON-defined agent, through the same frontmatter rules as a Markdown
+    agent; `None` (logged) when `description` or `prompt` is missing or empty, or a value is invalid.
+    """
+    import yaml
+
+    if not isinstance(definition, Mapping):
+        logger.warning("Agent %s: expected an object", name)
+        return None
+    description, prompt = definition.get("description"), definition.get("prompt")
+    if not isinstance(description, str) or not description:
+        logger.warning("Agent %s: Description cannot be empty", name)
+        return None
+    if not isinstance(prompt, str) or not prompt:
+        logger.warning("Agent %s: Prompt cannot be empty", name)
+        return None
+    frontmatter: dict[str, Any] = {"name": name, "description": description}
+    frontmatter.update({key: definition[key] for key in AGENT_JSON_KEYS if key in definition})
+    content = f"---\n{yaml.safe_dump(frontmatter, sort_keys=False)}---\n{prompt}"
+    try:
+        return load_agent_definition(content, source=source)
+    except (AgentFrontmatterError, ValueError) as error:
+        logger.warning("Error parsing agent %s from JSON: %s", name, error)
+        return None
+
+
+def parse_agents_from_json(agents_json: Any, source: str = "flagSettings") -> dict[str, AgentDefinition]:
+    """`parseAgentsFromJson`: every valid agent of `{name: definition}`; `{}` when it is not an object."""
+    if not isinstance(agents_json, Mapping):
+        logger.warning("Error parsing agents from JSON: expected an object")
+        return {}
+    agents = (parse_agent_from_json(str(name), definition, source) for name, definition in agents_json.items())
+    return {agent.name: agent for agent in agents if agent is not None}
+
+
 #: The built-in roster: `app/prompts/agents/`.
 BUILT_IN_AGENTS_DIR = Path(__file__).resolve().parents[2] / "prompts" / "agents"
 

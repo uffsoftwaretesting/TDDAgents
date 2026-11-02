@@ -45,6 +45,8 @@ class SessionOptions:
     #: `--thinking` / `--max-thinking-tokens` (`app/utils/thinking.py`).
     thinking: str | None = None
     max_thinking_tokens: int | None = None
+    #: `--agents <json>`: the session's `flagSettings` agents (`parseAgentsFromJson`).
+    agents: Any = None
 
 
 def derive_thread_id(initial_input: str) -> str:
@@ -78,6 +80,7 @@ def development_run_options(options: SessionOptions) -> dict[str, Any]:
         "append_system_prompt": options.append_system_prompt,
         "thinking": options.thinking,
         "max_thinking_tokens": options.max_thinking_tokens,
+        "agents": options.agents,
     }
 
 

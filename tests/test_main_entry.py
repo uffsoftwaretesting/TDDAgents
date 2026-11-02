@@ -378,6 +378,8 @@ def test_parser_help_and_metadata() -> None:
         "permission_prompt_tool": argparse.SUPPRESS,
         "max_turns": argparse.SUPPRESS,
         "max_budget_usd": argparse.SUPPRESS,
+        "agents": 'JSON object defining custom agents (e.g. \'{"reviewer": {"description": "Reviews code", '
+                  '"prompt": "You are a code reviewer"}}\')',
         "continue_session": "Continue the most recent conversation",
         "resume": "Resume a conversation by session ID, or open interactive picker with optional search term",
         "fork_session": "When resuming, create a new session ID instead of reusing the original "
