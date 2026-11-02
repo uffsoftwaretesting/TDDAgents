@@ -58,6 +58,7 @@ from app.commands import (
     get_commands,
     help_text,
     parse_slash_command,
+    reload_plugins_message,
 )
 from app.components.hooks.prompt_dialog import (
     PROMPT_CANCELLED,
@@ -470,6 +471,8 @@ class Repl:
             await self._requirements(command.args)
         elif name == "context":
             await self._context()
+        elif name == "reload-plugins":
+            await self._reload_plugins()
         else:  # exit, quit
             self.exiting = True
             await self._stop_turn()
@@ -484,6 +487,13 @@ class Repl:
             self.io.write(str(exc))
             return
         self.io.write(render_plan(updated))
+
+    async def _reload_plugins(self) -> None:
+        """`/reload-plugins`: the run's plugins refreshed, then the counts (`reload_plugins_message`)."""
+        if self.run.refresh_plugins is None:
+            self.io.write("Plugins are not available in this session.")
+            return
+        self.io.write(reload_plugins_message(await self.run.refresh_plugins()))
 
     async def _context(self) -> None:
         """

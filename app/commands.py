@@ -11,6 +11,12 @@ a typed `/<skill> args` expands into the turn
 prompts and skills, the remote/bridge filters, availability requirements (no auth types) and the
 memoized command cache (the list is built from the run's skill registry each time).
 
+`/reload-plugins` is ported from `reference/claude-code/src/commands/reload-plugins/index.ts` and
+`reload-plugins.ts` -> `call`: the run's `refresh_plugins` (`refreshActivePlugins`), reported as
+`Reloaded: N plugins · N skills · …` (`reload_plugins_message`). The `CLAUDE_CODE_REMOTE` user
+settings re-download is not ported (no settings sync). The `/plugin` dialog (`commands/plugin/`,
+React/Ink) is not ported: the `plugin` CLI subcommand does its work (`app/cli/handlers/plugins.py`).
+
 `/context` is ported from `reference/claude-code/src/commands/context/index.ts` ->
 `contextNonInteractive` and `context-noninteractive.ts` -> `collectContextData`, `call`,
 `formatContextAsMarkdownTable`: the Markdown report, which upstream's interactive build replaces
@@ -31,6 +37,7 @@ module, not a package, so it lives in this module. Not ported: the context-colla
 | `/resume` | Undo `/pause` and continue the plan |
 | `/requirements <request>` | Enter plan mode and plan the new request (upstream's `/plan <description>`) |
 | `/context` | Show current context usage |
+| `/reload-plugins` | Activate pending plugin changes in the current session |
 | `/help` | This list |
 | `/exit`, `/quit` | Leave (the session can be continued with `--thread-id`) |
 
@@ -61,7 +68,7 @@ from app.utils.format import format_tokens
 from app.utils.messages import Message
 from app.utils.settings.constants import get_source_display_name
 
-COMMANDS = ("plan", "pause", "resume", "requirements", "context", "help", "exit", "quit")
+COMMANDS = ("plan", "pause", "resume", "requirements", "context", "reload-plugins", "help", "exit", "quit")
 
 #: Commands that run even while a turn is in flight (upstream's `immediate`).
 IMMEDIATE = frozenset({"help", "pause", "exit", "quit"})
@@ -76,6 +83,7 @@ HELP_TEXT = """Commands:
   /resume                       continue the plan
   /requirements <request>       enter plan mode and plan a new request
   /context                      show current context usage
+  /reload-plugins               activate pending plugin changes in the current session
   /help                         this list
   /exit, /quit                  leave (continue later with --thread-id)
 Anything else is a message to the agents; Esc interrupts them."""
@@ -92,6 +100,9 @@ class Command:
     aliases: tuple[str, ...] = ()
     is_hidden: bool = False
     display_name: str | None = None
+    argument_hint: str | None = None
+    #: `pluginInfo.pluginManifest.name` of a plugin's command.
+    plugin_name: str | None = None
 
     def user_facing_name(self) -> str:
         """`getCommandName`: the display name when there is one."""
@@ -106,6 +117,8 @@ BUILT_IN_DESCRIPTIONS: dict[str, str] = {
     "requirements": "Enter plan mode and plan a new request",
     #: `contextNonInteractive.description`.
     "context": "Show current context usage",
+    #: `reloadPlugins.description`.
+    "reload-plugins": "Activate pending plugin changes in the current session",
     "help": "Show the commands",
     "exit": "Leave (continue later with --thread-id)",
 }
@@ -131,9 +144,10 @@ def built_in_command_names() -> frozenset[str]:
 
 
 def get_commands(skill_registry: Any) -> list[Command]:
-    """`getCommands`: the skills (as `prompt` commands), then the built-ins."""
+    """`getCommands`: the skills and plugin commands (as `prompt` commands), then the built-ins."""
     skills = [] if skill_registry is None else [
-        Command(s.name, s.description, "prompt", source=s.source, is_hidden=s.is_hidden, display_name=s.display_name)
+        Command(s.name, s.description, "prompt", source=s.source, is_hidden=s.is_hidden, display_name=s.display_name,
+                argument_hint=s.argument_hint, plugin_name=getattr(s, "plugin_name", None))
         for s in skill_registry.commands()
     ]
     return [*skills, *built_in_commands()]
@@ -162,7 +176,12 @@ def get_command(name: str, commands: Sequence[Command]) -> Command:
 
 def format_description_with_source(command: Command) -> str:
     """`formatDescriptionWithSource`: a prompt command's description with where it comes from."""
-    if command.type != "prompt" or command.source in ("builtin", "mcp"):
+    if command.type != "prompt":
+        return command.description
+    if command.source == "plugin":
+        return f"({command.plugin_name}) {command.description}" if command.plugin_name else \
+            f"{command.description} (plugin)"
+    if command.source in ("builtin", "mcp"):
         return command.description
     if command.source == "bundled":
         return f"{command.description} (bundled)"
@@ -205,6 +224,27 @@ def parse_slash_command(line: str) -> SlashCommand | None:
     if name not in COMMANDS:
         return None
     return SlashCommand(name=name, args=args.strip())
+
+
+def reload_plugins_message(result: Any) -> str:
+    """
+    `/reload-plugins`' report (`reload-plugins.ts` -> `call`): the counts, and the errors when any.
+    The MCP and LSP counts are the plugins' own servers (`gh-31321`).
+    """
+    from app.utils.string_utils import plural
+
+    def n(count: int, noun: str) -> str:
+        return f"{count} {plural(count, noun)}"
+
+    parts = [
+        n(result.enabled_count, "plugin"), n(result.command_count, "skill"), n(result.agent_count, "agent"),
+        n(result.hook_count, "hook"), n(result.mcp_count, "plugin MCP server"),
+        n(result.lsp_count, "plugin LSP server"),
+    ]
+    message = "Reloaded: " + " · ".join(parts)
+    if result.error_count > 0:
+        message += f"\n{n(result.error_count, 'error')} during load. Run /doctor for details."
+    return message
 
 
 def _int(text: str, usage: str) -> int:

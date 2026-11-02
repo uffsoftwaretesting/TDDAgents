@@ -51,7 +51,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -91,6 +91,7 @@ from app.utils.hooks.hooks import HookDispatcher
 from app.utils.message_queue_manager import CommandQueue, QueuedCommand
 from app.utils.permissions.permission_setup import set_permission_mode
 from app.utils.plans import load_session_plans
+from app.utils.plugins.plugin_loader import SYNC_PLUGIN_INSTALL_ENV
 from app.utils.session_storage import TranscriptStore
 from app.utils.settings.settings import (
     SettingsLocations,
@@ -152,6 +153,7 @@ def main_thread_tools(
     mcp_tools: Sequence[Tool] = (),
     coordinator_filter: bool = True,
     extra_agents: Mapping[str, Any] | None = None,
+    plugin_agents: Sequence[Any] = (),
 ) -> list[Tool]:
     """
     The main thread's roster: the built-ins plus the Agent tool, as upstream's main thread
@@ -164,7 +166,8 @@ def main_thread_tools(
     The Skill tool, given the run's
     `skill_registry`, joins both rosters, as upstream's base tools hold it. The run's
     `mcp_tools` join the workers' roster here; the main thread's arrive through
-    `assemble_tool_pool(mcp_tools=…)`. `EnterPlanMode` and `ExitPlanMode` are the main thread's
+    `assemble_tool_pool(mcp_tools=…)`. The enabled plugins' agents (`plugin_agents`) sit between the
+    built-in agents and the user's. `EnterPlanMode` and `ExitPlanMode` are the main thread's
     (upstream's `ALL_AGENT_DISALLOWED_TOOLS`). In coordinator mode the main thread keeps only the
     orchestration tools (`applyCoordinatorToolFilter`) unless `coordinator_filter` is off: the
     planning phase runs with the whole roster, since the coordinator's filter would leave the
@@ -190,7 +193,8 @@ def main_thread_tools(
 
     built_ins = build_builtin_tools()
     coordinator = is_coordinator_mode(config)
-    definitions = get_agent_definitions_with_overrides(project_dir=project_root, user_home=home)
+    definitions = get_agent_definitions_with_overrides(project_dir=project_root, user_home=home,
+                                                       plugin_agents=plugin_agents)
     # `--agents` / `initialize.agents` (`flagSettings`) override the user's and the project's.
     definitions.update(extra_agents or {})
     if skill_registry is not None:
@@ -409,6 +413,24 @@ def run_agent_memory_store(run_dir: Path | None) -> tuple[AgentMemoryStore, Path
     return AgentMemoryStore(base_dir=root), root
 
 
+async def load_plugin_commands_into(skill_registry: Any, locations: SettingsLocations) -> None:
+    """
+    `getSkills` / `loadAllCommands`' plugin half: the enabled plugins' commands, then their skills,
+    swapped into the run's skill registry. A failure leaves the run without them (logged), as
+    upstream's `getPluginSkills().catch(...)`.
+    """
+    from app.utils.plugins.load_plugin_commands import get_all_plugin_commands
+
+    try:
+        skill_registry.set_plugin_commands(await get_all_plugin_commands(locations))
+    except Exception as exc:  # noqa: BLE001 - plugin commands are non-critical, as upstream
+        logger.error("Plugin commands failed to load, continuing without them: %s", exc)
+
+
+async def _nothing() -> None:
+    return None
+
+
 @dataclass
 class DevelopmentRun:
     """
@@ -450,6 +472,25 @@ class DevelopmentRun:
     #: The session's `flagSettings` agents (`--agents`, `initialize.agents`), and how to add more.
     extra_agents: dict[str, Any] = field(default_factory=dict)
     add_agent_definitions: Callable[[Mapping[str, Any]], None] | None = None
+    #: The run's settings sources (`run_settings_locations`).
+    settings_locations: SettingsLocations | None = None
+    #: `appState.agentDefinitions`: built-in < plugin < user < project < `flagSettings`.
+    get_agent_definitions: Callable[[], dict[str, Any]] | None = None
+    #: `refreshActivePlugins` applied to this run (`/reload-plugins`, `reload_plugins`); see `open_session_run`.
+    refresh_plugins: Callable[..., Awaitable[Any]] | None = None
+    #: `startBackgroundHousekeeping` ran (once per session).
+    housekeeping_started: bool = False
+
+    def start_housekeeping(self) -> None:
+        """`startBackgroundHousekeeping`, once: the plugin autoupdate in the background."""
+        if self.housekeeping_started or self.settings_locations is None:
+            return
+        self.housekeeping_started = True
+        from app.utils.background_housekeeping import start_background_housekeeping
+
+        task = start_background_housekeeping(self.settings_locations)
+        _PLUGIN_STARTUP_TASKS.add(task)
+        task.add_done_callback(_PLUGIN_STARTUP_TASKS.discard)
 
 
 def session_run_id(session_id: Any) -> str:
@@ -530,9 +571,13 @@ async def open_session_run(
 
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
     skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
-    await initialize_plugins_at_startup(
-        run_settings_locations(config, root_dir, home, managed_dir), interactive=is_interactive
-    )
+    locations = run_settings_locations(config, root_dir, home, managed_dir)
+    await initialize_plugins_at_startup(locations, interactive=is_interactive)
+    # `loadAllCommands`' plugin commands and skills, and `loadPluginAgents`, from the plugins on disk.
+    await load_plugin_commands_into(skill_registry, locations)
+    from app.utils.plugins.load_plugin_agents import load_plugin_agents
+
+    plugin_agents: list[Any] = await load_plugin_agents(locations)
     from app.cli.session_mcp import SessionMcp
 
     #: The session's live MCP servers (configured, SDK, dynamic): the pools read them at each refresh.
@@ -556,10 +601,10 @@ async def open_session_run(
             mcp_tools = session_mcp.all_tools()
             built_ins = main_thread_tools(
                 config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp_tools,
-                extra_agents=extra_agents)
+                extra_agents=extra_agents, plugin_agents=plugin_agents)
             planning_tools = (
                 main_thread_tools(config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp_tools,
-                                  coordinator_filter=False, extra_agents=extra_agents)
+                                  coordinator_filter=False, extra_agents=extra_agents, plugin_agents=plugin_agents)
                 if coordinator else built_ins
             )
 
@@ -683,12 +728,50 @@ async def open_session_run(
             run.mcp_tools = session_mcp.all_tools()
 
         session_mcp.on_change = on_mcp_change
+
+        def agent_definitions() -> dict[str, Any]:
+            """`appState.agentDefinitions` with the `flagSettings` agents on top."""
+            from app.tools.agent_tool.load_agents_dir import (
+                get_agent_definitions_with_overrides,
+            )
+
+            definitions = get_agent_definitions_with_overrides(project_dir=root_dir, user_home=home,
+                                                               plugin_agents=plugin_agents)
+            definitions.update(extra_agents)
+            return definitions
+
+        async def refresh_plugins(*, mcp: bool = True) -> Any:
+            """
+            `refreshActivePlugins` for this run, then what upstream re-reads after it: the command
+            list (`getCommands`, the plugin commands and skills), the sent-skill memory
+            (`resetSentSkillNames`), the plugin agents in the rosters, and — unless `mcp` is off —
+            the plugin MCP servers (`applyPluginMcpDiff` / `pluginReconnectKey`). A failure after
+            the refresh is logged, never raised, as upstream's `allSettled`.
+            """
+            from app.utils.plugins.refresh import refresh_active_plugins
+
+            result = await refresh_active_plugins(store.update, locations, hook_dispatcher=hook_dispatcher)
+            plugin_agents[:] = [a for a in result.agent_definitions.values() if getattr(a, "source", None) == "plugin"]
+            skill_registry.sent_skill_names.clear()
+            outcomes = await asyncio.gather(
+                load_plugin_commands_into(skill_registry, locations),
+                session_mcp.refresh_plugin_servers() if mcp else _nothing(),
+                return_exceptions=True)
+            for outcome in outcomes:
+                if isinstance(outcome, BaseException):
+                    logger.error("Plugin refresh: %s", outcome)
+            build_rosters()
+            pool_cache["key"] = None
+            ctx.tools = refresh_tools()
+            return result
+
         run = DevelopmentRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine,
                              add_agent_definitions=add_agent_definitions, extra_agents=extra_agents,
                              mcp_tools=session_mcp.all_tools(), mcp=session_mcp,
                              session_tools=session_tools,
                              transcript=transcript, deps=run_deps, messages=engine.mutable_messages,
-                             recorder=recorder)
+                             recorder=recorder, settings_locations=locations,
+                             get_agent_definitions=agent_definitions, refresh_plugins=refresh_plugins)
         unsubscribe = ctx.command_queue.subscribe(lambda: interrupt_on_now_priority(run.engine, ctx.command_queue))
         try:
             yield run
@@ -930,6 +1013,7 @@ async def begin_session(
     The first turn: SessionStart and `fresh_prompt`, or — with a transcript on disk — the
     resumed conversation, continued with the interrupted prompt or else `resume_prompt`.
     """
+    run.start_housekeeping()
     session, prompt_text = await load_initial_messages(
         run.ctx, run.transcript, fresh_prompt, run.config.model, resume_prompt=resume_prompt
     )
@@ -958,7 +1042,11 @@ async def restore_session(run: DevelopmentRun) -> bool:
 
 
 async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal | None:
-    """A later turn of the same conversation: the user's prompt after everything said so far."""
+    """
+    A later turn of the same conversation: the user's prompt after everything said so far. The
+    first one starts the background housekeeping (`REPL.tsx`'s `submitCount === 1`).
+    """
+    run.start_housekeeping()
     return await _submit(run, run.messages, prompt_text)
 
 
@@ -1118,6 +1206,9 @@ async def run_headless(
         run_ref.append(run)
         streaming = HeadlessStreaming(sio, run, options, session_id)
         streaming_ref.append(streaming)
+        # `print.ts`: the background plugin installation, then `main.tsx`'s housekeeping once MCP is up.
+        streaming.start_plugin_install()
+        run.start_housekeeping()
         await streaming.load_initial_messages(request, prompt, stream_input=stream_input)
         needs_full_array = options.output_format == "json" and options.verbose
         messages: list[dict[str, Any]] = []
@@ -1434,6 +1525,10 @@ class HeadlessStreaming:
         self.oauth_flows = McpOAuthFlows()
         self._run_task: asyncio.Task[None] | None = None
         self._background: set[asyncio.Task[Any]] = set()
+        #: `pluginInstallPromise`: the sync-mode install `run()` awaits before the first turn.
+        self.plugin_install: asyncio.Task[None] | None = None
+        #: The fire-and-forget plugin install (`void installPluginsAndApplyMcpInBackground()`).
+        self._plugin_tasks: set[asyncio.Task[None]] = set()
         self._unsubscribe: list[Callable[[], None]] = []
         self._last_mode = str(run.store.get().tool_permission_context.mode)
         self._last_ledger = run.store.get().phase_ledger
@@ -1593,7 +1688,7 @@ class HeadlessStreaming:
             for unsubscribe in self._unsubscribe:
                 unsubscribe()
             self.run_.ctx.on_stream_chunk = None
-            for task in (reader, self._run_task, *self._background):
+            for task in (reader, self._run_task, *self._background, *self._plugin_tasks):
                 if task is not None and not task.done():
                     task.cancel()
 
@@ -1691,6 +1786,8 @@ class HeadlessStreaming:
         self._session_state("running")
         if self.run_.mcp is not None:
             await self.run_.mcp.update_sdk()
+        if self.plugin_install is not None:
+            await self._await_plugin_install()
         try:
             while True:
                 self._drain_sdk_events()
@@ -1834,6 +1931,9 @@ class HeadlessStreaming:
         return build_system_init_message(inputs, self.session_id)
 
     def agent_definitions(self) -> dict[str, Any]:
+        """`currentAgents`: the run's agents (plugin ones included), the `flagSettings` agents on top."""
+        if self.run_.get_agent_definitions is not None:
+            return self.run_.get_agent_definitions()
         from app.tools.agent_tool.load_agents_dir import get_agent_definitions_with_overrides
 
         definitions = get_agent_definitions_with_overrides(project_root_of(self.run_.ctx.workspace))
@@ -1873,6 +1973,86 @@ class HeadlessStreaming:
         engine = self.run_.engine
         if engine.running:
             engine.interrupt()
+
+    # ── plugins ──────────────────────────────────────────────────────────────
+
+    def start_plugin_install(self) -> None:
+        """
+        `print.ts`'s background plugin installation for every headless run: the declared
+        marketplaces reconciled and delisted plugins removed (`installPluginsForHeadless`), then,
+        when anything changed, the plugin MCP servers applied (`applyPluginMcpDiff`). With
+        `TDDAGENTS_SYNC_PLUGIN_INSTALL` the first turn waits for it (`pluginInstallPromise`).
+        """
+        if self.run_.settings_locations is None:
+            return
+        task = asyncio.ensure_future(self._install_plugins_and_apply_mcp())
+        if is_env_truthy(os.environ.get(SYNC_PLUGIN_INSTALL_ENV)):
+            self.plugin_install = task
+        self._plugin_tasks.add(task)
+        task.add_done_callback(self._plugin_tasks.discard)
+
+    async def _install_plugins_and_apply_mcp(self) -> None:
+        """`installPluginsAndApplyMcpInBackground`."""
+        from app.utils.plugins.headless_plugin_install import (
+            install_plugins_for_headless,
+        )
+
+        try:
+            assert self.run_.settings_locations is not None
+            if await install_plugins_for_headless(self.run_.settings_locations) and self.run_.mcp is not None:
+                await self.run_.mcp.refresh_plugin_servers()
+        except Exception as error:  # noqa: BLE001 - a failed background install never fails the run
+            logger.error("Background plugin installation failed: %s", error)
+
+    async def _await_plugin_install(self) -> None:
+        """
+        `run()`'s sync-install join: the install awaited (raced against
+        `TDDAGENTS_SYNC_PLUGIN_INSTALL_TIMEOUT_MS` when set), then `refreshPluginState`.
+        """
+        install, self.plugin_install = self.plugin_install, None
+        assert install is not None
+        timeout_ms = _int_env(SYNC_PLUGIN_INSTALL_TIMEOUT_ENV)
+        if timeout_ms > 0:
+            done, _ = await asyncio.wait({install}, timeout=timeout_ms / 1000)
+            if not done:
+                logger.error("%s: plugin installation timed out after %dms", SYNC_PLUGIN_INSTALL_ENV, timeout_ms)
+        else:
+            await install
+        if self.run_.refresh_plugins is not None:
+            try:
+                await self.run_.refresh_plugins(mcp=False)
+            except Exception as error:  # noqa: BLE001 - the run goes on with the plugins it has
+                logger.error("Plugin refresh after the sync install failed: %s", error)
+
+    async def _control_reload_plugins(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
+        """
+        `reload_plugins`: `refreshActivePlugins`, then the refreshed commands, agents (the
+        `flagSettings` ones kept), enabled plugins, MCP server statuses and the error count.
+        """
+        from app.commands import format_description_with_source, get_commands
+        from app.utils.plugins.plugin_loader import load_all_plugins_cache_only
+
+        run = self.run_
+        if run.refresh_plugins is None or run.settings_locations is None:
+            self.respond_error(message, "Plugins are not available in this session")
+            return
+        result = await run.refresh_plugins()
+        plugins: list[dict[str, Any]] = []
+        try:
+            loaded = await load_all_plugins_cache_only(run.settings_locations)
+            plugins = [{"name": p.name, "path": p.path, "source": p.source} for p in loaded.enabled]
+        except Exception as error:  # noqa: BLE001 - a read failure must not mask the reload, as upstream
+            logger.error("reload_plugins: %s", error)
+        commands = [c for c in get_commands(run.ctx.skill_registry) if not c.is_hidden]
+        mcp = run.mcp
+        self.respond(message, {
+            "commands": [{"name": c.user_facing_name(), "description": format_description_with_source(c),
+                          "argumentHint": c.argument_hint or ""} for c in commands],
+            "agents": [_agent_info(name, agent) for name, agent in self.agent_definitions().items()],
+            "plugins": plugins,
+            "mcpServers": mcp.statuses() if mcp is not None else build_mcp_server_statuses(run.ctx.mcp_clients),
+            "error_count": result.error_count,
+        })
 
     async def _control_interrupt(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         self._abort_turn()
@@ -1914,10 +2094,8 @@ class HeadlessStreaming:
         commands = [c for c in get_commands(self.run_.ctx.skill_registry) if not c.is_hidden]
         self.respond(message, {
             "commands": [{"name": c.user_facing_name(), "description": format_description_with_source(c),
-                          "argumentHint": ""} for c in commands],
-            "agents": [{"name": name, "description": a.description,
-                        **({"model": a.model} if getattr(a, "model", None) not in (None, "inherit") else {})}
-                       for name, a in agents.items()],
+                          "argumentHint": c.argument_hint or ""} for c in commands],
+            "agents": [_agent_info(name, a) for name, a in agents.items()],
             "output_style": DEFAULT_OUTPUT_STYLE,
             "available_output_styles": [DEFAULT_OUTPUT_STYLE],
             "models": [],
@@ -2285,6 +2463,25 @@ def _server_info(info: Any) -> dict[str, Any] | None:
         dumped = info.model_dump(by_alias=True, exclude_none=True)
         return {key: dumped[key] for key in ("name", "version") if key in dumped}
     return dict(info) if isinstance(info, Mapping) else None
+
+
+#: `CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS`, this build's name.
+SYNC_PLUGIN_INSTALL_TIMEOUT_ENV = "TDDAGENTS_SYNC_PLUGIN_INSTALL_TIMEOUT_MS"
+
+
+def _int_env(name: str) -> int:
+    """`parseInt(process.env[name] || '', 10)`, `0` when unset or not a number."""
+    try:
+        return int(os.environ.get(name, "").strip() or 0)
+    except ValueError:
+        return 0
+
+
+def _agent_info(name: str, agent: Any) -> dict[str, Any]:
+    """`AgentInfo`: `{name, description, model?}` (`inherit` is no model)."""
+    model = getattr(agent, "model", None)
+    return {"name": name, "description": agent.description,
+            **({"model": model} if model not in (None, "inherit") else {})}
 
 
 def build_mcp_server_statuses(clients: Sequence[Any], tools: Sequence[Any] = ()) -> list[dict[str, Any]]:
