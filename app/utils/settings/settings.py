@@ -7,7 +7,7 @@ Ported from claude-code v2.1.88:
 * `src/utils/settings/managedPath.ts` -> `getManagedFilePath`, `getManagedSettingsDropInDir`
 * `src/utils/settings/settings.ts` -> `getSettingsFilePathForSource`,
   `getSettingsRootPathForSource`, `loadManagedFileSettings`, `loadSettingsFromDisk`,
-  `settingsMergeCustomizer`
+  `settingsMergeCustomizer`, `getInitialSettings` (`getSettings_DEPRECATED`)
 * `src/utils/permissions/permissionRuleParser.ts` -> `permissionRuleValueFromString`,
   `unescapeRuleContent`, `normalizeLegacyToolName`
 * `src/utils/permissions/permissionsLoader.ts` -> `shouldAllowManagedPermissionRulesOnly`,
@@ -31,7 +31,10 @@ come from the deep merge of all sources, later sources winning — `loadSettings
 
 Divergences: policy settings have one tier here, the file plus drop-ins; upstream's remote,
 MDM and HKCU tiers have no equivalent. Settings are read leniently (malformed files and
-entries are logged and skipped) rather than validated against upstream's Zod schema.
+entries are logged and skipped) rather than validated against upstream's Zod schema, except
+the `hooks` block and the plugin keys (`app/utils/settings/types.py`), whose failure ignores the
+whole file as upstream's schema failure does; valid plugin keys are kept as parsed (nested
+unknown keys stripped), as upstream returns the parsed document.
 `--base-tools` and the PWD-symlink working directory are not ported: no CLI exists yet.
 """
 
@@ -54,6 +57,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permission_rule_parser import escape_rule_content
+from app.utils.settings.types import parse_plugin_settings
 
 logger = logging.getLogger("TDDOrchestrator.Permissions")
 
@@ -100,13 +104,16 @@ class SettingsLocations:
     Where each settings source lives for one run.
 
     `home` is the base of the user scope (`~`); `flag_settings_path` is upstream's
-    `--settings` file, `None` when the run names none; `managed_dir` is the policy root.
+    `--settings` file, `None` when the run names none; `managed_dir` is the policy root;
+    `additional_directories` are upstream's `--add-dir` directories
+    (`getAdditionalDirectoriesForClaudeMd`), whose plugin settings load at the lowest priority.
     """
 
     project_root: Path
     home: Path | None = None
     flag_settings_path: Path | None = None
     managed_dir: Path = Path(MANAGED_DIR)
+    additional_directories: tuple[str, ...] = ()
 
     @property
     def user_config_dir(self) -> Path:
@@ -259,6 +266,13 @@ def parse_settings_file(path: Path) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         logger.warning("Ignoring malformed settings at %s: not a JSON object", path)
         return None
+    plugin_errors, plugin_keys = parse_plugin_settings(data)
+    if plugin_errors:
+        # Same rule as the hooks below: a document failing `SettingsSchema` is ignored whole.
+        logger.warning("Invalid settings at %s, file ignored:\n%s", path, "\n".join(plugin_errors))
+        return None
+    # `parseSettingsFileUncached` returns the parsed document: nested unknown keys stripped.
+    data = {**data, **plugin_keys}
     if "hooks" in data:
         # `parseSettingsFileUncached`: a document failing `SettingsSchema` yields
         # `settings: null` — the whole file (its hooks, rules and `defaultMode`) is ignored.
@@ -349,6 +363,11 @@ def load_settings(locations: SettingsLocations) -> dict[str, Any]:
         if settings:
             merged = merge_settings(merged, settings)
     return merged
+
+
+def get_initial_settings(locations: SettingsLocations) -> dict[str, Any]:
+    """`getInitialSettings` / `getSettings_DEPRECATED`: the merged settings of every source."""
+    return load_settings(locations)
 
 
 # ── rules ─────────────────────────────────────────────────────────────────────
@@ -610,6 +629,7 @@ __all__ = [
     "SettingsLocations",
     "build_tool_permission_context",
     "escape_rule_content",
+    "get_initial_settings",
     "get_permission_rules_for_source",
     "get_settings_for_source",
     "initial_permission_mode_from_cli",
