@@ -60,6 +60,12 @@ class SessionMcp:
     settings_locations: Callable[[], Any] | None = None
     #: `connect_to_server` / `reconnect_mcp_server_impl` keyword arguments (e.g. the elicitation callback).
     connect_options: dict[str, Any] = field(default_factory=dict)
+    #: The run's hook dispatcher, for the Elicitation / ElicitationResult / Notification hooks.
+    hook_dispatcher: Any = None
+    #: The host's `handleElicitation`, once a session has one; without it an elicitation is cancelled.
+    ask_host: Any = None
+    #: Where `system/elicitation_complete` goes (the SDK output).
+    emit_elicitation_complete: Callable[[str, str], None] | None = None
     sdk_configs: dict[str, McpServerConfig] = field(default_factory=dict)
     sdk_clients: list[Any] = field(default_factory=list)
     sdk_tools: list[Any] = field(default_factory=list)
@@ -108,6 +114,33 @@ class SessionMcp:
         clients = [*configured, *(c for c in self.dynamic_clients if c.name not in names)]
         # Upstream's `appState.mcp.tools` holds the SDK tools too (`updateSdkMcp`).
         return build_mcp_server_statuses(clients, self.all_tools())
+
+    # ── elicitation ──────────────────────────────────────────────────────────
+    # `registerElicitationHandlers`: upstream installs the handlers on each connected client before
+    # every turn; here every connection gets these two from the start, and they read the hooks and
+    # the host when an elicitation arrives, so a server connected before the host keeps working.
+
+    def elicitation_options(self) -> dict[str, Any]:
+        """The connection keyword arguments that route a server's elicitations through this session."""
+        return {"elicitation_callback": self.elicit, "on_elicitation_complete": self.elicitation_complete}
+
+    async def elicit(self, server_name: str, params: Any) -> Any:
+        """An MCP server's `elicitation/create`: the Elicitation hooks, then the host, then the result hooks."""
+        from app.services.mcp.elicitation_handler import build_elicitation_callback
+
+        return await build_elicitation_callback(self.hook_dispatcher, self._ask_host)(server_name, params)
+
+    async def _ask_host(self, *args: Any) -> Any:
+        if self.ask_host is None:
+            return {"action": "cancel"}
+        return await self.ask_host(*args)
+
+    async def elicitation_complete(self, server_name: str, elicitation_id: str) -> None:
+        """`notifications/elicitation/complete`: the Notification hook, then the SDK message."""
+        from app.services.mcp.elicitation_handler import build_elicitation_complete_handler
+
+        await build_elicitation_complete_handler(self.hook_dispatcher, self.emit_elicitation_complete)(
+            server_name, elicitation_id)
 
     # ── reconnect / toggle ───────────────────────────────────────────────────
 

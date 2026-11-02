@@ -494,12 +494,17 @@ async def open_session_run(
 
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
     skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
-    mcp = await connect_mcp_servers(root_dir, run_settings_locations(config, root_dir, home, managed_dir))
     from app.cli.session_mcp import SessionMcp
 
     #: The session's live MCP servers (configured, SDK, dynamic): the pools read them at each refresh.
-    session_mcp = SessionMcp(manager=mcp, cwd=str(root_dir),
+    session_mcp = SessionMcp(manager=None, cwd=str(root_dir),
                              settings_locations=lambda: run_settings_locations(config, root_dir, home, managed_dir))
+    session_mcp.connect_options = session_mcp.elicitation_options()
+    mcp = await connect_mcp_servers(
+        root_dir, run_settings_locations(config, root_dir, home, managed_dir), **session_mcp.connect_options,
+        # The auth tool's reconnect swapped a server's client and tools in the manager's lists.
+        on_reconnect=lambda _name, _result: session_mcp.on_change())
+    session_mcp.manager = mcp
     try:
         coordinator = is_coordinator_mode(config)
         #: `--agents` / SDK `initialize.agents`: the session's `flagSettings` agents.
@@ -569,6 +574,7 @@ async def open_session_run(
                 model=config.model,
                 transcript_path=str(transcript.path),
             )
+        session_mcp.hook_dispatcher = hook_dispatcher
 
         memory_store, memory_root = run_agent_memory_store(transcript_dir)
         ctx = tool_context_for(
@@ -676,11 +682,12 @@ def interrupt_on_now_priority(engine: QueryEngine, queue: CommandQueue) -> None:
         engine.interrupt("interrupt")
 
 
-async def connect_mcp_servers(root_dir: Path, locations: SettingsLocations) -> Any:
+async def connect_mcp_servers(root_dir: Path, locations: SettingsLocations, **manager_options: Any) -> Any:
     """
     `getClaudeCodeMcpConfigs` + `getMcpToolsCommandsAndResources` for the run: every configured
     server connected (a server that fails is recorded, never fatal), headless as `claude -p`,
-    so project servers load without an approval prompt.
+    so project servers load without an approval prompt. `manager_options` are
+    `McpConnectionManager` fields (the elicitation callbacks, `on_reconnect`).
     """
     from app.services.mcp.config import get_claude_code_mcp_configs
     from app.services.mcp.mcp_connection_manager import McpConnectionManager
@@ -688,7 +695,7 @@ async def connect_mcp_servers(root_dir: Path, locations: SettingsLocations) -> A
     configs, errors = get_claude_code_mcp_configs(root_dir, locations)
     for error in errors:
         logger.warning("MCP config error: %s", error)
-    manager = McpConnectionManager(cwd=str(root_dir))
+    manager = McpConnectionManager(cwd=str(root_dir), **manager_options)
     await manager.connect(configs)
     return manager
 
@@ -1408,6 +1415,10 @@ class HeadlessStreaming:
         if run.mcp is not None:
             # `setupSdkMcpClients(…, (name, message) => structuredIO.sendMcpMessage(name, message))`.
             run.mcp.send_mcp_message = self.sio.send_mcp_message
+            # `registerElicitationHandlers(…)`: the host answers, `system/elicitation_complete` is streamed.
+            run.mcp.ask_host = self._ask_host_elicitation
+            run.mcp.emit_elicitation_complete = lambda server, elicitation_id: self.output.enqueue(self._system(
+                "elicitation_complete", mcp_server_name=server, elicitation_id=elicitation_id))
         dispatcher = run.ctx.hook_dispatcher
         if dispatcher is not None and self.options.output_format == "stream-json" and self.options.verbose:
             # `print.ts`: hook lifecycle events reach the stream; every event only with --include-hook-events.
@@ -1429,6 +1440,14 @@ class HeadlessStreaming:
         from app.utils.sdk_event_queue import notify_session_state_changed
 
         notify_session_state_changed(self.run_.store.get(), session_state)
+
+    async def _ask_host_elicitation(
+        self, server_name: str, message: str, requested_schema: Mapping[str, Any] | None, mode: str | None,
+        url: str | None, elicitation_id: str | None,
+    ) -> dict[str, Any]:
+        """`structuredIO.handleElicitation(serverName, message, requestedSchema, signal, mode, url, id)`."""
+        return dict(await self.sio.handle_elicitation(server_name, message, requested_schema, mode=mode, url=url,
+                                                      elicitation_id=elicitation_id))
 
     def _system(self, subtype: str, **fields: Any) -> dict[str, Any]:
         return {"type": "system", "subtype": subtype, **fields, "session_id": self.session_id,
@@ -2029,7 +2048,8 @@ class HeadlessStreaming:
         cwd = mcp.cwd if mcp is not None else "."
         return {
             "find_config": lambda name: mcp.find_config(name) if mcp is not None else None,
-            "reconnect": lambda name, config: _reconnect_only(name, config, cwd),
+            "reconnect": lambda name, config: _reconnect_only(
+                name, config, cwd, mcp.connect_options if mcp is not None else {}),
             "apply_reconnect": lambda name, result: mcp.apply_reconnect(name, result) if mcp is not None else None,
             "is_server_disabled": lambda name: is_mcp_server_disabled(name, cwd),
         }
@@ -2193,11 +2213,11 @@ def _mcp_status(client: Any) -> str:
         kind, "pending")
 
 
-async def _reconnect_only(name: str, config: Any, cwd: str) -> Any:
-    """`reconnectMcpServerImpl` bound to the session's cwd (the caller applies the result)."""
+async def _reconnect_only(name: str, config: Any, cwd: str, options: Mapping[str, Any]) -> Any:
+    """`reconnectMcpServerImpl` bound to the session's cwd and connection options (the caller applies it)."""
     from app.services.mcp.mcp_connection_manager import reconnect_mcp_server_impl
 
-    return await reconnect_mcp_server_impl(name, config, cwd=cwd)
+    return await reconnect_mcp_server_impl(name, config, cwd=cwd, **options)
 
 
 def _status_config(config: Any) -> dict[str, Any] | None:

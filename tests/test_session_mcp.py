@@ -447,3 +447,89 @@ def test_sdk_server_from_the_host_reaches_the_model_and_set_servers(python_works
     assert got["ss"]["response"] == {"added": [], "removed": ["calc"], "errors": {}}
     assert got["st2"]["response"] == {"mcpServers": []}
     assert ("calc", "initialize") in [(s, m.get("method")) for s, m in host.received]
+
+
+PROBE_SERVER = """
+from mcp.server.mcpserver import Context, MCPServer
+from pydantic import BaseModel
+
+
+class Answer(BaseModel):
+    name: str
+
+
+srv = MCPServer("probe")
+
+
+@srv.tool()
+async def ask(ctx: Context) -> str:
+    result = await ctx.elicit("Your name?", Answer)
+    return f"{result.action}:{result.data.name}" if result.action == "accept" else result.action
+
+
+@srv.tool()
+async def visit(ctx: Context) -> str:
+    result = await ctx.elicit_url("Sign in", "https://auth.example/x", "eid-1")
+    await ctx.request_context.session.send_elicit_complete("eid-1")
+    return "visited:" + result.action
+
+
+srv.run()
+"""
+
+
+def test_a_configured_servers_elicitation_reaches_the_host(python_workspace: Any, tmp_path: Path) -> None:
+    import sys
+
+    from langchain_core.messages import ToolMessage
+
+    (tmp_path / "probe_server.py").write_text(PROBE_SERVER)
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"probe": {
+        "command": sys.executable, "args": [str(tmp_path / "probe_server.py")]}}}))
+    calls = AIMessage(content="", tool_calls=[{"name": "mcp__probe__ask", "id": "c1", "args": {}}])
+    visit = AIMessage(content="", tool_calls=[{"name": "mcp__probe__visit", "id": "c2", "args": {}}])
+    feed = Feed({"type": "user", "message": {"role": "user", "content": "go"}, "parent_tool_use_id": None})
+    written: list[str] = []
+    elicitations: list[dict[str, Any]] = []
+
+    def write(text: str) -> None:
+        written.append(text)
+        for message in lines_of([text]):
+            request = message.get("request") or {}
+            answer: dict[str, Any] | None = None
+            if message.get("type") == "control_request" and request.get("subtype") == "can_use_tool":
+                answer = {"behavior": "allow", "updatedInput": request["input"]}
+            if message.get("type") == "control_request" and request.get("subtype") == "elicitation":
+                elicitations.append(request)
+                answer = ({"action": "accept", "content": {"name": "Ada"}} if request.get("mode") != "url"
+                          else {"action": "accept"})
+            if answer is not None:
+                feed.send({"type": "control_response", "response": {
+                    "subtype": "success", "request_id": message["request_id"], "response": answer}})
+            if message.get("type") == "result":
+                feed.close()
+
+    model = Model([[calls], [visit], [AIMessage(content="Hello Ada.")]])
+    seen: list[Any] = []
+    inner = model.__call__
+
+    async def recording(state: Any, config: Any) -> Any:
+        seen.append(list(state.messages))
+        async for message in inner(state, config):
+            yield message
+
+    options = dict(run_options(tmp_path, recording))
+    options["permission_context"] = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
+    asyncio.run(asyncio.wait_for(run_headless(
+        "sj-mcp-elicit", None, workspace=python_workspace, options=STREAM, input_blocks=feed.blocks(),
+        write_stdout=write, **options), 60))
+    form, url = elicitations
+    assert (form["mcp_server_name"], form["message"], form["mode"]) == ("probe", "Your name?", "form")
+    assert form["requested_schema"]["properties"]["name"]["type"] == "string"
+    assert (url["mode"], url["url"], url["elicitation_id"]) == ("url", "https://auth.example/x", "eid-1")
+    results = [str(m.content) for m in seen[-1] if isinstance(m, ToolMessage)]
+    assert any("accept:Ada" in r for r in results) and any("visited:accept" in r for r in results)
+    out = lines_of(written)
+    assert out[-1]["result"] == "Hello Ada."
+    complete = [m for m in out if m.get("subtype") == "elicitation_complete"]
+    assert [(m["mcp_server_name"], m["elicitation_id"]) for m in complete] == [("probe", "eid-1")]
