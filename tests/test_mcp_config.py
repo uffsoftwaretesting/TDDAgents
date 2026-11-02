@@ -272,6 +272,35 @@ class TestServerSchema:
 
         assert adheres_to_server_schema(raw) is False
 
+    @pytest.mark.parametrize("oauth,ok", [
+        ({}, True),
+        ({"clientId": "c", "callbackPort": 8080, "authServerMetadataUrl": "https://as/m", "xaa": False, "x": 1}, True),
+        ("oauth", False),
+        ({"clientId": 1}, False),
+        ({"callbackPort": 0}, False),
+        ({"callbackPort": 1.5}, False),
+        ({"callbackPort": True}, False),
+        ({"authServerMetadataUrl": "http://as/m"}, False),
+        ({"authServerMetadataUrl": "https://"}, False),
+        ({"xaa": "yes"}, False),
+    ])
+    def test_the_oauth_object(self, oauth, ok):
+        from app.services.mcp.types import adheres_to_server_schema
+
+        assert adheres_to_server_schema({"type": "http", "url": "u", "oauth": oauth}) is ok
+        assert adheres_to_server_schema({"type": "sse", "url": "u", "oauth": oauth}) is ok
+        assert adheres_to_server_schema({"type": "ws", "url": "u", "oauth": oauth}) is True
+
+    def test_the_oauth_object_is_kept_for_sse_and_http_only(self):
+        from app.services.mcp.types import McpOAuthConfig, server_config_from_raw
+
+        oauth = {"clientId": "c", "callbackPort": 8080, "authServerMetadataUrl": "https://as/m", "xaa": True}
+        expected = McpOAuthConfig(client_id="c", callback_port=8080, auth_server_metadata_url="https://as/m", xaa=True)
+        assert server_config_from_raw({"type": "http", "url": "u", "oauth": oauth}, "user").oauth == expected
+        assert server_config_from_raw({"type": "sse", "url": "u", "oauth": {}}, "user").oauth == McpOAuthConfig()
+        assert server_config_from_raw({"type": "ws", "url": "u", "oauth": oauth}, "user").oauth is None
+        assert server_config_from_raw({"type": "http", "url": "u"}, "user").oauth is None
+
     def test_the_headers_helper_is_kept(self):
         from app.services.mcp.types import server_config_from_raw
 

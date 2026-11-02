@@ -7,6 +7,10 @@ union of stdio, sse, sse-ide, ws-ide, http, ws, sdk and claudeai-proxy), `Scoped
 `DisabledMCPServer`. zod's union is replaced by `adheres_to_server_schema`, which accepts and
 rejects the same shapes: a stdio entry has a non-empty `command` (its `type` is optional, for
 backwards compatibility), `args` defaults to `[]`, and every map is string-valued.
+
+`McpOAuthConfigSchema` (the `oauth` object of an sse/http entry: `clientId`, a positive integer
+`callbackPort`, an https `authServerMetadataUrl`, the XAA flag `xaa`) is `McpOAuthConfig`, and
+`NeedsAuthMCPServer` is the `needs-auth` connection state.
 """
 
 from __future__ import annotations
@@ -22,6 +26,16 @@ SERVER_TYPES = frozenset({"stdio", "sse", "sse-ide", "ws-ide", "http", "ws", "sd
 
 
 @dataclass(frozen=True)
+class McpOAuthConfig:
+    """`McpOAuthConfigSchema`."""
+
+    client_id: str | None = None
+    callback_port: int | None = None
+    auth_server_metadata_url: str | None = None
+    xaa: bool | None = None
+
+
+@dataclass(frozen=True)
 class McpServerConfig:
     """`ScopedMcpServerConfig`: one server entry and the scope it was read from."""
 
@@ -33,6 +47,7 @@ class McpServerConfig:
     url: str | None = None
     headers: Mapping[str, str] | None = None
     headers_helper: str | None = None
+    oauth: McpOAuthConfig | None = None
 
     @property
     def transport(self) -> str:
@@ -55,6 +70,24 @@ class ValidationError:
 
 def _string_map(value: Any) -> bool:
     return isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def adheres_to_oauth_schema(raw: Any) -> bool:
+    """`McpOAuthConfigSchema().safeParse(raw).success` (unknown keys are allowed and dropped)."""
+    if not isinstance(raw, dict):
+        return False
+    url = raw.get("authServerMetadataUrl")
+    return (
+        ("clientId" not in raw or isinstance(raw["clientId"], str))
+        and ("callbackPort" not in raw or (_is_int(raw["callbackPort"]) and raw["callbackPort"] > 0))
+        and ("authServerMetadataUrl" not in raw or (
+            isinstance(url, str) and url.startswith("https://") and len(url) > len("https://")))
+        and ("xaa" not in raw or isinstance(raw["xaa"], bool))
+    )
 
 
 def adheres_to_server_schema(raw: Any) -> bool:
@@ -81,7 +114,8 @@ def adheres_to_server_schema(raw: Any) -> bool:
         return False
     if kind in ("sse", "http", "ws"):
         return ("headers" not in raw or _string_map(raw["headers"])) and (
-            "headersHelper" not in raw or isinstance(raw["headersHelper"], str))
+            "headersHelper" not in raw or isinstance(raw["headersHelper"], str)) and (
+            kind == "ws" or "oauth" not in raw or adheres_to_oauth_schema(raw["oauth"]))
     required = "id" if kind == "claudeai-proxy" else "ideName"
     return isinstance(raw.get(required), str)
 
@@ -90,6 +124,7 @@ def server_config_from_raw(raw: Mapping[str, Any], scope: str) -> McpServerConfi
     """A validated raw entry as a `McpServerConfig`."""
     env = raw.get("env")
     headers = raw.get("headers")
+    oauth = raw.get("oauth") if raw.get("type") in ("sse", "http") else None
     return McpServerConfig(
         type=raw.get("type"),
         scope=scope,
@@ -99,6 +134,12 @@ def server_config_from_raw(raw: Mapping[str, Any], scope: str) -> McpServerConfi
         url=raw.get("url"),
         headers=dict(headers) if isinstance(headers, dict) else None,
         headers_helper=raw.get("headersHelper"),
+        oauth=McpOAuthConfig(
+            client_id=oauth.get("clientId"),
+            callback_port=oauth.get("callbackPort"),
+            auth_server_metadata_url=oauth.get("authServerMetadataUrl"),
+            xaa=oauth.get("xaa"),
+        ) if isinstance(oauth, dict) else None,
     )
 
 
@@ -155,7 +196,16 @@ class DisabledMCPServer:
     type: Literal["disabled"] = "disabled"
 
 
-MCPServerConnection = ConnectedMCPServer | FailedMCPServer | DisabledMCPServer
+@dataclass
+class NeedsAuthMCPServer:
+    """`NeedsAuthMCPServer`: an sse/http server that answered 401 and holds no usable token."""
+
+    name: str
+    config: McpServerConfig
+    type: Literal["needs-auth"] = "needs-auth"
+
+
+MCPServerConnection = ConnectedMCPServer | FailedMCPServer | NeedsAuthMCPServer | DisabledMCPServer
 
 __all__ = [
     "SERVER_TYPES",
@@ -164,9 +214,12 @@ __all__ = [
     "DisabledMCPServer",
     "FailedMCPServer",
     "MCPServerConnection",
+    "McpOAuthConfig",
     "McpServerConfig",
+    "NeedsAuthMCPServer",
     "ServerResource",
     "ValidationError",
+    "adheres_to_oauth_schema",
     "adheres_to_server_schema",
     "server_config_from_raw",
 ]
