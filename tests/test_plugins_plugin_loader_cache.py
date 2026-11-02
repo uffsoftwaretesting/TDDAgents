@@ -162,14 +162,19 @@ def test_copy_plugin_to_versioned_cache_errors(tmp_path: Path):
         asyncio.run(copy_plugin_to_versioned_cache(str(empty), "q@m", "1"))
 
 
-def test_zip_cache_mode_is_stage_two(tmp_path: Path, monkeypatch: Any):
+def test_zip_cache_mode_caches_a_zip_and_removes_the_directory(tmp_path: Path, monkeypatch: Any):
+    import zipfile
+
     monkeypatch.setenv("TDDAGENTS_PLUGIN_USE_ZIP_CACHE", "1")
     src = tmp_path / "src"
-    _write(src / "f")
-    with pytest.raises(NotImplementedError, match="stage 2"):
-        asyncio.run(copy_plugin_to_versioned_cache(str(src), "p@m", "1"))
-    # Refused before any copy: no directory is left for a later run without the switch to reuse.
+    _write(src / "f", "payload")
+    _write(src / ".git" / "HEAD", "ref")
+    result = asyncio.run(copy_plugin_to_versioned_cache(str(src), "p@m", "1"))
+    assert result == get_versioned_zip_cache_path("p@m", "1")
     assert not os.path.exists(get_versioned_cache_path("p@m", "1"))
+    with zipfile.ZipFile(result) as archive:
+        assert archive.namelist() == ["f"]
+        assert archive.read("f") == b"payload"
     # An existing zip is returned as is.
     zip_path = get_versioned_zip_cache_path("p@m", "2")
     _write(Path(zip_path), "zip")

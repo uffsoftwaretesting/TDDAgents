@@ -206,8 +206,16 @@ def test_register_without_caching_defaults_the_version():
     assert entry_["installedAt"] == entry_["lastUpdated"]
 
 
-def test_zip_cache_mode_refuses_before_caching(tmp_path: Path, monkeypatch):
+def test_zip_cache_mode_registers_the_zip(tmp_path: Path, monkeypatch):
+    import zipfile
+
     monkeypatch.setenv("TDDAGENTS_PLUGIN_USE_ZIP_CACHE", "1")
-    with pytest.raises(NotImplementedError, match="stage 2"):
-        asyncio.run(pih.cache_and_register_plugin("p@m", {"name": "p", "source": "./p"}, "user", None, str(tmp_path)))
-    assert not os.path.exists(get_plugin_cache_path())
+    source = tmp_path / "p"
+    (source / ".tddagents-plugin").mkdir(parents=True)
+    (source / ".tddagents-plugin" / "plugin.json").write_text(json.dumps({"name": "p", "version": "3.0.0"}))
+    path = asyncio.run(pih.cache_and_register_plugin("p@m", {"name": "p", "source": "./p"}, "user", None, str(source)))
+    assert path == get_versioned_cache_path("p@m", "3.0.0") + ".zip"
+    assert not os.path.exists(get_versioned_cache_path("p@m", "3.0.0"))
+    with zipfile.ZipFile(path) as archive:
+        assert archive.namelist() == [".tddagents-plugin/plugin.json"]
+    assert ipm.load_installed_plugins_from_disk()["plugins"]["p@m"][0]["installPath"] == path

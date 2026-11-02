@@ -21,7 +21,6 @@ SSH). The plugin package folder is upstream's `.claude-plugin/` renamed `.tddage
 
 Divergences: the fetch telemetry (`logPluginFetch`, `classifyFetchError`) is not ported. Git and
 npm run in the process directory (upstream's `useCwd`), see `app/utils/exec_file_no_throw.py`.
-The zip cache is stage 2 (`app/utils/plugins/zip_cache.py`).
 """
 
 from __future__ import annotations
@@ -60,7 +59,6 @@ from app.utils.plugins.schemas import (
 from app.utils.plugins.zip_cache import (
     convert_directory_to_zip_in_place,
     is_plugin_zip_cache_enabled,
-    require_zip_cache_port,
 )
 
 logger = logging.getLogger("TDDOrchestrator.Plugins")
@@ -222,7 +220,6 @@ async def copy_plugin_to_versioned_cache(
         logger.debug("Using seed cache for %s@%s at %s", plugin_id, version, seed_path)
         return seed_path
 
-    require_zip_cache_port()
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     entry_source = entry.get("source") if entry is not None else None
     if isinstance(entry_source, str) and marketplace_dir:
