@@ -259,8 +259,11 @@ def _merge_for_write(existing: Mapping[str, Any], patch: Mapping[str, Any]) -> d
     for key, value in patch.items():
         if value is None:
             merged.pop(key, None)
-        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _merge_for_write(merged[key], value)
+        elif isinstance(value, dict):
+            # lodash `mergeWith` clones a source object into a missing target, applying the
+            # customizer to each key, so a nested `undefined` (here `None`) is dropped, not written.
+            existing_value = merged.get(key)
+            merged[key] = _merge_for_write(existing_value if isinstance(existing_value, dict) else {}, value)
         else:
             merged[key] = value
     return merged
