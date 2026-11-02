@@ -56,7 +56,8 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 | Path (`app/`) | Upstream | Ships |
 |---|---|---|
 | `main.py` | `entrypoints/cli.tsx`, `main.tsx` | Arguments, interactive / headless (`-p`), reports |
-| `cli/print.py` | `cli/print.ts` | `open_session_run` → `DevelopmentRun`: MCP, SessionStart / UserPromptSubmit, one `QueryEngine` per session, the background-task wait loop, resume, SessionEnd; `run_headless` |
+| `cli/print.py` | `cli/print.ts` | `open_session_run` → `DevelopmentRun`: MCP, SessionStart / UserPromptSubmit, one `QueryEngine` per session, the background-task wait loop, resume, SessionEnd; `run_headless` + `HeadlessStreaming` (the stream-json loop and every control request) |
+| `cli/structured_io.py`, `utils/sdk_messages.py`, `utils/sdk_event_queue.py` | `cli/structuredIO.ts`, `queryHelpers.ts`, `sdkEventQueue.ts` | NDJSON in/out, control requests both ways, the host's `can_use_tool`; the SDK wire shapes; task / session-state events |
 | `screens/repl.py`, `screens/terminal_io.py` | `screens/REPL.tsx` | The REPL: queued input, Esc abort, permission questions, slash commands; `terminal_io.py` is the `prompt_toolkit` seam |
 | `commands.py` | `commands.ts` | `local` slash commands, `/plan` operations |
 | `hooks/use_can_use_tool.py`, `components/permissions/permission_options.py` | `useCanUseTool.tsx`, permission options | The interactive `canUseTool` and each tool's choices |
@@ -91,8 +92,10 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
   field, which is what produced upstream's `compact → error → stop hook → compact` spiral.
 - **Ceilings follow claude-code, nothing else.** Where upstream bounds something, port the
   bound **with upstream's constant and a citation**. Where upstream is unbounded, stay
-  unbounded: **no turn limit** and no `max_turns`. The retry layer keeps `withRetry`'s
-  ceiling. `has_attempted_reactive_compact` is a latch, not a budget. Invent no other ceiling.
+  unbounded: **no turn limit by default**. Upstream's `--max-turns`, `--max-budget-usd` and
+  `--json-schema` exist only as opt-in `-p` flags (`run_loop(max_turns=…)`, `QueryEngine`; user
+  decision 2026-11-01). The retry layer keeps `withRetry`'s ceiling.
+  `has_attempted_reactive_compact` is a latch, not a budget. Invent no other ceiling.
 - **`run_loop` yields `Terminated` last** instead of returning it (PEP 525 forbids a value in
   an async generator's `return`). `drain` stands in for JS's `yield*` return.
 - The **API-error guard** skips stop hooks and terminates `model_error`, never `completed`: a
@@ -151,8 +154,8 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   (`<plans dir>/<slug>.md`), `EnterPlanMode` / `ExitPlanMode`. The plan's
   `## Implementation Plan` numbered items become the sub-requirements through
   `update_tdd_plan(replace_pending)`; a plan without items fails `validate_input`. A session
-  whose plan has no items opens in `plan`. **Headless denies `ExitPlanMode`**, so a new session
-  plans and exits 1.
+  whose plan has no items opens in `plan`. **Plain `-p` denies `ExitPlanMode`**, so a new session
+  plans and stops there; under `--input-format stream-json` the SDK host answers it.
 - **Permissions** are `hasPermissionsToUseToolInner` step for step. The shipped
   `.tddagents/settings.json` says `"defaultMode": "acceptEdits"`. In `default` mode every
   write asks and headless denies it. **A test that drives a write through the pipeline must
@@ -168,7 +171,17 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   session stops `stop_hook_prevented` with the questions; `--thread-id <id> "<answer>"`
   continues.
 - **Hooks**: all four types and 27 events, from a frozen snapshot of the five settings
-  sources. Hook output becomes messages. Configured stop hooks can only *add* blocks.
+  sources, plus upstream's `callback` hooks (an SDK host's, `initialize.hooks`) and `function`
+  hooks (`--json-schema`'s Stop enforcement). Hook output becomes messages. Configured stop hooks
+  can only *add* blocks.
+- **`-p` is the SDK protocol** (`app/cli/structured_io.py`, `run_headless`): a text prompt is the
+  one user message of a closed input; `--output-format text|json|stream-json` (stream-json needs
+  `--verbose`), `--input-format stream-json` (user messages and every control request on stdin;
+  every permission 'ask' goes to the host as `can_use_tool`, a changed input re-checked against
+  the TDD tier). **The exit code is the last result's `is_error`**, never the plan. Banners and
+  reports go to stderr. The SDK `session_id` is the thread id; TDD state streams as
+  `system/tdd_ledger|tdd_plan|tdd_transition`. Thinking is off unless asked (`--thinking`,
+  `--max-thinking-tokens`); a custom `--system-prompt` keeps `tdd-contract.md`.
 - **Compaction** summarizes the whole history through the forked, cache-sharing summarizer
   (same system prompt, tools and model as the main thread), then falls back to the regular
   request. TDD state is re-attached after the boundary from authoritative state (ledger and
@@ -311,14 +324,19 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # also vend
 # Interactive (from the repo root: the spec menu reads app/prompts/specs relatively)
 python -m app.main
 
-# Headless (upstream `claude -p`): ExitPlanMode is denied, so a new session plans and exits 1.
-# A resumed session with an approved plan develops it; exit 0 only if every item completed its cycle
+# Headless (upstream `claude -p`): ExitPlanMode is denied, so a new session plans and stops.
+# stdout carries only the result; the exit code is the result's is_error
 python -m app.main -p --spec app/prompts/specs/<file>.txt
-echo "Build a calculator" | python -m app.main -p
+echo "Build a calculator" | python -m app.main -p --output-format json
+python -m app.main -p --input-format stream-json --output-format stream-json --verbose   # SDK host
 
-python -m app.main --thread-id "tdd-<hash>" ["<next message>"]   # continue a session
+python -m app.main --thread-id "tdd-<hash>" ["<next message>"]   # continue a session (= --resume)
+python -m app.main -c | --resume [id] | --fork-session | --session-id <uuid>
 python -m app.main --fresh                                       # new thread
-# Flags: --permission-mode, --settings <file>, --dangerously-skip-permissions, --coordinator
+# Flags: --permission-mode, --settings <file>, --dangerously-skip-permissions, --coordinator,
+# --system-prompt[-file], --append-system-prompt[-file], --agents <json>, --rewind-files <uuid>;
+# -p only: --max-turns, --max-budget-usd, --json-schema, --include-partial-messages,
+# --replay-user-messages, --include-hook-events, --permission-prompt-tool <mcp tool|stdio>
 ```
 
 The REPL opens in plan mode (`⏸ plan mode on`). `ExitPlanMode` shows upstream's choices

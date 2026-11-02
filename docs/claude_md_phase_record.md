@@ -1858,6 +1858,80 @@ asked for a set of upstream files to be ported alongside. Plan:
   engine knows only the skills. A typed skill that is not user-invocable gets upstream's
   refusal with "TDDAgents" for "Claude".
 
+#### Part 8f — `-p` as the SDK protocol (2026-11-01, branch `feat/live-run-fixes-8f`)
+
+Every `-p` run goes through `StructuredIO` (`app/cli/structured_io.py`, `cli/structuredIO.ts`):
+`run_headless` is `runHeadless` + `runHeadlessStreaming` (`HeadlessStreaming` in `app/cli/print.py`),
+the wire is Anthropic's SDK JSON translated from LangChain whatever the provider
+(`app/utils/sdk_messages.py`), and every control request upstream's external build answers is
+handled. Merged subsystems: file history (`app/utils/file_history.py`, `--rewind-files`,
+`rewind_files`) and context usage (`app/utils/analyze_context.py`, `/context`, `get_context_usage`).
+
+*User decisions (2026-11-01):*
+- stdout and the exit code are upstream's in **every** `-p` mode: the exit code is the last result's
+  `is_error`, never the plan's completion; TDDAgents' banners and reports go to stderr.
+- Under `--input-format stream-json` (or `--permission-prompt-tool stdio`) every 'ask', ExitPlanMode
+  and AskUserQuestion included, goes to the host as `can_use_tool`; plain `-p` keeps the headless deny.
+  **A host's (or a permission prompt tool's) changed input is re-checked against the rule-based gate,
+  the TDD phase tier among it**, as a PermissionRequest hook's is.
+- `session_id` is the thread id; `--resume`/`-r` aliases `--thread-id` (a bare `--resume` opens a
+  picker in the REPL), `-c/--continue` takes the thread whose transcript changed last,
+  `--session-id <uuid>` names a new thread, and `--fork-session` is upstream's: a new thread over the
+  **same project folder** (the conversation re-recorded under the new id, the TDD plan sidecar copied,
+  the plan file copied under a new slug); `LocalWorkspace.for_run` gives the fork its own `run_dir`.
+- TDD state streams as extra `system` subtypes (`tdd_ledger`, `tdd_plan`, `tdd_transition`) and the
+  result carries the loop's `terminal_reason`.
+- `--max-turns`, `--max-budget-usd` and `--json-schema` are opt-in flags; nothing is bounded by
+  default. `max_turns` is `run_loop`'s entry argument (`Terminal.MAX_TURNS`), the budget and the
+  structured-output retry limit (`MAX_STRUCTURED_OUTPUT_RETRIES`, default 5) are `QueryEngine`'s.
+- `--system-prompt` / `initialize.systemPrompt` replace upstream's default sections, but
+  **`tdd-contract.md` stays after a custom prompt**; `--append-system-prompt` appends as upstream.
+- Extended thinking is **off unless asked** (`--thinking`, `--max-thinking-tokens`,
+  `MAX_THINKING_TOKENS`, `alwaysThinkingEnabled: true`, `set_max_thinking_tokens`); upstream defaults
+  it on. On OpenAI reasoning models it maps to `reasoning_effort` (disabled → minimal, adaptive →
+  medium, a budget < 4096 → low, < 16384 → medium, else high).
+- `/context` and `get_context_usage` count with the provider's endpoint on Claude **and** OpenAI runs
+  (`messages.count_tokens`, `responses.input_tokens.count`), the rough estimate otherwise; the context
+  report labels bundled skills `bundled` and has no ant-only breakdowns.
+- File history: checkpointing in `-p` follows `TDDAGENTS_ENABLE_SDK_FILE_CHECKPOINTING`, as upstream's
+  SDK env; **a successful rewind restarts the ledger in RED and re-takes the test baseline** (only
+  erases evidence; done items stay done); **synchronous workers' edits are checkpointed** (they keep
+  the parent's updater; upstream stubs every worker).
+- `claude_authenticate` / `claude_oauth_*` answer errors (no Anthropic account login is impersonated);
+  `remote_control` enabling fails as upstream's bridge does without a bridge; `channel_enable` and
+  `set_proactive` answer as the external build does.
+- The official plugin marketplace: constants only (no startup auto-install, no CDN download).
+
+*Ported alongside:* `Stream`, `controlMessageCompat`, `ndjsonSafeStringify`,
+`streamJsonStdoutGuard`, `PermissionPromptToolResultSchema`, the `callback` hook type
+(`registerHookCallbacks`, `initialize.hooks`) and `function` hooks (`sessionHooks.ts`),
+`SyntheticOutputTool` (`StructuredOutput`) with `registerStructuredOutputEnforcement`, `--agents` /
+`initialize.agents` (`parseAgentsFromJson`), `sessionTitle.ts`, `sideQuestion.ts`, `hookEvents.ts`
+(started/response), `sdkEventQueue.ts` / `sdkProgress.ts` / `sessionState.ts`'s event,
+`createCanUseToolWithPermissionPrompt`, `services/tokenEstimation.ts`' API count, `utils/thinking.ts`.
+
+*Divergences, recorded:*
+- The SDK translation happens at the print boundary (`sdk_messages_for_event`), since the REPL
+  consumes the engine's internal events; `system/init` is emitted by the runner before each `ask`.
+- Hook lifecycle events, the SDK event queue and the hook-callback registry are per run (the hook
+  dispatcher, `AppState.sdk_events`), not per process. The periodic `hook_progress` event is not
+  ported: a command hook's output is read when it exits.
+- Signal attachments (`structured_output`, `max_turns_reached`) have no text and are dropped from
+  every request (`normalizeMessagesForAPI`); `max_turns_reached` is never stored in the history.
+- `apply_flag_settings` keeps the inline flag settings and applies `model` at once; other keys need
+  the live settings reload, which is not ported (Part 9). `seed_read_state` fills only gaps in the read
+  cache (`FileState` has no timestamp).
+- The session title is parsed from the small fast model's text (no `json_schema` output format); a
+  side question is one forked model call over the run's state, not `runForkedAgent`.
+- A `--resume` without an id in `-p` is refused ("--resume requires a session ID when used with
+  --print"); upstream's picker is replaced by a numbered list in the REPL.
+- Not ported: `--sdk-url` / `RemoteIO`, the bridge, streamlined output, `auth_status`,
+  `rate_limit_event`, `prompt_suggestion`, `files_persisted`, `--workload`, KAIROS / proactive / cron,
+  the teammates' inbox. Still to merge (separate branches): MCP-server OAuth (`mcp_authenticate`,
+  `mcp_oauth_callback_url`, `mcp_clear_auth`), the MCP control requests (`mcp_set_servers`,
+  `mcp_reconnect`, `mcp_toggle`, `mcp_message`, SDK MCP servers, host elicitation) and the plugin
+  system (`reload_plugins`).
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
