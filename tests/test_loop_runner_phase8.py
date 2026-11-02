@@ -394,9 +394,9 @@ def test_the_runner_hands_its_scopes_to_skills_mcp_and_the_task_tools(python_wor
         captured["send"] = kw
         return real_send(**kw)
 
-    async def connect(root: Any, locations: Any) -> Any:
+    async def connect(root: Any, locations: Any, **options: Any) -> Any:
         captured["locations"] = locations
-        return await real_connect(root, locations)
+        return await real_connect(root, locations, **options)
 
     monkeypatch.setattr(skill_loader, "get_skill_registry", registry)
     monkeypatch.setattr(skill_tool_mod, "build_skill_tool", skill)
