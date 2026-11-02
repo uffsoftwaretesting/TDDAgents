@@ -72,7 +72,8 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 | `services/mcp/` | `services/mcp/` | Config scopes, client, connection manager; MCP-server OAuth (`auth.py`; the TS SDK's `auth()` in `sdk_auth.py`), `needs-auth` and its 15-minute cache; elicitation (`elicitation_handler.py`); SDK servers over `mcp_message` (`sdk_control_transport.py`). claude.ai account OAuth is not ported |
 | `cli/session_mcp.py`, `cli/mcp_auth_control.py` | `cli/print.ts` | `SessionMcp` (`DevelopmentRun.mcp`): the run's configured, SDK and dynamic servers, read live by the pools; reconnect / toggle / set-servers / elicitation routing. The `mcp_authenticate`, `mcp_oauth_callback_url` and `mcp_clear_auth` bodies, dependencies injected |
 | `tools/mcp_auth_tool/` | `tools/McpAuthTool/` | `mcp__<server>__authenticate`, offered for `needs-auth` servers |
-| `utils/plugins/`, `services/plugins/`, `plugins/`, `utils/dxt/` | same | The plugin system: marketplaces, installation, loader, refresh, zip cache, MCPB bundles, autoupdate, startup checks, `--plugin-dir`. The package folder is `.tddagents-plugin/` |
+| `utils/plugins/`, `services/plugins/`, `plugins/`, `utils/dxt/`, `cli/handlers/plugins.py` | same | The plugin system: marketplaces, installation, loader, refresh, zip cache, MCPB bundles, autoupdate, startup checks, `--plugin-dir`; plugin commands/skills, agents, hooks and MCP servers in the session; `pluginOperations` and the `plugin` CLI; `/reload-plugins`, `reload_plugins`. The package folder is `.tddagents-plugin/` |
+| `components/`, `hooks/notifs/` | `components/`, `hooks/notifs/` | The REPL's line-based dialogs: `/mcp` (`components/mcp/`), the MCP elicitation dialog, the trust dialog (`components/trust_dialog/`, `utils/config.py`); the plugin-autoupdate notice |
 | `utils/secure_storage/` | `utils/secureStorage/` | The plaintext credential store (`<config home>/.credentials.json`, 0600) on every platform |
 | `context.py`, `constants/system_prompt_sections.py` | `context.ts`, `prompts.ts` | System prompt + `tdd-contract.md`, system/user context, per-run memoization |
 | `state/app_state_store.py` | `AppStateStore.ts` | `AppState` (ledger, plan, todos, permission context, last test run, tasks) |
@@ -337,6 +338,7 @@ python -m app.main -p --input-format stream-json --output-format stream-json --v
 python -m app.main --thread-id "tdd-<hash>" ["<next message>"]   # continue a session (= --resume)
 python -m app.main -c | --resume [id] | --fork-session | --session-id <uuid>
 python -m app.main --fresh                                       # new thread
+python -m app.main plugin list | install <p@m> | marketplace add <src> …   # [--thread-id <id>] for project/local scope
 # Flags: --permission-mode, --settings <file>, --dangerously-skip-permissions, --coordinator,
 # --system-prompt[-file], --append-system-prompt[-file], --agents <json>, --rewind-files <uuid>;
 # -p only: --max-turns, --max-budget-usd, --json-schema, --include-partial-messages,
@@ -346,7 +348,9 @@ python -m app.main --fresh                                       # new thread
 The REPL opens in plan mode (`⏸ plan mode on`). `ExitPlanMode` shows upstream's choices
 ("Yes", "No, keep planning" with feedback, or `/edit`). Afterwards the same conversation
 develops the plan. Type at any time; Esc interrupts. `/help` lists `/plan`, `/pause`,
-`/resume`, `/requirements` and `/exit` (resumable with `--thread-id`).
+`/resume`, `/requirements`, `/context`, `/mcp`, `/reload-plugins` and `/exit` (resumable with
+`--thread-id`). A new interactive session first asks to trust its folder (upstream's trust dialog);
+`-p` treats trust as implicit, as `claude -p`.
 
 **Experiment tooling:** `python mutation_tests/<task>/run_mutation_tests.py` (hardcoded
 `/home/amaro/...` paths; edit before running). SonarQube: `docker compose -f

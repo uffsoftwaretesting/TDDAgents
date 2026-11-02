@@ -1977,11 +1977,54 @@ stages 1–2.*
   settings are the lowest settings layer; autoupdate skips on `DISABLE_AUTOUPDATER` or
   `TDDAGENTS_DISABLE_NONESSENTIAL_TRAFFIC`; the headless zip cache is removed through `atexit`;
   telemetry is not ported.
-- *Later user decisions (2026-11-02):* `/mcp` is ported as a text-mode REPL command (the auth tool's
-  "run /mcp" text stays verbatim and becomes true); the REPL answers elicitations with a terminal
-  port of `ElicitationDialog`; plugin startup checks run behind a ported trust dialog (headless:
-  untrusted unless already accepted). Plugins stage 3 (component integrations, `plugin` CLI,
-  `/reload-plugins`, `reload_plugins`) is in progress.
+- **Plugins stage 3** (`app/utils/plugins/load_plugin_{commands,agents,hooks}.py`,
+  `mcp_plugin_integration.py`, `app/services/plugins/plugin_operations.py`,
+  `app/cli/handlers/plugins.py`, `app/utils/background_housekeeping.py`): plugin commands and
+  skills join the skill registry (`<plugin>:<namespace>:<name>`), plugin agents sit between the
+  built-in agents and the user's (their `permissionMode`, `hooks` and `mcpServers` ignored, as
+  upstream), plugin hooks register on the run's dispatcher (with `CLAUDE_PLUGIN_ROOT`,
+  `CLAUDE_PLUGIN_DATA`, `CLAUDE_PLUGIN_OPTION_*`; skipped under `allowManagedHooksOnly`), plugin MCP
+  servers (`plugin:<plugin>:<server>`, scope `dynamic`) merge below the user's. `pluginOperations`
+  and `python -m app.main plugin …` (validate, list, install, uninstall, enable, disable, update,
+  `marketplace add|list|remove|update`); `/reload-plugins` and the `reload_plugins` control request
+  (the `--agents` agents kept); `-p`'s background plugin install (waited for under
+  `TDDAGENTS_SYNC_PLUGIN_INSTALL`); the autoupdate once per session, its REPL notice
+  (`usePluginAutoupdateNotification`, `app/hooks/notifs/`); `/context` counts the run's agents.
+  *User decisions (2026-11-02):* a plugin agent's TDD `phase` is honoured (phase moves stay
+  ledger-guarded); `plugin … --thread-id <id>` targets that session's project folder (the cwd
+  otherwise, as upstream); hints name real commands ("/doctor" → `python -m app.main plugin list`,
+  "/plugin" and "/plugins" → `/reload-plugins`); plugin content uses the `TDDAGENTS_*` skill
+  placeholders only (`${CLAUDE_PLUGIN_ROOT}` kept). *Divergences:* plugin MCP servers are refreshed
+  on the configured connection list for the REPL and `-p` alike (connections are not memoized, so
+  upstream's headless `applyPluginMcpDiff` sharing does not apply); plugin hooks are per run
+  (a generation counter for the load memo); plugin agents get TDDAgents' extra memory scopes; the
+  CLI returns exit codes; plugin MCP config errors are logged; the REPL's background install
+  refreshes through the run's `refresh_plugins`. Not ported: LSP (no LSP manager), output styles
+  (none), the `/plugin` React dialog (the CLI covers it), plugin-hook hot reload, `--available`'s
+  install counts, analytics.
+- **The REPL dialogs** (`app/components/`, line-based: choices typed by number, Esc closes):
+  - *`/mcp`* (`app/components/mcp/`): the server list by scope, a server's menu (reconnect,
+    authenticate and clear auth for sse/http, enable/disable, tools), a tool's detail, and
+    `/mcp enable|disable [name|all]` / `/mcp reconnect <name>` (an `enable` toggles whatever the
+    state, as upstream; user decision). `SessionMcp.reconnect` closes the old connection first
+    (`clearServerCache`), which the `mcp_reconnect` / `mcp_toggle` control requests now share.
+  - *Elicitation* (`elicitation_dialog.py`, `app/utils/mcp/elicitation_validation.py`,
+    `date_time_parser.py`): form fields one by one in schema order (an empty line keeps the value;
+    an invalid value is asked again; Accept with a field missing asks it again), URL mode with the
+    link; the REPL is `SessionMcp.ask_host`. zod's checks are rewritten by hand (messages checked
+    against zod 3.25); no unset of a set value, no scroll window or locale date display.
+  - *Trust* (`app/components/trust_dialog/`, `app/utils/config.py`): upstream's
+    `checkHasTrustDialogAccepted` (session trust, the project key, every parent folder), shown before
+    the session opens; plugin startup checks run only with the folder trusted. *User decisions:*
+    trust is stored as upstream (the project's key, so each new session folder asks once); `-p`
+    treats trust as implicit, as `claude -p` (this supersedes the earlier "headless untrusted").
+  - *Texts:* where upstream points at Claude Code, the TDDAgents route is named (user decision):
+    the empty `/mcp` list names the project's `.mcp.json` and the global config's `mcpServers`; with
+    a failed server the list names the session's `metrics_and_logging/execution_logs.txt` (upstream's
+    `claude --debug` hint); the docs and "Security guide" links are dropped (no TDDAgents page).
+  - Not ported: claude.ai connector menus, agent-only MCP servers, `McpParsingWarnings`. The
+    `.mcp.json` per-server approval dialog is being ported (user decision 2026-11-02; `-p` keeps
+    auto-approval, as `claude -p`).
 
 ### The three things that changed most
 
