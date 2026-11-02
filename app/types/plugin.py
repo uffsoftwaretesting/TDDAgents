@@ -2,16 +2,18 @@
 Plugin types: a loaded plugin, the plugin error union and its display message.
 
 Ported from `reference/claude-code/src/types/plugin.ts` -> `LoadedPlugin`, `PluginComponent`,
-`PluginError`, `PluginLoadResult`, `getPluginErrorMessage`, `PluginRepository`, `PluginConfig`.
+`PluginError`, `PluginLoadResult`, `getPluginErrorMessage`, `PluginRepository`, `PluginConfig`,
+`BuiltinPluginDefinition`.
 
 `LoadedPlugin` is a mutable dataclass (upstream mutates `enabled` while loading); each
 `PluginError` variant is a `TypedDict` tagged by `type`, as upstream's discriminated union is a
-plain object. `BuiltinPluginDefinition` belongs with the built-in plugin registry
-(`src/plugins/builtinPlugins.ts`) and is not ported here.
+plain object. `BuiltinPluginDefinition.skills` holds upstream's `BundledSkillDefinition`s, which
+the stage-3 skills integration turns into commands; it is untyped (`Any`) until then.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
@@ -19,6 +21,22 @@ from app.utils.plugins.schemas import CommandMetadata, LspServerConfig, PluginMa
 
 #: `PluginComponent`.
 PluginComponent: TypeAlias = Literal["commands", "agents", "skills", "hooks", "output-styles"]
+
+
+@dataclass(frozen=True)
+class BuiltinPluginDefinition:
+    """`BuiltinPluginDefinition`: a plugin shipped with the CLI (`<name>@builtin`)."""
+
+    name: str
+    description: str
+    version: str | None = None
+    skills: list[Any] | None = None
+    hooks: dict[str, Any] | None = None
+    mcp_servers: dict[str, dict[str, Any]] | None = None
+    #: Unavailable plugins are hidden entirely.
+    is_available: Callable[[], bool] | None = None
+    #: The enabled state before the user sets one (`True` when unset).
+    default_enabled: bool | None = None
 
 
 @dataclass
