@@ -69,8 +69,10 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 | `services/api/` | `claude.ts`, `withRetry.ts` | `stream_call_model` (one message per content block), cache breakpoints; `DEFAULT_MAX_RETRIES = 10` |
 | `services/tools/` | `services/tools/` | `run_tool_use` pipeline, orchestration, streaming executor, tool hooks |
 | `services/compact/` | `services/compact/` | Compaction, autocompact, microcompact, the compact prompt + TDD sections, forked summarizer |
-| `services/mcp/` | `services/mcp/` | Config scopes, client, connection manager; MCP-server OAuth (`auth.py`; the TS SDK's `auth()` in `sdk_auth.py`), `needs-auth` and its 15-minute cache. claude.ai account OAuth is not ported |
-| `cli/mcp_auth_control.py` | `cli/print.ts` | The `mcp_authenticate`, `mcp_oauth_callback_url` and `mcp_clear_auth` control-request bodies, dependencies injected |
+| `services/mcp/` | `services/mcp/` | Config scopes, client, connection manager; MCP-server OAuth (`auth.py`; the TS SDK's `auth()` in `sdk_auth.py`), `needs-auth` and its 15-minute cache; elicitation (`elicitation_handler.py`); SDK servers over `mcp_message` (`sdk_control_transport.py`). claude.ai account OAuth is not ported |
+| `cli/session_mcp.py`, `cli/mcp_auth_control.py` | `cli/print.ts` | `SessionMcp` (`DevelopmentRun.mcp`): the run's configured, SDK and dynamic servers, read live by the pools; reconnect / toggle / set-servers / elicitation routing. The `mcp_authenticate`, `mcp_oauth_callback_url` and `mcp_clear_auth` bodies, dependencies injected |
+| `tools/mcp_auth_tool/` | `tools/McpAuthTool/` | `mcp__<server>__authenticate`, offered for `needs-auth` servers |
+| `utils/plugins/`, `services/plugins/`, `plugins/`, `utils/dxt/` | same | The plugin system: marketplaces, installation, loader, refresh, zip cache, MCPB bundles, autoupdate, startup checks, `--plugin-dir`. The package folder is `.tddagents-plugin/` |
 | `utils/secure_storage/` | `utils/secureStorage/` | The plaintext credential store (`<config home>/.credentials.json`, 0600) on every platform |
 | `context.py`, `constants/system_prompt_sections.py` | `context.ts`, `prompts.ts` | System prompt + `tdd-contract.md`, system/user context, per-run memoization |
 | `state/app_state_store.py` | `AppStateStore.ts` | `AppState` (ledger, plan, todos, permission context, last test run, tasks) |

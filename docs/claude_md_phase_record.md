@@ -1927,10 +1927,61 @@ handled. Merged subsystems: file history (`app/utils/file_history.py`, `--rewind
   --print"); upstream's picker is replaced by a numbered list in the REPL.
 - Not ported: `--sdk-url` / `RemoteIO`, the bridge, streamlined output, `auth_status`,
   `rate_limit_event`, `prompt_suggestion`, `files_persisted`, `--workload`, KAIROS / proactive / cron,
-  the teammates' inbox. Still to merge (separate branches): MCP-server OAuth (`mcp_authenticate`,
-  `mcp_oauth_callback_url`, `mcp_clear_auth`), the MCP control requests (`mcp_set_servers`,
-  `mcp_reconnect`, `mcp_toggle`, `mcp_message`, SDK MCP servers, host elicitation) and the plugin
-  system (`reload_plugins`).
+  the teammates' inbox.
+
+*Merged 2026-11-02: MCP-server OAuth, the MCP control plane, elicitation, the auth tool, plugins
+stages 1–2.*
+
+- **MCP-server OAuth** (`app/services/mcp/auth.py`, the TS SDK's `auth()` in `sdk_auth.py`,
+  `app/cli/mcp_auth_control.py`, `app/utils/secure_storage/`): `mcp_authenticate`,
+  `mcp_oauth_callback_url`, `mcp_clear_auth`, `needs-auth` and its 15-minute cache.
+  *User decisions:* dynamic client registration (a client metadata URL only through
+  `TDDAGENTS_MCP_*` env); XAA, the macOS keychain and issuer stamps are left out.
+  *Divergences:* no default client-metadata URL; the plaintext credential store on every platform;
+  discovery uses its own fetch; env names are `TDDAGENTS_MCP_*`.
+- **The MCP control plane** (`app/cli/session_mcp.py`, `app/services/mcp/sdk_control_transport.py`):
+  upstream keeps the configured, SDK and dynamic servers in `runHeadlessStreaming`'s closure; here
+  they are one `SessionMcp` on `DevelopmentRun.mcp`, which the rosters and the tool pool read at each
+  refresh (`on_change` rebuilds them, upstream's `buildAllTools`). `mcp_reconnect` / `mcp_toggle`
+  (config gate `getMcpConfigByName`, then every client list), `mcp_set_servers`
+  (`applyMcpServerChanges`, serialized; `filterMcpServersByPolicy` with the run's own settings
+  locations), `mcp_message`, `initialize.sdkMcpServers` (`setupSdkMcpClients` over
+  `SdkControlClientTransport`), and `buildMcpServerStatuses` in upstream's shape (`serverInfo`,
+  `scope`, the per-transport `config`, tools with annotations).
+  *Divergences:* a failed host `mcp_message` answers the pending request with a JSON-RPC error (the
+  Python `ClientSession` does not fail pending requests on a stream exception; upstream's `send()`
+  rejects). Tool annotations carry no `openWorld` (the MCP tool has no `isOpenWorld`).
+- **Elicitation** (`app/services/mcp/elicitation_handler.py`, `execute_elicitation_hooks` /
+  `execute_elicitation_result_hooks` / `execute_notification_hooks` in `app/utils/hooks/hooks.py`):
+  Elicitation hooks, then the host's `handleElicitation`, then the ElicitationResult hooks;
+  `notifications/elicitation/complete` fires the Notification hook and streams
+  `system/elicitation_complete`. *Divergence:* upstream registers the handlers on each connected
+  client before every turn (`registerElicitationHandlers`, a tracking set); the Python SDK fixes the
+  callback when a session is created, so every connection gets `SessionMcp.elicit` from the start and
+  it reads the hooks and the host when an elicitation arrives (cancel while no host is attached). No
+  abort signal reaches the hooks; a hook's content that does not validate as an `ElicitResult` is a
+  hook error (the host is asked). SDK servers answer through their transport, as upstream.
+- **The MCP auth tool** (`app/tools/mcp_auth_tool/`, `createMcpAuthTool`): offered for every
+  `needs-auth` server; a completed OAuth flow reconnects through `McpConnectionManager.reconnect` /
+  `apply_reconnect` (it holds the cwd, transport and elicitation settings), then `on_reconnect`
+  rebuilds the pools. Not ported: `callMCPToolWithUrlElicitationRetry` (-32042).
+- **Plugins stages 1–2** (`app/utils/plugins/`, `app/services/plugins/`, `app/plugins/`,
+  `app/utils/dxt/`): schemas, marketplaces, installation state, the reconciler, the loader,
+  `refreshActivePlugins`, the zip cache, MCPB bundles (`@anthropic-ai/mcpb` 1.2.0, manifest 0.3,
+  ported from npm since it is not in the snapshot), background installs, startup checks,
+  autoupdate, `--plugin-dir`. *User decisions:* the plugin package folder is **`.tddagents-plugin/`**
+  (`PLUGIN_PACKAGE_DIR`); the official marketplace is constants only.
+  *Divergences:* every loader takes the run's `SettingsLocations` (cached per locations), not global
+  settings; YAML frontmatter is PyYAML (YAML 1.1); Zod's error reporting is approximated;
+  `save_plugin_options` writes the user scope; a timed-out git/npm child is SIGKILLed; plugin
+  settings are the lowest settings layer; autoupdate skips on `DISABLE_AUTOUPDATER` or
+  `TDDAGENTS_DISABLE_NONESSENTIAL_TRAFFIC`; the headless zip cache is removed through `atexit`;
+  telemetry is not ported.
+- *Later user decisions (2026-11-02):* `/mcp` is ported as a text-mode REPL command (the auth tool's
+  "run /mcp" text stays verbatim and becomes true); the REPL answers elicitations with a terminal
+  port of `ElicitationDialog`; plugin startup checks run behind a ported trust dialog (headless:
+  untrusted unless already accepted). Plugins stage 3 (component integrations, `plugin` CLI,
+  `/reload-plugins`, `reload_plugins`) is in progress.
 
 ### The three things that changed most
 
