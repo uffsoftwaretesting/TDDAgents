@@ -68,7 +68,9 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 | `services/api/` | `claude.ts`, `withRetry.ts` | `stream_call_model` (one message per content block), cache breakpoints; `DEFAULT_MAX_RETRIES = 10` |
 | `services/tools/` | `services/tools/` | `run_tool_use` pipeline, orchestration, streaming executor, tool hooks |
 | `services/compact/` | `services/compact/` | Compaction, autocompact, microcompact, the compact prompt + TDD sections, forked summarizer |
-| `services/mcp/` | `services/mcp/` | Config scopes, client, connection manager |
+| `services/mcp/` | `services/mcp/` | Config scopes, client, connection manager; MCP-server OAuth (`auth.py`; the TS SDK's `auth()` in `sdk_auth.py`), `needs-auth` and its 15-minute cache. claude.ai account OAuth is not ported |
+| `cli/mcp_auth_control.py` | `cli/print.ts` | The `mcp_authenticate`, `mcp_oauth_callback_url` and `mcp_clear_auth` control-request bodies, dependencies injected |
+| `utils/secure_storage/` | `utils/secureStorage/` | The plaintext credential store (`<config home>/.credentials.json`, 0600) on every platform |
 | `context.py`, `constants/system_prompt_sections.py` | `context.ts`, `prompts.ts` | System prompt + `tdd-contract.md`, system/user context, per-run memoization |
 | `state/app_state_store.py` | `AppStateStore.ts` | `AppState` (ledger, plan, todos, permission context, last test run, tasks) |
 | `task.py`, `tasks/`, `utils/task/` | `Task.ts`, `tasks/` | `LocalAgentTask`, `<task-notification>`, `stopTask` |
