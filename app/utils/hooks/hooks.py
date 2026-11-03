@@ -116,6 +116,7 @@ from app.schemas.hooks import (
 )
 from app.types.hooks import (
     AggregatedHookResult,
+    HookProgress,
     HookResult,
     PromptRequest,
     PromptResponse,
@@ -283,11 +284,14 @@ class HookDispatcher:
         force_sync: bool = False,
         request_prompt: RequestPrompt | None = None,
         tool_input_summary: str | None = None,
+        with_progress: bool = False,
     ) -> AsyncIterator[AggregatedHookResult]:
         """
         `executeHooks`: run the matching hooks in parallel and stream their news. `request_prompt`
         is bound to this hook's name and the tool's summary, so a dialog can say who asks; only
-        command hooks receive it.
+        command hooks receive it. With `with_progress`, each matched hook's `hook_progress` comes
+        first, before any hook runs (upstream always yields it, for its UI; here only the stop
+        hooks' summary reads it, so the other callers' streams are unchanged).
         """
         hook_event = str(hook_input["hook_event_name"])
         hook_name = f"{hook_event}:{match_query}" if match_query else hook_event
@@ -300,6 +304,12 @@ class HookDispatcher:
             return
         json_input = json.dumps(hook_input)
         bound_prompt = request_prompt(hook_name, tool_input_summary) if request_prompt is not None else None
+        if with_progress:
+            for m in matched:
+                yield AggregatedHookResult(progress=HookProgress(
+                    hook_event=hook_event, hook_name=hook_name, command=hook_display_text(m.hook),
+                    prompt_text=m.hook.prompt if isinstance(m.hook, PromptHook) else None,
+                    status_message=getattr(m.hook, "status_message", None)))
 
         async def run(index: int, m: MatchedHook) -> HookResult:
             return await self._run_one(
@@ -1051,7 +1061,8 @@ def execute_stop_hooks(
     if text is not None:
         hook_input["last_assistant_message"] = text
     return dispatcher.execute_hooks(
-        hook_input, str(uuid.uuid4()), signal=signal, timeout_ms=timeout_ms, tool_context=context, messages=messages
+        hook_input, str(uuid.uuid4()), signal=signal, timeout_ms=timeout_ms, tool_context=context, messages=messages,
+        with_progress=True,
     )
 
 

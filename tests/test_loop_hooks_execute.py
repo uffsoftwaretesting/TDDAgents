@@ -895,8 +895,9 @@ def test_stop_hooks_on_the_main_thread():
     assert hook_input == {**BASE, "permission_mode": "default", "hook_event_name": "Stop",
                           "stop_hook_active": True, "last_assistant_message": "all done"}
     assert tool_use_id
+    # The stop hooks ask for the progress items: their summary counts the hooks from them.
     assert kwargs == {"signal": "sig", "timeout_ms": TOOL_HOOK_EXECUTION_TIMEOUT_MS, "tool_context": context,
-                      "messages": messages}
+                      "messages": messages, "with_progress": True}
 
 
 def test_stop_hooks_in_a_worker_fire_subagent_stop():

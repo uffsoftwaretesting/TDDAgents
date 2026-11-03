@@ -322,12 +322,29 @@ class HookResult:
 
 
 @dataclass(frozen=True, slots=True)
+class HookProgress:
+    """
+    `HookProgress` (`types/hooks.ts`): the `hook_progress` data `executeHooks` yields for each matched
+    hook before it runs: the event, the hook's name, its display text (`getHookDisplayText`), a prompt
+    hook's prompt and the hook's status message.
+    """
+
+    hook_event: str
+    hook_name: str
+    command: str
+    prompt_text: str | None = None
+    status_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AggregatedHookResult:
     """
     `AggregatedHookResult`: one item of `executeHooks`' stream. Each item carries one kind
     of news, the way upstream yields them; the consumer reads the fields it cares about.
+    `progress` is upstream's `message` of type `progress` (asked for with `with_progress`).
     """
 
+    progress: HookProgress | None = None
     attachment: HookAttachment | None = None
     blocking_error: HookBlockingError | None = None
     prevent_continuation: bool = False
@@ -543,6 +560,7 @@ def get_user_prompt_submit_hook_blocking_message(blocking_error: HookBlockingErr
 __all__ = [
     "EXPECTED_SCHEMA_HINT",
     "AggregatedHookResult",
+    "HookProgress",
     "HookOutputError",
     "HookResult",
     "ParsedHookOutput",

@@ -78,6 +78,7 @@ from app.utils.hooks.hooks import execute_subagent_start_hooks
 from app.utils.messages import (
     HookAttachment,
     Message,
+    StopHookSummaryMessage,
     ToolUseSummaryMessage,
     create_attachment_message,
 )
@@ -303,8 +304,9 @@ def run_agent(
         try:
             async for event in events:
                 # A worker never labels its batches (`!toolUseContext.agentId`), so only the loop's
-                # verdict is skipped; the summary type is excluded for the type checker.
-                if isinstance(event, (Terminated, ToolUseSummaryMessage)):
+                # verdict is skipped; the summary type is excluded for the type checker. A SubagentStop
+                # summary is UI the worker's transcript does not keep.
+                if isinstance(event, (Terminated, ToolUseSummaryMessage, StopHookSummaryMessage)):
                     continue
                 if store is not None and _is_recordable(event):
                     last_uuid = store.record_sidechain_transcript([event], agent_id, last_uuid)

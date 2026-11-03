@@ -388,10 +388,13 @@ __all__ = [
     "HookBlockingError",
     "Message",
     "ToolCall",
+    "StopHookInfo",
+    "StopHookSummaryMessage",
     "ToolUseSummaryMessage",
     "async_hook_response_messages",
     "attachment_type_of",
     "create_attachment_message",
+    "create_stop_hook_summary_message",
     "create_tool_use_summary_message",
     "create_user_interruption_message",
     "is_attachment_message",
@@ -422,6 +425,54 @@ def create_tool_use_summary_message(summary: str, preceding_tool_use_ids: Sequen
     """`createToolUseSummaryMessage`."""
     return ToolUseSummaryMessage(summary=summary, preceding_tool_use_ids=tuple(preceding_tool_use_ids),
                                  uuid=str(uuid_module.uuid4()), timestamp=datetime.now(UTC).isoformat())
+
+
+@dataclass(frozen=True, slots=True)
+class StopHookInfo:
+    """`StopHookInfo`: one hook that ran, its display text, a prompt hook's prompt, and how long it took."""
+
+    command: str
+    prompt_text: str | None = None
+    duration_ms: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StopHookSummaryMessage:
+    """
+    `SystemStopHookSummaryMessage` (`subtype: 'stop_hook_summary'`): the hooks a stop ran, their
+    errors, and whether one prevented continuation. Like the tool-use summary it is not a conversation
+    message: the loop yields it for the REPL (`app/components/messages/system_text_message.py`), and the
+    model, the transcript and the SDK stream never see it (upstream's `normalizeMessagesForAPI` drops
+    system messages too).
+    """
+
+    hook_count: int
+    hook_infos: tuple[StopHookInfo, ...]
+    hook_errors: tuple[str, ...]
+    prevented_continuation: bool
+    stop_reason: str | None
+    has_output: bool
+    level: str
+    uuid: str
+    timestamp: str
+    tool_use_id: str | None = None
+    hook_label: str | None = None
+    total_duration_ms: int | None = None
+    type: str = "system"
+    subtype: str = "stop_hook_summary"
+
+
+def create_stop_hook_summary_message(
+    hook_count: int, hook_infos: Sequence[StopHookInfo], hook_errors: Sequence[str], prevented_continuation: bool,
+    stop_reason: str | None, has_output: bool, level: str, tool_use_id: str | None = None,
+    hook_label: str | None = None, total_duration_ms: int | None = None,
+) -> StopHookSummaryMessage:
+    """`createStopHookSummaryMessage`."""
+    return StopHookSummaryMessage(
+        hook_count=hook_count, hook_infos=tuple(hook_infos), hook_errors=tuple(hook_errors),
+        prevented_continuation=prevented_continuation, stop_reason=stop_reason, has_output=has_output, level=level,
+        uuid=str(uuid_module.uuid4()), timestamp=datetime.now(UTC).isoformat(), tool_use_id=tool_use_id,
+        hook_label=hook_label, total_duration_ms=total_duration_ms)
 
 
 #: `INTERRUPT_MESSAGE` / `INTERRUPT_MESSAGE_FOR_TOOL_USE` (`src/utils/messages.ts`).
