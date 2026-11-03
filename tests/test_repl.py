@@ -450,6 +450,25 @@ def test_context_reports_the_sessions_context_usage(python_workspace, tmp_path, 
     assert "| flag-reviewer | Flag |" in report
 
 
+def test_hooks_reloads_the_hooks_and_lists_them_until_esc(python_workspace, tmp_path):
+    model = Model([[AIMessage(content="planned the calculator")]])
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: not repl.busy and repl.last_terminal is not None)
+        settings = tmp_path / ".tddagents" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text('{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo done"}]}]}}')
+        io.lines.put_nowait("/hooks")
+        await until(lambda: any(line.startswith("Hooks\n1 hook configured") for line in io.out))
+        repl.interrupt()  # Esc
+        await until(lambda: "Hooks dialog dismissed" in io.out)
+        io.lines.put_nowait("/exit")
+
+    _, repl, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    stop = repl.run.ctx.hook_dispatcher.snapshot.matchers_for("Stop")
+    assert [hook.command for matcher in stop for hook in matcher.hooks] == ["echo done"]
+
+
 def test_an_interactive_session_checks_trust_before_a_headers_helper(python_workspace, tmp_path, monkeypatch):
     import app.utils.config as config_mod
 

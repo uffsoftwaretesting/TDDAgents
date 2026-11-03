@@ -19,18 +19,19 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
   declines. A single-select question's option previews are boxed under their options (upstream's
   `PreviewBox`, `app/components/permissions/ask_user_question_permission_request/preview_box.py`).
 * **Slash commands** (`app/commands/commands.py`): never run mid-turn, as upstream's queue processor;
-  the immediate ones (`/help`, `/plan`, `/pause`, `/mcp`, `/exit`) do. A typed prompt command (a
+  the immediate ones (`/help`, `/plan`, `/pause`, `/mcp`, `/hooks`, `/exit`) do. A typed prompt command (a
   skill, or `/init`) is a turn of its own.
 * **Project onboarding** (`app/project_onboarding_state.py`, upstream's `LogoV2` feed): the header
   shows the "Tips for getting started" while the project has not completed them; each turn marks
   them complete once they are (`onQueryImpl`).
-* **Dialogs** (`app/components/design_system/dialog.py`): `/mcp` (`app/components/mcp/mcp_command.py`)
-  and an MCP server's elicitation (`app/components/mcp/elicitation_dialog.py`, upstream's
-  `ElicitationDialog`, set as the session's `SessionMcp.ask_host`; the Elicitation hooks still run
-  first) take the screen like a permission question, one at a time, answered by the lines typed. Esc
-  closes them without aborting the turn, as upstream's dialogs keep Esc to themselves. A URL
-  elicitation accepted stays on screen, waiting for the server's completion notification
-  (`SessionMcp.emit_elicitation_complete`) or the user, while the server already has its answer.
+* **Dialogs** (`app/components/design_system/dialog.py`): `/mcp` (`app/components/mcp/mcp_command.py`),
+  `/hooks` (`app/commands/hooks/hooks.py`) and an MCP server's elicitation
+  (`app/components/mcp/elicitation_dialog.py`, upstream's `ElicitationDialog`, set as the session's
+  `SessionMcp.ask_host`; the Elicitation hooks still run first) take the screen like a permission
+  question, one at a time, answered by the lines typed. Esc closes them without aborting the turn,
+  as upstream's dialogs keep Esc to themselves. A URL elicitation accepted stays on screen, waiting
+  for the server's completion notification (`SessionMcp.emit_elicitation_complete`) or the user,
+  while the server already has its answer.
 
 The session opens in plan mode (the Analyst): the model plans, asks with `AskUserQuestion`, and
 asks for the plan's approval with `ExitPlanMode`, which `ask_permission` shows with upstream's
@@ -561,6 +562,8 @@ class Repl:
             await self._reload_plugins()
         elif name == "mcp":
             self._spawn_dialog(self._mcp(command.args))
+        elif name == "hooks":
+            self._spawn_dialog(self._hooks())
         else:  # exit, quit
             self.exiting = True
             await self._stop_turn()
@@ -597,6 +600,26 @@ class Repl:
                 result = await call(ReplDialog(self), self._panel_context(), args)
             except Exception as error:  # noqa: BLE001 - a failed /mcp is reported, and the session goes on
                 logger.exception("/mcp failed")
+                result = f"Error: {error}"
+        if result:
+            self.io.write(result)
+
+    async def _hooks(self) -> None:
+        """`/hooks`: the hooks reloaded, then the menu holds the screen until it closes; its result is shown."""
+        from app.commands.hooks.hooks import call, menu_context
+
+        locations = getattr(self.run, "settings_locations", None)
+        if locations is None:
+            self.io.write("Hooks are not available in this session.")
+            return
+        ctx = self.run.ctx
+        tools = ctx.refresh_tools() if getattr(ctx, "refresh_tools", None) is not None else getattr(ctx, "tools", ())
+        dispatcher = getattr(ctx, "hook_dispatcher", None)
+        async with self._asking:
+            try:
+                result = await call(ReplDialog(self), menu_context(locations, tools, dispatcher), dispatcher)
+            except Exception as error:  # noqa: BLE001 - a failed /hooks is reported, and the session goes on
+                logger.exception("/hooks failed")
                 result = f"Error: {error}"
         if result:
             self.io.write(result)
