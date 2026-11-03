@@ -42,6 +42,7 @@ from app.session.prompts import development_continue_prompt
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.plan import ItemStatus, PlanError, TddPlan
 from app.types.permissions import PermissionMode, ToolPermissionContext
+from tests.plan_helpers import PROJECT_CONFIG_SECTION
 
 CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 CALC_TEST = "import calculator\n\ndef test_add():\n    assert calculator.add(2, 3) == 5\n"
@@ -258,7 +259,8 @@ def deps_for(model: Model) -> Any:
 def plan_document(*items: str) -> str:
     """A plan file as the Analyst writes it: a specification and the Implementation Plan."""
     numbered = "\n".join(f"{n}. {item}" for n, item in enumerate(items, start=1))
-    return f"# Plan\n\n## Context\nA calculator.\n\n## Implementation Plan\n{numbered}\n\n## Verification\nRunTests.\n"
+    return (f"# Plan\n\n## Context\nA calculator.\n\n## Implementation Plan\n{numbered}\n\n## Verification\nRunTests.\n"
+            + PROJECT_CONFIG_SECTION)
 
 
 def planning_turns(*items: str) -> list[Any]:

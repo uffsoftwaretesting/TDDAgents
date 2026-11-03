@@ -27,10 +27,12 @@ from app.tool import tool_context_for
 from app.types.permissions import PermissionMode, ToolPermissionContext
 from app.utils.permissions.permission_setup import set_permission_mode
 from app.utils.tool_result_storage import config_home
+from tests.plan_helpers import PROJECT_CONFIG_SECTION
 from tests.test_session_run import CALC_IMPL, CALC_TEST, call, cycle, options, scripted
 
 CONFIG = build_run_config("plan-mode-test")
-PLAN = "# Plan: calculator\n\n## Context\nAdd two numbers.\n\n## Implementation Plan\n1. add two numbers\n"
+PLAN = ("# Plan: calculator\n\n## Context\nAdd two numbers.\n\n## Implementation Plan\n1. add two numbers\n"
+        + PROJECT_CONFIG_SECTION)
 
 
 # ── the stop hooks ──────────────────────────────────────────────────────────

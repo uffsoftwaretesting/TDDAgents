@@ -20,6 +20,7 @@ from app.session.driver import (
     session_exists,
 )
 from app.tdd.plan import ItemStatus, TddPlan, plan_path, save_plan
+from tests.plan_helpers import PROJECT_CONFIG_SECTION
 from tests.test_phase0_baseline import CALC_IMPL, CALC_TEST, _call, _scripted_deps
 from tests.test_repl import Model, deps_for
 
@@ -47,7 +48,8 @@ def _options(tmp_path: Any) -> dict[str, Any]:
     return {"project_root": tmp_path, "home": tmp_path / "home", "managed_dir": tmp_path / "etc"}
 
 
-PLAN_FILE = "# Plan\n\n## Context\nAdd two numbers.\n\n## Implementation Plan\n1. add two numbers\n"
+PLAN_FILE = ("# Plan\n\n## Context\nAdd two numbers.\n\n## Implementation Plan\n1. add two numbers\n"
+             + PROJECT_CONFIG_SECTION)
 
 
 def test_a_headless_session_plans_and_stops_unapproved(python_workspace: Any, tmp_path: Any) -> None:

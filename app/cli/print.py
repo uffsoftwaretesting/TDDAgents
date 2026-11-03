@@ -75,6 +75,7 @@ from app.state.app_state_store import AppState, AppStateStore
 from app.tasks.local_shell_task.kill_shell_tasks import kill_all_shell_tasks
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
+from app.tdd.project_config import load_project_config
 from app.tdd.suite_fingerprint import fingerprint_test_files
 from app.tool import Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
@@ -566,7 +567,9 @@ async def open_session_run(
     # `getIsNonInteractiveSession`: every `-p` run is non-interactive, a host answering its asks or not.
     is_interactive = interactive if interactive is not None else can_use_tool is not None
     bootstrap = SessionBootstrap(session_id=run_id, original_cwd=cwd, is_interactive=is_interactive)
-    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan, bootstrap=bootstrap))
+    # The project's approved configuration (2026-11-03): a resumed session reads it back, as the plan.
+    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan, bootstrap=bootstrap,
+                                         project_config=load_project_config(workspace)))
     from app.skills.load_skills_dir import get_skill_registry
 
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.

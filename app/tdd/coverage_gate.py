@@ -24,9 +24,6 @@ from typing import Any
 #: Line + branch coverage of the production code that is a good rule of thumb (user decision).
 COVERAGE_RULE_OF_THUMB = 90.0
 
-#: The values prompts name as placeholders (no values in prose, §4 of the plan).
-TDD_PROMPT_VARS: dict[str, str] = {"COVERAGE_RULE_OF_THUMB": f"{COVERAGE_RULE_OF_THUMB:.0f}"}
-
 COVERAGE_DIR = ".tddagents/coverage"
 COVERAGE_CONFIG_PATH = f"{COVERAGE_DIR}/coveragerc"
 COVERAGE_REPORT_PATH = f"{COVERAGE_DIR}/report.json"

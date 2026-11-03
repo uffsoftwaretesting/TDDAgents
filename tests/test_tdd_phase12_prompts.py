@@ -12,7 +12,8 @@ import pytest
 
 from app.context import _file_section
 from app.session.prompts import development_approved_prompt
-from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB, TDD_PROMPT_VARS
+from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
+from app.tdd.prompt_vars import TDD_PROMPT_VARS
 from app.tdd.plan import TddPlan
 
 REPO = Path(__file__).resolve().parents[1]
@@ -39,7 +40,12 @@ def test_no_prompt_states_the_old_red_rule(path):
 
 
 def test_the_rule_of_thumb_is_named_once_in_code_and_filled_into_the_prompts():
-    assert TDD_PROMPT_VARS == {"COVERAGE_RULE_OF_THUMB": "90"}
+    assert TDD_PROMPT_VARS["COVERAGE_RULE_OF_THUMB"] == "90"
+    assert TDD_PROMPT_VARS["JUNIT_REPORT_ENV"] == "TDDAGENTS_JUNIT_REPORT"
+    assert TDD_PROMPT_VARS["COVERAGE_REPORT_ENV"] == "TDDAGENTS_COVERAGE_REPORT"
+    assert TDD_PROMPT_VARS["PROJECT_CONFIG_HEADING"] == "Project Configuration"
+    assert TDD_PROMPT_VARS["PROJECT_CONFIG_PATH"] == ".tddagents/project.json"
+    assert TDD_PROMPT_VARS["PROJECT_CONFIG_SKILL"] == "tdd-project-config"
     contract = _file_section("tdd-contract.md")()
     start = development_approved_prompt(TddPlan.from_texts(["a"]))
     for text in (contract, start):

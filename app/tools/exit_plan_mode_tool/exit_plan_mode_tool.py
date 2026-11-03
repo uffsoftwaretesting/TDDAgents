@@ -18,6 +18,13 @@ pending ones are replaced. The result then ends with how development works and t
 (`development_approved_prompt`). A plan with no such items is refused before the approval (`validate_input`)
 and at the call, so the model keeps planning.
 
+*TDD addition (2026-11-03):* the plan also declares the project's configuration in its
+`Project Configuration` section (`app/tdd/project_config.py`): the setup and test commands and which
+files are tests. A plan whose section is missing or invalid is refused the same way, with every
+issue listed and the `tdd-project-config` skill named. On approval the configuration is written to
+`.tddagents/project.json` (a protected directory the model cannot edit) and set on `AppState`
+before the sub-requirements are installed, so the first item's test baseline is taken with it.
+
 *Divergences:* no teammates or team-lead approval (`isTeammate`, `isPlanModeRequired`, the mailbox),
 no `allowedPrompts` permission rules (upstream adds them only with the classifier permissions
 on), no auto-mode circuit breaker on restore (plan with auto is not ported), no Ultraplan, and no
@@ -26,13 +33,22 @@ TeamCreate hint.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from app.tdd.plan import (
     IMPLEMENTATION_PLAN_HEADING,
+    PROJECT_CONFIG_HEADING,
     parse_implementation_plan,
+    parse_project_configuration,
     update_tdd_plan,
+)
+from app.tdd.project_config import (
+    PROJECT_CONFIG_PATH,
+    PROJECT_CONFIG_SKILL,
+    ProjectConfig,
+    save_project_config,
 )
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
 from app.types.permissions import PermissionBehavior, PermissionMode, PermissionResult
@@ -91,6 +107,17 @@ def no_sub_requirements_message(file_path: str) -> str:
     )
 
 
+def invalid_project_config_message(file_path: str, issues: tuple[str, ...]) -> str:
+    """Why a plan without a usable project configuration cannot be approved (the TDD addition)."""
+    listed = "\n".join(f"- {issue}" for issue in issues)
+    return (
+        f'The plan file at {file_path} has no usable "## {PROJECT_CONFIG_HEADING}" section:\n{listed}\n'
+        "TDDAgents sets the project up and runs its tests with the commands that section declares, and tells "
+        "the tests from the production code by its file patterns, so the plan cannot be approved without it. "
+        f"The {PROJECT_CONFIG_SKILL} skill describes how to declare it for the project's language."
+    )
+
+
 def approved_plan_text(plan: str | None, file_path: str, *, is_agent: bool, edited: bool) -> str:
     """`mapToolResultToToolResultBlockParam` (no teammate, no TeamCreate hint)."""
     if is_agent:
@@ -123,6 +150,10 @@ def build_exit_plan_mode_tool() -> BuiltTool:
         if not parse_implementation_plan(plan or ""):
             return ValidationResult(valid=False, message=no_sub_requirements_message(str(plans.file_path())),
                                     error_code=2)
+        _config, issues = parse_project_configuration(plan or "")
+        if issues:
+            return ValidationResult(valid=False, message=invalid_project_config_message(str(plans.file_path()), issues),
+                                    error_code=3)
         return ValidationResult(valid=True)
 
     def check(input_args: dict[str, Any], context: ToolContext) -> PermissionResult:
@@ -140,6 +171,11 @@ def build_exit_plan_mode_tool() -> BuiltTool:
         items = parse_implementation_plan(plan or "") if not agent_id else []
         if not agent_id and not items:
             raise RuntimeError(no_sub_requirements_message(str(file_path)))
+        config: ProjectConfig | None = None
+        if not agent_id:
+            config, issues = parse_project_configuration(plan or "")
+            if config is None:
+                raise RuntimeError(invalid_project_config_message(str(file_path), issues))
         if input_plan is not None:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(input_plan, encoding="utf-8")
@@ -152,6 +188,11 @@ def build_exit_plan_mode_tool() -> BuiltTool:
 
         context.set_app_state(restore)
         content = approved_plan_text(plan, str(file_path), is_agent=bool(agent_id), edited=input_plan is not None)
+        if config is not None:
+            approved_config = config
+            if context.workspace is not None:
+                save_project_config(context.workspace, approved_config)
+            context.set_app_state(lambda state: replace(state, project_config=approved_config))
         if items:
             from app.session.prompts import development_approved_prompt
 
@@ -160,7 +201,9 @@ def build_exit_plan_mode_tool() -> BuiltTool:
         return ToolResult(
             content=content,
             metadata={"plan": plan, "filePath": str(file_path), "isAgent": bool(agent_id),
-                      "planWasEdited": input_plan is not None, "subRequirements": items},
+                      "planWasEdited": input_plan is not None, "subRequirements": items,
+                      "projectConfig": config.to_dict() if config is not None else None,
+                      "projectConfigPath": PROJECT_CONFIG_PATH if config is not None else None},
         )
 
     return build_tool(
@@ -187,5 +230,6 @@ __all__ = [
     "NOT_IN_PLAN_MODE",
     "approved_plan_text",
     "build_exit_plan_mode_tool",
+    "invalid_project_config_message",
     "no_sub_requirements_message",
 ]

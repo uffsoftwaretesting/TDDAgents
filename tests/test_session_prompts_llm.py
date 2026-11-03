@@ -16,7 +16,7 @@ from app.session.prompts import (
     development_continue_prompt,
     development_resume_prompt,
 )
-from app.tdd.coverage_gate import TDD_PROMPT_VARS
+from app.tdd.prompt_vars import TDD_PROMPT_VARS
 from app.tdd.plan import ItemStatus, TddPlan, render_plan
 from app.utils.run_sync import run_sync
 

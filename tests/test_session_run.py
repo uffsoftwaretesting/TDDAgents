@@ -171,6 +171,26 @@ def test_a_fresh_session_saves_its_plan_at_once(python_workspace, tmp_path):
     assert json.loads(path.read_text(encoding="utf-8"))["items"][0]["text"] == "a"
 
 
+def test_a_session_opens_with_the_projects_approved_configuration(tmp_path):
+    """`.tddagents/project.json` (written by ExitPlanMode) is read back when a session opens or resumes."""
+    from app.tdd.project_config import ProjectConfig, save_project_config
+    from app.workspace.local import LocalWorkspace
+
+    declared = ProjectConfig(test="make test", test_files=("t/",))
+    with_config = LocalWorkspace(tmp_path / "with")
+    save_project_config(with_config, declared)
+    seen: list[Any] = []
+
+    async def go(workspace: Any, run_id: str) -> Any:
+        async with open_session_run(run_id=run_id, plan=TddPlan.from_texts(["a"]), workspace=workspace,
+                                    **options(tmp_path, scripted([], []))) as run:
+            seen.append(run.store.get().project_config)
+
+    asyncio.run(go(with_config, "loop-config"))
+    asyncio.run(go(LocalWorkspace(tmp_path / "without"), "loop-no-config"))
+    assert seen == [declared, None]
+
+
 def test_with_a_transcript_the_conversation_is_resumed_with_the_resume_prompt(python_workspace, tmp_path):
     seen: list[Any] = []
     turns = [[AIMessage(content="one")], [AIMessage(content="two")]]
