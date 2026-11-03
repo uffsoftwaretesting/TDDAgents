@@ -219,7 +219,9 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   `testSupportFiles`, `manifestFiles`, `exclude`. The contract tells the model to declare every
   dependency it installs in the project's own manifest. The `tdd-project-config` skill (claude-api
   pattern) injects the reference for the project's ecosystem.
-- **The final run** (`app/tdd/final_run.py`) copies the project into a clean folder, runs the
+- **The final run** (`app/tdd/final_run.py`) copies the project into a clean folder (upstream's
+  ripgrep listing with `--follow`, so every `.gitignore` applies and links are recreated as links;
+  broken or looping links are left out), runs the
   declared `setup` then `test` there, judges it with the same `judge`, writes
   `metrics_and_logging/final_test_run.txt` and deletes the copy: a dependency installed but not
   declared reads "NOT passing".

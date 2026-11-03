@@ -2193,7 +2193,20 @@ prompt style.
   `.gitignore` / `.ignore` applies (user decision: follow claude-code). Divergences:
   `--no-require-git` (TDDAgents never runs `git init`, but a checkout honours `.gitignore`) and
   `--no-ignore-parent` (the project is the root of every lookup). No ripgrep → "clean final run
-  unsupported". Symlinks: the user chose `--follow` with links recreated as links (in progress).
+  unsupported".
+- **Symbolic links in the final-run copy** (user decisions 2026-11-03). The listing follows links
+  (`--files --follow --hidden`, upstream's order in `hooks/fileSuggestions.ts`), and `copy_project`
+  recreates each link once as a link with its own target (`os.readlink`); files listed through a linked
+  folder are not copied again. On exit 2 with output, `rip_grep` returns the partial listing, as
+  upstream's `ripGrep` does. Divergences from a git checkout, recorded:
+  - a link rg lists nothing through (an empty folder, or one whose files are all ignored or excluded) is
+    left out;
+  - broken and looping links are left out (user decision: rg lists nothing through them, and a broken
+    link cannot make a test pass);
+  - a link pointing outside the project keeps its exact target, so a relative one may be broken in the
+    copy, as in a checkout elsewhere.
+  - A link into a huge outside tree can make the listing hit rg's timeout, and the run reports "could not
+    copy the project": upstream's behaviour, kept (user decision, no extra bound).
 
 *Live settings, `--debug`, the settings schema (user decisions 2026-11-03, to restore `update-config`
 verbatim):*
