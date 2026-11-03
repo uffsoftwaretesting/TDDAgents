@@ -367,7 +367,7 @@ def drive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lines: list[str | Non
         locations = SimpleNamespace(project_root=tmp_path)
         yield SimpleNamespace(on_message=None, ctx=SimpleNamespace(),
                               mcp=SimpleNamespace(settings_locations=lambda: locations),
-                              store=SimpleNamespace(update=lambda f: None))
+                              store=SimpleNamespace(update=lambda f: None), refresh_plugins=None)
 
     class Repl:
         def __init__(self, run: Any, io: Any, verbose: bool = False) -> None:
