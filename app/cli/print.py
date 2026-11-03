@@ -571,6 +571,10 @@ async def open_session_run(
 
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
     skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
+    from app.commands.init import init_command
+
+    # `COMMANDS()`' prompt commands, after every skill (`loadAllCommands`).
+    skill_registry.set_built_in_commands([init_command(root_dir)])
     locations = run_settings_locations(config, root_dir, home, managed_dir)
     await initialize_plugins_at_startup(locations, interactive=is_interactive)
     # `loadAllCommands`' plugin commands and skills, and `loadPluginAgents`, from the plugins on disk.
@@ -1928,7 +1932,8 @@ class HeadlessStreaming:
         tools = ctx.refresh_tools() if ctx.refresh_tools is not None else ctx.tools
         registry = ctx.skill_registry
         commands = [c.user_facing_name() for c in get_commands(registry) if not c.is_hidden]
-        skills = [s.name for s in registry.commands()] if registry is not None else []
+        # `getSlashCommandToolSkills` leaves the built-ins out (`source !== 'builtin'`).
+        skills = [s.name for s in registry.commands() if s.source != "builtin"] if registry is not None else []
         inputs = SystemInitInputs(
             cwd=str(getattr(ctx.workspace, "root", "") or ""),
             tools=[t.name for t in tools],

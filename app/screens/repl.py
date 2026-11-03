@@ -18,7 +18,11 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
   several, for a multiSelect question) picks, any other text is the user's own answer, and Esc
   declines.
 * **Slash commands** (`app/commands/commands.py`): never run mid-turn, as upstream's queue processor;
-  the immediate ones (`/help`, `/plan`, `/pause`, `/mcp`, `/exit`) do.
+  the immediate ones (`/help`, `/plan`, `/pause`, `/mcp`, `/exit`) do. A typed prompt command (a
+  skill, or `/init`) is a turn of its own.
+* **Project onboarding** (`app/project_onboarding_state.py`, upstream's `LogoV2` feed): the header
+  shows the "Tips for getting started" while the project has not completed them; each turn marks
+  them complete once they are (`onQueryImpl`).
 * **Dialogs** (`app/components/design_system/dialog.py`): `/mcp` (`app/components/mcp/mcp_command.py`)
   and an MCP server's elicitation (`app/components/mcp/elicitation_dialog.py`, upstream's
   `ElicitationDialog`, set as the session's `SessionMcp.ask_host`; the Elicitation hooks still run
@@ -80,6 +84,13 @@ from app.components.messages.collapsed_read_search_content import (
 )
 from app.components.permissions.permission_options import PermissionOption
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt
+from app.project_onboarding_state import (
+    create_project_onboarding_feed,
+    get_steps,
+    increment_project_onboarding_seen_count,
+    maybe_mark_project_onboarding_complete,
+    should_show_project_onboarding,
+)
 from app.query.transitions import Terminal
 from app.query_engine import ResultMessage
 from app.session.prompts import development_continue_prompt
@@ -412,7 +423,16 @@ class Repl:
 
     # ── turns ──────────────────────────────────────────────────────────────
 
+    def _project_dir(self) -> Path:
+        """The session's project folder (upstream's `getCwd()`): its settings root, else the workspace's."""
+        locations = getattr(self.run, "settings_locations", None)
+        if locations is not None:
+            return Path(locations.project_root)
+        return project_root_of(getattr(self.run.ctx, "workspace", None))
+
     def _start(self, turn: Coroutine[Any, Any, Terminal | None]) -> None:
+        # `onQueryImpl`: "Mark onboarding as complete when any user message is sent to Claude".
+        maybe_mark_project_onboarding_complete(self._project_dir())
         self.turn = asyncio.create_task(self._run_turn(turn))
 
     async def _run_turn(self, turn: Coroutine[Any, Any, Terminal | None]) -> None:
@@ -698,6 +718,12 @@ class Repl:
         """
         from app.hooks.notifs.use_plugin_autoupdate_notification import use_plugin_autoupdate_notification
 
+        project = self._project_dir()
+        if should_show_project_onboarding(project):
+            # `LogoV2`'s onboarding feed, and its seen count (once per session here, see
+            # `app/project_onboarding_state.py`).
+            self.io.write(f"{create_project_onboarding_feed(get_steps(project), project)}\n")
+            increment_project_onboarding_seen_count(project)
         in_plan = self.run.store.get().tool_permission_context.mode == PermissionMode.PLAN
         header = PLAN_MODE_ON if in_plan else f"TDD plan:\n{render_plan(self.plan)}"
         self.io.write(f"{header}\n\n{HELP_TEXT}")

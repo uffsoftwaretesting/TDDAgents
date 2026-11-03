@@ -314,6 +314,8 @@ class SkillRegistry:
         self._plugin: list[SkillCommand] = []
         self._conditional = {c.name: c for c in conditional}
         self._dynamic: dict[str, SkillCommand] = {}
+        #: `COMMANDS()`' `prompt` commands (`/init`), last in `getCommands`; see `set_built_in_commands`.
+        self._built_in: list[SkillCommand] = []
         self.model = model
         #: `attachments.ts` -> `sentSkillNames`, keyed by agent id (`""` is the main thread).
         self.sent_skill_names: dict[str | None, set[str]] = {}
@@ -326,6 +328,13 @@ class SkillRegistry:
         """
         self._plugin = list(commands)
 
+    def set_built_in_commands(self, commands: Iterable[SkillCommand]) -> None:
+        """
+        The built-in `prompt` commands (`source: 'builtin'`, `app/commands/init.py`), which
+        `loadAllCommands` puts after every skill and plugin command: a skill of the same name wins.
+        """
+        self._built_in = list(commands)
+
     def plugin_commands(self) -> list[SkillCommand]:
         """The plugin commands and skills currently loaded."""
         return list(self._plugin)
@@ -333,11 +342,11 @@ class SkillRegistry:
     def commands(self) -> list[SkillCommand]:
         """
         `getCommands`: the base commands (bundled, then the skill directories), the plugin
-        commands and skills, then activated skills no earlier command shadows.
+        commands and skills, activated skills no earlier command shadows, then the built-ins.
         """
         base = [*self._base, *self._plugin]
         names = {c.name for c in base}
-        return [*base, *(c for c in self._dynamic.values() if c.name not in names)]
+        return [*base, *(c for c in self._dynamic.values() if c.name not in names), *self._built_in]
 
     def find_command(self, name: str) -> SkillCommand | None:
         """`findCommand`: the first command whose name or user-facing name matches."""
@@ -345,12 +354,14 @@ class SkillRegistry:
 
     def get_skill_tool_commands(self) -> list[SkillCommand]:
         """
-        `getSkillToolCommands`: what the model may invoke. Bundled and skills-directory entries
-        always; a plugin command only with a description of its own or a `when_to_use`.
+        `getSkillToolCommands`: what the model may invoke. Never a built-in; bundled and
+        skills-directory entries always; a plugin command only with a description of its own or a
+        `when_to_use`.
         """
         return [
             c for c in self.commands()
             if not c.disable_model_invocation
+            and c.source != "builtin"
             and (c.loaded_from in ("bundled", "skills") or c.has_user_specified_description or bool(c.when_to_use))
         ]
 
