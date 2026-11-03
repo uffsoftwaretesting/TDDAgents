@@ -62,12 +62,12 @@ class TestRegistry:
     def test_init_registers_each_code_built_skill_once(self):
         init_bundled_skills()
         init_bundled_skills()
-        assert [d.name for d in get_bundled_skills()] == ["tdd-project-config"]
+        assert [d.name for d in get_bundled_skills()] == ["update-config", "tdd-project-config"]
 
     def test_init_keeps_what_another_caller_registered(self):
         register_bundled_skill(_definition("other"))
         init_bundled_skills()
-        assert [d.name for d in get_bundled_skills()] == ["other", "tdd-project-config"]
+        assert [d.name for d in get_bundled_skills()] == ["other", "update-config", "tdd-project-config"]
 
 
 class TestCommand:
