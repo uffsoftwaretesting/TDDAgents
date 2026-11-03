@@ -445,6 +445,29 @@ def test_context_reports_the_sessions_context_usage(python_workspace, tmp_path, 
     assert "| flag-reviewer | Flag |" in report
 
 
+def test_an_interactive_session_checks_trust_before_a_headers_helper(python_workspace, tmp_path, monkeypatch):
+    import app.utils.config as config_mod
+
+    asked: list[Any] = []
+
+    def untrusted(folder: Any) -> bool:
+        asked.append(folder)
+        return False
+
+    monkeypatch.setattr(config_mod, "check_has_trust_dialog_accepted", untrusted)
+    model = Model([[AIMessage(content="ok")]])
+    checks: list[Any] = []
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: not repl.busy and repl.last_terminal is not None)
+        checks.append(repl.run.mcp.connect_options["trust_check"])
+        io.lines.put_nowait("/exit")
+
+    asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    (check,) = checks
+    assert check() is False and asked == [tmp_path]
+
+
 def test_a_plugin_autoupdate_is_announced_while_the_repl_runs(python_workspace, tmp_path):
     import app.utils.plugins.plugin_autoupdate as autoupdate
 

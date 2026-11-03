@@ -157,3 +157,64 @@ def test_a_hanging_helper_is_cut_off(monkeypatch):
     start = time.monotonic()
     assert mtr.get_mcp_headers_from_helper("srv", helper_config("sleep 3")) is None
     assert time.monotonic() - start < 2
+
+
+# ── the headersHelper trust check (interactive sessions) ─────────────────────
+
+def project_helper(scope: str = "project") -> McpServerConfig:
+    return McpServerConfig(type="http", scope=scope, url="http://u", headers_helper="echo '{}'")
+
+
+def test_the_helper_needs_trust_only_for_an_interactive_project_or_local_server(caplog):
+    untrusted = lambda: False  # noqa: E731 - a predicate under test
+    assert mtr.headers_helper_trusted("s", project_helper(), None)
+    assert mtr.headers_helper_trusted("s", project_helper("user"), untrusted)
+    assert mtr.headers_helper_trusted("s", McpServerConfig(type="http", scope="project", url="u"), untrusted)
+    assert mtr.headers_helper_trusted("s", project_helper("local"), lambda: True)
+    with caplog.at_level("ERROR"):
+        assert not mtr.headers_helper_trusted("srv", project_helper("local"), untrusted)
+        assert not mtr.headers_helper_trusted("srv", project_helper(), untrusted)
+    assert caplog.messages == [
+        "Security: headersHelper for MCP server 'srv' executed before workspace trust is confirmed."] * 2
+
+
+def test_an_untrusted_project_server_opens_without_its_helper_and_keeps_its_config(tmp_path):
+    seen: list[McpServerConfig] = []
+
+    def factory(name: str, config: McpServerConfig) -> Any:
+        seen.append(config)
+        raise ConnectionError("no server")
+
+    async def connect(trusted: bool) -> Any:
+        return await connect_to_server("p", project_helper(), cwd=str(tmp_path), transport_factory=factory,
+                                       trust_check=lambda: trusted)
+
+    untrusted = asyncio.run(connect(False))
+    trusted = asyncio.run(connect(True))
+    assert [c.headers_helper for c in seen] == [None, "echo '{}'"]
+    assert seen[0].url == "http://u" and seen[0].scope == "project"
+    assert isinstance(untrusted, FailedMCPServer) and untrusted.config.headers_helper == "echo '{}'"
+    assert isinstance(trusted, FailedMCPServer)
+
+
+def test_reconnect_and_the_manager_pass_the_trust_check_on(tmp_path):
+    from app.services.mcp.mcp_connection_manager import McpConnectionManager, reconnect_mcp_server_impl
+
+    seen: list[str | None] = []
+
+    def factory(name: str, config: McpServerConfig) -> Any:
+        seen.append(config.headers_helper)
+        raise ConnectionError("no server")
+
+    def untrusted() -> bool:
+        return False
+
+    async def scenario() -> None:
+        await reconnect_mcp_server_impl("p", project_helper(), cwd=str(tmp_path), transport_factory=factory,
+                                        trust_check=untrusted)
+        manager = McpConnectionManager(cwd=str(tmp_path), transport_factory=factory, trust_check=untrusted)
+        await manager.connect({"p": project_helper()})
+        await manager.reconnect("p", project_helper())
+
+    asyncio.run(scenario())
+    assert seen == [None, None, None]

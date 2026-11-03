@@ -585,6 +585,11 @@ async def open_session_run(
                              settings_locations=lambda: run_settings_locations(config, root_dir, home, managed_dir),
                              is_non_interactive_session=bootstrap.get_is_non_interactive_session())
     session_mcp.connect_options = session_mcp.elicitation_options()
+    if is_interactive:
+        from app.utils.config import check_has_trust_dialog_accepted
+
+        # `getMcpHeadersFromHelper`'s trust check: interactive sessions only (`-p` is trusted implicitly).
+        session_mcp.connect_options["trust_check"] = lambda: check_has_trust_dialog_accepted(root_dir)
     mcp = await connect_mcp_servers(
         root_dir, run_settings_locations(config, root_dir, home, managed_dir),
         is_non_interactive_session=bootstrap.get_is_non_interactive_session(), **session_mcp.connect_options,

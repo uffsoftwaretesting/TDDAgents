@@ -59,8 +59,10 @@ to put an in-memory server where a process or a socket would be.
   overridden on purpose. The server's stderr goes to a temporary file (upstream pipes it so it
   never reaches the UI) and is logged when the connection fails.
 * **sse** / **http** send `User-Agent` plus the static headers, overridden by the
-  `headersHelper` output. A TDDAgents run is always non-interactive, so — as upstream's
-  `getIsNonInteractiveSession()` branch — the helper runs without a trust prompt.
+  `headersHelper` output. In an interactive session (`trust_check` given) a project or local
+  server's helper runs only once the folder is trusted (`getMcpHeadersFromHelper`'s security check,
+  `headers_helper_trusted`); `-p` runs it without a check, as upstream's
+  `getIsNonInteractiveSession()` branch.
 * **ws** follows the 1.x SDK's `websocket_client` (subprotocol `mcp`, one JSON-RPC message per
   text frame): `mcp` 2.x ships no WebSocket client, and upstream supports the type.
 
@@ -77,6 +79,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import logging
 import os
@@ -200,6 +203,23 @@ def get_mcp_headers_from_helper(server_name: str, config: McpServerConfig) -> di
     except (OSError, TypeError, ValueError, subprocess.SubprocessError) as exc:
         logger.warning("MCP server %s: error getting headers from headersHelper: %s", server_name, exc)
         return None
+
+
+def headers_helper_trusted(
+    server_name: str, config: McpServerConfig, trust_check: Callable[[], bool] | None
+) -> bool:
+    """
+    `getMcpHeadersFromHelper`'s security check: in an interactive session (`trust_check` given), a
+    project or local server's `headersHelper` runs only once the workspace is trusted; otherwise
+    the helper is skipped (no dynamic headers) and the attempt is logged.
+    """
+    if trust_check is None or not config.headers_helper or config.scope not in ("project", "local"):
+        return True
+    if trust_check():
+        return True
+    logger.error("Security: headersHelper for MCP server '%s' executed before workspace trust is confirmed.",
+                 server_name)
+    return False
 
 
 def get_mcp_server_headers(server_name: str, config: McpServerConfig) -> dict[str, str]:
@@ -475,11 +495,20 @@ async def connect_to_server(
     transport_factory: TransportFactory = open_transport,
     elicitation_callback: ElicitationCallback | None = None,
     on_elicitation_complete: OnElicitationComplete | None = None,
+    trust_check: Callable[[], bool] | None = None,
 ) -> MCPServerConnection:
     """
     `connectToServer`: a `ConnectedMCPServer` whose `cleanup` closes it, a `NeedsAuthMCPServer`
-    (an sse/http server answering `UnauthorizedError`), or a `FailedMCPServer`.
+    (an sse/http server answering `UnauthorizedError`), or a `FailedMCPServer`. `trust_check` is the
+    interactive session's workspace trust: an untrusted project/local server's transport opens
+    without its `headersHelper` (the connection keeps the full config, for a reconnect once trusted).
     """
+    if not headers_helper_trusted(name, config, trust_check):
+        opener = transport_factory
+
+        def transport_factory(server: str, cfg: McpServerConfig) -> Any:
+            return opener(server, dataclasses.replace(cfg, headers_helper=None))
+
     ready = asyncio.Event()
     stop = asyncio.Event()
     box: dict[str, Any] = {}

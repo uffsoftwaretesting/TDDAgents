@@ -136,6 +136,8 @@ class McpConnectionManager:
     elicitation_callback: ElicitationCallback | None = None
     #: The connections' `notifications/elicitation/complete` handler.
     on_elicitation_complete: OnElicitationComplete | None = None
+    #: The interactive session's workspace trust, for `headersHelper` (`None`: non-interactive).
+    trust_check: Callable[[], bool] | None = None
     #: Told after an auth tool's reconnect is applied: `(server_name, result)`.
     on_reconnect: Callable[[str, ReconnectResult], None] | None = None
     _resource_tools_added: bool = False
@@ -169,7 +171,8 @@ class McpConnectionManager:
         try:
             client = await connect_to_server(
                 name, config, cwd=self.cwd, transport_factory=self.transport_factory,
-                elicitation_callback=self.elicitation_callback, on_elicitation_complete=self.on_elicitation_complete)
+                elicitation_callback=self.elicitation_callback, on_elicitation_complete=self.on_elicitation_complete,
+                trust_check=self.trust_check)
             self.clients.append(client)
             if not isinstance(client, ConnectedMCPServer):
                 if isinstance(client, NeedsAuthMCPServer):
@@ -194,7 +197,8 @@ class McpConnectionManager:
         """`reconnectMcpServerImpl(name, config)` with this manager's cwd, transport and elicitation."""
         return await reconnect_mcp_server_impl(
             name, config, cwd=self.cwd, transport_factory=self.transport_factory,
-            elicitation_callback=self.elicitation_callback, on_elicitation_complete=self.on_elicitation_complete)
+            elicitation_callback=self.elicitation_callback, on_elicitation_complete=self.on_elicitation_complete,
+            trust_check=self.trust_check)
 
     def apply_reconnect(self, name: str, result: ReconnectResult) -> None:
         """
@@ -234,13 +238,14 @@ async def reconnect_mcp_server_impl(
     transport_factory: TransportFactory = open_transport,
     elicitation_callback: ElicitationCallback | None = None,
     on_elicitation_complete: OnElicitationComplete | None = None,
+    trust_check: Callable[[], bool] | None = None,
 ) -> ReconnectResult:
     """`reconnectMcpServerImpl`: a fresh connection; its tools and resources when connected."""
     try:
         clear_keychain_cache()
         client = await connect_to_server(
             name, config, cwd=cwd, transport_factory=transport_factory, elicitation_callback=elicitation_callback,
-            on_elicitation_complete=on_elicitation_complete)
+            on_elicitation_complete=on_elicitation_complete, trust_check=trust_check)
         if not isinstance(client, ConnectedMCPServer):
             return ReconnectResult(client=client)
         supports_resources = bool(getattr(client.capabilities, "resources", None))
