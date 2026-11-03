@@ -20,7 +20,9 @@ with its own timeout, and results are yielded **as they complete** as a stream o
 `AggregatedHookResult`s. A PreToolUse permission verdict is aggregated with upstream's
 precedence, deny > ask > allow. Trust is implicit: this loop only runs headless, and upstream
 skips the trust check for non-interactive sessions (`shouldSkipHookDueToTrust`). Progress
-messages and the stop-hook summary are UI and are not produced.
+messages and the stop-hook summary are UI and are not produced. What upstream writes with
+`logForDebugging` (which hooks matched, each outside-REPL hook's exit status, a hook's decisions)
+goes to the debug log (`app/utils/debug.py`, `--debug`).
 
 Which configured hooks run for one event.
 
@@ -133,6 +135,7 @@ from app.utils.hooks.hook_events import (
     match_query_for,
 )
 from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
+from app.utils.debug import log_for_debugging
 from app.utils.messages import HookAttachment, HookBlockingError, Message
 from app.utils.settings.settings import (
     LEGACY_TOOL_NAME_ALIASES,
@@ -285,10 +288,11 @@ class HookDispatcher:
         is bound to this hook's name and the tool's summary, so a dialog can say who asks; only
         command hooks receive it.
         """
-        if self.snapshot.disable_all:
-            return
         hook_event = str(hook_input["hook_event_name"])
         hook_name = f"{hook_event}:{match_query}" if match_query else hook_event
+        if self.snapshot.disable_all:
+            log_for_debugging(f"Skipping hooks for {hook_name} due to 'disableAllHooks' managed setting")
+            return
         tools = getattr(tool_context, "tools", None) if tool_context is not None else None
         matched = self.matching(hook_event, hook_input, tools)
         if not matched or is_aborted(signal):
@@ -310,6 +314,7 @@ class HookDispatcher:
         try:
             for finished in asyncio.as_completed(tasks):
                 result = await finished
+                _log_hook_result(hook_event, result)
                 for item in _aggregate(result):
                     yield item
                 if result.permission_behavior is not None:
@@ -639,10 +644,11 @@ class HookDispatcher:
         PostCompact, SessionEnd, StopFailure). Prompt and agent hooks are not supported here,
         exactly as upstream.
         """
-        if self.snapshot.disable_all:
-            return []
         hook_event = str(hook_input["hook_event_name"])
         hook_name = f"{hook_event}:{match_query}" if match_query else hook_event
+        if self.snapshot.disable_all:
+            log_for_debugging(f"Skipping hooks for {hook_name} due to 'disableAllHooks' managed setting")
+            return []
         matched = self.matching(hook_event, hook_input, None)
         if not matched or is_aborted(signal):
             return []
@@ -729,13 +735,17 @@ class HookDispatcher:
                 plugin=self._with_locations(plugin),
             )
             if result.aborted:
+                log_for_debugging(f"{hook_name} [{hook.command}] cancelled")
                 return HookOutsideReplResult(
                     command=hook.command, succeeded=False, output="Hook cancelled", blocked=False
                 )
+            log_for_debugging(f"{hook_name} [{hook.command}] completed with status {result.status}")
             parsed = parse_hook_output(result.stdout)
             if parsed.validation_error:
                 raise ValueError(parsed.validation_error)
             sync_json = parsed.json if parsed.json is not None and not is_async_hook_json_output(parsed.json) else None
+            if sync_json is not None:
+                log_for_debugging(f"Parsed JSON output from hook: {json.dumps(sync_json)}", level="verbose")
             blocked = result.status == 2 or bool(sync_json and sync_json.get("decision") == "block")
             output = (result.stdout or "") if result.status == 0 else (result.stderr or "")
             watch_paths: tuple[str, ...] = ()
@@ -750,6 +760,7 @@ class HookDispatcher:
                 watch_paths=watch_paths, system_message=system_message,
             )
         except Exception as exc:  # noqa: BLE001
+            log_for_debugging(f"{hook_name} [{hook.command}] failed to run: {exc}", level="error")
             return HookOutsideReplResult(command=hook.command, succeeded=False, output=str(exc), blocked=False)
 
 
@@ -770,6 +781,27 @@ def _precedence(current: str | None, new: str) -> str | None:
     if new == "allow":
         return current if current is not None else "allow"
     return current
+
+
+def _log_hook_result(hook_event: str, result: HookResult) -> None:
+    """`executeHooks`' `logForDebugging` lines for one finished hook."""
+    name = f"Hook {hook_event} ({hook_display_text(result.hook)})"
+    if result.prevent_continuation:
+        log_for_debugging(f"{name} requested preventContinuation")
+    if result.additional_context:
+        log_for_debugging(f"{name} provided additionalContext ({len(result.additional_context)} chars)")
+    if result.initial_user_message:
+        log_for_debugging(f"{name} provided initialUserMessage ({len(result.initial_user_message)} chars)")
+    if result.watch_paths:
+        log_for_debugging(f"{name} provided {len(result.watch_paths)} watchPaths")
+    if result.updated_mcp_tool_output:
+        log_for_debugging(f"{name} replaced MCP tool output")
+    if result.permission_behavior is not None:
+        reason = result.hook_permission_decision_reason
+        log_for_debugging(f"{name} returned permissionDecision: {result.permission_behavior}"
+                          + (f" (reason: {reason})" if reason else ""))
+    if result.updated_input:
+        log_for_debugging(f"{name} modified tool input keys: [{', '.join(result.updated_input)}]")
 
 
 def _aggregate(result: HookResult) -> list[AggregatedHookResult]:
@@ -1383,7 +1415,7 @@ def matches_pattern(match_query: str, matcher: str | None) -> bool:
     try:
         regex = re.compile(matcher)
     except re.error:
-        logger.debug("Invalid regex pattern in hook matcher: %s", matcher)
+        log_for_debugging(f"Invalid regex pattern in hook matcher: {matcher}")
         return False
     if regex.search(match_query):
         return True
@@ -1528,6 +1560,9 @@ def get_matching_hooks(
     try:
         hook_matchers = get_hooks_config(snapshot, hook_event, session_matchers, registered_matchers)
         match_query = match_query_for(hook_input)
+        log_for_debugging(f"Getting matching hook commands for {hook_event} with query: {match_query}",
+                          level="verbose")
+        log_for_debugging(f"Found {len(hook_matchers)} hook matchers in settings", level="verbose")
         if match_query:
             hook_matchers = [m for m in hook_matchers if not m.matcher or matches_pattern(match_query, m.matcher)]
         matched = [
@@ -1547,15 +1582,21 @@ def get_matching_hooks(
                 filtered.append(m)
                 continue
             if if_matcher is None:
-                logger.debug(
-                    "Hook if condition %r cannot be evaluated for non-tool event %s",
-                    condition, hook_input.get("hook_event_name"),
-                )
+                log_for_debugging(f'Hook if condition "{condition}" cannot be evaluated for non-tool event '
+                                  f'{hook_input.get("hook_event_name")}')
                 continue
             if if_matcher(condition):
                 filtered.append(m)
+            else:
+                log_for_debugging(f'Skipping hook due to if condition "{condition}" not matching')
         if hook_event in (HookEvent.SESSION_START, HookEvent.SETUP):
+            for m in filtered:
+                if isinstance(m.hook, HttpHook):
+                    log_for_debugging(f"Skipping HTTP hook {m.hook.url} — HTTP hooks are not supported for "
+                                      f"{hook_event}")
             filtered = [m for m in filtered if not isinstance(m.hook, HttpHook)]
+        log_for_debugging(f'Matched {len(filtered)} unique hooks for query "{match_query or "no match query"}" '
+                          f"({len(matched)} before deduplication)", level="verbose")
         return filtered
     except Exception:
         logger.exception("Failed to collect matching hooks for %s", hook_event)
@@ -1647,7 +1688,10 @@ def _option_text(value: Any) -> str:
 
 def safe_cwd(cwd: str, project_dir: str) -> str:
     """The working directory, or the project root when the working directory is missing."""
-    return cwd if Path(cwd).is_dir() else project_dir
+    if Path(cwd).is_dir():
+        return cwd
+    log_for_debugging(f"Hooks: cwd {cwd} not found, falling back to original cwd", level="warn")
+    return project_dir
 
 
 async def _spawn(hook: CommandHook, cwd: str, env: dict[str, str]) -> asyncio.subprocess.Process:
@@ -1722,6 +1766,7 @@ async def exec_command_hook(
             _on_prompt_line, capture=capture, request_prompt=request_prompt, seen=prompt_lines, chain=prompt_chain)
 
     if (hook.run_async or hook.async_rewake) and not force_sync and registry is not None:
+        log_for_debugging(f"Hooks: Config-based async hook, backgrounding process {process_id}")
         await capture.write_stdin(json_input + "\n")
         if hook.async_rewake:
             registry.register_rewake(hook_name=hook_name, capture=capture)
@@ -1742,7 +1787,7 @@ async def exec_command_hook(
     except (BrokenPipeError, ConnectionResetError):
         if request_prompt is not None:
             # With prompts, a stdin error is only logged: the hook may simply not read it.
-            logger.debug("Hooks: stdin error during prompt flow")
+            log_for_debugging("Hooks: stdin error during prompt flow (likely process exited)")
         message = "Hook command closed stdin before hook input was fully written (EPIPE)"
         capture.kill()
         await capture.result()
@@ -1768,7 +1813,9 @@ async def exec_command_hook(
             first = _first_line(capture.stdout).strip()
             if "}" in first:
                 initial_checked = True
+                log_for_debugging(f"Hooks: Checking first line for async: {first}")
                 if _is_async_line(first) and not force_sync and registry is not None:
+                    log_for_debugging(f"Hooks: Detected async hook, backgrounding process {process_id}")
                     registry.register_pending(
                         process_id=process_id,
                         hook_id=hook_id,
@@ -1823,7 +1870,7 @@ def _on_prompt_line(
                 stdin.write((json.dumps(response.as_dict(), separators=(",", ":")) + "\n").encode("utf-8"))
                 await stdin.drain()
         except Exception as err:  # noqa: BLE001 - upstream: log, then destroy stdin
-            logger.debug("Hooks: Prompt request handling failed: %s", err)
+            log_for_debugging(f"Hooks: Prompt request handling failed: {err}")
             capture.close_stdin()
 
     chain.append(asyncio.ensure_future(answer()))

@@ -29,7 +29,10 @@ the session's files back as they were when that user message was sent, then exit
 thread's own project; `--permission-mode`, `--settings` and `--dangerously-skip-permissions` are
 upstream's startup flags for it, and `--coordinator` turns on coordinator mode
 (`TDDAGENTS_COORDINATOR_MODE`). `--plugin-dir <path>` (repeatable) loads a plugin directory for
-this process only (upstream's session plugins, `<name>@inline`).
+this process only (upstream's session plugins, `<name>@inline`). `-d/--debug [filter]`,
+`--debug-file <path>` and the hidden `-d2e/--debug-to-stderr` are upstream's debug options
+(`app/utils/debug.py`): hook execution and settings reloads are written to
+`<config home>/debug/<thread id>.txt`.
 
 `plugin …` (alias `plugins`) is upstream's `claude plugin` subcommand (`main.tsx`'s `pluginCmd`,
 handlers in `app/cli/handlers/plugins.py`): `validate`, `list`, `install`, `uninstall`, `enable`,
@@ -187,6 +190,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--settings", default=None, help="A settings file (upstream's flag settings).")
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
     parser.add_argument("--coordinator", action="store_true", help="Run development in coordinator mode.")
+    # `main.tsx`'s debug options (`app/utils/debug.py`).
+    parser.add_argument("-d", "--debug", nargs="?", const=True, default=None, metavar="filter",
+                        help='Enable debug mode with optional category filtering (e.g., "api,hooks" or "!1p,!file")')
+    parser.add_argument("-d2e", "--debug-to-stderr", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--debug-file", default=None, metavar="<path>",
+                        help="Write debug logs to a specific file path (implicitly enables debug mode)")
     parser.add_argument("--verbose", action="store_true", help="Override verbose mode setting from config")
     # `main.tsx`'s SDK options (only with --print).
     parser.add_argument("--output-format", choices=OUTPUT_FORMATS, default=None,
@@ -797,6 +806,29 @@ def main(argv: list[str] | None = None) -> int:
     if error is not None:
         print(error, file=sys.stderr)
         return 1
+    debug_handler = apply_debug_flags(args)
+    try:
+        return run_entry(args)
+    finally:
+        if debug_handler is not None:
+            logging.getLogger().removeHandler(debug_handler)
+
+
+def apply_debug_flags(args: argparse.Namespace) -> Any:
+    """
+    `--debug [filter]`, `--debug-file` and `--debug-to-stderr` (`app/utils/debug.py`); in debug mode
+    TDDAgents' own log records go to the debug log too. Returns the handler to remove afterwards.
+    """
+    from app.utils.debug import configure_debug, install_debug_log_handler, set_has_formatted_output
+
+    configure_debug(args.debug, debug_file=args.debug_file, to_stderr=args.debug_to_stderr)
+    # `main.tsx`: in --print mode, JSON on stdout makes a multiline debug message JSON too.
+    set_has_formatted_output(bool(args.print and args.output_format in ("json", "stream-json")))
+    return install_debug_log_handler()
+
+
+def run_entry(args: argparse.Namespace) -> int:
+    """`main` after the flags are applied: the REPL, or `-p` with stdout kept for the result."""
     if args.coordinator:
         os.environ["TDDAGENTS_COORDINATOR_MODE"] = "1"
     apply_plugin_dirs(args.plugin_dir)
@@ -855,6 +887,10 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
 
     thread_id = resolve_thread_id(args, initial_input)
     logger.info("🔑 thread_id: %s", thread_id)
+    from app.utils.debug import set_debug_session_id
+
+    # The debug log is named after the session (`getDebugLogPath`'s `getSessionId()`).
+    set_debug_session_id(thread_id)
     from app.cli.print import session_workspace
 
     workspace = session_workspace(thread_id)

@@ -383,6 +383,9 @@ def test_parser_help_and_metadata() -> None:
         "settings": "A settings file (upstream's flag settings).",
         "dangerously_skip_permissions": None,
         "coordinator": "Run development in coordinator mode.",
+        "debug": 'Enable debug mode with optional category filtering (e.g., "api,hooks" or "!1p,!file")',
+        "debug_to_stderr": argparse.SUPPRESS,
+        "debug_file": "Write debug logs to a specific file path (implicitly enables debug mode)",
         "verbose": "Override verbose mode setting from config",
         "output_format": 'Output format (only works with --print): "text" (default), "json" (single result), '
                          'or "stream-json" (realtime streaming)',
