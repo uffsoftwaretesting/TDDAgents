@@ -16,7 +16,8 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
 * **The model's questions** (`AskUserQuestion`, upstream's `AskUserQuestionPermissionRequest`):
   `ask_questions` shows one question at a time with its options and an "Other"; a number (or
   several, for a multiSelect question) picks, any other text is the user's own answer, and Esc
-  declines.
+  declines. A single-select question's option previews are boxed under their options (upstream's
+  `PreviewBox`, `app/components/permissions/ask_user_question_permission_request/preview_box.py`).
 * **Slash commands** (`app/commands/commands.py`): never run mid-turn, as upstream's queue processor;
   the immediate ones (`/help`, `/plan`, `/pause`, `/mcp`, `/exit`) do. A typed prompt command (a
   skill, or `/init`) is a turn of its own.
@@ -44,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from pathlib import Path
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -81,6 +83,10 @@ from app.components.hooks.prompt_dialog import (
 )
 from app.components.messages.collapsed_read_search_content import (
     CollapsedReadSearchRenderer,
+)
+from app.components.permissions.ask_user_question_permission_request.preview_box import (
+    has_any_preview,
+    preview_box,
 )
 from app.components.permissions.permission_options import PermissionOption
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt
@@ -193,12 +199,24 @@ def _options(question: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return list(question.get("options") or [])
 
 
+#: Where an option's preview box starts: under the option's label.
+PREVIEW_INDENT = "     "
+
+
 def render_question(question: Mapping[str, Any], number: int, total: int) -> str:
-    """One of the model's questions, its options numbered and "Other" last."""
+    """
+    One of the model's questions, its options numbered and "Other" last. A single-select question
+    whose options carry a `preview` shows each preview under its option, in upstream's `PreviewBox`.
+    """
     options = _options(question)
     lines = [f"? [{question.get('header', '')}] {question.get('question', '')}"
              + (f" ({number}/{total})" if total > 1 else "")]
-    lines += [f"  {i}. {o.get('label', '')} — {o.get('description', '')}" for i, o in enumerate(options, start=1)]
+    previews = has_any_preview(question)
+    width = shutil.get_terminal_size().columns - 4 - len(PREVIEW_INDENT)
+    for i, o in enumerate(options, start=1):
+        lines.append(f"  {i}. {o.get('label', '')} — {o.get('description', '')}")
+        if previews and o.get("preview"):
+            lines += [PREVIEW_INDENT + line for line in preview_box(str(o["preview"]), max_width=width)]
     lines.append(f"  {len(options) + 1}. Other — type your own answer")
     if question.get("multiSelect"):
         lines.append(f"Choose one or more of 1-{len(options)} (e.g. \"1,3\"), or type your own answer.")
