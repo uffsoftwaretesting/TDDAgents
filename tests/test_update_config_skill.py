@@ -255,3 +255,10 @@ class TestRegistration:
         turn = get_messages_for_prompt_slash_command(command, f"{HOOKS_ONLY_PREFIX} format on edit")
         assert turn.messages[1].content == f"{HOOKS_DOCS}\n\n{HOOK_VERIFICATION_FLOW}\n\n## Task\n\nformat on edit"
 
+
+def test_new_init_loads_this_skill_with_the_hooks_only_prefix():
+    from app.commands.init import NEW_INIT_PROMPT
+
+    assert f"`skill: '{SKILL_NAME}'` and args starting with `{HOOKS_ONLY_PREFIX}`" in NEW_INIT_PROMPT
+    assert '**"Constructing a Hook"** flow' in NEW_INIT_PROMPT
+    assert HOOK_VERIFICATION_FLOW.startswith("## Constructing a Hook (with verification)\n")
