@@ -2022,9 +2022,23 @@ stages 1–2.*
     the empty `/mcp` list names the project's `.mcp.json` and the global config's `mcpServers`; with
     a failed server the list names the session's `metrics_and_logging/execution_logs.txt` (upstream's
     `claude --debug` hint); the docs and "Security guide" links are dropped (no TDDAgents page).
-  - Not ported: claude.ai connector menus, agent-only MCP servers, `McpParsingWarnings`. The
-    `.mcp.json` per-server approval dialog is being ported (user decision 2026-11-02; `-p` keeps
-    auto-approval, as `claude -p`).
+  - *`.mcp.json` approval* (`app/services/mcp_server_approval.py`, `app/interactive_helpers.py`,
+    `app/components/mcp_server_{approval,multiselect}_dialog.py`; user decision 2026-11-02): right
+    after the trust dialog, before the session connects anything, the REPL asks about each pending
+    project server (one server: the single dialog; several: the multi-select, numbers typed, an
+    empty line enabling all as upstream's all-selected start, Esc rejecting all). The answers go to
+    `<project>/.tddagents/settings.local.json`. `getProjectMcpServerStatus`: rejected by
+    `disabledMcpjsonServers`, approved by `enabledMcpjsonServers`, `enableAllProjectMcpServers`, a
+    trusted source's `skipDangerousModePermissionPrompt`, or a non-interactive session (`-p`
+    approves, as `claude -p`); the rest stay pending and do not connect. *Divergences:* the docs link
+    is dropped; the settings-error gate sees only ignored settings files and MCP config errors (the
+    settings are read leniently); project settings are always on (no `--setting-sources`); Ctrl-D
+    exits at once.
+  - *`headersHelper` trust* (user decision 2026-11-02): an interactive session runs a project or
+    local server's `headersHelper` only once the folder is trusted (`getMcpHeadersFromHelper`'s
+    check, `headers_helper_trusted`); untrusted, the transport opens without it (logged) and the
+    connection keeps its full config. `-p` runs it as before.
+  - Not ported: claude.ai connector menus, agent-only MCP servers, `McpParsingWarnings`.
 
 ### The three things that changed most
 

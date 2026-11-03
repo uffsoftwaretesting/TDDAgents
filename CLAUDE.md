@@ -349,8 +349,9 @@ The REPL opens in plan mode (`⏸ plan mode on`). `ExitPlanMode` shows upstream'
 ("Yes", "No, keep planning" with feedback, or `/edit`). Afterwards the same conversation
 develops the plan. Type at any time; Esc interrupts. `/help` lists `/plan`, `/pause`,
 `/resume`, `/requirements`, `/context`, `/mcp`, `/reload-plugins` and `/exit` (resumable with
-`--thread-id`). A new interactive session first asks to trust its folder (upstream's trust dialog);
-`-p` treats trust as implicit, as `claude -p`.
+`--thread-id`). A new interactive session first asks to trust its folder (upstream's trust dialog),
+then to approve the project's pending `.mcp.json` servers; `-p` treats trust as implicit and
+approves them, as `claude -p`.
 
 **Experiment tooling:** `python mutation_tests/<task>/run_mutation_tests.py` (hardcoded
 `/home/amaro/...` paths; edit before running). SonarQube: `docker compose -f
