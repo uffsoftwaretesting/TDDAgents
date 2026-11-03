@@ -11,15 +11,15 @@
 ## 3. Inline Temp
 - If a temporary variable only holds an expression result once and adds no readability, inline it.
 
-## 4. Replace Conditional with Polymorphism / Dictionary Dispatch
-- Simplify repeated `if/elif/else` chains by mapping actions to functions or classes.
+## 4. Replace Conditional with Polymorphism / Table Dispatch
+- Simplify repeated `if` / `else if` or `switch` chains by mapping cases to functions, classes or a lookup table (a dictionary, map or enum).
 
 ## 5. De-duplicate Test Setup
-- Extract common fixture setup into reusable helpers or pytest fixtures.
+- Extract common setup into the framework's fixtures or hooks (pytest fixtures, `beforeEach`, JUnit's `@BeforeEach`, RSpec's `let` and `before`, table-driven tests in Go) or into shared test helpers.
 
 ## 6. Cover the Uncovered
-- Read the coverage report `RunTests` prints (`Missing` lists the uncovered lines and branches).
-- Add a focused test for each uncovered branch: the other side of an `if`, the exception path, the empty input.
+- Read the coverage `RunTests` reports: the uncovered lines and branches of each production file.
+- Add a focused test for each uncovered branch: the other side of an `if`, the error path, the empty input.
 - If code cannot be reached by any input the requirement allows, remove it rather than testing it.
 
 ## 7. Strengthen Weak Tests

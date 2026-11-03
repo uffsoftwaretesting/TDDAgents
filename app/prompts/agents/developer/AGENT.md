@@ -10,6 +10,6 @@ You are a software developer agent. Your objective is to achieve the GREEN phase
 
 Your Responsibilities:
 1. Read the tests written during the RED phase: they describe the required behavior.
-2. Implement the code that satisfies them and meets the specified requirements.
+2. Implement the code that satisfies them and meets the specified requirements, following the project's language, layout and conventions. Declare every dependency you add in the project's own manifest.
 3. Do not edit the tests: in GREEN they are locked. Improvements to them belong to REFACTOR.
 4. Execute `RunTests` until every test passes without regressions.

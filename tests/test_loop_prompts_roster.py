@@ -82,3 +82,28 @@ def test_refactorer_catalogue_reference_exists() -> None:
     cat_path = PROMPTS_ROOT / "agents" / "refactorer" / "references" / "refactoring-catalogue.md"
     assert cat_path.is_file()
     assert "Extract Function" in cat_path.read_text(encoding="utf-8")
+
+
+# The TDD skills and agents are language-generic (2026-11-03): no single ecosystem's idiom is the
+# only one they teach.
+_GENERIC_PROMPTS = [
+    "skills/tdd-mutation-defense/SKILL.md", "skills/tdd-mutation-defense/references/mutation_operators.md",
+    "skills/tdd-refactor-clean/SKILL.md", "skills/tdd-refactor-clean/references/clean_code.md",
+    "skills/tdd-test-design/SKILL.md", "skills/tdd-test-design/references/isolation.md",
+    "agents/refactorer/references/refactoring-catalogue.md",
+    "agents/tester/AGENT.md", "agents/developer/AGENT.md", "agents/refactorer/AGENT.md",
+]
+
+
+def test_the_tdd_skills_and_agents_are_language_generic() -> None:
+    texts = {name: (PROMPTS_ROOT / name).read_text(encoding="utf-8") for name in _GENERIC_PROMPTS}
+    joined = "\n".join(texts.values())
+    for python_only in ("Python type annotations", "produced by `mutmut`", "Mutmut Mutation",
+                        "use `tmp_path` pytest fixture", "`Missing` lists", "or pytest fixtures."):
+        assert python_only not in joined, python_only
+    for name, text in texts.items():
+        if "pytest" in text:
+            assert any(other in text for other in ("Jest", "JUnit", "Go")), f"{name} teaches pytest alone"
+    assert "the project's own manifest" in texts["agents/developer/AGENT.md"]
+    assert "declared test-file patterns" in texts["agents/tester/AGENT.md"]
+    assert "declared test-file patterns" in texts["skills/tdd-test-design/SKILL.md"]
