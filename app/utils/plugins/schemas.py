@@ -28,7 +28,10 @@ newline) and character classes are ASCII (`re.ASCII`); a JSON integer stays an `
 Divergences: the embedded `HooksSchema` and `McpServerConfigSchema` reuse this repository's
 validators (`hooks_schema_errors`, `adheres_to_server_schema`) and keep the raw object instead of
 a stripped copy; Zod's `.url()` (WHATWG `new URL`) is approximated by `is_url`. The `.describe()`
-texts feed upstream's JSON-schema export only and are not carried. Issue reporting differs from
+texts feed upstream's JSON-schema export only: the sources the settings schema embeds
+(`MarketplaceSourceSchema`, with `PluginSourceSchema`, `SettingsMarketplacePluginSchema` and
+`PluginAuthorSchema` for its inline arm) carry them in `marketplace_source_json_schema`, for the
+schema `update-config` prints (`app/utils/settings/schema_output.py`). Issue reporting differs from
 Zod in three known ways: a missing required field reads `expected value` where Zod names the
 field's type; chained refinements stop at the first failure where Zod 4 reports every failing
 check; and a plain union reports one `invalid_union` at its own path (Zod 4.x surfaces the lone
@@ -1074,7 +1077,173 @@ def typed_dict_keys(typed_dict: Any) -> frozenset[str]:
     return frozenset(typed_dict.__required_keys__) | frozenset(typed_dict.__optional_keys__)
 
 
+def _git_ref() -> dict[str, Any]:
+    from app.utils.settings.schema_builder import describe, opt, string
+
+    return opt(describe(string(), (
+        'Git branch or tag to use (e.g., "main", "v1.0.0"). Defaults to repository default branch.')))[0]
+
+
+def plugin_source_json_schema() -> dict[str, Any]:
+    """`PluginSourceSchema()` as JSON Schema."""
+    from app.utils.settings.schema_builder import describe, literal, obj, opt, req, string, union
+
+    sha = opt(describe(string(length=40, pattern="^[a-f0-9]{40}$"), "Specific commit SHA to use"))
+    ref = opt(_git_ref())
+    return union(
+        describe(string(pattern="^\\./.*"), (
+            "Path to the plugin root, relative to the marketplace root (the directory containing .tddagents-plugin/, "
+            "not .tddagents-plugin/ itself)")),
+        describe(obj({
+            "source": req(literal("npm")),
+            "package": req(describe(union(string(), string()), (
+                "Package name (or url, or local path, or anything else that can be passed to `npm` as a "
+                "package)"))),
+            "version": opt(describe(string(), "Specific version or version range (e.g., ^1.0.0, ~2.1.0)")),
+            "registry": opt(describe(string(url=True), (
+                "Custom NPM registry URL (defaults to using system default, likely npmjs.org)"))),
+        }), "NPM package as plugin source"),
+        describe(obj({
+            "source": req(literal("pip")),
+            "package": req(describe(string(), "Python package name as it appears on PyPI")),
+            "version": opt(describe(string(), "Version specifier (e.g., ==1.0.0, >=2.0.0, <3.0.0)")),
+            "registry": opt(describe(string(url=True), (
+                "Custom PyPI registry URL (defaults to using system default, likely pypi.org)"))),
+        }), "Python package as plugin source"),
+        obj({
+            "source": req(literal("url")),
+            "url": req(describe(string(), "Full git repository URL (https:// or git@)")),
+            "ref": ref,
+            "sha": sha,
+        }),
+        obj({
+            "source": req(literal("github")),
+            "repo": req(describe(string(), "GitHub repository in owner/repo format")),
+            "ref": ref,
+            "sha": sha,
+        }),
+        describe(obj({
+            "source": req(literal("git-subdir")),
+            "url": req(describe(string(), "Git repository: GitHub owner/repo shorthand, https://, or git@ URL")),
+            "path": req(describe(string(min_length=1), (
+                'Subdirectory within the repo containing the plugin (e.g., "tools/tddagents-plugin"). Cloned sparsely '
+                "using partial clone (--filter=tree:0) to minimize bandwidth for monorepos."))),
+            "ref": ref,
+            "sha": sha,
+        }), (
+            "Plugin located in a subdirectory of a larger repository (monorepo). Only the specified subdirectory "
+            "is materialized; the rest of the repo is not downloaded.")),
+    )
+
+
+def plugin_author_json_schema() -> dict[str, Any]:
+    """`PluginAuthorSchema()` as JSON Schema."""
+    from app.utils.settings.schema_builder import describe, obj, opt, req, string
+
+    return obj({
+        "name": req(describe(string(min_length=1), "Display name of the plugin author or organization")),
+        "email": opt(describe(string(), "Contact email for support or feedback")),
+        "url": opt(describe(string(), "Website, GitHub profile, or organization URL")),
+    })
+
+
+def marketplace_source_json_schema() -> dict[str, Any]:
+    """`MarketplaceSourceSchema()` as JSON Schema."""
+    from app.utils.settings.schema_builder import (
+        array,
+        boolean,
+        describe,
+        literal,
+        obj,
+        opt,
+        record,
+        req,
+        string,
+        union,
+    )
+
+    ref = opt(_git_ref())
+    path = opt(describe(string(), (
+        "Path to marketplace.json within repo (defaults to .tddagents-plugin/marketplace.json)")))
+    sparse = opt(describe(array(string()), (
+        "Directories to include via git sparse-checkout (cone mode). Use for monorepos where the marketplace lives "
+        'in a subdirectory. Example: [".tddagents-plugin", "plugins"]. If omitted, the full repository is cloned.')))
+    settings_plugin = obj({
+        "name": req(describe(string(min_length=1), "Plugin name as it appears in the target repository")),
+        "source": req(describe(plugin_source_json_schema(), (
+            "Where to fetch the plugin from. Must be a remote source — relative paths have no marketplace "
+            "repository to resolve against."))),
+        "description": opt(string()),
+        "version": opt(string()),
+        "strict": opt(boolean()),
+    })
+    return union(
+        obj({
+            "source": req(literal("url")),
+            "url": req(describe(string(url=True), "Direct URL to marketplace.json file")),
+            "headers": opt(describe(record(string()), "Custom HTTP headers (e.g., for authentication)")),
+        }),
+        obj({
+            "source": req(literal("github")),
+            "repo": req(describe(string(), "GitHub repository in owner/repo format")),
+            "ref": ref,
+            "path": path,
+            "sparsePaths": sparse,
+        }),
+        obj({
+            "source": req(literal("git")),
+            "url": req(describe(string(), "Full git repository URL")),
+            "ref": ref,
+            "path": path,
+            "sparsePaths": sparse,
+        }),
+        obj({
+            "source": req(literal("npm")),
+            "package": req(describe(string(), "NPM package containing marketplace.json")),
+        }),
+        obj({
+            "source": req(literal("file")),
+            "path": req(describe(string(), "Local file path to marketplace.json")),
+        }),
+        obj({
+            "source": req(literal("directory")),
+            "path": req(describe(string(), "Local directory containing .tddagents-plugin/marketplace.json")),
+        }),
+        obj({
+            "source": req(literal("hostPattern")),
+            "hostPattern": req(describe(string(), (
+                "Regex pattern to match the host/domain extracted from any marketplace source type. For github "
+                'sources, matches against "github.com". For git sources (SSH or HTTPS), extracts the hostname from '
+                "the URL. Use in strictKnownMarketplaces to allow all marketplaces from a specific host (e.g., "
+                '"^github\\.mycompany\\.com$").'))),
+        }),
+        obj({
+            "source": req(literal("pathPattern")),
+            "pathPattern": req(describe(string(), (
+                "Regex pattern matched against the .path field of file and directory sources. Use in "
+                "strictKnownMarketplaces to allow filesystem-based marketplaces alongside hostPattern restrictions "
+                'for network sources. Use ".*" to allow all filesystem paths, or a narrower pattern (e.g., '
+                '"^/opt/approved/") to restrict to specific directories.'))),
+        }),
+        describe(obj({
+            "source": req(literal("settings")),
+            "name": req(describe(string(min_length=1), (
+                "Marketplace name. Must match the extraKnownMarketplaces key (enforced); the synthetic manifest is "
+                "written under this name. Same validation as PluginMarketplaceSchema plus reserved-name rejection "
+                "\u2014 validateOfficialNameSource runs after the disk write, too late to clean up."))),
+            "plugins": req(describe(array(settings_plugin), "Plugin entries declared inline in settings.json")),
+            "owner": opt(plugin_author_json_schema()),
+        }), (
+            "Inline marketplace manifest defined directly in settings.json. The reconciler writes a synthetic "
+            "marketplace.json to the cache; diffMarketplaces detects edits via isEqual on the stored source (the "
+            "plugins array is inside this object, so edits surface as sourceChanged).")),
+    )
+
+
 __all__ = [
+    "marketplace_source_json_schema",
+    "plugin_author_json_schema",
+    "plugin_source_json_schema",
     "ALLOWED_OFFICIAL_MARKETPLACE_NAMES",
     "BLOCKED_OFFICIAL_NAME_PATTERN",
     "DEP_REF_REGEX",

@@ -9,7 +9,9 @@ Ported from claude-code v2.1.88:
   `applyPermissionUpdates`, `supportsPersistence`, `persistPermissionUpdate`,
   `persistPermissionUpdates`
 * `src/utils/permissions/permissionsLoader.ts` -> `addPermissionRulesToSettings`
-* `src/utils/settings/settings.ts` -> `updateSettingsForSource`
+* `src/utils/permissions/permissions.ts` -> `convertRulesToUpdates`, `syncPermissionRulesFromDisk`
+  (the live settings reload, `app/utils/settings/apply_settings_change.py`)
+* `src/utils/settings/settings.ts` -> `updateSettingsForSource` (with `markInternalWrite`)
 
 **In memory** an update is a pure function of the context, exactly as upstream: `setMode`
 replaces the mode (unguarded, as v2.1.88 — the TDD phase tier sits above bypass anyway);
@@ -48,6 +50,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permission_rule_parser import permission_rule_value_to_string
+from app.utils.settings.internal_writes import mark_internal_write
 from app.utils.settings.settings import (
     SettingsLocations,
     parse_settings_file,
@@ -260,6 +263,46 @@ def apply_permission_updates(
     return context
 
 
+def convert_rules_to_updates(rules: Sequence[PermissionRule], update_type: str) -> list[PermissionUpdate]:
+    """`convertRulesToUpdates`: one update per (source, behavior) group, in first-seen order."""
+    groups: dict[tuple[PermissionRuleSource, PermissionBehavior], list[tuple[str, str | None]]] = {}
+    for rule in rules:
+        groups.setdefault((rule.source, rule.rule_behavior), []).append((rule.tool_name, rule.rule_content))
+    return [PermissionUpdate(update_type, source, rules=tuple(values), behavior=behavior)
+            for (source, behavior), values in groups.items()]
+
+
+#: The sources `syncPermissionRulesFromDisk` clears under `allowManagedPermissionRulesOnly`.
+MANAGED_ONLY_CLEARED_SOURCES: tuple[PermissionRuleSource, ...] = (
+    PermissionRuleSource.USER_SETTINGS,
+    PermissionRuleSource.PROJECT_SETTINGS,
+    PermissionRuleSource.LOCAL_SETTINGS,
+    PermissionRuleSource.CLI_ARG,
+    PermissionRuleSource.SESSION,
+)
+#: The file sources whose every rule group is cleared before the fresh rules are applied.
+DISK_RULE_SOURCES: tuple[PermissionRuleSource, ...] = MANAGED_ONLY_CLEARED_SOURCES[:3]
+
+
+def sync_permission_rules_from_disk(
+    context: ToolPermissionContext, rules: Sequence[PermissionRule], locations: SettingsLocations
+) -> ToolPermissionContext:
+    """
+    `syncPermissionRulesFromDisk`: the context's settings rules replaced by `rules`, the ones just
+    read from disk (`load_all_permission_rules_from_disk`). The editable file sources are cleared
+    first, so a rule deleted from a file leaves the context too; under
+    `allowManagedPermissionRulesOnly` the CLI and session rules go as well.
+    """
+    if should_allow_managed_permission_rules_only(locations):
+        for source in MANAGED_ONLY_CLEARED_SOURCES:
+            for behavior in RULE_BEHAVIORS:
+                context = apply_permission_update(context, PermissionUpdate("replaceRules", source, behavior=behavior))
+    for source in DISK_RULE_SOURCES:
+        for behavior in RULE_BEHAVIORS:
+            context = apply_permission_update(context, PermissionUpdate("replaceRules", source, behavior=behavior))
+    return apply_permission_updates(context, convert_rules_to_updates(rules, "replaceRules"))
+
+
 # ── on disk ──────────────────────────────────────────────────────────────────
 
 def supports_persistence(destination: PermissionRuleSource) -> bool:
@@ -302,6 +345,8 @@ def update_settings_for_source(
         if existing is None and path.exists():
             return f"Invalid JSON syntax in settings file at {path}"
         merged = _merge_for_write(existing or {}, patch)
+        # Before the write lands, so the settings watcher knows this change is ours.
+        mark_internal_write(str(path.resolve()))
         path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:
         return f"Failed to write settings file at {path}: {exc}"
@@ -399,6 +444,8 @@ def settings_locations_for(context: ToolPermissionContext) -> SettingsLocations 
 
 __all__ = [
     "DIRECTORY_UPDATE_TYPES",
+    "DISK_RULE_SOURCES",
+    "MANAGED_ONLY_CLEARED_SOURCES",
     "PERSISTABLE_DESTINATIONS",
     "RULE_UPDATE_TYPES",
     "permission_update_to_json",
@@ -408,6 +455,7 @@ __all__ = [
     "add_permission_rules_to_settings",
     "apply_permission_update",
     "apply_permission_updates",
+    "convert_rules_to_updates",
     "create_read_rule_suggestion",
     "parse_permission_update",
     "parse_permission_updates",
@@ -415,5 +463,6 @@ __all__ = [
     "persist_permission_updates",
     "settings_locations_for",
     "supports_persistence",
+    "sync_permission_rules_from_disk",
     "update_settings_for_source",
 ]

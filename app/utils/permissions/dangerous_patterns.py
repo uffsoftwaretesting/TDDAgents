@@ -144,7 +144,7 @@ def strip_dangerous_permissions(context: ToolPermissionContext) -> ToolPermissio
 
     Removes each dangerous allow rule whose source is editable, appends the removed rules
     to `stripped_dangerous_rules` (it also re-runs after a hook's `updatedPermissions` are
-    applied), and leaves the mode alone.
+    applied, and after a live settings reload), and leaves the mode alone.
     """
     dangerous = find_dangerous_classifier_permissions(context.always_allow_rules)
     removable = tuple(rule for rule in dangerous if rule.source in PERMISSION_UPDATE_DESTINATIONS)
@@ -158,7 +158,9 @@ def strip_dangerous_permissions(context: ToolPermissionContext) -> ToolPermissio
     return replace(
         context,
         always_allow_rules=tuple(rule for rule in context.always_allow_rules if rule not in removable),
-        stripped_dangerous_rules=context.stripped_dangerous_rules + removable,
+        # A rule already stashed (a settings reload re-reads it from disk) is stashed once.
+        stripped_dangerous_rules=context.stripped_dangerous_rules
+        + tuple(rule for rule in removable if rule not in context.stripped_dangerous_rules),
     )
 
 

@@ -3,7 +3,8 @@ The session's working directory: where the shell is now, and where the session s
 
 Ported from `reference/claude-code/src/bootstrap/state.ts` -> `getOriginalCwd`, `getCwdState`,
 `setCwd`, `setInlinePlugins`, `getInlinePlugins`, `setSessionTrustAccepted`,
-`getSessionTrustAccepted`, and (`SessionBootstrap`) `getSessionId`,
+`getSessionTrustAccepted`, `setFlagSettingsInline`, `getFlagSettingsInline`, and
+(`SessionBootstrap`) `getSessionId`,
 `getIsNonInteractiveSession`. Upstream keeps
 these in the process-wide `STATE`, one session per process. A TDDAgents process can hold
 several sessions (the test suite, the experiment drivers), each over its own workspace, so the
@@ -14,13 +15,17 @@ with it (weak keys). The session's identity is a `SessionBootstrap` value on the
 The `--plugin-dir` directories (`inlinePlugins`) stay process-wide, as upstream: the flag is a
 property of the process invocation, set once by `app/main.py` before any plugin load. So does
 `sessionTrustAccepted`: the interactive entry point sets it once the trust dialog is past
-(`app/session/driver.py`, upstream's `showSetupScreens`).
+(`app/session/driver.py`, upstream's `showSetupScreens`). So do the SDK host's inline flag
+settings (`flagSettingsInline`, `apply_flag_settings`): `-p` runs one session per process, and the
+settings files are read process-wide (`app/utils/settings/settings.py` merges them into
+`flagSettings`).
 """
 
 from __future__ import annotations
 
 import os
 import weakref
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,6 +36,19 @@ _CWD_BY_ID: dict[int, str] = {}
 _INLINE_PLUGINS: list[str] = []
 #: `STATE.sessionTrustAccepted`: trust given for this process only (the home directory's case).
 _SESSION_TRUST_ACCEPTED: list[bool] = [False]
+#: `STATE.flagSettingsInline`: the settings an SDK host applied (`apply_flag_settings`), or `None`.
+_FLAG_SETTINGS_INLINE: list[dict[str, Any] | None] = [None]
+
+
+def set_flag_settings_inline(settings: Mapping[str, Any] | None) -> None:
+    """`setFlagSettingsInline`."""
+    _FLAG_SETTINGS_INLINE[0] = dict(settings) if settings is not None else None
+
+
+def get_flag_settings_inline() -> dict[str, Any] | None:
+    """`getFlagSettingsInline`."""
+    value = _FLAG_SETTINGS_INLINE[0]
+    return dict(value) if value is not None else None
 
 
 def set_session_trust_accepted(accepted: bool) -> None:

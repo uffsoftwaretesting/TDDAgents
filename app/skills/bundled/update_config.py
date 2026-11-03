@@ -2,14 +2,17 @@
 The `update-config` bundled skill: configuring TDDAgents through its settings files.
 
 Ported from `reference/claude-code/src/skills/bundled/updateConfig.ts` -> `SETTINGS_EXAMPLES_DOCS`,
-`HOOKS_DOCS`, `HOOK_VERIFICATION_FLOW`, `UPDATE_CONFIG_PROMPT` and `registerUpdateConfigSkill` (its
-description, `allowedTools`, `userInvocable` and `getPromptForCommand`).
+`HOOKS_DOCS`, `HOOK_VERIFICATION_FLOW`, `UPDATE_CONFIG_PROMPT`, `generateSettingsSchema` and
+`registerUpdateConfigSkill` (its description, `allowedTools`, `userInvocable` and
+`getPromptForCommand`).
 
 `getPromptForCommand` has upstream's two paths:
 
 - **`[hooks-only]`** (what `/init`'s `NEW_INIT_PROMPT` loads before writing its first hook): the
   hook reference and the verification flow, then `## Task` with the rest of the argument, if any.
-- **Anything else:** the whole prompt, then `## User Request` with the argument, if any.
+- **Anything else:** the whole prompt, then `## Full Settings JSON Schema` (the settings schema,
+  generated at each call as upstream's, `app/utils/settings/schema_output.py`), then `## User Request`
+  with the argument, if any.
 
 The texts are `app/prompts/skills/update-config/` (`prompt.md` is `UPDATE_CONFIG_PROMPT`, its
 `${…}` interpolations written `{{…}}`), upstream's verbatim after the substitutions
@@ -22,16 +25,18 @@ The texts are `app/prompts/skills/update-config/` (`prompt.md` is `UPDATE_CONFIG
 - **`tool_response`:** a PostToolUse hook receives the tool's result text here, so the hook input
   sample shows a string and the examples read `.tool_input.file_path` alone (upstream's
   `.tool_response.filePath // …` fails in `jq` on a string).
-- **Hooks are read when a session starts** (`app/utils/hooks/hooks_config_snapshot.py`; no
-  settings watcher, no `/hooks` menu): the verification flow's in-turn proof (step 6) and its
-  `/hooks` handoff become one handoff that names the restart.
+- **No `/hooks` menu:** the settings watcher reloads a hook written mid-session
+  (`app/utils/settings/change_detector.py`), so the verification flow's in-turn proof (step 6) is
+  upstream's; where it sends the user to `/hooks` (to reload, or to review the hook later), the
+  restart is named instead and the review pointer is dropped.
+- **`claude --debug`** is `{{CLI_COMMAND}} --debug` (`app/constants/product.py`, `app/utils/debug.py`).
 - **Settings this build does not read, dropped:** `env`, `model`, `agent` (the block keeps
   `alwaysThinkingEnabled`, under "Thinking"), `attribution` (TDDAgents never commits), the "Other
   Settings" list, and the description's env-var trigger and example.
-- **No Config tool, no `--debug`, no generated settings schema**: the "Config Tool vs Direct Edit"
-  section, the description's Config-tool sentence, the `--debug` troubleshooting step and the
-  `## Full Settings JSON Schema` section are dropped (settings are read leniently here, except the
-  `hooks` block and the plugin keys; there is no whole-file schema to print).
+- **No Config tool**: the "Config Tool vs Direct Edit" section and the description's Config-tool
+  sentence are dropped.
+- **The settings schema** lists the keys this build reads (`app/utils/settings/types.py` ->
+  `settings_json_schema`), not upstream's whole `SettingsSchema`.
 - **Plugin sources:** a marketplace's name (listed by `{{PLUGIN_CLI}} marketplace list`) or
   `builtin`; upstream's official marketplaces hold `.claude-plugin/` packages, which this build does
   not load.
@@ -44,6 +49,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.constants.product import CLI_COMMAND
 from app.services.plugins.plugin_operations import PLUGIN_CLI
 from app.skills.bundled_skills import BundledSkillContext, BundledSkillDefinition
 from app.utils.frontmatter_parser import render_prompt
@@ -66,6 +72,7 @@ HOOK_VERIFICATION_FLOW = _read("hook_verification_flow.md")
 UPDATE_CONFIG_PROMPT = render_prompt(
     _read("prompt.md"),
     {
+        "CLI_COMMAND": CLI_COMMAND,
         "SETTINGS_EXAMPLES_DOCS": SETTINGS_EXAMPLES_DOCS,
         "HOOKS_DOCS": HOOKS_DOCS,
         "HOOK_VERIFICATION_FLOW": HOOK_VERIFICATION_FLOW,
@@ -83,8 +90,15 @@ DESCRIPTION = (
 )
 
 
+def generate_settings_schema() -> str:
+    """`generateSettingsSchema`: the settings JSON Schema, generated to stay in sync with the types."""
+    from app.utils.settings.schema_output import generate_settings_json_schema
+
+    return generate_settings_json_schema()
+
+
 def get_prompt_for_command(args: str, context: BundledSkillContext) -> str:
-    """`getPromptForCommand`: the hook reference for `[hooks-only]`, otherwise the whole prompt."""
+    """`getPromptForCommand`: the hook reference for `[hooks-only]`, otherwise the whole prompt and the schema."""
     if args.startswith(HOOKS_ONLY_PREFIX):
         request = args[len(HOOKS_ONLY_PREFIX):].strip()
         prompt = HOOKS_DOCS + "\n\n" + HOOK_VERIFICATION_FLOW
@@ -93,6 +107,7 @@ def get_prompt_for_command(args: str, context: BundledSkillContext) -> str:
         return prompt
 
     prompt = UPDATE_CONFIG_PROMPT
+    prompt += f"\n\n## Full Settings JSON Schema\n\n```json\n{generate_settings_schema()}\n```"
     if args:
         prompt += f"\n\n## User Request\n\n{args}"
     return prompt
@@ -118,6 +133,7 @@ __all__ = [
     "SKILL_DIR",
     "SKILL_NAME",
     "UPDATE_CONFIG_PROMPT",
+    "generate_settings_schema",
     "get_prompt_for_command",
     "update_config_skill",
 ]

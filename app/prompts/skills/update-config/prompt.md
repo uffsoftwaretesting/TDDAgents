@@ -108,3 +108,4 @@ If a hook isn't running:
 3. **Check the matcher** - Does it match the tool name? (e.g., "Bash", "WriteFile", "Edit")
 4. **Check hook type** - Is it "command", "prompt", or "agent"?
 5. **Test the command** - Run the hook command manually to see if it works
+6. **Use --debug** - Run `{{CLI_COMMAND}} --debug` to see hook execution logs

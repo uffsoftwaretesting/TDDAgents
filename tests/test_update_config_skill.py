@@ -6,11 +6,13 @@ after the recorded substitutions (checked against the reference snapshot when it
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 import pytest
 
+from app.constants.product import CLI_COMMAND
 from app.skills.bundled.index import init_bundled_skills
 from app.skills.bundled.update_config import (
     DESCRIPTION,
@@ -21,6 +23,7 @@ from app.skills.bundled.update_config import (
     SKILL_DIR,
     SKILL_NAME,
     UPDATE_CONFIG_PROMPT,
+    generate_settings_schema,
     get_prompt_for_command,
     update_config_skill,
 )
@@ -29,6 +32,8 @@ from app.skills.load_skills_dir import get_skill_registry
 from app.services.plugins.plugin_operations import PLUGIN_CLI
 from app.tools.skill_tool.skill_tool import skill_has_only_safe_properties
 from app.utils.process_user_input.process_slash_command import get_messages_for_prompt_slash_command
+from app.utils.settings.schema_output import generate_settings_json_schema
+from app.utils.settings.types import settings_json_schema
 
 REPO = Path(__file__).resolve().parent.parent
 UPDATE_CONFIG_TS = REPO / "reference" / "claude-code" / "src" / "skills" / "bundled" / "updateConfig.ts"
@@ -80,11 +85,13 @@ TOOL_RESPONSE: list[Substitution] = [
     (".tool_response.filePath // .tool_input.file_path", ".tool_input.file_path"),
     (".tool_input.file_path // .tool_response.filePath", ".tool_input.file_path"),
 ]
-#: Hooks are read when a session starts (no settings watcher, no `/hooks` menu): no in-turn proof.
-NO_LIVE_RELOAD: list[Substitution] = [
-    (re.compile(r"6\. \*\*Prove the hook fires\*\*.*?7\. \*\*Handoff\.\*\* .*?by design\.\n", re.DOTALL),
-     "6. **Handoff.** Tell the user the hook is live from the next session: TDDAgents reads hooks when a "
-     "session starts, so it needs a restart (resume the session with `--thread-id`).\n"),
+#: No `/hooks` menu in this build (the settings watcher reloads hooks; a restart is the fallback).
+NO_HOOKS_MENU: list[Substitution] = [
+    ("Tell the user to open `/hooks` once (reloads config) or restart — you can't do this yourself; `/hooks` is a "
+     "user UI menu and opening it ends this turn.",
+     "Tell the user to restart (resume the session with `--thread-id`) — you can't do this yourself."),
+    ("(or needs `/hooks`/restart per the watcher caveat)", "(or needs a restart per the watcher caveat)"),
+    ("Point them at `/hooks` to review, edit, or disable it later. ", ""),
 ]
 #: Settings this build does not read, sections dropped, the plugin sources it has.
 SETTINGS_ONLY: list[Substitution] = [
@@ -100,7 +107,8 @@ SETTINGS_ONLY: list[Substitution] = [
 PROMPT_ONLY: list[Substitution] = [
     (re.compile(r"## Decision: Config Tool vs Direct Edit\n.*?\n\n(?=## Workflow)", re.DOTALL), ""),
     (re.compile(r"### Environment Variables\n\nUser: \"Set DEBUG=true\".*?```\n\n", re.DOTALL), ""),
-    ("6. **Use --debug** - Run `claude --debug` to see hook execution logs\n", ""),
+    # This build's command line (`app/constants/product.py`).
+    ("Run `claude --debug`", "Run `{{CLI_COMMAND}} --debug`"),
     ("${SETTINGS_EXAMPLES_DOCS}", "{{SETTINGS_EXAMPLES_DOCS}}"),
     ("${HOOKS_DOCS}", "{{HOOKS_DOCS}}"),
     ("${HOOK_VERIFICATION_FLOW}", "{{HOOK_VERIFICATION_FLOW}}"),
@@ -122,7 +130,7 @@ PRODUCT: list[Substitution] = [
 _ONLY: dict[str, list[Substitution]] = {
     "SETTINGS_EXAMPLES_DOCS": [*SETTINGS_ONLY],
     "HOOKS_DOCS": [],
-    "HOOK_VERIFICATION_FLOW": [*NO_LIVE_RELOAD],
+    "HOOK_VERIFICATION_FLOW": [*NO_HOOKS_MENU],
     "UPDATE_CONFIG_PROMPT": [*PROMPT_ONLY],
     "description": [*DESCRIPTION_ONLY],
 }
@@ -181,7 +189,8 @@ def test_every_substitution_still_applies_to_upstream():
 def test_the_composed_texts():
     assert "{{" not in SETTINGS_EXAMPLES_DOCS and f"`{PLUGIN_CLI} marketplace list`" in SETTINGS_EXAMPLES_DOCS
     assert UPDATE_CONFIG_PROMPT == (
-        _file("prompt.md").replace("{{SETTINGS_EXAMPLES_DOCS}}", SETTINGS_EXAMPLES_DOCS)
+        _file("prompt.md").replace("{{CLI_COMMAND}}", CLI_COMMAND)
+        .replace("{{SETTINGS_EXAMPLES_DOCS}}", SETTINGS_EXAMPLES_DOCS)
         .replace("{{HOOKS_DOCS}}", HOOKS_DOCS).replace("{{HOOK_VERIFICATION_FLOW}}", HOOK_VERIFICATION_FLOW))
     assert HOOKS_DOCS == _file("hooks_docs.md") and HOOK_VERIFICATION_FLOW == _file("hook_verification_flow.md")
     for text in (DESCRIPTION, SETTINGS_EXAMPLES_DOCS, HOOKS_DOCS, HOOK_VERIFICATION_FLOW, UPDATE_CONFIG_PROMPT):
@@ -193,11 +202,19 @@ def test_the_texts_name_this_builds_settings_files_and_tools():
         assert path in SETTINGS_EXAMPLES_DOCS
     assert '"matcher": "WriteFile|Edit"' in HOOKS_DOCS and '"matcher": "Write|' not in UPDATE_CONFIG_PROMPT
     assert ".tool_response.filePath" not in UPDATE_CONFIG_PROMPT
-    assert "/hooks" not in UPDATE_CONFIG_PROMPT and "--debug" not in UPDATE_CONFIG_PROMPT
+    assert "/hooks" not in UPDATE_CONFIG_PROMPT and "/tmp/tddagents-hook-check.txt" in HOOK_VERIFICATION_FLOW
+    assert UPDATE_CONFIG_PROMPT.endswith(
+        "6. **Use --debug** - Run `python -m app.main --debug` to see hook execution logs\n")
+    assert "6. **Prove the hook fires**" in HOOK_VERIFICATION_FLOW and "7. **Handoff.**" in HOOK_VERIFICATION_FLOW
     assert "Config tool" not in UPDATE_CONFIG_PROMPT and '"env"' not in UPDATE_CONFIG_PROMPT
 
 
 # ── getPromptForCommand ──────────────────────────────────────────────────────
+
+def _full() -> str:
+    """The whole prompt and the schema, as `getPromptForCommand` builds them without a request."""
+    return f"{UPDATE_CONFIG_PROMPT}\n\n## Full Settings JSON Schema\n\n```json\n{generate_settings_json_schema()}\n```"
+
 
 class TestPrompt:
     def test_hooks_only_returns_the_hook_docs_and_the_flow_with_the_task(self):
@@ -211,14 +228,20 @@ class TestPrompt:
 
     def test_the_prefix_must_lead(self):
         text = get_prompt_for_command(f" {HOOKS_ONLY_PREFIX} x", _CONTEXT)
-        assert text == f"{UPDATE_CONFIG_PROMPT}\n\n## User Request\n\n {HOOKS_ONLY_PREFIX} x"
+        assert text == f"{_full()}\n\n## User Request\n\n {HOOKS_ONLY_PREFIX} x"
 
     def test_the_full_prompt_with_the_user_request(self):
         assert get_prompt_for_command("allow npm commands", _CONTEXT) == (
-            f"{UPDATE_CONFIG_PROMPT}\n\n## User Request\n\nallow npm commands")
+            f"{_full()}\n\n## User Request\n\nallow npm commands")
 
     def test_the_full_prompt_without_arguments(self):
-        assert get_prompt_for_command("", _CONTEXT) == UPDATE_CONFIG_PROMPT
+        assert get_prompt_for_command("", _CONTEXT) == _full()
+
+    def test_the_full_prompt_ends_with_the_generated_settings_schema(self):
+        schema = generate_settings_schema()
+        assert schema == generate_settings_json_schema()
+        assert _full().endswith(f"\n\n## Full Settings JSON Schema\n\n```json\n{schema}\n```")
+        assert json.loads(schema) == settings_json_schema()
 
     def test_the_full_prompt_carries_every_section(self):
         for section in (SETTINGS_EXAMPLES_DOCS, HOOKS_DOCS, HOOK_VERIFICATION_FLOW):

@@ -64,10 +64,19 @@ def test_regex_matchers():
     assert matches_pattern("Bash", "^Task$") is False
 
 
-def test_invalid_regex_matches_nothing(caplog):
-    with caplog.at_level(logging.DEBUG, logger="TDDOrchestrator.Hooks"):
-        assert matches_pattern("Bash", "([") is False
-    assert "Invalid regex pattern in hook matcher: ([" in [r.getMessage() for r in caplog.records]
+def _debug_log(tmp_path: Any) -> Any:
+    """The debug log (`logForDebugging`), switched on for the test."""
+    from app.utils.debug import configure_debug
+
+    target = tmp_path / "debug.txt"
+    configure_debug(True, debug_file=str(target))
+    return target
+
+
+def test_invalid_regex_matches_nothing(tmp_path):
+    target = _debug_log(tmp_path)
+    assert matches_pattern("Bash", "([") is False
+    assert target.read_text(encoding="utf-8").endswith("[DEBUG] Invalid regex pattern in hook matcher: ([\n")
 
 
 # ── prepareIfConditionMatcher ─────────────────────────────────────────────────
@@ -237,14 +246,14 @@ def test_if_conditions_filter_tool_hooks(caplog):
     assert [m.hook for m in hooks] == [yes, plain]
 
 
-def test_if_conditions_on_a_non_tool_event_are_skipped(caplog):
+def test_if_conditions_on_a_non_tool_event_are_skipped(tmp_path):
     gated = CommandHook(command="g", if_condition="Bash")
     snap = _snap("Stop", HookMatcher(hooks=(gated, CommandHook(command="p"))))
-    with caplog.at_level(logging.DEBUG, logger="TDDOrchestrator.Hooks"):
-        hooks = get_matching_hooks(snap, "Stop", {"hook_event_name": "Stop"})
+    target = _debug_log(tmp_path)
+    hooks = get_matching_hooks(snap, "Stop", {"hook_event_name": "Stop"})
     assert _names(hooks) == ["p"]
-    assert "Hook if condition 'Bash' cannot be evaluated for non-tool event Stop" in [
-        r.getMessage() for r in caplog.records]
+    assert '[DEBUG] Hook if condition "Bash" cannot be evaluated for non-tool event Stop\n' in target.read_text(
+        encoding="utf-8")
 
 
 def test_no_if_condition_never_prepares_a_matcher(monkeypatch):

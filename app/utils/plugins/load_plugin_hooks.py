@@ -3,7 +3,7 @@ The enabled plugins' hooks, registered on a run's hook dispatcher.
 
 Ported from `reference/claude-code/src/utils/plugins/loadPluginHooks.ts` ->
 `convertPluginHooksToMatchers`, `loadPluginHooks`, `clearPluginHookCache`,
-`pruneRemovedPluginHooks`, `getPluginAffectingSettingsSnapshot`; and
+`pruneRemovedPluginHooks`, `getPluginAffectingSettingsSnapshot`, `setupPluginHookHotReload`; and
 `reference/claude-code/src/bootstrap/state.ts` -> `clearRegisteredPluginHooks` (here
 `HookDispatcher.clear_registered_plugin_hooks`).
 
@@ -21,8 +21,10 @@ hooks, the hooks of plugins no longer enabled, without adding newly enabled ones
 for `/reload-plugins`, as commands, agents and MCP servers do); `clear_all_plugin_caches` starts
 it in the background.
 
-Not ported: `setupPluginHookHotReload` and its settings snapshot listener (no settings change
-detector here: settings are read from disk when a run opens), and bare mode.
+`setup_plugin_hook_hot_reload` subscribes a run's dispatcher to its settings change detector
+(`app/utils/settings/change_detector.py`): a policy settings change that alters the plugin-affecting
+settings reloads the plugin hooks in the background. Upstream subscribes once per process; here once
+per run, as the detector is. Not ported: bare mode.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ import asyncio
 import json
 import logging
 import weakref
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from app.schemas.hooks import HookMatcher, parse_hooks_settings
@@ -166,6 +168,45 @@ def get_plugin_affecting_settings_snapshot(locations: SettingsLocations) -> str:
     }, separators=(",", ":"))
 
 
+def setup_plugin_hook_hot_reload(dispatcher: Any, detector: Any) -> Callable[[], None]:
+    """
+    `setupPluginHookHotReload`: on a `policySettings` change, reload the plugin hooks when the
+    plugin-affecting settings changed (`clearPluginCache` + `clearPluginHookCache`, then
+    `loadPluginHooks` fire-and-forget). Returns the unsubscribe function.
+    """
+    from app.utils.debug import log_for_debugging
+
+    locations = _locations_of(dispatcher)
+    last = [get_plugin_affecting_settings_snapshot(locations)]
+
+    def on_change(source: Any) -> None:
+        if source != PermissionRuleSource.POLICY_SETTINGS:
+            return
+        snapshot = get_plugin_affecting_settings_snapshot(locations)
+        if snapshot == last[0]:
+            log_for_debugging("Plugin hooks: skipping reload, plugin-affecting settings unchanged")
+            return
+        last[0] = snapshot
+        log_for_debugging("Plugin hooks: reloading due to plugin-affecting settings change")
+        from app.utils.plugins.plugin_loader import clear_plugin_cache
+
+        clear_plugin_cache("loadPluginHooks: plugin-affecting settings changed")
+        clear_plugin_hook_cache()
+
+        async def reload() -> None:
+            try:
+                await load_plugin_hooks(dispatcher)
+            except Exception as exc:  # noqa: BLE001 - upstream's `void loadPluginHooks()`: logged, never raised
+                logger.error("Plugin hooks reload failed: %s", exc)
+
+        task = asyncio.ensure_future(reload())
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+
+    unsubscribe: Callable[[], None] = detector.subscribe(on_change)
+    return unsubscribe
+
+
 __all__ = [
     "clear_plugin_hook_cache",
     "convert_plugin_hooks_to_matchers",
@@ -173,4 +214,5 @@ __all__ = [
     "load_plugin_hooks",
     "prune_removed_plugin_hooks",
     "prune_removed_plugin_hooks_in_background",
+    "setup_plugin_hook_hot_reload",
 ]

@@ -24,6 +24,10 @@ answer an 'ask'.
   managed tier applied. The context lives in the run's `AppState`, so a worker reading its
   parent's state is held to it. A headless run (`should_avoid_permission_prompts`) denies an
   `ask` that no PermissionRequest hook answers.
+* **Live settings.** The run watches its settings files (`settingsChangeDetector`,
+  `start_settings_change_detector`): a file edited during the session — or the SDK host's
+  `apply_flag_settings` — re-reads the permission rules (dangerous allows stripped again) and the
+  hooks snapshot into the run (`applySettingsChange`), in the REPL and in `-p` alike.
 * **Transcript.** A `QueryEngine` per run (Phase 6) records it at upstream's location,
   `<config home>/projects/<sanitized workspace>/<run id>.jsonl` — never inside the workspace,
   so agents cannot read or edit their own record and it never reaches the exported artifact.
@@ -430,6 +434,32 @@ async def _nothing() -> None:
     return None
 
 
+async def start_settings_change_detector(
+    locations: SettingsLocations, store: AppStateStore, hook_dispatcher: HookDispatcher
+) -> Any:
+    """
+    `settingsChangeDetector.initialize()` (`main.tsx`) and its subscribers, for this run: a settings
+    file changing during the session runs the ConfigChange hooks, then `applySettingsChange` re-reads
+    the permission rules and the hooks snapshot into the run (`AppState.tsx`' `useSettingsChange` in
+    the REPL, `print.ts`' direct subscription in `-p`: both are this run), and a policy change that
+    alters the plugin-affecting settings reloads the plugin hooks (`setupPluginHookHotReload`).
+    """
+    from app.utils.hooks.hooks import execute_config_change_hooks
+    from app.utils.plugins.load_plugin_hooks import setup_plugin_hook_hot_reload
+    from app.utils.settings.apply_settings_change import apply_settings_change
+    from app.utils.settings.change_detector import SettingsChangeDetector
+
+    def config_change_hooks(source: str, path: str) -> Awaitable[Any]:
+        return execute_config_change_hooks(hook_dispatcher, source, path)
+
+    detector = SettingsChangeDetector(locations, config_change_hooks=config_change_hooks)
+    detector.subscribe(lambda source: apply_settings_change(source, store.update, locations, hook_dispatcher))
+    if hook_dispatcher.settings_locations is not None:
+        setup_plugin_hook_hot_reload(hook_dispatcher, detector)
+    await detector.initialize()
+    return detector
+
+
 @dataclass
 class DevelopmentRun:
     """
@@ -479,6 +509,8 @@ class DevelopmentRun:
     refresh_plugins: Callable[..., Awaitable[Any]] | None = None
     #: `startBackgroundHousekeeping` ran (once per session).
     housekeeping_started: bool = False
+    #: `settingsChangeDetector` for this run's settings files (`app/utils/settings/change_detector.py`).
+    settings_change_detector: Any = None
 
     def start_housekeeping(self) -> None:
         """`startBackgroundHousekeeping`, once: the plugin autoupdate in the background."""
@@ -780,13 +812,15 @@ async def open_session_run(
             ctx.tools = refresh_tools()
             return result
 
+        detector = await start_settings_change_detector(locations, store, hook_dispatcher)
         run = DevelopmentRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine,
                              add_agent_definitions=add_agent_definitions, extra_agents=extra_agents,
                              mcp_tools=session_mcp.all_tools(), mcp=session_mcp,
                              session_tools=session_tools,
                              transcript=transcript, deps=run_deps, messages=engine.mutable_messages,
                              recorder=recorder, settings_locations=locations,
-                             get_agent_definitions=agent_definitions, refresh_plugins=refresh_plugins)
+                             get_agent_definitions=agent_definitions, refresh_plugins=refresh_plugins,
+                             settings_change_detector=detector)
         unsubscribe = ctx.command_queue.subscribe(lambda: interrupt_on_now_priority(run.engine, ctx.command_queue))
         try:
             yield run
@@ -794,6 +828,7 @@ async def open_session_run(
             from app.context import reset_session_context
             from app.utils.hooks.hooks import execute_session_end_hooks
 
+            await detector.dispose()
             unsubscribe()
             # Upstream's `registerCleanup` per shell task: nothing the session started outlives it.
             kill_all_shell_tasks(store.get, store.update)
@@ -1537,7 +1572,10 @@ class HeadlessStreaming:
         #: `pendingSeeds` (`seed_read_state`): applied at the next clone-replace boundary.
         self.pending_seeds: dict[str, Any] = {}
         self.received_uuids: dict[str, None] = {}
-        self.flag_settings_inline: dict[str, Any] = {}
+        from app.bootstrap.state import set_flag_settings_inline
+
+        # `STATE.flagSettingsInline` starts empty for the session (`apply_flag_settings` fills it).
+        set_flag_settings_inline(None)
         from app.cli.mcp_auth_control import McpOAuthFlows
 
         #: The session's in-flight MCP OAuth flows (`activeOAuthFlows`, `oauthCallbackSubmitters`, …).
@@ -2339,35 +2377,40 @@ class HeadlessStreaming:
         self.respond(message, {})
 
     async def _control_get_settings(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
-        """`getSettingsWithSources` plus what is applied."""
+        """`getSettingsWithSources` plus what is applied (the inline flag settings are in `flagSettings`)."""
         from app.utils.settings.settings import (
             SETTING_SOURCES,
             get_settings_for_source,
             load_settings,
-            merge_settings,
         )
 
         run = self.run_
-        locations = run_settings_locations(run.config, project_root_of(run.ctx.workspace), None, None)
+        locations = run.settings_locations or run_settings_locations(
+            run.config, project_root_of(run.ctx.workspace), None, None)
         sources = []
         for source in SETTING_SOURCES:
             settings = get_settings_for_source(source, locations) or {}
-            if source == "flagSettings" and self.flag_settings_inline:
-                settings = merge_settings(settings, self.flag_settings_inline)
             if settings:
                 sources.append({"source": str(source), "settings": settings})
-        effective = merge_settings(load_settings(locations), self.flag_settings_inline)
+        effective = load_settings(locations)
         self.respond(message, {"effective": effective, "sources": sources,
                                "applied": {"model": run.user_specified_model or run.config.model, "effort": None}})
 
     async def _control_apply_flag_settings(self, message: Mapping[str, Any], request: Mapping[str, Any]) -> None:
         """
-        The provided settings shallow-merged into the inline flag settings (`null` clears a key);
-        a `model` key changes the model at once.
+        The provided settings shallow-merged into the inline flag settings (`null` clears a key), then
+        `notifyChange('flagSettings')`: the run re-reads its settings as for a file change
+        (`apply_settings_change`: permission rules, hooks). A `model` key changes the model at once.
         """
+        from app.bootstrap.state import get_flag_settings_inline, set_flag_settings_inline
+        from app.types.permissions import PermissionRuleSource
+
         incoming = dict(request.get("settings") or {})
-        merged = {**self.flag_settings_inline, **incoming}
-        self.flag_settings_inline = {k: v for k, v in merged.items() if v is not None}
+        merged = {**(get_flag_settings_inline() or {}), **incoming}
+        set_flag_settings_inline({k: v for k, v in merged.items() if v is not None})
+        detector = self.run_.settings_change_detector
+        if detector is not None:
+            detector.notify_change(PermissionRuleSource.FLAG_SETTINGS)
         if "model" in incoming:
             self.run_.user_specified_model = str(incoming["model"]) if incoming["model"] is not None else None
         self.respond(message)

@@ -3,7 +3,7 @@ Which hooks a run may execute, captured once at startup.
 
 Ported from `reference/claude-code/src/utils/hooks/hooksConfigSnapshot.ts` ->
 `getHooksFromAllowedSources`, `shouldAllowManagedHooksOnly`,
-`shouldDisableAllHooksIncludingManaged`, `captureHooksConfigSnapshot`, and
+`shouldDisableAllHooksIncludingManaged`, `captureHooksConfigSnapshot`, `updateHooksConfigSnapshot`, and
 `src/utils/settings/pluginOnlyPolicy.ts` -> `isRestrictedToPluginOnly`.
 
 The settings sources are the ones the permission context is built from
@@ -19,8 +19,11 @@ Policy decides first, and nothing below it can relax it:
   file cannot switch off what an administrator configured;
 * otherwise every source's hooks, merged (arrays concatenate, as upstream's settings merge).
 
-The snapshot is **frozen for the run**, as upstream's is for a session: a hook edited
-mid-run does not change what the run executes, so the record of a run can name its hooks.
+The snapshot is taken when the run opens and **replaced, never edited**, as upstream's: a settings
+file changing during the session (`app/utils/settings/change_detector.py` ->
+`apply_settings_change`) recaptures it from disk with `update_hooks_config_snapshot`, so a hook
+written mid-session runs from the next event on. A snapshot value itself is immutable: a run of
+hooks already started keeps the configuration it matched against.
 """
 
 from __future__ import annotations
@@ -105,6 +108,17 @@ def capture_hooks_config_snapshot(locations: SettingsLocations) -> HooksConfigSn
     )
 
 
+def update_hooks_config_snapshot(dispatcher: Any) -> None:
+    """
+    `updateHooksConfigSnapshot`: re-read the run's hooks from its settings files (the dispatcher's
+    `settings_locations`; one without them keeps its snapshot). Upstream resets its settings cache
+    first; this build reads the files on every load, so there is nothing to reset.
+    """
+    locations = getattr(dispatcher, "settings_locations", None)
+    if isinstance(locations, SettingsLocations):
+        dispatcher.snapshot = capture_hooks_config_snapshot(locations)
+
+
 __all__ = [
     "HooksConfigSnapshot",
     "capture_hooks_config_snapshot",
@@ -112,4 +126,5 @@ __all__ = [
     "is_restricted_to_plugin_only",
     "should_allow_managed_hooks_only",
     "should_disable_all_hooks_including_managed",
+    "update_hooks_config_snapshot",
 ]

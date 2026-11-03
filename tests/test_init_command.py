@@ -52,8 +52,6 @@ def _literal(source: str, name: str) -> str:
 
 #: NEW_INIT_PROMPT: what TDDAgents lacks, its equivalent where a route exists, otherwise dropped.
 NEW_INIT_ONLY = [
-    # Hooks are read when a session starts here, so the `update-config` flow has no in-turn live proof.
-    (" → live-proof (for `Pre|PostToolUse` on triggerable matchers) → cleanup → handoff.", " → handoff."),
     # This build's tool names.
     ("`PostToolUse` with matcher `Write|Edit`", "`PostToolUse` with matcher `WriteFile|Edit`"),
     ("`[hooks-only] Constructing a PostToolUse/Write|Edit format hook",

@@ -15,7 +15,7 @@ from app.state.app_state_store import AppStateStore
 from app.tool import tool_context_for
 from app.types.hooks import AggregatedHookResult
 from app.utils.hooks.exec_agent_hook import exec_agent_hook
-from app.utils.hooks.exec_http_hook import HttpHookPolicy, exec_http_hook
+from app.utils.hooks.exec_http_hook import HttpHookPolicy
 from app.utils.hooks.exec_prompt_hook import exec_prompt_hook
 from app.utils.hooks.hook_dispatcher import build_hook_dispatcher
 from app.utils.messages import HookAttachment, HookBlockingError
@@ -126,7 +126,7 @@ def write_settings(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data))
 
 
-def test_dispatcher_from_settings_with_injected_fakes(tmp_path: Path):
+def test_dispatcher_from_settings_with_injected_fakes(tmp_path: Path, monkeypatch: Any):
     write_settings(tmp_path / "proj" / ".tddagents" / "settings.json", {
         "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo hi"}]}]},
         "allowedHttpHookUrls": ["https://hooks.example/*"],
@@ -148,11 +148,31 @@ def test_dispatcher_from_settings_with_injected_fakes(tmp_path: Path):
     assert d.agent_executor.func is exec_agent_hook  # type: ignore[union-attr]
     assert d.agent_executor.keywords == {  # type: ignore[union-attr]
         "agent_runner": runner, "transcript_path": "/t.jsonl", "default_model": "m-1"}
-    assert d.http_executor.func is exec_http_hook  # type: ignore[union-attr]
-    assert d.http_executor.keywords == {  # type: ignore[union-attr]
-        "policy": HttpHookPolicy(allowed_urls=("https://hooks.example/*",), allowed_env_vars=("TOKEN",)),
-        "transport": transport}
+    assert d.http_executor.keywords == {"locations": locations, "transport": transport}  # type: ignore[union-attr]
     assert d.registry.get_pending() == []
+    # `getHttpHookPolicy()` reads the settings at each call: an edit applies to the next HTTP hook.
+    seen: list[tuple[Any, ...]] = []
+
+    async def fake_exec(hook: Any, event: str, json_input: str, signal: Any, **kwargs: Any) -> str:
+        seen.append((hook, event, json_input, signal, kwargs))
+        return "result"
+
+    monkeypatch.setattr("app.utils.hooks.hook_dispatcher.exec_http_hook", fake_exec)
+    executor = d.http_executor
+    assert executor is not None
+
+    async def call() -> Any:
+        return await executor("hook", "Stop", "{}", "sig")
+
+    assert asyncio.run(call()) == "result"
+    write_settings(tmp_path / "proj" / ".tddagents" / "settings.json", {"allowedHttpHookUrls": []})
+    asyncio.run(call())
+    assert [entry[:4] for entry in seen] == [("hook", "Stop", "{}", "sig")] * 2
+    assert [entry[4] for entry in seen] == [
+        {"policy": HttpHookPolicy(allowed_urls=("https://hooks.example/*",), allowed_env_vars=("TOKEN",)),
+         "transport": transport},
+        {"policy": HttpHookPolicy(allowed_urls=(), allowed_env_vars=None), "transport": transport},
+    ]
 
 
 def test_policy_disable_all_reaches_the_snapshot(tmp_path: Path):
