@@ -23,7 +23,8 @@ The sources, in upstream's load order, with TDDAgents' names (`.tddagents/`, `/e
     userSettings      ~/.tddagents/settings.json
     projectSettings   <project>/.tddagents/settings.json
     localSettings     <project>/.tddagents/settings.local.json
-    flagSettings      the file named by the run (upstream `--settings`)
+    flagSettings      the file named by the run (upstream `--settings`), with the SDK host's
+                      inline flag settings (`apply_flag_settings`) merged over it
     policySettings    /etc/tddagents/managed-settings.json + managed-settings.d/*.json
 
 Rules from every source contribute; deny beats ask beats allow at match time, not load

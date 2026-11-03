@@ -3,7 +3,9 @@ The hook configuration schema: what a `hooks` block in a settings file may conta
 
 Ported from `reference/claude-code/src/schemas/hooks.ts` -> `HookCommandSchema` (a
 discriminated union of `command`, `prompt`, `agent` and `http`), `HookMatcherSchema`,
-`HooksSchema`; `SHELL_TYPES` from `src/utils/shell/shellProvider.ts`.
+`HooksSchema`; `SHELL_TYPES` from `src/utils/shell/shellProvider.ts`. `hooks_json_schema` is
+`HooksSchema` as `toJSONSchema` prints it (every `.describe()` text upstream's), for the settings
+schema `update-config` shows (`app/utils/settings/schema_output.py`).
 
 Upstream parses with Zod, which strips unknown keys and rejects a wrong type. That is kept
 field for field. *Divergence:* upstream's settings loader rejects a whole settings file
@@ -366,6 +368,92 @@ def parse_hooks_settings(raw: Any, origin: str = "") -> dict[str, tuple[HookMatc
     return parsed
 
 
+def hooks_json_schema() -> dict[str, Any]:
+    """`HooksSchema()` (with `HookMatcherSchema`, `HookCommandSchema`, `IfConditionSchema`) as JSON Schema."""
+    from app.utils.hooks.hook_events import HookEvent
+    from app.utils.settings.schema_builder import (
+        array,
+        boolean,
+        describe,
+        enum,
+        literal,
+        number,
+        obj,
+        opt,
+        record,
+        req,
+        string,
+        union,
+    )
+
+    if_condition = opt(describe(string(), (
+        'Permission rule syntax to filter when this hook runs (e.g., "Bash(git *)"). '
+        "Only runs if the tool call matches the pattern. Avoids spawning hooks for non-matching commands.")))
+    status_message = opt(describe(string(), "Custom status message to display in spinner while hook runs"))
+    once = opt(describe(boolean(), "If true, hook runs once and is removed after execution"))
+    command = obj({
+        "type": req(describe(literal("command"), "Shell command hook type")),
+        "command": req(describe(string(), "Shell command to execute")),
+        "if": if_condition,
+        "shell": opt(describe(enum(SHELL_TYPES), (
+            "Shell interpreter. 'bash' uses your $SHELL (bash/zsh/sh); 'powershell' uses pwsh. "
+            "Defaults to bash."))),
+        "timeout": opt(describe(number(positive=True), "Timeout in seconds for this specific command")),
+        "statusMessage": status_message,
+        "once": once,
+        "async": opt(describe(boolean(), "If true, hook runs in background without blocking")),
+        "asyncRewake": opt(describe(boolean(), (
+            "If true, hook runs in background and wakes the model on exit code 2 (blocking error). "
+            "Implies async."))),
+    })
+    prompt = obj({
+        "type": req(describe(literal("prompt"), "LLM prompt hook type")),
+        "prompt": req(describe(string(), (
+            "Prompt to evaluate with LLM. Use $ARGUMENTS placeholder for hook input JSON."))),
+        "if": if_condition,
+        "timeout": opt(describe(number(positive=True), "Timeout in seconds for this specific prompt evaluation")),
+        "model": opt(describe(string(), (
+            'Model to use for this prompt hook (e.g., "claude-sonnet-4-6"). If not specified, uses the default '
+            "small fast model."))),
+        "statusMessage": status_message,
+        "once": once,
+    })
+    agent = obj({
+        "type": req(describe(literal("agent"), "Agentic verifier hook type")),
+        "prompt": req(describe(string(), (
+            'Prompt describing what to verify (e.g. "Verify that unit tests ran and passed."). Use $ARGUMENTS '
+            "placeholder for hook input JSON."))),
+        "if": if_condition,
+        "timeout": opt(describe(number(positive=True), "Timeout in seconds for agent execution (default 60)")),
+        "model": opt(describe(string(), (
+            'Model to use for this agent hook (e.g., "claude-sonnet-4-6"). If not specified, uses Haiku.'))),
+        "statusMessage": status_message,
+        "once": once,
+    })
+    http = obj({
+        "type": req(describe(literal("http"), "HTTP hook type")),
+        "url": req(describe(string(url=True), "URL to POST the hook input JSON to")),
+        "if": if_condition,
+        "timeout": opt(describe(number(positive=True), "Timeout in seconds for this specific request")),
+        "headers": opt(describe(record(string()), (
+            "Additional headers to include in the request. Values may reference environment variables using "
+            '$VAR_NAME or ${VAR_NAME} syntax (e.g., "Authorization": "Bearer $MY_TOKEN"). Only variables listed '
+            "in allowedEnvVars will be interpolated."))),
+        "allowedEnvVars": opt(describe(array(string()), (
+            "Explicit list of environment variable names that may be interpolated in header values. Only "
+            "variables listed here will be resolved; all other $VAR references are left as empty strings. "
+            "Required for env var interpolation to work."))),
+        "statusMessage": status_message,
+        "once": once,
+    })
+    matcher = obj({
+        "matcher": opt(describe(string(), 'String pattern to match (e.g. tool names like "Write")')),
+        "hooks": req(describe(array(union(command, prompt, agent, http)),
+                              "List of hooks to execute when the matcher matches")),
+    })
+    return record(array(matcher), keys=enum([str(event) for event in HookEvent]))
+
+
 __all__ = [
     "DEFAULT_HOOK_SHELL",
     "SHELL_TYPES",
@@ -377,6 +465,7 @@ __all__ = [
     "HooksSettings",
     "HttpHook",
     "PromptHook",
+    "hooks_json_schema",
     "hooks_schema_errors",
     "parse_hook_command",
     "parse_hook_matcher",
