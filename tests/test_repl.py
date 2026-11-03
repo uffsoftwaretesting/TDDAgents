@@ -1,6 +1,6 @@
 """
 Phase 11: the interactive development session (`app/screens/repl.py`), its slash commands
-(`app/commands.py`) and `develop_interactive`, against a fake terminal and a scripted model.
+(`app/commands/commands.py`) and `develop_interactive`, against a fake terminal and a scripted model.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.cli.print import open_session_run
-from app.commands import (
+from app.commands.commands import (
     HELP_TEXT,
     CommandError,
     SlashCommand,
@@ -302,7 +302,10 @@ def test_a_session_works_through_the_plan_and_stays_open(python_workspace, tmp_p
     terminal, repl, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["add"]), script))
     assert terminal == Terminal.COMPLETED
     assert repl.plan.is_complete
-    assert io.out[0].startswith("TDD plan:\n▶ 1. add\n\n" + HELP_TEXT)
+    # The project has files and no TDDAGENTS.md: the onboarding tip comes first (`LogoV2`).
+    assert io.out[0] == ("Tips for getting started\n"
+                         "Run /init to create a TDDAGENTS.md file with instructions for TDDAgents\n")
+    assert io.out[1].startswith("TDD plan:\n▶ 1. add\n\n" + HELP_TEXT)
     assert "⏺ RunTests(test_path='tests')" in io.text()
     assert io.prompts and io.prompts[0] == PROMPT
     assert model.seen[0].messages[0].content == "start"
@@ -615,7 +618,8 @@ def test_develop_interactive_plans_then_develops_the_approved_plan(python_worksp
     outcome = develop_interactive("t-i", "build a calculator", python_workspace, SessionOptions(),
                                   io_factory=factory, deps=deps_for(model), permission_context=perm,
                                   project_root=tmp_path, home=tmp_path / "home", managed_dir=tmp_path / "etc")
-    assert io.out[0].startswith("⏸ plan mode on")
+    assert io.out[0].startswith("Tips for getting started\n")
+    assert io.out[1].startswith("⏸ plan mode on")
     assert [(i.text, i.status) for i in outcome.plan.items] == [("first", ItemStatus.DONE)]
     assert outcome.planned and outcome.plan_file is not None
     assert model.seen[0].messages[0].content == "build a calculator"

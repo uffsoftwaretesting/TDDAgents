@@ -3,8 +3,9 @@ File helpers.
 
 Ported from `reference/claude-code/src/utils/file.ts` -> `FILE_NOT_FOUND_CWD_NOTE`,
 `addLineNumbers` (the compact `N<TAB>line` form), `getAbsoluteAndRelativePaths`,
-`getDisplayPath`, `stripLineNumberPrefix`. The working directory is the context's workspace's tracked one (`getCwd`
-is process-wide upstream); without a context it is the process's.
+`getDisplayPath`, `stripLineNumberPrefix`, `isDirEmpty` (with `fsOperations.ts` ->
+`isDirEmptySync`). The working directory is the context's workspace's tracked one (`getCwd` is
+process-wide upstream); without a context it is the process's.
 """
 
 from __future__ import annotations
@@ -16,6 +17,20 @@ from typing import Any
 
 #: `src/utils/file.ts` -> `FILE_NOT_FOUND_CWD_NOTE`; our cwd is the workspace root.
 FILE_NOT_FOUND_CWD_NOTE = "Note: your current working directory is the workspace root."
+
+
+def is_dir_empty(dir_path: str | os.PathLike[str]) -> bool:
+    """
+    `isDirEmpty`: whether the directory has no entries. A directory that does not exist counts as
+    empty (ENOENT); any other error (a folder the process may not list) counts as not empty.
+    """
+    try:
+        with os.scandir(dir_path) as entries:
+            return next(entries, None) is None
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
 
 
 def add_line_numbers(lines: list[str], start_line: int) -> str:

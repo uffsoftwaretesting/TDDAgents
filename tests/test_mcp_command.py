@@ -589,7 +589,7 @@ def test_mcp_in_the_repl_is_answered_by_the_next_lines(monkeypatch: pytest.Monke
 
 
 def test_mcp_in_the_repl_without_servers_and_with_a_crash(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.commands import SlashCommand
+    from app.commands.commands import SlashCommand
     from app.screens.repl import Repl
     from tests.test_repl import FakeIO
 

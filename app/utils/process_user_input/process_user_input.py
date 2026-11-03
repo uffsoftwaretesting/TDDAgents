@@ -8,18 +8,19 @@ Ported from `reference/claude-code/src/utils/processUserInput/processUserInput.t
 branches). The REPL and headless share it through `QueryEngine.submit_message`.
 
 * **Base.** Input starting with `/` goes to the slash-command path: a known prompt command (a
-  skill) expands into its messages (`get_messages_for_prompt_slash_command`) and its attachments,
-  whose `allowed-tools` and `model` then apply to the turn; `/name` that looks like a command but
-  is none is answered "Unknown skill: …" and never queried; anything else (`/usr/bin/x`, an
-  existing path) is a text prompt. A text prompt is the user's message, then the user-input
-  attachments.
+  skill, or a built-in such as `/init`) expands into its messages
+  (`get_messages_for_prompt_slash_command`) and its attachments, whose `allowed-tools` and `model`
+  then apply to the turn; `/name` that looks like a command but is none is answered "Unknown
+  skill: …" and never queried; anything else (`/usr/bin/x`, an existing path) is a text prompt. A
+  text prompt is the user's message, then the user-input attachments.
 * **UserPromptSubmit**, on the raw input and only when the base would query: a blocking error
   drops everything said (upstream keeps only a UI warning); `continue: false` keeps the prompt
   and its attachments, adds "Operation stopped by hook", and does not query; hook context
   follows what was said.
 
 The REPL runs its own local commands (`/plan`, `/pause`, …) before input reaches here, so the
-slash path knows only the skills (`get_skill_tool_commands`). Not ported: images and pasted
+slash path knows only the run's prompt commands: the skills, then the built-in ones (`/init`), as
+the skill registry orders them (`SkillRegistry.find_command`). Not ported: images and pasted
 contents, `bash` mode, bridge-safe commands, the ultraplan keyword, agent-mention logging and
 OTel prompt events.
 """

@@ -5,9 +5,11 @@ Ported from `reference/claude-code/src/commands.ts` -> `getCommands`, `builtInCo
 `findCommand`, `hasCommand`, `getCommand`, `formatDescriptionWithSource`, and
 `types/command.ts` -> `getCommandName`. Upstream merges bundled, skill, plugin and built-in
 commands into one list and dispatches by type: TDDAgents' built-ins are `local` (they run in the
-session and report to the user, `app/screens/repl.py`); its skills are `prompt` commands, which
-a typed `/<skill> args` expands into the turn
-(`app/utils/process_user_input/process_slash_command.py`). Not ported: plugins, workflows, MCP
+session and report to the user, `app/screens/repl.py`), except `/init` (`app/commands/init.py`), a
+built-in `prompt` command the skill registry holds after every skill (`set_built_in_commands`);
+skills and `/init` are `prompt` commands, which a typed `/<name> args` expands into the turn
+(`app/utils/process_user_input/process_slash_command.py`). `/help` lists `/init` among the
+commands, and only the other prompt commands under "Skills:". Not ported: plugins, workflows, MCP
 prompts and skills, the remote/bridge filters, availability requirements (no auth types) and the
 memoized command cache (the list is built from the run's skill registry each time).
 
@@ -22,8 +24,8 @@ React/Ink) is not ported: the `plugin` CLI subcommand does its work (`app/cli/ha
 `formatContextAsMarkdownTable`: the Markdown report, which upstream's interactive build replaces
 with a coloured grid (`context.tsx`, `components/ContextVisualization.tsx`, React/Ink, not
 ported). `collect_context_data` is also what the SDK's `get_context_usage` control request
-answers with (`cli/print.ts`). Upstream keeps it in `src/commands/context/`; here `commands` is a
-module, not a package, so it lives in this module. Not ported: the context-collapse status
+answers with (`cli/print.ts`). Upstream keeps it in `src/commands/context/`; here it lives in this
+module. Not ported: the context-collapse status
 (`CONTEXT_COLLAPSE`, off in the external build) and the `[ANT-ONLY]` tables.
 
 | Command | What it does |
@@ -39,6 +41,7 @@ module, not a package, so it lives in this module. Not ported: the context-colla
 | `/context` | Show current context usage |
 | `/reload-plugins` | Activate pending plugin changes in the current session |
 | `/mcp` | Manage MCP servers; `/mcp enable [server]`, `/mcp disable [server]`, `/mcp reconnect <server>` |
+| `/init` | Ask the agents to write the project's `TDDAGENTS.md` (a `prompt` command) |
 | `/help` | This list |
 | `/exit`, `/quit` | Leave (the session can be continued with `--thread-id`) |
 
@@ -87,6 +90,7 @@ HELP_TEXT = """Commands:
   /context                      show current context usage
   /reload-plugins               activate pending plugin changes in the current session
   /mcp                          manage MCP servers ([enable|disable [server-name]])
+  /init                         initialize a new TDDAGENTS.md file with codebase documentation
   /help                         this list
   /exit, /quit                  leave (continue later with --thread-id)
 Anything else is a message to the agents; Esc interrupts them."""
@@ -149,7 +153,7 @@ def built_in_command_names() -> frozenset[str]:
 
 
 def get_commands(skill_registry: Any) -> list[Command]:
-    """`getCommands`: the skills and plugin commands (as `prompt` commands), then the built-ins."""
+    """`getCommands`: the skills, plugin commands and `/init` (as `prompt` commands), then the built-ins."""
     skills = [] if skill_registry is None else [
         Command(s.name, s.description, "prompt", source=s.source, is_hidden=s.is_hidden, display_name=s.display_name,
                 argument_hint=s.argument_hint, plugin_name=getattr(s, "plugin_name", None))
@@ -194,8 +198,8 @@ def format_description_with_source(command: Command) -> str:
 
 
 def help_text(commands: Sequence[Command]) -> str:
-    """`/help`: the built-ins, then the skills the user can type."""
-    skills = [c for c in commands if c.type == "prompt" and not c.is_hidden]
+    """`/help`: the built-ins (`/init` among them), then the skills the user can type."""
+    skills = [c for c in commands if c.type == "prompt" and not c.is_hidden and c.source != "builtin"]
     if not skills:
         return HELP_TEXT
     width = max(len(c.user_facing_name()) for c in skills) + 3
