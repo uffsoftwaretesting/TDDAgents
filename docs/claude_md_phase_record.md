@@ -2168,9 +2168,10 @@ prompt style.
   - PostToolUse hooks get the tool result as text, so the `jq` examples read `.tool_input.file_path`.
   - The settings TDDAgents lacks are dropped: `env`, `model`, `agent`, `attribution`, and the
     Config-tool section.
-  - The "prove the hook fires" step, the `--debug` step and the generated settings schema are pending:
-    the user decided to port live settings change detection, `--debug` and the schema, which restores
-    them verbatim.
+  - The "prove the hook fires" step, the `--debug` step and the generated "Full Settings JSON Schema"
+    are verbatim again, now that live settings, `--debug` and the schema are ported (below). Where
+    upstream points at `/hooks`, the text says to restart with `--thread-id` until `/hooks` is ported
+    (user decision: port it).
 - **Test-file classes.**
   - Declared test-support files count as test code for the tier and the fingerprint, so `conftest.py`
     and helpers can be written in RED.
@@ -2183,9 +2184,38 @@ prompt style.
   `python_workspace` stays as an alias.
 - **Final-run timeout.** The final run uses upstream's maximum Bash timeout for `test` as well as
   `setup`.
-- **Pending (user decisions 2026-11-03, in progress):**
-  - the stop hook states the no-configuration reason;
-  - the final-run copy follows claude-code's ripgrep listing, so every `.gitignore` applies.
+- **Stop hook, no configuration.** While an item is current and nothing is declared, the refusal in
+  every phase is "TDD cycle incomplete: <PHASE>. <rule>: <NO_PROJECT_CONFIG>", the tier's own reason
+  from one source, without the usual next steps (they are blocked while the tier is closed; user
+  decisions).
+- **Final-run copy.** Built from upstream's ripgrep listing (`rg --files --hidden`, the VCS folders of
+  `hooks/fileSuggestions.ts` and `.tddagents` excluded, then the declared excludes), so every
+  `.gitignore` / `.ignore` applies (user decision: follow claude-code). Divergences:
+  `--no-require-git` (TDDAgents never runs `git init`, but a checkout honours `.gitignore`) and
+  `--no-ignore-parent` (the project is the root of every lookup). No ripgrep → "clean final run
+  unsupported". Symlinks: the user chose `--follow` with links recreated as links (in progress).
+
+*Live settings, `--debug`, the settings schema (user decisions 2026-11-03, to restore `update-config`
+verbatim):*
+
+- **`--debug [filter]`** (`app/utils/debug.py`, `debug_filter.py`; `utils/debug.ts`): `-d/--debug`,
+  `--debug-file`, hidden `-d2e/--debug-to-stderr`; the log is `<config home>/debug/<thread id>.txt`
+  with a `latest` link; the hook code writes upstream's debug lines. Divergences: `--debug api,hooks`
+  (space) also filters; TDDAgents' own warnings and errors reach the debug log.
+- **Settings change detection** (`app/utils/settings/change_detector.py`, `apply_settings_change.py`;
+  `changeDetector.ts`, `applySettingsChange`): a changed settings file runs the ConfigChange hooks, then
+  reloads the permission rules and the hooks snapshot, in the REPL, `-p` and stream-json;
+  `apply_flag_settings` uses the same path (the 8f "live reload not ported" divergence is closed).
+  Dangerous allows are stripped again on every reload and the TDD tier still holds. Divergences: one
+  watcher per session (500 ms mtime polling with upstream's constants, not chokidar), no MDM polling or
+  settings cache reset, `transitionPlanAutoMode` not applied, stripping on reload for everyone (upstream:
+  ant-only); upstream's quirk kept (an emptied inline flag rule list keeps the old rules until restart).
+- **Settings JSON Schema** (`app/utils/settings/schema_builder.py`, `schema_output.py`;
+  `utils/settings/types.ts` `SettingsSchema`): the 25 keys this build reads, upstream's descriptions with
+  the product renames (`.claude-plugin/` → `.tddagents-plugin/`); a small helper reproduces Zod's JSON
+  Schema shapes (not compared byte for byte with Zod). Whole-file validation like upstream is a user
+  decision in progress.
+- `app/constants/product.py` holds `CLI_COMMAND`; `PLUGIN_CLI` derives from it.
 
 ### The three things that changed most
 
