@@ -7,11 +7,12 @@ which the sub-requirement's tests changed since the item started. "Changed" is o
 RunTests in RED compares the current one with it, so writes by any tool count: WriteFile,
 Edit, Bash, MCP or a worker.
 
-The fingerprint hashes the sorted path and content of every test file, as
-`app/tdd/phase_permissions.is_test_path` classifies them. Caches are left out (a run writes
-`__pycache__/*.pyc` under `tests/`, which would otherwise change it on every run), and so is
-TDDAgents' own `.tddagents/` directory. It goes through the `Workspace` protocol, so it is the
-same locally, in E2B and in the in-memory test double.
+The fingerprint hashes the sorted path and content of every test file and test-support file the
+project declares (`testFiles` and `testSupportFiles` in `.tddagents/project.json`, 2026-11-03). The
+walk is pruned on the declared `exclude` patterns, `.git/` and `.tddagents/` (`project_files`), so a
+dependency tree (`node_modules/x/test/y.js`) or a cache the runner writes never counts. With no
+declaration there is no fingerprint (`None`): no evidence either way. It goes through the
+`Workspace` protocol, so it is the same locally, in E2B and in the in-memory test double.
 """
 
 from __future__ import annotations
@@ -20,10 +21,7 @@ import hashlib
 from typing import Any
 
 from app.tdd.ledger import PhaseLedger, TddPhase
-from app.tdd.phase_permissions import is_test_path
-
-#: Directory names whose contents are never test files.
-IGNORED_SEGMENTS = frozenset({"__pycache__", ".pytest_cache", ".tddagents", ".git", ".mypy_cache", ".venv"})
+from app.tdd.project_config import ProjectConfig, TestFileRules
 
 #: Deep enough for any project tree (`list_files` counts depth in entries).
 LISTING_DEPTH = 64
@@ -32,23 +30,34 @@ LISTING_DEPTH = 64
 EMPTY_FINGERPRINT = hashlib.sha256(b"").hexdigest()
 
 
-def _counts(path: str) -> bool:
-    segments = path.replace("\\", "/").split("/")
-    if any(segment in IGNORED_SEGMENTS for segment in segments) or path.endswith(".pyc"):
-        return False
-    return is_test_path(path)
-
-
-def fingerprint_test_files(workspace: Any) -> str | None:
-    """The test files' fingerprint, or `None` when the workspace cannot be listed."""
-    lister = getattr(workspace, "list_files", None)
-    if not callable(lister):
-        return None
+def project_files(workspace: Any, rules: TestFileRules) -> list[str] | None:
+    """
+    The project's own files, root-relative: the workspace's pruned walk (`LocalWorkspace.walk_files`)
+    when it has one, else its full listing, filtered. `None` when the workspace cannot be listed.
+    """
     try:
-        entries = lister(".", depth=LISTING_DEPTH)
+        walker = getattr(workspace, "walk_files", None)
+        if callable(walker):
+            listed = [str(path) for path in walker(rules.is_excluded)]
+        else:
+            lister = getattr(workspace, "list_files", None)
+            if not callable(lister):
+                return None
+            listed = [str(entry.path) for entry in lister(".", depth=LISTING_DEPTH) if not entry.is_dir]
     except Exception:  # noqa: BLE001 - an unlistable workspace gives no evidence either way
         return None
-    paths = sorted(str(entry.path) for entry in entries if not entry.is_dir and _counts(str(entry.path)))
+    return sorted(path for path in listed if not rules.is_excluded(path))
+
+
+def fingerprint_test_files(workspace: Any, config: ProjectConfig | None) -> str | None:
+    """The declared test files' fingerprint, or `None` with no declaration or an unlistable workspace."""
+    if config is None:
+        return None
+    rules = config.rules
+    files = project_files(workspace, rules)
+    if files is None:
+        return None
+    paths = [path for path in files if rules.is_test_code(path)]
     digest = hashlib.sha256()
     for path in paths:
         try:
@@ -57,6 +66,12 @@ def fingerprint_test_files(workspace: Any) -> str | None:
             content = "\x00<unreadable>"
         digest.update(f"{path}\x00{content}\x00".encode("utf-8", "surrogateescape"))
     return digest.hexdigest() if paths else EMPTY_FINGERPRINT
+
+
+def context_test_fingerprint(context: Any) -> str | None:
+    """`fingerprint_test_files` for a tool context: its workspace and its app state's declaration."""
+    config = getattr(context.get_app_state(), "project_config", None)
+    return fingerprint_test_files(getattr(context, "workspace", None), config)
 
 
 def have_tests_changed(current: str | None, baseline: str | None) -> bool:
@@ -77,6 +92,6 @@ def spawn_test_baseline(spawn_ledger: PhaseLedger, context: Any) -> str | None:
     so its tests are fingerprinted afresh; any other spawn keeps the item's baseline.
     """
     if spawn_ledger.phase == TddPhase.RED:
-        return fingerprint_test_files(getattr(context, "workspace", None))
+        return context_test_fingerprint(context)
     baseline: str | None = context.get_app_state().tdd_item_test_baseline
     return baseline

@@ -526,7 +526,8 @@ def test_token_usage_is_off_when_unset(monkeypatch):
 
 def test_post_compaction_text_is_exact_and_tails_by_bytes():
     stdout = "é" * PREVIEW_SIZE_BYTES + "END"
-    record = TestRunRecord(test_path="t.py", exit_code=1, stdout=stdout, stderr="boom")
+    record = TestRunRecord(command="sh t.sh", exit_code=1, stdout=stdout, stderr="boom",
+                           meaning="the test command failed")
     msg = create_tdd_state_attachment_message(PhaseLedger(), record, after_compaction=True)
     full = f"{stdout}\n--- STDERR ---\nboom".encode()
     tail = full[-PREVIEW_SIZE_BYTES:].decode("utf-8", errors="ignore")
@@ -534,7 +535,7 @@ def test_post_compaction_text_is_exact_and_tails_by_bytes():
         "<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs):\n"
         "Current Phase: RED\nTests Written: False\nGreen Passed: False\nRefactor Passed: False\n"
         "Coverage: not measured\n\n"
-        "Last RunTests run (recorded by RunTests, not by the model): t.py exited 1\n"
+        "Last RunTests run (recorded by RunTests, not by the model): `sh t.sh` exited 1 (the test command failed)\n"
         f"{tail}\n</system-reminder>"
     )
     assert msg.additional_kwargs["is_meta"] is True

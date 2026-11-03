@@ -30,15 +30,15 @@ from app.tdd.project_config_skill import (
     skill_files,
     tdd_project_config_skill,
 )
-from app.tdd.project_config_vars import (
+from app.tdd.plan import PROJECT_CONFIG_HEADING
+from app.tdd.project_config import (
     COVERAGE_REPORT_ENV,
     JUNIT_REPORT_ENV,
     PROJECT_CONFIG_FILE,
-    PROJECT_CONFIG_HEADING,
-    PROJECT_CONFIG_PROMPT_VARS,
     PROJECT_CONFIG_VERSION,
 )
-from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB, TDD_PROMPT_VARS
+from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
+from app.tdd.prompt_vars import PROJECT_CONFIG_PROMPT_VARS, TDD_PROMPT_VARS
 from app.tools.skill_tool.skill_tool import skill_has_only_safe_properties
 from app.utils.process_user_input.process_slash_command import (
     get_messages_for_prompt_slash_command,

@@ -30,7 +30,7 @@ from app.tools.glob_tool.glob_tool import build_glob_tool
 from app.types.permissions import PermissionMode, ToolPermissionContext
 from app.utils.path import backfill_path, expand_path, tracked_cwd_offset
 from tests.conftest import FakeWorkspace
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 
 def _ctx(root: str, perm: ToolPermissionContext | None = None, **state: Any) -> Any:
@@ -116,18 +116,20 @@ def test_bash_permissions_resolve_against_the_shell_and_keep_the_root():
 
 def test_a_redirect_is_judged_where_it_lands():
     red = PhaseLedger(phase=TddPhase.RED)
-    assert check_bash_tdd_phase("echo x > test_a.py", red, "tests")[0] is True
-    assert check_bash_tdd_phase("echo x > a.py", red, "tests")[0] is True  # tests/a.py is a test path
-    assert check_bash_tdd_phase("echo x > a.py", red, None)[0] is False
-    assert check_bash_tdd_phase("echo x > /tmp/log", red, "tests")[0] is False
-    assert check_bash_tdd_phase("echo x > ~/log", red, "tests")[0] is False
+    assert check_bash_tdd_phase("echo x > test_a.py", red, "tests", rules=TEST_PROJECT_CONFIG.rules)[0] is True
+    assert check_bash_tdd_phase("echo x > a.py", red, "tests",
+                                rules=TEST_PROJECT_CONFIG.rules)[0] is True  # tests/a.py is a test path
+    assert check_bash_tdd_phase("echo x > a.py", red, None, rules=TEST_PROJECT_CONFIG.rules)[0] is False
+    assert check_bash_tdd_phase("echo x > /tmp/log", red, "tests", rules=TEST_PROJECT_CONFIG.rules)[0] is False
+    assert check_bash_tdd_phase("echo x > ~/log", red, "tests", rules=TEST_PROJECT_CONFIG.rules)[0] is False
 
 
 def test_the_tdd_tier_uses_the_shell_directory_for_bash():
     from app.tools.bash_tool.bash_tool import build_bash_tool
     from app.utils.permissions.permissions import tdd_phase_denial
 
-    ctx = _ctx("/p", tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED))
+    ctx = _ctx("/p", tdd_plan=CURRENT_ITEM_PLAN,
+               project_config=TEST_PROJECT_CONFIG, phase_ledger=PhaseLedger(phase=TddPhase.RED))
     command = {"command": "echo x > a.py"}
     assert tdd_phase_denial(build_bash_tool(), command, ctx) is not None
     set_cwd(ctx.workspace, "/p/tests")

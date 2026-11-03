@@ -7,6 +7,11 @@ Phase deny rules (§3.3 of `docs/transition_elaboration_plan.md`; Phase 12 cycle
 - REFACTOR: denies nothing; it is mandatory and improves both the code and the tests
   (user decision, 2026-10-28), while every RunTests run must stay green
 - RunTests is NEVER denied.
+
+Which files are tests is the project's declaration (2026-11-03, `app/tdd/project_config.py`): the
+`testFiles` and `testSupportFiles` gitignore patterns of `.tddagents/project.json`, approved with the
+plan. Declared manifests and lockfiles (`manifestFiles`) are writable in every phase, beside agent
+memory and the session's plan file. With no declaration the tier fails closed.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.project_config import TestFileRules, project_relative_path
 from app.types.permissions import (
     PermissionBehavior,
     PermissionRule,
@@ -88,74 +94,43 @@ def is_test_writing_tool(tool: Tool) -> bool:
     return False
 
 
-def is_test_path(path: str) -> bool:
+#: What the tier says when the project declares no configuration (2026-11-03): it cannot tell a test
+#: file from production code, so it fails closed while a sub-requirement is current.
+NO_PROJECT_CONFIG = (
+    "the project declares no test command, so its test files cannot be told from its production code. "
+    "The project's configuration is declared in the plan's \"## Project Configuration\" section and approved "
+    "with the plan (ExitPlanMode)."
+)
+
+
+def classify_path(path: str, rules: TestFileRules, root: str | None) -> str:
     """
-    Determine if a file path targets test code rather than production code.
-    Matches directory segments (e.g. tests/, test/) or filenames (test_*.py, *_test.py).
+    `"manifest"`, `"test"` or `"production"`, by the project's declared patterns
+    (`app/tdd/project_config.py`). A path outside the project is production: it is neither a test
+    file nor a manifest the project declares.
     """
-    normalized = path.replace("\\", "/").strip().lower()
-    if not normalized:
-        return False
-    parts = normalized.split("/")
-    if any(p in ("tests", "test") for p in parts[:-1]):
-        return True
-    basename = parts[-1]
-    return basename.startswith("test_") or basename.endswith("_test.py")
+    relative = project_relative_path(path, root)
+    if relative is None:
+        return "production"
+    if rules.is_manifest(relative):
+        return "manifest"
+    return "test" if rules.is_test_code(relative) else "production"
 
 
 def get_phase_deny_rules(ledger: PhaseLedger) -> tuple[PermissionRule, ...]:
     """
-    Derive permission deny rules from the current TDD phase (§3.3 and D3/D4).
-    RunTests is never included in deny rules.
+    The pool's phase deny rules (§3.3 and D3/D4): the dedicated implementation writers in RED,
+    the dedicated test writers in GREEN. A generic file tool is never removed from the pool; its
+    target path is judged at the gate (`check_tdd_phase_permission`). RunTests is never included.
     """
-    rules: list[PermissionRule] = []
-
     if ledger.phase == TddPhase.RED:
-        for name in sorted(IMPLEMENTATION_WRITER_TOOL_NAMES):
-            rules.append(
-                PermissionRule(
-                    tool_name=name,
-                    rule_behavior=PermissionBehavior.DENY,
-                    source=PermissionRuleSource.POLICY_SETTINGS,
-                )
-            )
-        for name in sorted(GENERIC_WRITER_TOOL_NAMES):
-            rules.append(
-                PermissionRule(
-                    tool_name=name,
-                    rule_behavior=PermissionBehavior.DENY,
-                    rule_content="src/*",
-                    source=PermissionRuleSource.POLICY_SETTINGS,
-                )
-            )
-            rules.append(
-                PermissionRule(
-                    tool_name=name,
-                    rule_behavior=PermissionBehavior.DENY,
-                    rule_content="app/*",
-                    source=PermissionRuleSource.POLICY_SETTINGS,
-                )
-            )
+        names = IMPLEMENTATION_WRITER_TOOL_NAMES
     elif ledger.phase == TddPhase.GREEN:
-        for name in sorted(TEST_WRITER_TOOL_NAMES):
-            rules.append(
-                PermissionRule(
-                    tool_name=name,
-                    rule_behavior=PermissionBehavior.DENY,
-                    source=PermissionRuleSource.POLICY_SETTINGS,
-                )
-            )
-        for name in sorted(GENERIC_WRITER_TOOL_NAMES):
-            rules.append(
-                PermissionRule(
-                    tool_name=name,
-                    rule_behavior=PermissionBehavior.DENY,
-                    rule_content="tests/*",
-                    source=PermissionRuleSource.POLICY_SETTINGS,
-                )
-            )
-
-    return tuple(rules)
+        names = TEST_WRITER_TOOL_NAMES
+    else:
+        return ()
+    return tuple(PermissionRule(tool_name=name, rule_behavior=PermissionBehavior.DENY,
+                                source=PermissionRuleSource.POLICY_SETTINGS) for name in sorted(names))
 
 
 def check_tdd_phase_permission(
@@ -163,6 +138,8 @@ def check_tdd_phase_permission(
     input_args: dict[str, Any],
     ledger: PhaseLedger,
     *,
+    rules: TestFileRules | None,
+    root: str | None = None,
     agent_memory: bool = False,
     plan_file: bool = False,
     cwd_offset: str | None = None,
@@ -178,6 +155,11 @@ def check_tdd_phase_permission(
     (`tdd/bash_phase_permissions.py`): without that, `echo code > calculator.py` would write production code
     in RED through a tool the path check cannot see, and barrier 2 would be bypassable by
     rephrasing the request.
+
+    Which paths are tests is the project's declaration (`rules`, from `.tddagents/project.json`,
+    2026-11-03), matched relative to the project `root`. A declared manifest or lockfile is writable in
+    every phase, as any file is upstream. With no declaration (`rules` is `None`) every write the tier
+    judges is refused (`NO_PROJECT_CONFIG`): the tier fails closed.
     """
     if tool.name == "RunTests" or ((agent_memory or plan_file) and tool.name in GENERIC_WRITER_TOOL_NAMES):
         return True, ""
@@ -185,7 +167,17 @@ def check_tdd_phase_permission(
     if tool.name == BASH_TOOL_NAME:
         from app.tdd.bash_phase_permissions import check_bash_tdd_phase
 
-        return check_bash_tdd_phase(str(input_args.get("command") or ""), ledger, cwd_offset)
+        return check_bash_tdd_phase(str(input_args.get("command") or ""), ledger, cwd_offset, rules=rules, root=root)
+
+    raw_path = input_args.get("path") or input_args.get("file_path")
+    if rules is None:
+        if (raw_path and tool.name in GENERIC_WRITER_TOOL_NAMES) or is_implementation_writing_tool(tool) \
+                or is_test_writing_tool(tool):
+            return False, f"TDD phase {ledger.phase} denies '{tool.name}': {NO_PROJECT_CONFIG}"
+        return True, ""
+    kind = classify_path(str(raw_path), rules, root) if raw_path else None
+    if kind == "manifest" and tool.name in GENERIC_WRITER_TOOL_NAMES:
+        return True, ""
 
     if ledger.phase == TddPhase.RED:
         if is_implementation_writing_tool(tool):
@@ -195,10 +187,9 @@ def check_tdd_phase_permission(
                  "write and run this sub-requirement's tests first."),
             )
         if tool.name in GENERIC_WRITER_TOOL_NAMES:
-            raw_path = input_args.get("path") or input_args.get("file_path")
             if raw_path:
                 path = str(raw_path)
-                if not is_test_path(path):
+                if kind != "test":
                     return (
                         False,
                         (f"TDD phase RED denies writing to production file '{path}'. "
@@ -211,10 +202,9 @@ def check_tdd_phase_permission(
                 f"TDD phase {ledger.phase} denies test-writing tool '{tool.name}'.",
             )
         if tool.name in GENERIC_WRITER_TOOL_NAMES:
-            raw_path = input_args.get("path") or input_args.get("file_path")
             if raw_path:
                 path = str(raw_path)
-                if is_test_path(path):
+                if kind == "test":
                     return (
                         False,
                         (f"TDD phase {ledger.phase} denies modifying test file '{path}': GREEN implements "

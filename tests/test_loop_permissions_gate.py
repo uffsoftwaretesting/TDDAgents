@@ -30,7 +30,7 @@ from app.utils.messages import (
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
 from tests.hook_doubles import ScriptedDispatcher
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 ALLOW, DENY, ASK, PASS = (
     PermissionBehavior.ALLOW,
@@ -60,7 +60,8 @@ class _Tool:
 
 
 def _ctx(perm=None, ledger=None, hook_dispatcher=None):
-    state = AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger) if ledger is not None else AppState()
+    state = AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                     project_config=TEST_PROJECT_CONFIG, phase_ledger=ledger) if ledger is not None else AppState()
     return tool_context_for(
         AppStateStore(state=state),
         permission_context=perm if perm is not None else ToolPermissionContext(),

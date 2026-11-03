@@ -125,10 +125,13 @@ class TestRunRecord:
     after a compaction (Phase 5): the run's own output, not a model's summary of it.
     """
 
-    test_path: str
+    #: The test command the run executed (the project's declared `test`, 2026-11-03).
+    command: str
     exit_code: int
     stdout: str = ""
     stderr: str = ""
+    #: The exit code's meaning (`app/tdd/run_judgement.py::exit_semantic`), as RunTests reported it.
+    meaning: str = ""
     #: The phase the run was observed in (2026-10-28). A refusal says "no run since REFACTOR
     #: started" rather than naming the passing run that ended GREEN, which a model read as met.
     phase: TddPhase | None = None

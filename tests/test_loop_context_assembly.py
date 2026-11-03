@@ -101,7 +101,11 @@ def test_get_system_prompt_structure():
     # The contract names the coverage rule of thumb as a placeholder; the code fills it.
     contract = a.read_system_prompt_file("tdd-contract.md")
     assert "{{COVERAGE_RULE_OF_THUMB}}" in contract
-    assert rendered[7] == contract.replace("{{COVERAGE_RULE_OF_THUMB}}", "90").strip()
+    from app.tdd.prompt_vars import TDD_PROMPT_VARS
+
+    for name, value in TDD_PROMPT_VARS.items():
+        contract = contract.replace("{{" + name + "}}", value)
+    assert rendered[7] == contract.strip() and "{{" not in rendered[7]
     assert "90% is a good rule of thumb, not a gate" in rendered[7]
     assert rendered[-1].startswith("# Environment")
     # With no tools there is no session-specific guidance; with Agent, its contract arrives.

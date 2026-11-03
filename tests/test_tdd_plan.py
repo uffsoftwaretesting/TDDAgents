@@ -338,7 +338,7 @@ def test_replace_pending_keeps_done_items_and_replaces_the_rest():
 def test_moving_the_work_to_another_item_restarts_the_ledger(tmp_path: Path):
     from app.tdd.ledger import TestRunRecord
 
-    record = TestRunRecord(test_path="t", exit_code=1)
+    record = TestRunRecord(command="t", exit_code=1)
     red = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     for change in (lambda p: p.remove("1"), lambda p: p.move("2", 1), lambda p: p.edit("1", "A2"),
                    lambda p: p.replace_pending(["X"])):
@@ -352,10 +352,13 @@ def test_a_new_current_item_fingerprints_its_tests_as_red_baseline():
     from app.tdd.suite_fingerprint import fingerprint_test_files
     from tests.conftest import FakeWorkspace
 
+    from tests.plan_helpers import TEST_PROJECT_CONFIG
+
     ws = FakeWorkspace(files={"tests/test_a.py": "A"})
-    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old"))
+    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old",
+                                         project_config=TEST_PROJECT_CONFIG))
     update_tdd_plan(tool_context_for(store, workspace=ws), lambda p: p.remove("1"))
-    assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws)
+    assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws, TEST_PROJECT_CONFIG) is not None
     # Without a workspace no baseline can be taken.
     store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old"))
     update_tdd_plan(tool_context_for(store), lambda p: p.remove("1"))

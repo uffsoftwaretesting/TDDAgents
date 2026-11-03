@@ -33,7 +33,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.model.model import MODEL_ALIASES
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 from tests.test_loop_engine import CONFIG, FakeModel, asks_for, make_fake_deps
 
 TESTER = AgentDefinition(name="tester", description="Writes failing tests.", prompt="You write tests.",
@@ -52,7 +52,8 @@ def _tool(model: FakeModel | None = None, definitions=DEFS, **kw: Any):
 
 
 def _ctx(ledger: PhaseLedger | None = None, perm: ToolPermissionContext | None = None):
-    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger or PhaseLedger(),
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                   project_config=TEST_PROJECT_CONFIG, phase_ledger=ledger or PhaseLedger(),
                                    tool_permission_context=perm or ToolPermissionContext()))
     return store, tool_context_for(store, messages=(HumanMessage(content="coordinate"),))
 
@@ -110,7 +111,7 @@ class TestSelection:
 
 
 def _spawn_state(ledger: PhaseLedger) -> AppState:
-    return AppState(phase_ledger=ledger, tdd_plan=CURRENT_ITEM_PLAN)
+    return AppState(phase_ledger=ledger, tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG)
 
 
 class TestPhaseOnSpawn:
@@ -164,13 +165,13 @@ class TestPhaseOnSpawn:
         from tests.conftest import FakeWorkspace
 
         ws = FakeWorkspace(files={"tests/test_a.py": "A"})
-        store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+        store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG,
                                        phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
                                        tdd_item_test_baseline="old"))
         ctx = tool_context_for(store, messages=(HumanMessage(content="coordinate"),), workspace=ws)
         _call(_tool(FakeModel([[AIMessage(content="ok")]])), ARGS, ctx)
         assert store.get().phase_ledger == PhaseLedger()
-        assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws)
+        assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws, TEST_PROJECT_CONFIG)
 
     def test_a_refused_spawn_runs_no_worker_and_keeps_the_ledger(self):
         model = FakeModel([])

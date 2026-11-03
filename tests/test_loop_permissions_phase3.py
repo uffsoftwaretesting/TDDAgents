@@ -51,7 +51,7 @@ from app.utils.permissions.permissions import (
     run_permission_request_hooks_for_headless_agent,
 )
 from app.utils.settings.constants import SOURCE_DISPLAY_NAMES
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK
 S = PermissionRuleSource
@@ -565,7 +565,9 @@ def _gate_call(tool_name, args, perm, ledger, ws, dispatcher=None):
     from app.cli.print import build_builtin_tools
 
     tool = next(t for t in build_builtin_tools() if t.name == tool_name)
-    store = AppStateStore(state=AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger, tool_permission_context=perm))
+    store = AppStateStore(state=AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                         project_config=TEST_PROJECT_CONFIG,
+                                         phase_ledger=ledger, tool_permission_context=perm))
     ctx = tool_context_for(store, workspace=SimpleNamespace(root=str(ws)), hook_dispatcher=dispatcher)
     return asyncio.run(has_permissions_to_use_tool(tool, args, ctx, "tu"))
 
@@ -574,10 +576,11 @@ RED = PhaseLedger(phase=TddPhase.RED)
 GREEN = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
-def test_shipped_settings_lose_their_interpreter_allows(tmp_path):
+def test_shipped_settings_carry_no_allow_rules(tmp_path):
+    """2026-11-03: as claude-code, TDDAgents ships no allow rules, so none is stripped either."""
     perm = _repo_context(tmp_path, tmp_path)
     assert perm.mode == PermissionMode.ACCEPT_EDITS
-    assert {r.rule_content for r in perm.stripped_dangerous_rules} == {"python:*", "python -m pytest:*"}
+    assert perm.stripped_dangerous_rules == ()
     assert not dg.find_dangerous_classifier_permissions(perm.always_allow_rules)
 
 
@@ -615,13 +618,15 @@ def test_red_lets_tests_be_written_and_green_lets_code_be_written(tmp_path):
     assert code_write.behavior == ALLOW
     test_edit = _gate_call("WriteFile", {"file_path": "tests/test_calc.py", "content": "x"}, perm, GREEN, tmp_path)
     assert test_edit.behavior == DENY
+    # Running a command is never the phase's business; with no shipped allow rule it is the user's (2026-11-03).
     pytest_run = _gate_call("Bash", {"command": "pytest -q"}, perm, RED, tmp_path)
-    assert pytest_run.behavior == ALLOW
+    assert pytest_run.behavior != ALLOW and pytest_run.decision_reason["type"] != "phase_rule"
 
 
 def test_dangerous_files_stay_protected_under_the_shipped_settings(tmp_path):
     perm = _repo_context(tmp_path, tmp_path)
-    res = _gate_call("WriteFile", {"file_path": "tests/.tddagents/settings.json", "content": "{}"}, perm, RED,
+    # `.tddagents/` is never a test file (2026-11-03), so the phase lets GREEN reach the dangerous-file check.
+    res = _gate_call("WriteFile", {"file_path": "lib/.tddagents/settings.json", "content": "{}"}, perm, GREEN,
                      tmp_path)
     assert res.behavior == DENY and res.decision_reason["type"] == "asyncAgent"
 

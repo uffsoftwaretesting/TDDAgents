@@ -580,36 +580,20 @@ def session_dir(workspace: Any, thread_id: str) -> str:
 
 def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
     """
-    Run the project's whole suite once more, exactly as RunTests does, in the project's own venv
-    (Phase 13), and record it in `final_test_run.txt`. This is the result anyone re-running the
-    project gets. Returns the one-line summary printed in the report.
+    Run the project's declared setup and test commands once more, in a clean copy of the project built
+    from its manifests alone (`app/tdd/final_run.py`, 2026-11-03), and record it in `final_test_run.txt`.
+    This is the result anyone checking the project out gets. Returns the one-line summary printed in
+    the report.
     """
-    from app.tdd.collection_gate import uncollected_test_files
-    from app.tdd.run_tests_tool.run_tests_tool import (
-        RunTestsUnavailable,
-        exit_semantic,
-        files_that_ran,
-        run_suite,
-        skipped_count,
-    )
+    from app.tdd.final_run import run_final
 
-    try:
-        result = run_suite(workspace, ".")
-    except RunTestsUnavailable as exc:
-        summary = f"could not run the tests: {exc}"
-        _write_text(os.path.join(artifacts_dir, "final_test_run.txt"), "FINAL TEST RUN", summary)
-        return summary
-    output = f"{result.stdout}\n{result.stderr}".strip()
-    skipped = result.skipped if result.skipped is not None else skipped_count(output)
-    uncollected = uncollected_test_files(workspace, ".", files_that_ran(result))
-    verdict = "passed" if result.exit_code == 0 and skipped == 0 and not uncollected else "NOT passing"
-    meaning = exit_semantic(result.exit_code).meaning
-    summary = f"{verdict} (exit {result.exit_code}: {meaning}, {skipped} skipped, {result.coverage.describe()})"
-    if uncollected:
-        summary += f"; not collected: {', '.join(uncollected)}"
-    lines = [f"Project: {getattr(workspace, 'root', '?')}", f"Result: {summary}", "-" * 80, output]
+    run_dir = getattr(workspace, "run_dir", None) or os.path.dirname(os.path.abspath(artifacts_dir))
+    final = run_final(workspace, run_dir)
+    lines = [f"Project: {getattr(workspace, 'root', '?')}", f"Result: {final.summary}"]
+    if final.lines:
+        lines += ["-" * 80, *final.lines]
     _write_text(os.path.join(artifacts_dir, "final_test_run.txt"), "FINAL TEST RUN", "\n".join(lines))
-    return summary
+    return final.summary
 
 
 def waiting_text(thread_id: str, question: Sequence[dict[str, Any]], headless: bool) -> str:

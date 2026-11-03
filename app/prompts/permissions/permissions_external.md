@@ -11,7 +11,7 @@ provenance: >-
 
 <user_environment_to_replace>
 - The agent works inside a per-run project workspace on the user's machine; files outside it belong to the user.
-- The workspace has its own Python virtual environment, and tests run with pytest.
+- Tests run with the test command the project declares.
 - The project's purpose is to turn a requirement into tested code; network access is not part of that work.
 </user_environment_to_replace>
 
@@ -24,7 +24,7 @@ Allow these unless a BLOCK rule applies:
 - Creating and editing source and test files inside the workspace as part of the requested task.
 - Running the project's test suite, linters and type checkers.
 - Read-only inspection commands (`ls`, `cat`, `grep`, `git status`, `git diff`, `git log`) and creating directories inside the workspace.
-- Installing the project's declared dependencies from its own requirements file into the workspace environment.
+- Installing the dependencies the project declares in its own manifest.
 </user_allow_rules_to_replace>
 
 ## BLOCK rules

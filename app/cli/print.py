@@ -75,6 +75,7 @@ from app.state.app_state_store import AppState, AppStateStore
 from app.tasks.local_shell_task.kill_shell_tasks import kill_all_shell_tasks
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
+from app.tdd.project_config import load_project_config
 from app.tdd.suite_fingerprint import fingerprint_test_files
 from app.tool import Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
@@ -229,16 +230,14 @@ def coordinator_context(config: RunConfig) -> dict[str, Any]:
 def session_workspace(thread_id: str) -> LocalWorkspace:
     """
     The session's project (Phase 13): its own folder outside TDDAgents', with seeded settings
-    (`app/workspace/project.py`) and its own venv (`app/workspace/pyenv.py`), activated for every
-    command by the session environment script (`app/utils/session_environment.py`).
+    (`app/workspace/project.py`). No environment is built for it (2026-11-03, user decision: as
+    claude-code): the project sets itself up from its own manifests, with the commands it declares.
     """
     from app.workspace.project import prepare_project
-    from app.workspace.pyenv import ensure_session_python
 
     workspace = LocalWorkspace.for_run(thread_id)
-    project = prepare_project(workspace.root)
-    python = ensure_session_python(project)
-    return LocalWorkspace.for_run(thread_id, env=python.write_env_file(workspace.run_dir / "session-env.sh"))
+    prepare_project(workspace.root)
+    return workspace
 
 
 class NoConversationFound(LookupError):
@@ -566,7 +565,9 @@ async def open_session_run(
     # `getIsNonInteractiveSession`: every `-p` run is non-interactive, a host answering its asks or not.
     is_interactive = interactive if interactive is not None else can_use_tool is not None
     bootstrap = SessionBootstrap(session_id=run_id, original_cwd=cwd, is_interactive=is_interactive)
-    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan, bootstrap=bootstrap))
+    # The project's approved configuration (2026-11-03): a resumed session reads it back, as the plan.
+    store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan, bootstrap=bootstrap,
+                                         project_config=load_project_config(workspace)))
     from app.skills.bundled.index import init_bundled_skills
     from app.skills.load_skills_dir import get_skill_registry
 
@@ -719,7 +720,7 @@ async def open_session_run(
             ctx.tools = refresh_tools()
         # The current sub-requirement starts here (or restarts, on resume: the ledger is never
         # restored), so its tests are fingerprinted as RED's baseline (Phase 12).
-        baseline = fingerprint_test_files(workspace)
+        baseline = fingerprint_test_files(workspace, store.get().project_config)
         store.update(lambda s: replace(s, tdd_item_test_baseline=baseline))
         recorder = TransitionEventRecorder(store, events_path(run_id, cwd), session_id=run_id, plan_index=plan_index)
         run_deps = replace(deps, emit_event=_both(recorder, deps.emit_event))

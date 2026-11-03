@@ -265,6 +265,12 @@ def baseline_path(tmp_path: Path) -> Path:
     return tmp_path / "baseline.json"
 
 
+#: What the shared test venv holds: pytest, its JUnit and coverage reports (pytest-cov), pinned to the
+#: versions TDDAgents itself is tested with (keep in step with requirements.txt). Since 2026-11-03 no
+#: session gets a venv; this is a test asset only.
+REQUIRED_PACKAGES: tuple[str, ...] = ("pip==26.0.1", "pytest==9.0.1", "pytest-cov==7.0.0", "coverage==7.11.3")
+
+
 def shared_test_venv(root: Path | None = None) -> Path:
     """
     The real venv (pytest installed) every integration test runs generated code in, built once
@@ -273,17 +279,15 @@ def shared_test_venv(root: Path | None = None) -> Path:
     mutmut runs each mutant as a new pytest session in a forked child, and its time budget
     counts only the tests' call phase, never fixture setup. A venv built per session was
     rebuilt per mutant, invisibly to that budget, so a loaded host turned mutants into false
-    timeouts. It is built here with plain `venv` and `pip`, never through the mutated
-    `ensure_session_python`, so no mutant can leave a broken shared venv behind; a file lock
-    serialises concurrent children, and the venv is moved into place only once complete.
+    timeouts. It is built here with plain `venv` and `pip`, so no mutant can leave a broken shared
+    venv behind; a file lock serialises concurrent children, and the venv is moved into place only
+    once complete.
     """
     import fcntl
     import hashlib
     import shutil
     import subprocess
     import tempfile
-
-    from app.workspace.pyenv import REQUIRED_PACKAGES
 
     key = hashlib.sha256(repr((sys.executable, sys.version, REQUIRED_PACKAGES)).encode()).hexdigest()[:16]
     base = root if root is not None else Path(tempfile.gettempdir())
@@ -304,24 +308,40 @@ def shared_test_venv(root: Path | None = None) -> Path:
 
 
 @pytest.fixture(scope="session")
-def session_python() -> Any:
-    """One real session venv (pytest installed) shared by every integration test."""
-    from app.workspace.pyenv import SessionPython
-
-    return SessionPython(shared_test_venv())
+def test_venv() -> Path:
+    """One real venv (pytest installed) shared by every integration test."""
+    return shared_test_venv()
 
 
 @pytest.fixture
-def python_workspace(tmp_path: Path, session_python: Any) -> LocalWorkspace:
+def py_project(tmp_path: Path, test_venv: Path, monkeypatch: Any) -> LocalWorkspace:
     """
-    A project as production makes one (Phase 13, `app/workspace/project.py`): a folder with
-    TDDAgents' seeded settings whose commands run with the session venv activated by the session
-    environment script. The venv itself is the shared test venv, not the project's own `.venv`.
+    A pytest project as a session makes one (2026-11-03): a folder with TDDAgents' seeded settings and
+    an approved `.tddagents/project.json` declaring `TEST_PROJECT_CONFIG`, whose test command runs the
+    shared test venv's pytest (named by `TDDAGENTS_TEST_PYTHON`) with a JUnit and a cobertura report.
     """
+    from app.tdd.project_config import save_project_config
     from app.workspace.project import prepare_project
+    from tests.plan_helpers import TEST_PROJECT_CONFIG, TEST_PYTHON_ENV
 
-    env = session_python.write_env_file(tmp_path / "session-env.sh")
-    return LocalWorkspace(str(prepare_project(tmp_path / "workspace")), env=env)
+    monkeypatch.setenv(TEST_PYTHON_ENV, str(test_venv / "bin" / "python"))
+    workspace = LocalWorkspace(str(prepare_project(tmp_path / "workspace")))
+    save_project_config(workspace, TEST_PROJECT_CONFIG)
+    return workspace
+
+
+@pytest.fixture
+def python_workspace(py_project: LocalWorkspace) -> LocalWorkspace:
+    """The old name of `py_project` (a `pytest_` prefix is reserved for pytest hooks)."""
+    return py_project
+
+
+@pytest.fixture
+def script_project(tmp_path: Path) -> LocalWorkspace:
+    """A fake POSIX-sh ecosystem project (`tests/script_project.py`), its dependencies set up."""
+    from tests.script_project import make_script_project
+
+    return make_script_project(tmp_path / "thread" / "project")
 
 
 @pytest.fixture

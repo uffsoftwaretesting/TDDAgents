@@ -35,7 +35,7 @@ from app.utils.permissions.yolo_classifier import (
     build_yolo_rejection_message,
 )
 from tests.hook_doubles import ScriptedDispatcher
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 ALLOW, DENY, ASK = PermissionBehavior.ALLOW, PermissionBehavior.DENY, PermissionBehavior.ASK
 AUTO = ToolPermissionContext(mode=PermissionMode.AUTO, should_avoid_permission_prompts=True)
@@ -82,7 +82,8 @@ def ctx_for(perm=AUTO, classifier=None, denial=None, ledger=None, local_denial_t
     # A given ledger means the test is about the phase tier, which needs a current item.
     state = AppState(tool_permission_context=perm, denial_tracking=denial,
                      phase_ledger=ledger if ledger is not None else PhaseLedger(),
-                     tdd_plan=CURRENT_ITEM_PLAN if ledger is not None else TddPlan())
+                     tdd_plan=CURRENT_ITEM_PLAN if ledger is not None else TddPlan(),
+                     project_config=TEST_PROJECT_CONFIG)
     store = AppStateStore(state=state)
     ctx = tool_context_for(store, messages=(HumanMessage(content="task"),), run_id="r1", **kw)
     from dataclasses import replace

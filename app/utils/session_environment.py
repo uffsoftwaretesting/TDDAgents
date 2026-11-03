@@ -9,9 +9,8 @@ after the user's shell snapshot and before the command itself:
 `source <snapshot> && <session env script> && eval '<command>'`.
 
 TDDAgents' variable is `TDDAGENTS_ENV_FILE` (the product rename). It is read from the
-environment the command runs with, so each project's workspace points to its own script:
-the session's `session-env.sh`, which activates the project's venv
-(`app/workspace/pyenv.py::SessionPython.write_env_file`).
+environment the command runs with. TDDAgents itself writes no such script (2026-11-03: the
+pre-built session venv is gone); an external `TDDAGENTS_ENV_FILE` is honoured as upstream's is.
 
 *Not ported:* the hook env files (`SessionStart` / `Setup` / `CwdChanged` / `FileChanged` hooks
 writing to `CLAUDE_ENV_FILE`), since the hook layer has no env-file protocol (Phase 4), and the

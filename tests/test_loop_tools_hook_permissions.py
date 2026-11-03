@@ -31,7 +31,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from tests.hook_doubles import ScriptedDispatcher
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 
 async def _unused_call(args: dict[str, Any], ctx: Any) -> Any:  # pragma: no cover
@@ -43,7 +43,8 @@ def make_tool(name: str = "WriteFile", **kwargs: Any) -> Any:
 
 
 def make_context(ledger: PhaseLedger | None = None, **kwargs: Any) -> Any:
-    store = (AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger)) if ledger is not None
+    store = (AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                    project_config=TEST_PROJECT_CONFIG, phase_ledger=ledger)) if ledger is not None
              else AppStateStore())
     return tool_context_for(
         store,
@@ -162,7 +163,8 @@ def _never_the_full_gate(monkeypatch):
 
 
 def interactive_context(ledger=None, perm=None):
-    store = (AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger)) if ledger is not None
+    store = (AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                    project_config=TEST_PROJECT_CONFIG, phase_ledger=ledger)) if ledger is not None
              else AppStateStore())
     return tool_context_for(store, permission_context=perm or ToolPermissionContext())
 

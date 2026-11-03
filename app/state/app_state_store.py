@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from app.bootstrap.state import SessionBootstrap
 from app.tdd.ledger import PhaseLedger, TestRunRecord
 from app.tdd.plan import TddPlan
+from app.tdd.project_config import ProjectConfig
 from app.types.permissions import ToolPermissionContext
 from app.utils.file_history import FileHistoryState
 from app.utils.permissions.denial_tracking import DenialTrackingState
@@ -119,6 +120,11 @@ class AppState:
     #: (Phase 12, `app/tdd/suite_fingerprint.py`): RunTests ends RED only once they changed.
     #: `None` when it could not be taken.
     tdd_item_test_baseline: str | None = None
+    #: The project's approved configuration (`app/tdd/project_config.py`, 2026-11-03): its setup and
+    #: test commands and which files are tests. Written by `ExitPlanMode` with the plan and loaded
+    #: from `.tddagents/project.json` when a session opens. `None` while undeclared: RunTests and the
+    #: phase tier then fail closed whenever a sub-requirement is current.
+    project_config: ProjectConfig | None = None
     #: Upstream `STATE.hasExitedPlanMode` (`bootstrap/state.ts`), per run here: plan mode was left
     #: this session, so re-entering it attaches `plan_mode_reentry`.
     has_exited_plan_mode: bool = False

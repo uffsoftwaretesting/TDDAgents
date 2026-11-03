@@ -28,7 +28,7 @@ from app.utils.permissions.permissions import (
     rule_matches,
     tool_name_matches_rule,
 )
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 
 class TestRuleMatching:
@@ -252,7 +252,8 @@ class TestCheckRuleBasedPermissions:
             from app.tdd.ledger import PhaseLedger, TddPhase
 
             tool = build_tool(name="WriteImplementation", prompt="p", call=lambda a, c: ToolResult(content="ok"))
-            red = AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED))
+            red = AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                           project_config=TEST_PROJECT_CONFIG, phase_ledger=PhaseLedger(phase=TddPhase.RED))
             ctx = tool_context_for(AppStateStore(state=red))
             res = await check_rule_based_permissions(tool, {}, ctx)
             assert res is not None and res.behavior == PermissionBehavior.DENY

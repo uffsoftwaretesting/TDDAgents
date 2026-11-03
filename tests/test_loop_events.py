@@ -20,7 +20,7 @@ def _recorder(tmp_path, store, **kw):
 def test_a_transition_is_recorded_with_the_ledger_and_the_last_test_run(tmp_path):
     store = AppStateStore(AppState(
         phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
-        last_test_run=TestRunRecord(test_path="tests/test_a.py", exit_code=1),
+        last_test_run=TestRunRecord(command="tests/test_a.py", exit_code=1),
     ))
     rec = _recorder(tmp_path, store)
     rec(Transition(reason=Continue.NEXT_TURN))
@@ -29,14 +29,14 @@ def test_a_transition_is_recorded_with_the_ledger_and_the_last_test_run(tmp_path
     assert (entry.session_id, entry.turn_count, entry.phase) == ("s1", 1, "GREEN")
     assert entry.transition_reason == "next_turn"
     assert (entry.tests_written, entry.green_passed) == (True, False)
-    assert entry.payload == {"plan_index": 3, "terminal": False, "test_exit_code": 1, "test_path": "tests/test_a.py"}
+    assert entry.payload == {"plan_index": 3, "terminal": False, "test_exit_code": 1, "test_command": "tests/test_a.py"}
 
 
 def test_without_a_test_run_the_exit_code_is_null(tmp_path):
     rec = _recorder(tmp_path, AppStateStore(AppState()))
     rec(Terminated(reason=Terminal.COMPLETED))
     (entry,) = rec.log.all_events()
-    assert entry.payload == {"plan_index": 3, "terminal": True, "test_exit_code": None, "test_path": None}
+    assert entry.payload == {"plan_index": 3, "terminal": True, "test_exit_code": None, "test_command": None}
     assert (entry.phase, entry.transition_reason) == ("RED", "completed")
 
 
@@ -46,7 +46,7 @@ def test_the_snapshot_is_taken_when_the_event_fires(tmp_path):
     rec(Transition(reason=Continue.NEXT_TURN))
     store.update(lambda s: dataclasses.replace(
         s, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
-        last_test_run=TestRunRecord(test_path="t.py", exit_code=1)))
+        last_test_run=TestRunRecord(command="t.py", exit_code=1)))
     rec(Transition(reason=Continue.STOP_HOOK_BLOCKING))
     first, second = rec.log.all_events()
     assert (first.tests_written, first.payload["test_exit_code"]) == (False, None)
@@ -117,7 +117,7 @@ def test_missing_parent_directories_are_created(tmp_path):
 
 
 def test_non_ascii_is_written_as_is(tmp_path):
-    store = AppStateStore(AppState(last_test_run=TestRunRecord(test_path="tests/test_ação.py", exit_code=1)))
+    store = AppStateStore(AppState(last_test_run=TestRunRecord(command="tests/test_ação.py", exit_code=1)))
     rec = _recorder(tmp_path, store)
     rec(Transition(reason=Continue.NEXT_TURN))
     assert "test_ação.py" in (tmp_path / "events.jsonl").read_text(encoding="utf-8")

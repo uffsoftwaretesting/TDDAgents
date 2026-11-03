@@ -43,6 +43,7 @@ from app.tools.exit_plan_mode_tool.exit_plan_mode_tool import (
     NOT_IN_PLAN_MODE,
     approved_plan_text,
     build_exit_plan_mode_tool,
+    invalid_project_config_message,
     no_sub_requirements_message,
 )
 from app.types.permissions import (
@@ -54,9 +55,11 @@ from app.utils.messages import REJECT_MESSAGE, REJECT_MESSAGE_WITH_REASON_PREFIX
 from app.utils.plan_mode_v2 import PLAN_MODE_INTERVIEW_PHASE_ENV
 from app.utils.plans import SessionPlans
 from tests.conftest import FakeWorkspace
+from tests.plan_helpers import PROJECT_CONFIG_SECTION, TEST_PROJECT_CONFIG
 
 REFERENCE = Path(__file__).resolve().parents[1] / "reference" / "claude-code" / "src" / "tools"
-PLAN = "# Plan: calculator\n\n## Context\nAdd numbers.\n\n## Implementation Plan\n1. add two numbers\n2. subtract\n"
+PLAN = ("# Plan: calculator\n\n## Context\nAdd numbers.\n\n## Implementation Plan\n1. add two numbers\n2. subtract\n"
+        + PROJECT_CONFIG_SECTION)
 
 
 def planning_context(tmp_path: Path, *, mode: PermissionMode = PermissionMode.PLAN,
@@ -209,7 +212,12 @@ def test_approval_restores_the_mode_and_installs_the_sub_requirements(tmp_path: 
     assert result.content == (approved_plan_text(PLAN, file_path, is_agent=False, edited=False) + "\n\n"
                               + development_approved_prompt(state.tdd_plan))
     assert result.metadata == {"plan": PLAN, "filePath": file_path, "isAgent": False, "planWasEdited": False,
-                               "subRequirements": ["add two numbers", "subtract"]}
+                               "subRequirements": ["add two numbers", "subtract"],
+                               "projectConfig": TEST_PROJECT_CONFIG.to_dict(),
+                               "projectConfigPath": ".tddagents/project.json"}
+    # The approved configuration is the project's, in its protected folder and on the app state.
+    assert state.project_config == TEST_PROJECT_CONFIG
+    assert ctx.workspace.files[".tddagents/project.json"] == TEST_PROJECT_CONFIG.to_json()
 
 
 def test_the_approved_text_is_upstreams(tmp_path: Path):
@@ -237,7 +245,7 @@ def test_re_approval_keeps_the_done_items(tmp_path: Path):
     done = TddPlan(items=(PlanItem(id="1", text="add two numbers", status=ItemStatus.DONE),
                           PlanItem(id="2", text="old pending")))
     ctx = planning_context(tmp_path, tdd_plan=done,
-                           plan="## Implementation Plan\n1. subtract\n2. multiply\n")
+                           plan="## Implementation Plan\n1. subtract\n2. multiply\n" + PROJECT_CONFIG_SECTION)
     call_directly(build_exit_plan_mode_tool(), {}, ctx)
     items = ctx.get_app_state().tdd_plan.items
     assert [(i.text, i.status) for i in items] == [
@@ -267,6 +275,45 @@ def test_the_call_refuses_a_plan_without_items_and_a_session_without_plans(tmp_p
         call_directly(build_exit_plan_mode_tool(), {}, ctx)
 
 
+@pytest.mark.parametrize(("section", "issues"), [
+    ("", ['the plan has no "## Project Configuration" section']),
+    ("\n## Project Configuration\nnone yet\n",
+     ['the "Project Configuration" section must hold exactly one fenced json block (found none)']),
+    ('\n## Project Configuration\n```json\n{"version": 1, "testFiles": [], "shell": "x"}\n```\n',
+     ["unknown keys: shell (the keys are version, setup, test, junitReport, coverageReport, testFiles, "
+      "testSupportFiles, manifestFiles, exclude)",
+      "`test` is required: the shell command that runs the whole test suite",
+      "`testFiles` must name at least one pattern"]),
+])
+def test_a_plan_without_a_usable_project_configuration_is_refused(tmp_path: Path, section: str, issues: list[str]):
+    plan = "# Plan\n\n## Implementation Plan\n1. add two numbers\n" + section
+    ctx = planning_context(tmp_path, plan=plan)
+    result = build_exit_plan_mode_tool().validate_input({}, ctx)
+    file_path = str(ctx.session_plans.file_path())
+    expected = invalid_project_config_message(file_path, tuple(issues))
+    assert (result.valid, result.message, result.error_code) == (False, expected, 3)
+    listed = "\n".join(f"- {issue}" for issue in issues)
+    assert expected == (
+        f'The plan file at {file_path} has no usable "## Project Configuration" section:\n{listed}\n'
+        "TDDAgents sets the project up and runs its tests with the commands that section declares, and tells "
+        "the tests from the production code by its file patterns, so the plan cannot be approved without it. "
+        "The tdd-project-config skill describes how to declare it for the project's language.")
+    with pytest.raises(RuntimeError, match="no usable"):
+        call_directly(build_exit_plan_mode_tool(), {}, ctx)
+    assert ctx.get_app_state().project_config is None and ".tddagents/project.json" not in ctx.workspace.files
+    assert ctx.get_app_state().tool_permission_context.mode == PermissionMode.PLAN
+
+
+def test_the_configuration_is_set_before_the_first_items_baseline(tmp_path: Path):
+    """The first item's test baseline is taken with the approved patterns: its test file counts."""
+    ctx = planning_context(tmp_path)
+    ctx.workspace.files["tests/test_calc.py"] = "def test_x(): pass\n"
+    call_directly(build_exit_plan_mode_tool(), {}, ctx)
+    from app.tdd.suite_fingerprint import EMPTY_FINGERPRINT
+
+    assert ctx.get_app_state().tdd_item_test_baseline not in (None, EMPTY_FINGERPRINT)
+
+
 def test_a_worker_approval_installs_nothing(tmp_path: Path):
     ctx = planning_context(tmp_path, plan=None)
     ctx.agent_id = "w1"
@@ -276,6 +323,7 @@ def test_a_worker_approval_installs_nothing(tmp_path: Path):
     assert result.content == AGENT_APPROVED
     assert result.metadata["plan"] == "worker plan" and result.metadata["subRequirements"] == []
     assert ctx.get_app_state().tdd_plan.items == ()
+    assert ctx.get_app_state().project_config is None and result.metadata["projectConfig"] is None
 
 
 @pytest.mark.skipif(not (REFERENCE / "ExitPlanModeTool" / "ExitPlanModeV2Tool.ts").exists(),
@@ -361,7 +409,7 @@ def test_a_plain_no_ends_the_turn(tmp_path: Path):
 
 
 def test_edit_opens_the_editor_asks_again_and_approves_the_edit(tmp_path: Path):
-    edited = PLAN + "3. multiply\n"
+    edited = PLAN.replace("2. subtract\n", "2. subtract\n3. multiply\n")
     ctx, prompts, edited_from = interactive(
         tmp_path,
         [PermissionAnswer("no", EDIT_PLAN_COMMAND), PermissionAnswer("no", EDIT_PLAN_COMMAND),

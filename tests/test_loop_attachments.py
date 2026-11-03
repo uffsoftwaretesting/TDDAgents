@@ -523,14 +523,15 @@ def test_tdd_state_is_announced_once_until_the_ledger_moves():
 
 def test_post_compaction_tdd_state_carries_the_runtests_evidence():
     ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
-    record = TestRunRecord(test_path="tests/test_calc.py", exit_code=1, stdout="x" * 3000 + "\nE   assert 1 == 2",
-                           stderr="")
+    record = TestRunRecord(command="make test", exit_code=1, stdout="x" * 3000 + "\nE   assert 1 == 2",
+                           stderr="", meaning="the test command failed")
     msg = create_tdd_state_attachment_message(ledger, record, after_compaction=True)
     text = str(msg.content)
     assert text.startswith("<system-reminder>\nTDD phase ledger (written only by RunTests from observed test runs)")
     assert ("Current Phase: GREEN\nTests Written: True\nGreen Passed: False\nRefactor Passed: False\n"
             "Coverage: not measured") in text
-    assert "Last RunTests run (recorded by RunTests, not by the model): tests/test_calc.py exited 1" in text
+    assert ("Last RunTests run (recorded by RunTests, not by the model): `make test` exited 1 (the test command "
+            "failed)") in text
     assert text.removesuffix("\n</system-reminder>").endswith("E   assert 1 == 2")
     assert "x" * 2001 not in text  # the tail, bounded by the preview size
     assert attachment_of(msg) == {"type": "tdd_state", "phase": "GREEN", "tests_written": True,

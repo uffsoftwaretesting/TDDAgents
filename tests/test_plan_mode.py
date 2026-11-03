@@ -33,6 +33,7 @@ from app.utils.permissions.permission_setup import (
     set_permission_mode,
     transition_permission_mode,
 )
+from tests.plan_helpers import TEST_PROJECT_CONFIG
 
 REFERENCE = Path(__file__).resolve().parents[1] / "reference" / "claude-code" / "src"
 
@@ -280,6 +281,7 @@ def test_the_phase_tier_lets_the_plan_file_be_written_in_red():
 
     tool: Any = SimpleNamespace(name="WriteFile")
     args = {"file_path": "/plans/s.md", "content": "# Plan"}
-    assert check_tdd_phase_permission(tool, args, PhaseLedger(), plan_file=True) == (True, "")
-    permitted, _ = check_tdd_phase_permission(tool, args, PhaseLedger())
+    assert check_tdd_phase_permission(tool, args, PhaseLedger(), plan_file=True,
+                                      rules=TEST_PROJECT_CONFIG.rules) == (True, "")
+    permitted, _ = check_tdd_phase_permission(tool, args, PhaseLedger(), rules=TEST_PROJECT_CONFIG.rules)
     assert permitted is False

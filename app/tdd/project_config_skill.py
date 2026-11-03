@@ -42,12 +42,9 @@ import re
 from pathlib import Path
 
 from app.skills.bundled_skills import BundledSkillContext, BundledSkillDefinition
-from app.tdd.coverage_gate import TDD_PROMPT_VARS
-from app.tdd.project_config_vars import (
-    PROJECT_CONFIG_FILE,
-    PROJECT_CONFIG_HEADING,
-    PROJECT_CONFIG_PROMPT_VARS,
-)
+from app.tdd.plan import PROJECT_CONFIG_HEADING
+from app.tdd.project_config import PROJECT_CONFIG_FILE
+from app.tdd.prompt_vars import PROJECT_CONFIG_PROMPT_VARS, TDD_PROMPT_VARS
 
 SKILL_NAME = "tdd-project-config"
 SKILL_DIR = Path(__file__).resolve().parents[1] / "prompts" / "skills" / SKILL_NAME

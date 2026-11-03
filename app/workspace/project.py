@@ -6,10 +6,9 @@ the project settings. It never runs `git init` and never commits on its own: whe
 project is a git repository is the user's (and the model's) business, and the environment
 section says which it is (`Is a git repository`). TDDAgents creates the folder for each
 session, outside its own repository (`app/workspace/local.py::workspaces_root`), and only:
-
-* seeds `.tddagents/settings.json` from TDDAgents' shipped defaults (acceptEdits, the pytest and
-  pip allow rules), only if the project has none, so each project can be adjusted on its own
-  (user decision, 2026-10-28).
+* seeds `.tddagents/settings.json` from TDDAgents' shipped defaults (`acceptEdits`, and no allow
+  rules since 2026-11-03, as claude-code ships none), only if the project has none, so each
+  project can be adjusted on its own (user decision, 2026-10-28).
 """
 
 from __future__ import annotations

@@ -13,6 +13,7 @@ import pytest
 
 from app.tdd.bash_phase_permissions import check_bash_tdd_phase, redirect_targets
 from app.tdd.ledger import PhaseLedger, TddPhase
+from tests.plan_helpers import TEST_PROJECT_CONFIG
 
 RED = PhaseLedger()
 GREEN = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
@@ -20,7 +21,7 @@ REFACTOR = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed
 
 
 def allowed(command: str, ledger: PhaseLedger) -> bool:
-    return check_bash_tdd_phase(command, ledger)[0]
+    return check_bash_tdd_phase(command, ledger, rules=TEST_PROJECT_CONFIG.rules)[0]
 
 
 # ── extraction ──────────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ def test_several_targets_are_all_extracted():
     "printf 'x' > ./calculator.py",
 ])
 def test_red_denies_writing_production_code_through_a_redirection(command):
-    permitted, reason = check_bash_tdd_phase(command, RED)
+    permitted, reason = check_bash_tdd_phase(command, RED, rules=TEST_PROJECT_CONFIG.rules)
     assert permitted is False
     assert "RED denies writing to production file" in reason
 
@@ -78,13 +79,13 @@ def test_red_does_not_object_to_commands_that_write_nothing(command):
 
 def test_red_refuses_a_write_it_cannot_locate():
     """Fail closed: in a phase that forbids the write, 'I cannot tell' is a refusal."""
-    permitted, reason = check_bash_tdd_phase("echo x > $TARGET", RED)
+    permitted, reason = check_bash_tdd_phase("echo x > $TARGET", RED, rules=TEST_PROJECT_CONFIG.rules)
     assert permitted is False
     assert "cannot verify where this command writes" in reason
 
 
 def test_the_refusal_names_the_file_and_the_alternative():
-    _, reason = check_bash_tdd_phase("echo x > calculator.py", RED)
+    _, reason = check_bash_tdd_phase("echo x > calculator.py", RED, rules=TEST_PROJECT_CONFIG.rules)
     assert "'calculator.py'" in reason
     assert "Only test files may be written" in reason
 
@@ -92,7 +93,8 @@ def test_the_refusal_names_the_file_and_the_alternative():
 # ── GREEN and REFACTOR ──────────────────────────────────────────────────────
 
 def test_green_denies_rewriting_the_tests():
-    permitted, reason = check_bash_tdd_phase("echo 'assert True' > tests/test_calc.py", GREEN)
+    permitted, reason = check_bash_tdd_phase("echo 'assert True' > tests/test_calc.py", GREEN,
+                                             rules=TEST_PROJECT_CONFIG.rules)
     assert permitted is False
     assert "denies modifying test file" in reason
 
@@ -103,7 +105,7 @@ def test_green_denies_rewriting_the_tests():
 ])
 def test_refactor_may_write_tests_and_code_alike(command):
     """REFACTOR is mandatory and improves both (Phase 12): nothing is refused there."""
-    assert check_bash_tdd_phase(command, REFACTOR) == (True, "")
+    assert check_bash_tdd_phase(command, REFACTOR, rules=TEST_PROJECT_CONFIG.rules) == (True, "")
 
 
 @pytest.mark.parametrize("ledger", [GREEN, REFACTOR])
@@ -112,7 +114,7 @@ def test_the_implementing_phases_allow_writing_production_code(ledger):
 
 
 def test_green_also_refuses_an_unverifiable_target():
-    permitted, reason = check_bash_tdd_phase("echo x > $TARGET", GREEN)
+    permitted, reason = check_bash_tdd_phase("echo x > $TARGET", GREEN, rules=TEST_PROJECT_CONFIG.rules)
     assert permitted is False
     assert "cannot verify where this command writes" in reason
 
@@ -127,10 +129,12 @@ def test_the_permission_gate_routes_bash_through_the_phase_check():
         raise AssertionError
 
     bash = build_tool(name="Bash", prompt="p", call=noop)
-    permitted, reason = check_tdd_phase_permission(bash, {"command": "echo x > calculator.py"}, RED)
+    permitted, reason = check_tdd_phase_permission(bash, {"command": "echo x > calculator.py"}, RED,
+                                                   rules=TEST_PROJECT_CONFIG.rules)
     assert permitted is False and "RED denies writing to production file" in reason
 
-    assert check_tdd_phase_permission(bash, {"command": "pytest -q"}, RED) == (True, "")
+    assert check_tdd_phase_permission(bash, {"command": "pytest -q"}, RED,
+                                      rules=TEST_PROJECT_CONFIG.rules) == (True, "")
 
 
 def test_run_tests_is_never_denied_even_though_it_is_not_bash():
@@ -141,7 +145,8 @@ def test_run_tests_is_never_denied_even_though_it_is_not_bash():
         raise AssertionError
 
     run_tests = build_tool(name="RunTests", prompt="p", call=noop)
-    assert check_tdd_phase_permission(run_tests, {"test_path": "tests"}, RED) == (True, "")
+    assert check_tdd_phase_permission(run_tests, {"test_path": "tests"}, RED,
+                                      rules=TEST_PROJECT_CONFIG.rules) == (True, "")
 
 
 # ── the exact refusals, because the message is the model's only feedback ────
@@ -169,21 +174,49 @@ GREEN_UNVERIFIABLE = (
 
 
 def test_the_red_production_refusal_reads_exactly_this():
-    assert check_bash_tdd_phase("echo x > calculator.py", RED) == (False, RED_PRODUCTION)
+    assert check_bash_tdd_phase("echo x > calculator.py", RED,
+                                rules=TEST_PROJECT_CONFIG.rules) == (False, RED_PRODUCTION)
 
 
 def test_the_red_unverifiable_refusal_reads_exactly_this():
-    assert check_bash_tdd_phase("echo x > $OUT", RED) == (False, RED_UNVERIFIABLE)
+    assert check_bash_tdd_phase("echo x > $OUT", RED, rules=TEST_PROJECT_CONFIG.rules) == (False, RED_UNVERIFIABLE)
 
 
 def test_the_green_test_file_refusal_reads_exactly_this():
-    assert check_bash_tdd_phase("echo x > tests/test_calc.py", GREEN) == (False, GREEN_TEST_FILE)
+    assert check_bash_tdd_phase("echo x > tests/test_calc.py", GREEN,
+                                rules=TEST_PROJECT_CONFIG.rules) == (False, GREEN_TEST_FILE)
 
 
 def test_the_green_unverifiable_refusal_reads_exactly_this():
-    assert check_bash_tdd_phase("echo x > $OUT", GREEN) == (False, GREEN_UNVERIFIABLE)
+    assert check_bash_tdd_phase("echo x > $OUT", GREEN, rules=TEST_PROJECT_CONFIG.rules) == (False, GREEN_UNVERIFIABLE)
 
 
 def test_a_permitted_command_returns_an_empty_reason():
-    assert check_bash_tdd_phase("pytest -q", RED) == (True, "")
-    assert check_bash_tdd_phase("echo x > tests/test_a.py", RED) == (True, "")
+    assert check_bash_tdd_phase("pytest -q", RED, rules=TEST_PROJECT_CONFIG.rules) == (True, "")
+    assert check_bash_tdd_phase("echo x > tests/test_a.py", RED, rules=TEST_PROJECT_CONFIG.rules) == (True, "")
+
+
+@pytest.mark.parametrize("phase", list(TddPhase))
+def test_a_declared_manifest_may_be_redirected_to_in_every_phase(phase: TddPhase):
+    import dataclasses
+
+    config = dataclasses.replace(TEST_PROJECT_CONFIG, manifest_files=("requirements.txt",))
+    ledger = PhaseLedger(phase=phase, tests_written=phase != TddPhase.RED, green_passed=phase == TddPhase.REFACTOR)
+    assert check_bash_tdd_phase("echo pytest >> requirements.txt", ledger, rules=config.rules) == (True, "")
+
+
+def test_with_no_declaration_a_redirection_is_refused_and_a_plain_command_is_not():
+    from app.tdd.phase_permissions import NO_PROJECT_CONFIG
+
+    ledger = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)
+    assert check_bash_tdd_phase("echo x > tests/test_a.py", ledger, rules=None) == (
+        False, f"TDD phase REFACTOR denies this command's redirection: {NO_PROJECT_CONFIG}")
+    assert check_bash_tdd_phase("ls", ledger, rules=None) == (True, "")
+
+
+def test_targets_are_matched_from_the_project_root():
+    red = PhaseLedger()
+    assert check_bash_tdd_phase("echo x > /proj/tests/test_a.py", red, rules=TEST_PROJECT_CONFIG.rules,
+                                root="/proj") == (True, "")
+    assert check_bash_tdd_phase("echo x > /other/tests/test_a.py", red, rules=TEST_PROJECT_CONFIG.rules,
+                                root="/proj")[0] is False

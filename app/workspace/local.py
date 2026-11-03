@@ -6,9 +6,10 @@ trade-off was accepted when the two-execution-target design was locked: there is
 per-call override and no command allowlist, so the only thing standing between an
 agent and an arbitrary host command is the `workspace:` value in its definition file.
 Since Phase 13 every session's project has its own folder outside TDDAgents' own:
-`<workspaces root>/<thread>/project`, with its own virtualenv at `.venv`
-(`app/workspace/project.py`, `app/workspace/pyenv.py`), as claude-code works in the folder it
-is opened in. Reports go beside it, in `<thread>/metrics_and_logging/`, outside the git tree.
+`<workspaces root>/<thread>/project` (`app/workspace/project.py`), as claude-code works in the
+folder it is opened in. There is no pre-built environment (2026-11-03): the project sets itself up
+from its own manifests, and TDDAgents' own interpreter is kept off its `PATH`
+(`orchestrator_free_environment`). Reports go beside it, in `<thread>/metrics_and_logging/`, outside the git tree.
 """
 
 from __future__ import annotations
@@ -19,8 +20,10 @@ import logging
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from app.config.config import Config
@@ -54,6 +57,30 @@ def workspaces_root() -> Path:
 
     override = os.environ.get(WORKSPACES_DIR_ENV)
     return (Path(override) if override else config_home() / "workspaces").expanduser().resolve()
+
+
+def _same_path(a: str, b: str) -> bool:
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except (OSError, ValueError):
+        return False
+
+
+def orchestrator_free_environment(environ: Mapping[str, str], prefix: str = sys.prefix) -> dict[str, str]:
+    """
+    `environ` without TDDAgents' own interpreter (2026-11-03): its `<prefix>/bin` directory removed
+    from `PATH`, and `VIRTUAL_ENV` dropped when it names that prefix. TDDAgents runs from its own
+    virtualenv; without this a project's `python` or `pip` would resolve to the orchestrator's, and a
+    package installed there would make the project's tests pass for a reason the project never declared.
+    """
+    result = dict(environ)
+    own_bin = os.path.join(prefix, "bin")
+    if "PATH" in result:
+        result["PATH"] = os.pathsep.join(entry for entry in result["PATH"].split(os.pathsep)
+                                         if not entry or not _same_path(entry, own_bin))
+    if result.get("VIRTUAL_ENV") and _same_path(result["VIRTUAL_ENV"], prefix):
+        del result["VIRTUAL_ENV"]
+    return result
 
 
 def kill_process_group(pid: int) -> None:
@@ -200,6 +227,22 @@ class LocalWorkspace:
 
         return sorted(entries, key=lambda e: e.path)
 
+    def walk_files(self, prune: Callable[[str], bool]) -> list[str]:
+        """
+        Every file under the root, as root-relative POSIX paths, without descending into a directory
+        `prune` refuses (it is given the directory's relative path with a trailing `/`). The TDD walks
+        (`app/tdd/suite_fingerprint.py::project_files`) prune the declared `exclude` patterns, so a
+        dependency tree such as `node_modules/` is never listed, let alone read. Symlinked
+        directories are not followed.
+        """
+        files: list[str] = []
+        for current, dirnames, filenames in os.walk(self._root):
+            relative = Path(current).relative_to(self._root).as_posix()
+            prefix = "" if relative == "." else f"{relative}/"
+            dirnames[:] = sorted(name for name in dirnames if not prune(f"{prefix}{name}/"))
+            files.extend(f"{prefix}{name}" for name in filenames)
+        return sorted(files)
+
     def exists(self, path: str) -> bool:
         try:
             return self.resolve(path).exists()
@@ -220,9 +263,11 @@ class LocalWorkspace:
     # ── Execution ────────────────────────────────────────────────────────────
 
     def _environment(self, env: dict[str, str] | None = None) -> dict[str, str]:
-        # The ceiling (set last, so no caller lifts it) keeps git inside the project: its own
-        # repository is found first, and nothing above the session's directory ever is.
-        return {**os.environ, **self._env, **(env or {}), GIT_CEILING_ENV: str(self._root.parent)}
+        # The project never resolves TDDAgents' own interpreter (2026-11-03): its `bin` leaves `PATH`
+        # and its `VIRTUAL_ENV` goes. The ceiling (set last, so no caller lifts it) keeps git inside
+        # the project: its own repository is found first, and nothing above the session's directory ever is.
+        base = orchestrator_free_environment(os.environ)
+        return {**base, **self._env, **(env or {}), GIT_CEILING_ENV: str(self._root.parent)}
 
     def execute(
         self,

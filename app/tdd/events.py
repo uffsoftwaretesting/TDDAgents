@@ -104,7 +104,7 @@ class TransitionEventRecorder:
                 "plan_index": self._plan_index(app_state.tdd_plan),
                 "terminal": isinstance(event, Terminated),
                 "test_exit_code": run.exit_code if run is not None else None,
-                "test_path": run.test_path if run is not None else None,
+                "test_command": run.command if run is not None else None,
             },
         )
         if event.reason == Continue.NEXT_TURN:

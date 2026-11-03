@@ -172,11 +172,9 @@ def test_build_tool_permission_context(tmp_path):
 
 
 def test_shipped_project_settings_parse():
-    """The checked-in `.tddagents/settings.json` loads, only allows, and runs in acceptEdits."""
+    """The checked-in `.tddagents/settings.json` loads, holds no rules (as upstream), and runs in acceptEdits."""
     repo = Path(__file__).parent.parent
-    rules = load_permission_rules(repo, repo / "no-such-home")
-    assert rules and all(r.rule_behavior == ALLOW and r.tool_name == "Bash" for r in rules)
-    assert "pytest:*" in {r.rule_content for r in rules}
+    assert load_permission_rules(repo, repo / "no-such-home") == []
     ctx = build_tool_permission_context(repo, repo / "no-such-home", managed_dir=repo / "no-such-etc")
     assert ctx.mode == PermissionMode.ACCEPT_EDITS
 

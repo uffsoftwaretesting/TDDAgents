@@ -30,7 +30,8 @@ from pathlib import Path
 from typing import Any
 
 from app.tdd.ledger import PhaseLedger, TddPhase
-from app.tdd.suite_fingerprint import fingerprint_test_files
+from app.tdd.project_config import ProjectConfig, parse_project_config_text
+from app.tdd.suite_fingerprint import context_test_fingerprint
 from app.utils.session_storage_portable import get_project_dir
 
 logger = logging.getLogger("TDDOrchestrator.Plan")
@@ -232,6 +233,70 @@ def parse_implementation_plan(plan_text: str) -> list[str]:
     return [" ".join(part for part in item if part) for item in items]
 
 
+#: The plan-file section holding the project's configuration (`app/tdd/project_config.py`), as one
+#: fenced `json` block. The user approves it with the plan.
+PROJECT_CONFIG_HEADING = "Project Configuration"
+
+_FENCE = re.compile(r"^\s*(`{3,}|~{3,})\s*([\w+-]*)")
+
+
+def _section(lines: list[str], title: str) -> list[str] | None:
+    """The lines under the first heading named `title` (any level, any case), up to the next heading of
+    the same or a higher level; fenced lines are never headings. `None` when there is no such heading."""
+    start, level = None, 0
+    fence: str | None = None
+    for index, line in enumerate(lines):
+        opened = _FENCE.match(line)
+        if opened:
+            fence = None if fence is not None and opened.group(1).startswith(fence) else fence or opened.group(1)
+            continue
+        heading = _HEADING.match(line) if fence is None else None
+        if heading is None:
+            continue
+        if start is None and heading.group(2).strip().lower() == title.lower():
+            start, level = index + 1, len(heading.group(1))
+        elif start is not None and len(heading.group(1)) <= level:
+            return lines[start:index]
+    return None if start is None else lines[start:]
+
+
+def _json_blocks(lines: list[str]) -> list[str]:
+    """The bodies of the fenced blocks whose info string is `json`."""
+    blocks: list[str] = []
+    fence: str | None = None
+    body: list[str] = []
+    is_json = False
+    for line in lines:
+        opened = _FENCE.match(line)
+        if fence is None:
+            if opened:
+                fence, is_json, body = opened.group(1), opened.group(2).lower() == "json", []
+            continue
+        if opened and opened.group(1).startswith(fence) and not opened.group(2):
+            if is_json:
+                blocks.append("\n".join(body))
+            fence = None
+            continue
+        body.append(line)
+    return blocks
+
+
+def parse_project_configuration(plan_text: str) -> tuple[ProjectConfig | None, tuple[str, ...]]:
+    """
+    The project configuration a plan file declares: the one fenced `json` block of its
+    `Project Configuration` section, and every issue that keeps it from being used.
+    """
+    section = _section(plan_text.splitlines(), PROJECT_CONFIG_HEADING)
+    if section is None:
+        return None, (f'the plan has no "## {PROJECT_CONFIG_HEADING}" section',)
+    blocks = _json_blocks(section)
+    if len(blocks) != 1:
+        found = "none" if not blocks else str(len(blocks))
+        return None, (f'the "{PROJECT_CONFIG_HEADING}" section must hold exactly one fenced json block (found '
+                      f"{found})",)
+    return parse_project_config_text(blocks[0])
+
+
 def plan_path(session_id: str, cwd: str | Path) -> Path:
     """`<project dir>/<session id>/tdd-plan.json`, beside the session's other files."""
     return get_project_dir(cwd) / session_id / PLAN_FILE_NAME
@@ -269,7 +334,7 @@ def update_tdd_plan(context: Any, change: Callable[[TddPlan], TddPlan]) -> TddPl
     if updated.current != app_state.tdd_plan.current:
         ledger = app_state.phase_ledger
         reset_ledger = ledger.transition_to(TddPhase.RED)
-        baseline = fingerprint_test_files(getattr(context, "workspace", None))
+        baseline = context_test_fingerprint(context)
         context.set_app_state(lambda s: replace(s, tdd_plan=updated, phase_ledger=reset_ledger, last_test_run=None,
                                                 tdd_item_test_baseline=baseline))
     else:

@@ -77,10 +77,22 @@ def test_the_session_prompts_are_gone():
 
 def test_the_contract_tells_the_analyst_how_the_plan_runs():
     """Two live palindrome plans named `tests/tests_*.py`, which pytest never collects (2026-10-28)."""
-    text = read_system_prompt_file("tdd-contract.md")
+    from app.context import _file_section
+
+    text = _file_section("tdd-contract.md")()
     assert "numbered items under its `## Implementation Plan` heading become the sub-requirements" in text
-    assert ("RunTests runs pytest and reports the test files pytest does not collect. pytest's default "
-            "discovery collects `test_*.py` and `*_test.py` files") in text
+    assert "## Project Configuration` section holding one fenced `json` block" in text
+    assert ("RunTests runs the test command the approved plan declares, always over the whole suite, with "
+            "`TDDAGENTS_JUNIT_REPORT` naming where it writes its JUnit report") in text
+    assert ("Declare every dependency you install in the project's own manifest. The session ends by running the "
+            "declared setup and test commands in a clean copy of the project, in an environment built from its "
+            "manifests alone.") in text
+    assert "The `tdd-project-config` skill describes how to declare it for each language." in text
+    assert ("Only the files the declared test-file patterns match, and the declared manifests, may be written."
+            in text)
+    assert "{{" not in text
+    for python_only in ("pytest", "virtual environment", "venv", "pip"):
+        assert python_only not in text, python_only
     assert "exactly one Red -> Green -> Refactor cycle that the RunTests tool observes" in text
     for rule in ("unless", "README", " CI", "packaging", "MUST ALWAYS", "gold standard", "tests_"):
         assert rule not in text, rule

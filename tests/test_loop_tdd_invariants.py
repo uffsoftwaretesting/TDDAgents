@@ -46,8 +46,9 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
+from app.tdd.junit_report import JUnitReport
 from tests.conftest import FakeWorkspace
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 
 def make_test_tool(name: str, *, is_impl: bool = False, is_test: bool = False) -> BuiltTool:
@@ -63,6 +64,10 @@ def make_test_tool(name: str, *, is_impl: bool = False, is_test: bool = False) -
         is_implementation_writer=is_impl,
         is_test_writer=is_test,
     )
+
+
+#: A JUnit report of one test that ran and passed.
+ONE_TEST = JUnitReport(tests=1)
 
 
 class ScriptedModel:
@@ -164,7 +169,8 @@ class TestInvariant1NoImplementationWriterInRedPool:
     def test_property_1_runtime_gate_denies_implementation_writers_in_red(self):
         async def go():
             for ledger in self.reachable_red_ledger_states():
-                store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=ledger))
+                store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                               project_config=TEST_PROJECT_CONFIG, phase_ledger=ledger))
                 perm_ctx = ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS)
                 ctx = tool_context_for(store, permission_context=perm_ctx)
 
@@ -208,8 +214,8 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
     def _build_test_deps(self, model: ScriptedModel, results: list[SuiteExecutionResult], events: list) -> LoopDeps:
         pending = list(results)
 
-        def runner(test_path: str):
-            return pending.pop(0) if pending else SuiteExecutionResult(exit_code=0)
+        def runner(context: Any) -> SuiteExecutionResult:
+            return pending.pop(0) if pending else SuiteExecutionResult(exit_code=0, report=ONE_TEST)
 
         run_tests_tool = build_run_tests_tool(runner)
         tools = [
@@ -238,7 +244,7 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
 
     async def _run(self, model: ScriptedModel, results: list[SuiteExecutionResult]) -> tuple[Terminated, AppStateStore]:
         deps = self._build_test_deps(model, results, [])
-        store = AppStateStore()
+        store = AppStateStore(AppState(project_config=TEST_PROJECT_CONFIG))
         ctx = tool_context_for(store, workspace=FakeWorkspace())
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
         terminated: Terminated | None = None
@@ -283,7 +289,8 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
             [AIMessage(content="Tests passed on first run! I am done.")],
             [AIMessage(content="I insist I am done.")],
         ])
-        terminated, store = asyncio.run(self._run(model, [SuiteExecutionResult(exit_code=0, coverage=MET)]))
+        terminated, store = asyncio.run(self._run(
+            model, [SuiteExecutionResult(exit_code=0, report=ONE_TEST, coverage=MET)]))
         assert terminated.reason == Terminal.ABORTED_STREAMING
         assert model.stops_blocked == 2
         assert store.get().phase_ledger == PhaseLedger()
@@ -292,9 +299,10 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
         # GREEN never passes
         ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=1)], TddPhase.GREEN),
         # REFACTOR never run
-        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, coverage=MET)], TddPhase.REFACTOR),
+        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, report=ONE_TEST, coverage=MET)],
+         TddPhase.REFACTOR),
         # REFACTOR breaks a test
-        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, coverage=MET),
+        ([SuiteExecutionResult(exit_code=1), SuiteExecutionResult(exit_code=0, report=ONE_TEST, coverage=MET),
           SuiteExecutionResult(exit_code=1, coverage=MET)], TddPhase.REFACTOR),
     ])
     def test_property_2_an_unfinished_cycle_cannot_reach_completed(self, results, ledger_phase):
@@ -319,8 +327,9 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
             [AIMessage(content="Cycle complete! All tests pass.")],
         ])
         terminated, store = asyncio.run(self._run(model, [
-            SuiteExecutionResult(exit_code=0), SuiteExecutionResult(exit_code=0, coverage=MET),
-            SuiteExecutionResult(exit_code=0, coverage=MET)]))
+            SuiteExecutionResult(exit_code=0, report=ONE_TEST),
+            SuiteExecutionResult(exit_code=0, report=ONE_TEST, coverage=MET),
+            SuiteExecutionResult(exit_code=0, report=ONE_TEST, coverage=MET)]))
         assert terminated.reason == Terminal.COMPLETED
         assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True,
                                                        refactor_passed=True, coverage=95.0)

@@ -37,7 +37,7 @@ from app.constants.system_prompt_sections import (
     SystemPromptSection,
     systemPromptSection,
 )
-from app.tdd.coverage_gate import TDD_PROMPT_VARS
+from app.tdd.prompt_vars import TDD_PROMPT_VARS
 from app.utils.claudemd import get_claude_mds, get_memory_files, is_env_truthy
 from app.utils.frontmatter_parser import render_prompt
 from app.utils.messages import Message

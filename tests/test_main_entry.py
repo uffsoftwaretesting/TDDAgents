@@ -489,14 +489,14 @@ def test_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: p
     assert capsys.readouterr().out == (
         f"\n📁 Project: {ws}\n"
         f"📝 Reports: {out_dir}/\n"
-        "🧪 Final test run: could not run the tests: no workspace is available to run the tests in\n"
+        "🧪 Final test run: clean final run unsupported: the workspace is not a local folder\n"
         "\n⚠️  DEVELOPMENT STOPPED: stop_hook_prevented\n"
         "   • 1. Item A: not done\n"
         "\n🔑 Thread ID for this run: t\n"
         "   (To inspect the state or resume later, use --thread-id)\n\n"
     )
     assert "2. " not in (out_dir / "subreq_results.txt").read_text()
-    assert "could not run the tests" in (out_dir / "final_test_run.txt").read_text()
+    assert "clean final run unsupported" in (out_dir / "final_test_run.txt").read_text()
     plan_file = tmp_path / "plans" / "a-b-c.md"
     plan_file.parent.mkdir()
     plan_file.write_text("# Plan so far\n")
@@ -512,26 +512,32 @@ def test_report_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: p
     assert not list(tmp_path.glob("workspace_output_*"))
 
 
-def test_the_final_test_run_is_the_projects_own_suite(python_workspace, tmp_path: Path) -> None:
-    """Phase 13: exactly RunTests' command in the project; a skipped test means not passing."""
+def test_the_final_test_run_is_the_declared_suite_in_a_clean_copy(python_workspace, tmp_path: Path) -> None:
+    """2026-11-03: the declared command in a clean copy of the project; a skipped test means not passing."""
     python_workspace.write_file("calc.py", "def add(a, b):\n    return a + b\n")
     python_workspace.write_file("tests/test_calc.py", (
         "import pytest\nfrom calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n\n"
         "def test_lint():\n    pytest.importorskip('not_installed_anywhere')\n"))
-    summary = entry.write_final_test_run(str(tmp_path), python_workspace)
-    assert summary == "NOT passing (exit 0: all tests passed, 1 skipped, coverage 100.0% (rule of thumb: 90%))"
-    text = (tmp_path / "final_test_run.txt").read_text()
-    assert f"Project: {python_workspace.root}" in text and "SKIPPED" in text
+    reports = tmp_path / "metrics_and_logging"
+    reports.mkdir()
+    summary = entry.write_final_test_run(str(reports), python_workspace)
+    assert summary == ("NOT passing (exit 0: the test command completed, coverage 100.0% (rule of thumb: 90%)); "
+                       "1 test(s) were skipped")
+    text = (reports / "final_test_run.txt").read_text()
+    assert f"Project: {python_workspace.root}" in text and "Setup: none declared" in text
+    assert "JUnit report: 2 test(s), 0 failed, 0 errored, 1 skipped" in text
+    assert not (tmp_path / "final-run").exists()
     python_workspace.write_file("tests/test_calc.py",
                                 "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n")
-    assert entry.write_final_test_run(str(tmp_path), python_workspace) == (
-        "passed (exit 0: all tests passed, 0 skipped, coverage 100.0% (rule of thumb: 90%))")
-    # A test file pytest does not collect never ran: not passing either.
-    python_workspace.write_file("pytest.ini", "[pytest]\npython_files = tests/test_*.py\n")
-    python_workspace.write_file("tests/tests_extra.py", "def test_extra():\n    assert False\n")
-    assert entry.write_final_test_run(str(tmp_path), python_workspace) == (
-        "NOT passing (exit 0: all tests passed, 0 skipped, coverage 100.0% (rule of thumb: 90%)); "
-        "not collected: tests/tests_extra.py")
+    assert entry.write_final_test_run(str(reports), python_workspace) == (
+        "passed (exit 0: the test command completed, coverage 100.0% (rule of thumb: 90%))")
+    # A declared test file pytest does not collect never ran: not passing either.
+    python_workspace.write_file("pytest.ini", "[pytest]\npython_files = check_*.py\n")
+    python_workspace.write_file("tests/check_calc.py",
+                                "from calc import add\n\ndef test_add():\n    assert add(1, 2)\n")
+    assert entry.write_final_test_run(str(reports), python_workspace) == (
+        "NOT passing (exit 0: the test command completed, coverage 100.0% (rule of thumb: 90%)); "
+        "a declared test file did not run: tests/test_calc.py")
 
 
 def test_main_output_and_log_file(fake_session: dict[str, Any], tmp_path: Path,
@@ -617,7 +623,8 @@ def test_the_final_run_never_reports_files_as_uncollected_when_pytest_stopped(py
     python_workspace.write_file("tests/test_ok.py", "def test_ok():\n    assert True\n")
     python_workspace.write_file("tests/test_web.py", "import not_installed_anywhere\n\ndef test_w():\n    pass\n")
     summary = entry.write_final_test_run(str(tmp_path), python_workspace)
-    assert summary.startswith("NOT passing (exit 2: test execution was interrupted") and "not collected" not in summary
+    assert summary == ("NOT passing (exit 2: the test command failed, coverage could not be measured); the test "
+                       "command exited 2, 1 test(s) errored")
 
 
 # ── the session's reports ────────────────────────────────────────────────────

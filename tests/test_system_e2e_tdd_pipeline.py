@@ -12,7 +12,6 @@ Validates the integrated multi-turn lifecycle across Parts D, E, F, G, and H:
 from __future__ import annotations
 
 import os
-import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -30,7 +29,6 @@ from app.services.tools.tool_orchestration import run_tools
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.run_tests_tool.run_tests_tool import (
-    SuiteExecutionResult,
     build_run_tests_tool,
 )
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool, tool_context_for
@@ -41,6 +39,7 @@ from app.utils.abort_controller import (
 )
 from app.utils.messages import Message, ToolCall
 from app.workspace.local import LocalWorkspace
+from app.tdd.project_config import load_project_config
 
 # ============================================================================
 # Test Fixture Helpers & Tool Factories
@@ -69,19 +68,6 @@ def _make_write_file_tool(workspace: LocalWorkspace) -> BuiltTool:
     )
 
 
-def _make_workspace_test_runner(ws: LocalWorkspace):
-    async def _runner(test_path: str, context: ToolContext) -> SuiteExecutionResult:
-        cmd = f'PYTHONPATH=. {sys.executable} -m pytest "{test_path}" -vv --tb=short'
-        res = ws.execute(cmd)
-        return SuiteExecutionResult(
-            exit_code=res.exit_code,
-            stdout=res.stdout,
-            stderr=res.stderr,
-        )
-
-    return _runner
-
-
 class ScriptedModel:
     """Streams a pre-recorded sequence of turns into the loop."""
 
@@ -108,7 +94,8 @@ async def test_e2e_full_tdd_red_green_refactor_lifecycle(python_workspace: Local
     run_tests_tool = build_run_tests_tool(None)
     tools = (write_tool, run_tests_tool)
 
-    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+    store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED),
+                                   project_config=load_project_config(workspace)))
     tool_ctx = tool_context_for(store, tools=tools, workspace=workspace)
     state = initial_loop_state((HumanMessage(content="Implement calculator addition with TDD"),), tool_ctx)
     config = build_run_config("e2e-tdd-run")
