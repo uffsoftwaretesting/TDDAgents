@@ -13,17 +13,18 @@ Target test path: $ARGUMENTS
 
 ## Core Rules
 
-1. **One Concept per Test**: Each test function must assert exactly one behavior or boundary condition.
-2. **Descriptive Test Names**: Name tests using `test_<unit>_<scenario>_<expected_outcome>()`.
-   - Good: `test_add_negative_integers_returns_sum()`
-   - Bad: `test_1()`, `test_calculator()`
+1. **One Concept per Test**: Each test must assert exactly one behavior or boundary condition.
+2. **Descriptive Test Names**: Name each test after the unit, the scenario and the expected outcome, in the project's convention.
+   - Good: `test_add_negative_integers_returns_sum` (pytest), `it("returns the sum of negative integers")` (Jest, Vitest, RSpec), `TestAddNegativeIntegersReturnsSum` (Go), `addNegativeIntegersReturnsSum` (JUnit)
+   - Bad: `test_1`, `test_calculator`, `it("works")`
 3. **Arrange-Act-Assert (AAA) Pattern**:
-   - Arrange: Set up inputs and test fixtures.
+   - Arrange: Set up inputs and fixtures.
    - Act: Call the unit under test.
    - Assert: Check the exact expected outcome.
-4. **Isolated & Hermetic**: Tests must never depend on external network calls or shared mutable global state.
+4. **Isolated & Hermetic**: Tests must never depend on external network calls, on the order they run in, or on shared mutable global state.
 5. **Breadth of Scenarios**: Beyond the typical case, cover boundary values, empty and invalid inputs, error conditions and every rule the requirement states.
-6. **Run Them**: Run `RunTests` once the tests are written. They need not fail: a run of the sub-requirement's new or changed tests completes RED, whether it passes or fails.
+6. **Follow the Project**: Use the project's test framework and conventions, and put the tests in files the project's declared test-file patterns match.
+7. **Run Them**: Run `RunTests` once the tests are written. They need not fail: a run of the sub-requirement's new or changed tests completes RED, whether it passes or fails.
 
 ## Reference
 

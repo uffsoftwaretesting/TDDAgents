@@ -1,7 +1,7 @@
 ---
 name: tdd-refactor-clean
 description: "Guidelines for the mandatory REFACTOR phase: improving code and tests and raising coverage while every test stays green."
-when_to_use: In the REFACTOR phase after all tests pass, to raise coverage and improve readability, typing, test strength and architectural hygiene.
+when_to_use: In the REFACTOR phase after all tests pass, to raise coverage and improve readability, types, test strength and architectural hygiene.
 argument-hint: "[target-source-file]"
 ---
 
@@ -17,7 +17,7 @@ You are performing the mandatory REFACTOR phase after achieving a GREEN test sui
 4. **Immediate Verification**: Run `RunTests` after every transformation and read its coverage. If any test fails, fix or revert immediately.
 5. **Clean Code Targets**:
    - Eliminate duplicated logic (DRY).
-   - Add explicit Python type annotations.
+   - Make types explicit where the language supports them (annotations, typed signatures, no implicit `any`).
    - Decompose complex conditionals.
    - Improve variable and function naming.
 

@@ -3,10 +3,14 @@ A skill command (Phase 8).
 
 Ported from `reference/claude-code/src/skills/loadSkillsDir.ts` -> `createSkillCommand` (the
 `PromptCommand` a `SKILL.md` becomes) and `skills/bundledSkills.ts` -> `registerBundledSkill`.
-TDDAgents' bundled skills live as files under `app/prompts/skills/` rather than in code. As
+TDDAgents' bundled skills are of two kinds. Most live as files under `app/prompts/skills/`. As
 upstream's `registerBundledSkill` with `files`, a bundled command's `skill_root` is its per-process
 extraction directory (`app/skills/bundled_skills.py`), its reference files are written there on
 first invocation, and `prependBaseDir` names it, so the model reads `references/` without a prompt.
+A skill whose prompt is computed in code is registered with `register_bundled_skill`
+(`app/skills/bundled_skills.py`); `create_bundled_skill_command` is the `Command` object
+upstream's `registerBundledSkill` builds, with its prompt function bound to the run's project
+directory (upstream's `getCwd()`).
 
 `getPromptForCommand` is `prompt_for_command`: the base-directory line, argument substitution,
 then the skill-dir and session placeholders, here `${TDDAGENTS_SKILL_DIR}` and
@@ -26,8 +30,10 @@ Ported from `reference/claude-code/src/skills/loadSkillsDir.ts` -> `parseSkillFr
 Sources, in upstream's `loadAllCommands` order — and `findCommand` takes the first match, so this
 order is the precedence:
 
-1. **bundled**: TDDAgents' roster in `app/prompts/skills/` (upstream's `getBundledSkills`).
-   Never conditional, description always user-specified, as `registerBundledSkill` makes them.
+1. **bundled**: the code-built skills (`get_bundled_skills`, registered by
+   `app/skills/bundled/index.py::init_bundled_skills`), then TDDAgents' roster in
+   `app/prompts/skills/` (upstream's `getBundledSkills`). Never conditional, description always
+   user-specified, as `registerBundledSkill` makes them.
 2. **policy**: `<managed dir>/.tddagents/skills` (`TDDAGENTS_DISABLE_POLICY_SKILLS` turns it off).
 3. **user**: `<config home>/skills` (`~/.tddagents/skills`).
 4. **project**: every `.tddagents/skills` from the project directory up to its git root (or the
@@ -53,7 +59,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -61,7 +67,14 @@ from typing import Any
 import pathspec
 import yaml
 
-from app.skills.bundled_skills import get_bundled_skill_extract_dir
+from app.skills.bundled_skills import (
+    BundledSkillContext,
+    BundledSkillDefinition,
+    extract_bundled_skill_file_map,
+    get_bundled_skill_extract_dir,
+    get_bundled_skills,
+    prepend_base_dir,
+)
 from app.utils.argument_substitution import parse_argument_names, substitute_arguments
 from app.utils.model.model import parse_user_specified_model
 from app.utils.settings.settings import MANAGED_DIR, parse_tool_list_from_cli
@@ -102,6 +115,8 @@ class SkillCommand:
     #: A bundled skill's own directory under `app/prompts/skills/`, whose reference files are
     #: extracted to `skill_root` (the per-process `get_bundled_skill_extract_dir`) on first use.
     bundled_source_dir: str | None = None
+    #: A code-built skill's `getPromptForCommand`, as `(args, session_id) -> prompt`.
+    get_prompt: Callable[[str, str], str] | None = None
 
     @property
     def is_hidden(self) -> bool:
@@ -118,22 +133,55 @@ class SkillCommand:
         """
         `getPromptForCommand`: the skill's text as the model receives it. A bundled skill's files are
         extracted on its first invocation (`registerBundledSkill`); if that fails it goes on without
-        its base directory.
+        its base directory. A code-built skill's prompt is its own function's.
         """
+        if self.get_prompt is not None:
+            return self.get_prompt(args, session_id)
         root = self.skill_root
         if self.bundled_source_dir is not None:
             from app.skills.bundled_skills import extract_bundled_skill_files
 
             root = extract_bundled_skill_files(self.name, self.bundled_source_dir)
-        content = (
-            f"Base directory for this skill: {root}\n\n{self.markdown_content}"
-            if root
-            else self.markdown_content
-        )
+        content = prepend_base_dir(self.markdown_content, root) if root else self.markdown_content
         content = substitute_arguments(content, args, True, self.argument_names)
         if root:
             content = content.replace(SKILL_DIR_PLACEHOLDER, root)
         return content.replace(SESSION_ID_PLACEHOLDER, session_id)
+
+
+def create_bundled_skill_command(definition: BundledSkillDefinition, cwd: str) -> SkillCommand:
+    """
+    `registerBundledSkill`'s `Command` for a code-built skill, its prompt bound to `cwd`. With
+    `files`, they are extracted on the first invocation and the prompt names their directory.
+    """
+    files = definition.files
+
+    def get_prompt(args: str, session_id: str) -> str:
+        prompt = definition.get_prompt_for_command(args, BundledSkillContext(cwd=cwd, session_id=session_id))
+        if not files:
+            return prompt
+        extracted = extract_bundled_skill_file_map(definition.name, files)
+        return prompt if extracted is None else prepend_base_dir(prompt, extracted)
+
+    return SkillCommand(
+        name=definition.name,
+        description=definition.description,
+        markdown_content="",
+        source="bundled",
+        loaded_from="bundled",
+        skill_root=get_bundled_skill_extract_dir(definition.name) if files else None,
+        has_user_specified_description=True,
+        allowed_tools=definition.allowed_tools,
+        argument_hint=definition.argument_hint,
+        when_to_use=definition.when_to_use,
+        model=definition.model,
+        disable_model_invocation=definition.disable_model_invocation,
+        user_invocable=definition.user_invocable,
+        context=definition.context,
+        agent=definition.agent,
+        hooks=definition.hooks,
+        get_prompt=get_prompt,
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -396,6 +444,7 @@ def get_skill_registry(
     user_dir = home / ".tddagents" / "skills" if home is not None else config_home() / "skills"
     policy_dir = Path(managed_dir if managed_dir is not None else MANAGED_DIR) / ".tddagents" / "skills"
     policy_off = os.environ.get(DISABLE_POLICY_SKILLS_ENV, "").strip().lower() in _TRUTHY
+    code_built = [create_bundled_skill_command(d, str(project_dir)) for d in get_bundled_skills()]
     loaded = [
         *load_skills_from_skills_dir(Path(bundled_dir), "bundled", loaded_from="bundled"),
         *([] if policy_off else load_skills_from_skills_dir(policy_dir, "policySettings")),
@@ -404,7 +453,7 @@ def get_skill_registry(
           load_skills_from_skills_dir(d, "projectSettings")),
     ]
     seen: dict[str, str] = {}
-    base: list[SkillCommand] = []
+    base: list[SkillCommand] = list(code_built)
     conditional: list[SkillCommand] = []
     for skill, path in loaded:
         identity = _file_identity(path)
@@ -425,6 +474,7 @@ __all__ = [
     "SkillCommand",
     "SkillRegistry",
     "coerce_description_to_string",
+    "create_bundled_skill_command",
     "extract_description_from_markdown",
     "get_project_dirs_up_to_home",
     "get_skill_registry",

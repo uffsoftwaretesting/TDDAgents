@@ -93,17 +93,21 @@ def _isolated_bundled_skills_root(tmp_path_factory: Any, monkeypatch: Any) -> An
     """
     Launching a bundled skill extracts its files under the per-process bundled-skills root
     (`app/skills/bundled_skills.py`). No test may write to the real `/tmp/tddagents-<uid>`: each
-    gets its own temp dir and a fresh root, as a new process would.
+    gets its own temp dir and a fresh root, as a new process would. The code-built skills'
+    registry starts empty too (upstream's `clearBundledSkills`): a run registers them
+    (`init_bundled_skills`), and no test sees another test's registrations.
     """
-    from app.skills.bundled_skills import clear_extracted_bundled_skills
+    from app.skills.bundled_skills import clear_bundled_skills, clear_extracted_bundled_skills
     from app.utils.permissions.filesystem import get_bundled_skills_root
 
     monkeypatch.setenv("TDDAGENTS_TMPDIR", str(tmp_path_factory.mktemp("tddagents-tmp")))
     get_bundled_skills_root.cache_clear()
     clear_extracted_bundled_skills()
+    clear_bundled_skills()
     yield
     get_bundled_skills_root.cache_clear()
     clear_extracted_bundled_skills()
+    clear_bundled_skills()
 
 
 def read_dotenv_key(name: str) -> str | None:
