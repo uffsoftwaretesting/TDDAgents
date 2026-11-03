@@ -27,6 +27,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
+from app.constants.product import CLI_COMMAND
 from app.plugins.builtin_plugins import is_builtin_plugin_id
 from app.types.permissions import PermissionRuleSource
 from app.types.plugin import LoadedPlugin
@@ -87,7 +88,7 @@ VALID_INSTALLABLE_SCOPES: tuple[InstallableScope, ...] = ("user", "project", "lo
 #: `VALID_UPDATE_SCOPES`: managed plugins can be updated.
 VALID_UPDATE_SCOPES: tuple[PluginScope, ...] = ("user", "project", "local", "managed")
 #: This build's command for the plugin CLI (upstream's `claude plugin`), named in hints.
-PLUGIN_CLI = "python -m app.main plugin"
+PLUGIN_CLI = f"{CLI_COMMAND} plugin"
 _SCOPE_PRECEDENCE: dict[str, int] = {"user": 0, "project": 1, "local": 2}
 
 

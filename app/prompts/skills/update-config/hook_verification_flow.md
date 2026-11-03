@@ -25,4 +25,12 @@ Given an event, matcher, target file, and desired behavior, follow this flow. Ea
 
    Exit 0 + prints your command = correct. Exit 4 = matcher doesn't match. Exit 5 = malformed JSON or wrong nesting. A broken settings.json silently disables ALL settings from that file — fix any pre-existing malformation too.
 
-6. **Handoff.** Tell the user the hook is live from the next session: TDDAgents reads hooks when a session starts, so it needs a restart (resume the session with `--thread-id`).
+6. **Prove the hook fires** — only for `Pre|PostToolUse` on a matcher you can trigger in-turn (`WriteFile|Edit` via Edit, `Bash` via Bash). `Stop`/`UserPromptSubmit`/`SessionStart` fire outside this turn — skip to step 7.
+
+   For a **formatter** on `PostToolUse`/`WriteFile|Edit`: introduce a detectable violation via Edit (two consecutive blank lines, bad indentation, missing semicolon — something this formatter corrects; NOT trailing whitespace, Edit strips that before writing), re-read, confirm the hook **fixed** it. For **anything else**: temporarily prefix the command in settings.json with `echo "$(date) hook fired" >> /tmp/tddagents-hook-check.txt; `, trigger the matching tool (Edit for `WriteFile|Edit`, a harmless `true` for `Bash`), read the sentinel file.
+
+   **Always clean up** — revert the violation, strip the sentinel prefix — whether the proof passed or failed.
+
+   **If proof fails but pipe-test passed and `jq -e` passed**: the settings watcher isn't watching `.tddagents/` — it only watches directories that had a settings file when this session started. The hook is written correctly. Tell the user to restart (resume the session with `--thread-id`) — you can't do this yourself.
+
+7. **Handoff.** Tell the user the hook is live (or needs a restart per the watcher caveat). The UI only shows "Ran N hooks" if a hook errors or is slow — silent success is invisible by design.
