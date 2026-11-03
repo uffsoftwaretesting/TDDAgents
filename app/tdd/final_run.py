@@ -6,9 +6,13 @@ installed a package into the session's environment and never declared it. Every 
 the old final run shared that environment, so nothing compared what was declared with what was
 installed. The final run now does what a fresh checkout does:
 
-1. the project is copied into `<thread>/final-run/project` (`shutil.copytree`) without `.git`,
-   `.tddagents/` (except the approved `project.json`), the declared `exclude` patterns and whatever
-   the project's root `.gitignore` ignores: no installed dependency, build output or cache crosses;
+1. the project is copied into `<thread>/final-run/project`, file by file, from upstream's project
+   listing (`project_files`: ripgrep's `--files --hidden`, as `countFilesRoundedRg` and `utils/glob.ts`
+   list files), so every ignore file rg honours applies: the root and every nested `.gitignore`,
+   `.ignore` and `.rgignore`, and the global git excludes. `.git` and the other version-control
+   directories upstream's file index leaves out (`hooks/fileSuggestions.ts`), `.tddagents/` (except the
+   approved `project.json`) and the declared `exclude` patterns never cross either: no installed
+   dependency, build output or cache does;
 2. the environment is scrubbed: no `TDDAGENTS_ENV_FILE`, TDDAgents' own interpreter kept off `PATH`
    (`app/workspace/local.py::orchestrator_free_environment`), fresh report variables;
 3. the declared `setup` runs, with upstream's maximum Bash timeout (`getMaxBashTimeoutMs`); a non-zero
@@ -19,7 +23,14 @@ installed. The final run now does what a fresh checkout does:
    JUnit counts, the coverage, the declared test files that did not run, and the raw output;
 6. the copy is deleted.
 
-An E2B workspace has no host folder to copy, so its final run is reported as unsupported.
+An E2B workspace has no host folder to copy, so its final run is reported as unsupported, and so is
+one where ripgrep cannot run (`app/utils/ripgrep.py` has no fallback lister).
+
+Divergences from upstream's listing (2026-11-03): `--no-require-git`, because TDDAgents never runs
+`git init` and rg reads `.gitignore` only inside a git repository, while a fresh checkout always
+honours it; and `--no-ignore-parent`, because the project is the root of every lookup and a fresh
+checkout sees no ignore file above it (a `~/.gitignore` must not empty the copy). Without `--follow`,
+rg lists no symbolic link, so none is copied.
 """
 
 from __future__ import annotations
@@ -29,8 +40,6 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-import pathspec
 
 from app.tdd.collection_gate import uncollected_test_files
 from app.tdd.ledger import TddPhase
@@ -44,10 +53,12 @@ from app.tdd.run_tests_tool.run_tests_tool import (
     report_line,
     run_suite,
 )
+from app.utils.ripgrep import RipgrepTimeoutError, RipgrepUnavailableError, rip_grep, to_relative_path
 from app.utils.session_environment import ENV_FILE_VAR
 
 FINAL_RUN_DIRNAME = "final-run"
 UNSUPPORTED = "clean final run unsupported: the workspace is not a local folder"
+NO_RIPGREP = "clean final run unsupported: ripgrep, which lists the project's files, could not run"
 NO_CONFIG = "not run: the project declares no test command"
 
 
@@ -66,33 +77,40 @@ def max_command_timeout_seconds() -> float:
     return get_max_bash_timeout_ms() / 1000
 
 
-def _gitignore(source: Path) -> pathspec.GitIgnoreSpec:
-    try:
-        lines = (source / ".gitignore").read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
-        lines = []
-    return pathspec.GitIgnoreSpec.from_lines(lines)
+#: The version-control directories upstream's file index never lists (`hooks/fileSuggestions.ts`).
+VCS_DIRECTORIES = (".git", ".svn", ".hg", ".bzr", ".jj", ".sl")
+
+#: The listing's ripgrep arguments: upstream's `--files --hidden`, the version-control directories and
+#: `.tddagents/` pruned, and the two divergences the module docstring explains.
+LISTING_ARGS = (
+    "--files", "--hidden", "--no-require-git", "--no-ignore-parent",
+    *(arg for name in (*VCS_DIRECTORIES, ".tddagents") for arg in ("--glob", f"!{name}/")),
+)
+
+
+def _scrubbed(root: Path, run_dir: Path) -> Any:
+    """A workspace over `root` without the session's environment script (`TDDAGENTS_ENV_FILE`)."""
+    from app.workspace.local import LocalWorkspace
+
+    return LocalWorkspace(root, env={ENV_FILE_VAR: ""}, run_dir=run_dir)
+
+
+def project_files(source: Path, rules: TestFileRules) -> list[str]:
+    """
+    The project's files as a fresh checkout has them, root-relative and sorted: ripgrep's listing
+    (`LISTING_ARGS`) without the declared `exclude` patterns (`TestFileRules.is_excluded`, the matcher
+    the phase tier and the fingerprint use). Raises `RipgrepUnavailableError` or `RipgrepTimeoutError`.
+    """
+    listed = rip_grep(_scrubbed(source, source.parent), list(LISTING_ARGS), ".")
+    return sorted({path for path in map(to_relative_path, listed) if not rules.is_excluded(path)})
 
 
 def copy_project(source: Path, target: Path, rules: TestFileRules) -> None:
-    """
-    Copy `source` to `target` without `.git`, `.tddagents/`, the declared excluded paths and what the
-    root `.gitignore` ignores; the approved `project.json` is copied back into `.tddagents/`.
-    """
-    ignored_by_git = _gitignore(source)
-
-    def ignore(directory: str, names: list[str]) -> set[str]:
-        relative = Path(directory).relative_to(source).as_posix()
-        prefix = "" if relative == "." else f"{relative}/"
-        skipped = set()
-        for name in names:
-            path = f"{prefix}{name}"
-            as_dir = f"{path}/" if os.path.isdir(os.path.join(directory, name)) else path
-            if rules.is_excluded(as_dir) or ignored_by_git.match_file(as_dir):
-                skipped.add(name)
-        return skipped
-
-    shutil.copytree(source, target, symlinks=True, ignore=ignore)
+    """Copy `project_files(source)` to `target`, then the approved `project.json` into `.tddagents/`."""
+    target.mkdir(parents=True, exist_ok=True)
+    for path in project_files(source, rules):
+        (target / path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source / path, target / path)
     config_file = source / PROJECT_CONFIG_FILE
     if config_file.is_file():
         (target / PROJECT_CONFIG_FILE).parent.mkdir(parents=True, exist_ok=True)
@@ -117,8 +135,6 @@ def _test_lines(result: SuiteExecutionResult, uncollected: tuple[str, ...] | Non
 
 def run_final(workspace: Any, run_dir: str | os.PathLike[str]) -> FinalRun:
     """The clean final run of `workspace`'s project (see the module docstring)."""
-    from app.workspace.local import LocalWorkspace
-
     root = getattr(workspace, "root", None)
     if getattr(workspace, "kind", None) != "local" or root is None:
         return FinalRun(UNSUPPORTED, ())
@@ -131,9 +147,11 @@ def run_final(workspace: Any, run_dir: str | os.PathLike[str]) -> FinalRun:
     try:
         try:
             copy_project(Path(root), target, config.rules)
-        except OSError as exc:
+        except RipgrepUnavailableError as exc:
+            return FinalRun(f"{NO_RIPGREP} ({exc})", ())
+        except (OSError, RipgrepTimeoutError) as exc:
             return FinalRun(f"could not copy the project: {exc}", ())
-        clean = LocalWorkspace(target, env={ENV_FILE_VAR: ""}, run_dir=base)
+        clean = _scrubbed(target, base)
         timeout = max_command_timeout_seconds()
         setup_exit: int | None = None
         setup_output = ""
@@ -168,4 +186,5 @@ def run_final(workspace: Any, run_dir: str | os.PathLike[str]) -> FinalRun:
         shutil.rmtree(base, ignore_errors=True)
 
 
-__all__ = ["FINAL_RUN_DIRNAME", "NO_CONFIG", "UNSUPPORTED", "FinalRun", "copy_project", "run_final"]
+__all__ = ["FINAL_RUN_DIRNAME", "LISTING_ARGS", "NO_CONFIG", "NO_RIPGREP", "UNSUPPORTED", "VCS_DIRECTORIES",
+           "FinalRun", "copy_project", "project_files", "run_final"]

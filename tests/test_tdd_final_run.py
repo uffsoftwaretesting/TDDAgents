@@ -12,7 +12,15 @@ from typing import Any
 
 import app.main as entry
 from app.state.app_state_store import AppState, AppStateStore
-from app.tdd.final_run import FINAL_RUN_DIRNAME, NO_CONFIG, UNSUPPORTED, copy_project, run_final
+from app.tdd.final_run import (
+    FINAL_RUN_DIRNAME,
+    NO_CONFIG,
+    NO_RIPGREP,
+    UNSUPPORTED,
+    FinalRun,
+    copy_project,
+    run_final,
+)
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.run_tests_tool.run_tests_tool import build_run_tests_tool
 from app.tool import tool_context_for
@@ -99,18 +107,77 @@ def test_a_command_that_writes_no_report_is_not_passing(tmp_path: Path):
     assert "JUnit report: none was written" in result.lines
 
 
+def copied_files(root: Path) -> list[str]:
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+
+
 def test_the_copy_leaves_out_the_environment_git_tddagents_and_what_gitignore_ignores(tmp_path: Path):
     source = tmp_path / "src"
     ws = make_script_project(source)
     for path in (".git/HEAD", ".tddagents/settings.json", ".tddagents/reports/junit.xml", "build/out.o",
-                 "lib/notes.log", "nested/.git/x"):
+                 "lib/notes.log", "nested/.git/x", ".hg/store", "nested/.svn/entries"):
         ws.write_file(path, "x")
     ws.write_file(".gitignore", "build/\n*.log\n")
     copy_project(source, tmp_path / "copy", SCRIPT_PROJECT_CONFIG.rules)
-    copied = sorted(p.relative_to(tmp_path / "copy").as_posix() for p in (tmp_path / "copy").rglob("*")
-                    if p.is_file())
-    assert copied == [".gitignore", ".tddagents/project.json", "deps.txt", "lib/greet.sh", "run-tests.sh",
-                      "setup.sh", "tests/test_greet.sh", "vendor/strings/lib.sh"]
+    assert copied_files(tmp_path / "copy") == [
+        ".gitignore", ".tddagents/project.json", "deps.txt", "lib/greet.sh", "run-tests.sh", "setup.sh",
+        "tests/test_greet.sh", "vendor/strings/lib.sh"]
+    assert (tmp_path / "copy/.tddagents/project.json").read_text() == ws.read_file(".tddagents/project.json")
+
+
+def test_the_copy_honours_every_nested_ignore_file_as_ripgrep_lists_the_project(tmp_path: Path):
+    """
+    User decision 2026-11-03: the copy is upstream's listing (`rg --files --hidden`), so a nested
+    `.gitignore` (and `.ignore`) applies in its own directory, with no `.git` in the project, while hidden
+    files are copied and nothing above the project root is read.
+    """
+    (tmp_path / ".gitignore").write_text("*\n")  # above the project: never read
+    source = tmp_path / "src"
+    ws = make_script_project(source)
+    for path in ("lib/gen/out.sh", "lib/keep.sh", "tests/cache/x", "tests/fixtures/data.txt", "docs/draft.md",
+                 "docs/final.md", "dist/bundle.js", ".github/workflows/ci.yml", ".env.example"):
+        ws.write_file(path, "x")
+    ws.write_file(".gitignore", "/dist\n")
+    ws.write_file("lib/.gitignore", "gen/\n")
+    ws.write_file("tests/.gitignore", "cache/\n")
+    ws.write_file("docs/.ignore", "draft.md\n")
+    ws.write_file("env/strings/lib.sh", "x")  # the declared `exclude`
+    copy_project(source, tmp_path / "copy", SCRIPT_PROJECT_CONFIG.rules)
+    assert copied_files(tmp_path / "copy") == [
+        ".env.example", ".github/workflows/ci.yml", ".gitignore", ".tddagents/project.json", "deps.txt",
+        "docs/.ignore", "docs/final.md", "lib/.gitignore", "lib/greet.sh", "lib/keep.sh", "run-tests.sh",
+        "setup.sh", "tests/.gitignore", "tests/fixtures/data.txt", "tests/test_greet.sh", "vendor/strings/lib.sh"]
+    assert (tmp_path / "copy/setup.sh").stat().st_mode == (source / "setup.sh").stat().st_mode
+
+
+def test_an_undeclared_dependency_kept_out_by_a_nested_gitignore_is_not_passing(tmp_path: Path):
+    """The CPF incident again, the installed tree ignored by a nested `.gitignore` instead of `exclude`."""
+    config = dataclasses.replace(SCRIPT_PROJECT_CONFIG, exclude=(), setup=None)
+    ws = make_script_project(tmp_path / "thread" / "project", deps="", config=config)
+    ws.write_file("env/.gitignore", "*\n")
+    assert asyncio.run(build_run_tests_tool(None).call({}, tool_context_for(AppStateStore(AppState(
+        tdd_plan=CURRENT_ITEM_PLAN, project_config=config,
+        phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))), workspace=ws))).exit_code == 0
+    result = final(ws)
+    assert result.summary.startswith("NOT passing (exit 1: the test command failed"), result.summary
+
+
+def test_without_ripgrep_the_clean_final_run_is_unsupported(script_project: LocalWorkspace, monkeypatch: Any):
+    from app.utils.ripgrep import RipgrepTimeoutError, RipgrepUnavailableError
+
+    def unavailable(*_: Any) -> list[str]:
+        raise RipgrepUnavailableError("ripgrep is not available at rg")
+
+    monkeypatch.setattr("app.tdd.final_run.rip_grep", unavailable)
+    assert final(script_project) == FinalRun(f"{NO_RIPGREP} (ripgrep is not available at rg)", ())
+    assert NO_RIPGREP == "clean final run unsupported: ripgrep, which lists the project's files, could not run"
+
+    def timed_out(*_: Any) -> list[str]:
+        raise RipgrepTimeoutError("timed out")
+
+    monkeypatch.setattr("app.tdd.final_run.rip_grep", timed_out)
+    assert final(script_project) == FinalRun("could not copy the project: timed out", ())
+    assert not (script_project.root.parent / FINAL_RUN_DIRNAME).exists()
 
 
 def test_the_scrubbed_environment_has_no_session_script(script_project: LocalWorkspace, monkeypatch: Any,
