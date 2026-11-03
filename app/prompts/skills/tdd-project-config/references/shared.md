@@ -56,7 +56,7 @@ Declare a coverage report. On every run, RunTests reports the line and branch co
 
 ## The final run
 
-When the session ends, TDDAgents copies the project, leaving out `exclude`, version control and what `.gitignore` ignores, then runs `setup` and `test` in that clean copy, in an environment built from the manifests alone. A dependency installed during the session but missing from a manifest fails there, so declare every dependency, the test runner and the coverage tool included, in the project's own manifest. A tool that no manifest can declare (a system package, a compiler toolchain component) belongs in `setup`, with a pinned version.
+When the session ends, TDDAgents copies the project, leaving out `exclude`, version control and what any `.gitignore` or `.ignore` file in it ignores, then runs `setup` and `test` in that clean copy, in an environment built from the manifests alone. A dependency installed during the session but missing from a manifest fails there, so declare every dependency, the test runner and the coverage tool included, in the project's own manifest. A tool that no manifest can declare (a system package, a compiler toolchain component) belongs in `setup`, with a pinned version.
 
 ## Rules for the globs
 
