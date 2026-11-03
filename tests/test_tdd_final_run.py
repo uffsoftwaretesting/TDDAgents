@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,7 @@ import app.main as entry
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.final_run import (
     FINAL_RUN_DIRNAME,
+    LISTING_ARGS,
     NO_CONFIG,
     NO_RIPGREP,
     UNSUPPORTED,
@@ -24,6 +27,7 @@ from app.tdd.final_run import (
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.run_tests_tool.run_tests_tool import build_run_tests_tool
 from app.tool import tool_context_for
+from app.utils.ripgrep import ripgrep_command
 from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
 from tests.plan_helpers import CURRENT_ITEM_PLAN
@@ -148,6 +152,71 @@ def test_the_copy_honours_every_nested_ignore_file_as_ripgrep_lists_the_project(
         "docs/.ignore", "docs/final.md", "lib/.gitignore", "lib/greet.sh", "lib/keep.sh", "run-tests.sh",
         "setup.sh", "tests/.gitignore", "tests/fixtures/data.txt", "tests/test_greet.sh", "vendor/strings/lib.sh"]
     assert (tmp_path / "copy/setup.sh").stat().st_mode == (source / "setup.sh").stat().st_mode
+
+
+def copied_entries(root: Path) -> dict[str, str]:
+    """Every entry under `root`, links not followed: a link maps to its target, a file to "file"."""
+    entries: dict[str, str] = {}
+    for folder, dirs, files in os.walk(root):
+        for name in (*dirs, *files):
+            path = Path(folder) / name
+            if path.is_symlink():
+                entries[path.relative_to(root).as_posix()] = f"-> {os.readlink(path)}"
+            elif path.is_file():
+                entries[path.relative_to(root).as_posix()] = "file"
+    return entries
+
+
+def test_symbolic_links_are_recreated_as_links_with_their_own_targets(tmp_path: Path):
+    """
+    User decision 2026-11-03: the listing follows links (`--follow`, `hooks/fileSuggestions.ts`), and each
+    link is recreated as a link, as a git checkout has it: never as a copy of its target, and a linked
+    folder's files are not duplicated as real files.
+    """
+    outside = tmp_path / "shared"
+    (outside / "data").mkdir(parents=True)
+    (outside / "data" / "big.bin").write_text("outside")
+    (outside / "VERSION").write_text("1")
+    source = tmp_path / "src"
+    ws = make_script_project(source)
+    ws.write_file("lib/sub/helper.sh", "helper() { :; }\n")
+    os.symlink("greet.sh", source / "lib/alias.sh")  # a relative link to a file
+    os.symlink("lib/sub", source / "helpers")  # a relative link to a folder
+    os.symlink("../lib", source / "tests/lib")  # a nested relative link to a folder
+    os.symlink(outside / "data", source / "data")  # an absolute link to a folder outside the project
+    os.symlink(outside / "VERSION", source / "VERSION")  # an absolute link to a file
+    copy = tmp_path / "copy"
+    copy_project(source, copy, SCRIPT_PROJECT_CONFIG.rules)
+    entries = copied_entries(copy)
+    assert {name: kind for name, kind in entries.items() if kind != "file"} == {
+        "VERSION": f"-> {outside / 'VERSION'}", "data": f"-> {outside / 'data'}", "helpers": "-> lib/sub",
+        "lib/alias.sh": "-> greet.sh", "tests/lib": "-> ../lib"}
+    assert sorted(name for name, kind in entries.items() if kind == "file") == [
+        ".tddagents/project.json", "deps.txt", "lib/greet.sh", "lib/sub/helper.sh", "run-tests.sh", "setup.sh",
+        "tests/test_greet.sh", "vendor/strings/lib.sh"]
+    assert (copy / "lib/alias.sh").read_text() == ws.read_file("lib/greet.sh")
+    assert (copy / "helpers/helper.sh").read_text() == "helper() { :; }\n"
+    assert (copy / "data/big.bin").read_text() == "outside"
+
+
+def test_a_broken_or_looping_link_does_not_break_the_copy(tmp_path: Path):
+    """
+    rg reports a broken link, and a link back to an ancestor, on stderr and exits 2 with the rest of the
+    listing, which `rip_grep` returns as upstream's `ripGrep` does. Neither link is listed, so neither is
+    recreated, and the final run still passes.
+    """
+    source = tmp_path / "thread" / "project"
+    ws = make_script_project(source)
+    os.symlink("nowhere.sh", source / "lib/broken.sh")
+    os.symlink("..", source / "lib/loop")
+    listing = ws.execute(shlex.join([ripgrep_command(ws), *LISTING_ARGS, "."]))
+    assert listing.exit_code == 2 and "lib/broken.sh" in listing.stderr and "loop" in listing.stderr
+    copy = tmp_path / "copy"
+    copy_project(source, copy, SCRIPT_PROJECT_CONFIG.rules)
+    assert copied_entries(copy) == {name: "file" for name in (
+        ".tddagents/project.json", "deps.txt", "lib/greet.sh", "run-tests.sh", "setup.sh", "tests/test_greet.sh",
+        "vendor/strings/lib.sh")}
+    assert final(ws).summary.startswith("passed (exit 0"), "a broken link must not fail the final run"
 
 
 def test_an_undeclared_dependency_kept_out_by_a_nested_gitignore_is_not_passing(tmp_path: Path):
