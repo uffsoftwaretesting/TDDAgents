@@ -217,7 +217,7 @@ class TestShippedPrompt:
                 assert value not in raw, f"{path.name} hard-codes {value}"
         assert set(PROJECT_CONFIG_PROMPT_VARS) == {
             "JUNIT_REPORT_ENV", "COVERAGE_REPORT_ENV", "PROJECT_CONFIG_HEADING", "PROJECT_CONFIG_FILE",
-            "PROJECT_CONFIG_VERSION"}
+            "PROJECT_CONFIG_VERSION", "PROJECT_CONFIG_SKILL"}
         rule = f"{COVERAGE_RULE_OF_THUMB:.0f}%"
         for path in (SKILL_DIR / "prompt.md", SKILL_DIR / "references" / "shared.md"):
             raw = Path(path).read_text(encoding="utf-8")
