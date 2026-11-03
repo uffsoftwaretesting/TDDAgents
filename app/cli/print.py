@@ -567,8 +567,11 @@ async def open_session_run(
     is_interactive = interactive if interactive is not None else can_use_tool is not None
     bootstrap = SessionBootstrap(session_id=run_id, original_cwd=cwd, is_interactive=is_interactive)
     store = AppStateStore(state=AppState(tool_permission_context=perm, tdd_plan=plan, bootstrap=bootstrap))
+    from app.skills.bundled.index import init_bundled_skills
     from app.skills.load_skills_dir import get_skill_registry
 
+    # `initBundledSkills` before `getCommands` (`main.tsx`): the code-built bundled skills.
+    init_bundled_skills()
     # `getSkills`, once per run: bundled, policy, user and the project dirs up to home.
     skill_registry = get_skill_registry(root_dir, home, managed_dir, model=config.model)
     locations = run_settings_locations(config, root_dir, home, managed_dir)
