@@ -1,19 +1,20 @@
 ---
 name: RunTests
-description: Runs the test suite with pytest, measures coverage, and records the run in the TDD phase ledger.
+description: Runs the project's declared test command over the whole suite, reads its JUnit and coverage reports, and records the run in the TDD phase ledger.
 ---
-Runs pytest in the workspace and returns what it observed:
+Runs the test command the approved plan declares for the project, over the whole suite, and returns what it observed:
 
-- the exit code with pytest's meaning of it;
-- the test files pytest reported collection errors for, the test files it did not collect, and the number of skipped tests, as pytest's reports record them;
-- the line and branch coverage it measured;
+- the command, and its exit code with the shell's meaning of it;
+- what the JUnit report the command wrote records: the number of tests, and how many failed, errored or were skipped;
+- the declared test files the JUnit report does not name, or that this is unknown when the report names no files;
+- the line and branch coverage of the production code, when the project declares a coverage report;
 - a `TDD ledger:` line: what the run did to the TDD ledger, the current phase's rule, and whether the run met it;
-- the raw pytest output, which includes the uncovered lines (`Missing`). It is verbose on purpose: the failure detail is the most valuable thing you will read.
+- the raw output of the command. It is verbose on purpose: the failure detail is the most valuable thing you will read.
 
 Failing tests are a result, not an error.
 
 The phase rules:
-- RED ends with a run that passes, fails, or stops on collection errors pytest reports, after the sub-requirement's test files changed.
-- GREEN and REFACTOR each end with a run in which every test passes (exit 0), none is skipped and every test file is collected.
+- RED ends with a completed run of the test command (its tests pass or fail) after the sub-requirement's test files changed.
+- GREEN and REFACTOR each end with a run that exits 0 and whose JUnit report records tests, none failed, errored or skipped, and every declared test file run.
 
-Any other run (interrupted, an internal or usage error, no tests collected, a timeout) is reported as an error and leaves the ledger unchanged.
+Any other run (a command that is not executable or not found, one that was killed or timed out, an exit 0 with no JUnit report or no tests in it) is reported as an error and leaves the ledger unchanged.

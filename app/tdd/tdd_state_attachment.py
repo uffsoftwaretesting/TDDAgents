@@ -93,8 +93,8 @@ def create_tdd_state_attachment_message(
             lines.append("No RunTests run has been observed yet.")
         else:
             lines.append(
-                f"Last RunTests run (recorded by RunTests, not by the model): {last_test_run.test_path} "
-                f"exited {last_test_run.exit_code}"
+                f"Last RunTests run (recorded by RunTests, not by the model): `{last_test_run.command}` "
+                f"exited {last_test_run.exit_code} ({last_test_run.meaning})"
             )
             output = last_test_run.stdout
             if last_test_run.stderr.strip():

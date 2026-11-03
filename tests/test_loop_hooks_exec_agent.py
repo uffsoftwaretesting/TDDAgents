@@ -434,8 +434,8 @@ def test_verifier_run_tests_never_moves_parent_ledger():
 
     runs: list[str] = []
 
-    def failing_suite(path: str, ctx: Any = None) -> SuiteExecutionResult:
-        runs.append(path)
+    def failing_suite(ctx: Any) -> SuiteExecutionResult:
+        runs.append("run")
         return SuiteExecutionResult(exit_code=1, stdout="1 failed")
 
     tools = tuple(t for t in build_builtin_tools() if t.name != "RunTests") + (

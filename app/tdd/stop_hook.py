@@ -72,13 +72,10 @@ def _last_run_fact(state: LoopState, phase: TddPhase) -> str:
     read "the last run exited 0" as REFACTOR already met (2026-10-28). A run recorded in this phase
     did not meet the rule, or the phase would have moved on.
     """
-    from app.tdd.run_tests_tool.run_tests_tool import exit_semantic
-
     run = state.tool_context.get_app_state().last_test_run
     if run is None or run.phase != phase:
         return f"no RunTests run since {phase.value} started"
-    return (f"the last RunTests run in {phase.value} exited {run.exit_code} ({exit_semantic(run.exit_code).meaning}) "
-            "and did not meet it")
+    return f"the last RunTests run in {phase.value} exited {run.exit_code} ({run.meaning}) and did not meet it"
 
 
 def incomplete_cycle_message(ledger: PhaseLedger, state: LoopState) -> str:

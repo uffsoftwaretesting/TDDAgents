@@ -37,7 +37,9 @@ from app.tdd.tdd_state_attachment import (
     tdd_state_data,
 )
 from app.tool import tool_context_for
+from app.tdd.junit_report import JUnitReport
 from tests.conftest import FakeWorkspace
+from tests.plan_helpers import TEST_PROJECT_CONFIG
 
 CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 CONFIG = build_run_config("advance")
@@ -55,7 +57,8 @@ RED = PhaseLedger()
 
 
 def store_with(plan: TddPlan, ledger: PhaseLedger = RED, **kw: Any) -> AppStateStore:
-    return AppStateStore(state=AppState(tdd_plan=plan, phase_ledger=ledger, **kw))
+    values: dict[str, Any] = {"project_config": TEST_PROJECT_CONFIG, **kw}
+    return AppStateStore(state=AppState(tdd_plan=plan, phase_ledger=ledger, **values))
 
 
 # ── advance_plan ─────────────────────────────────────────────────────────────
@@ -72,7 +75,7 @@ def test_an_incomplete_cycle_leaves_the_decision_to_the_tdd_hook():
 
 
 def test_a_completed_cycle_advances_resets_the_ledger_and_announces_the_next_item(tmp_path: Path):
-    record = TestRunRecord(test_path="t", exit_code=0)
+    record = TestRunRecord(command="t", exit_code=0)
     store = store_with(TddPlan.from_texts(["A", "B"]), CYCLE, last_test_run=record)
     result = advance_plan(state_for(store, plan_file=tmp_path / PLAN_FILE_NAME))
     plan = store.get().tdd_plan
@@ -230,11 +233,11 @@ def drive(store: AppStateStore, model: Scripted, steps: list[Step]) -> tuple[Ter
     pending = list(steps)
     workspace = FakeWorkspace()
 
-    def runner(path: str) -> SuiteExecutionResult:
+    def runner(context: Any) -> SuiteExecutionResult:
         code, coverage, new_tests = pending.pop(0)
         if new_tests:
             workspace.files[f"tests/test_{len(workspace.files)}.py"] = "def test_x():\n    pass\n"
-        return SuiteExecutionResult(exit_code=code, coverage=coverage)
+        return SuiteExecutionResult(exit_code=code, coverage=coverage, report=JUnitReport(tests=1, failures=code))
 
     tools = [build_run_tests_tool(runner)]
 

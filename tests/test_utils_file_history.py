@@ -554,7 +554,7 @@ def test_handle_rewind_files_rewinds_and_restarts_the_ledger_in_red(h: Harness) 
     green = PhaseLedger(phase=TddPhase.GREEN, tests_written=True, green_passed=True)
     from app.tdd.ledger import TestRunRecord
 
-    run = TestRunRecord(test_path="tests", exit_code=0)
+    run = TestRunRecord(command="tests", exit_code=0)
     from tests.plan_helpers import TEST_PROJECT_CONFIG
 
     h.store.update(lambda s: dataclasses.replace(s, phase_ledger=green, last_test_run=run,

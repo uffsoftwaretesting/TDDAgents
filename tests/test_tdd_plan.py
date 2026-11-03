@@ -338,7 +338,7 @@ def test_replace_pending_keeps_done_items_and_replaces_the_rest():
 def test_moving_the_work_to_another_item_restarts_the_ledger(tmp_path: Path):
     from app.tdd.ledger import TestRunRecord
 
-    record = TestRunRecord(test_path="t", exit_code=1)
+    record = TestRunRecord(command="t", exit_code=1)
     red = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
     for change in (lambda p: p.remove("1"), lambda p: p.move("2", 1), lambda p: p.edit("1", "A2"),
                    lambda p: p.replace_pending(["X"])):

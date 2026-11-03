@@ -49,12 +49,12 @@ def test_hook_allows_exit_when_cycle_complete():
     asyncio.run(go())
 
 
-RED_RULE = ("RED ends with a run that passes, fails, or stops on collection errors pytest reports, after the "
+RED_RULE = ("RED ends with a completed run of the test command (its tests pass or fail) after the "
             "sub-requirement's test files changed")
-GREEN_RULE = ("GREEN ends with a run in which every test passes (exit 0), none is skipped and every test file is "
-              "collected")
-REFACTOR_RULE = ("REFACTOR ends with a run in which every test passes (exit 0), none is skipped and every test file "
-                 "is collected")
+GREEN_RULE = ("GREEN ends with a run that exits 0 and whose JUnit report records tests, none failed, errored or "
+              "skipped, and every declared test file run")
+REFACTOR_RULE = ("REFACTOR ends with a run that exits 0 and whose JUnit report records tests, none failed, errored "
+                 "or skipped, and every declared test file run")
 WRITE_TESTS = ("Write or extend the tests for this sub-requirement, covering every relevant scenario and edge case, "
                "then run RunTests.")
 #: A context with no workspace cannot read the test files.
@@ -199,12 +199,12 @@ def test_red_names_the_update_plan_way_only_when_the_pool_has_it():
     assert RED_DUPLICATE_WAY not in _refusal(green, tools=(SimpleNamespace(name="UpdatePlan"),))
 
 
-@pytest.mark.parametrize("code, meaning", [(1, "some tests failed"), (2, "test execution was interrupted")])
+@pytest.mark.parametrize("code, meaning", [(1, "the test command failed"), (2, "the test command failed")])
 def test_green_and_refactor_name_the_last_run_of_their_own_phase(code, meaning):
     from app.tdd.ledger import TestRunRecord
 
     def run_in(phase: TddPhase) -> TestRunRecord:
-        return TestRunRecord(test_path=".", exit_code=code, stdout="", stderr="", phase=phase)
+        return TestRunRecord(command="make test", exit_code=code, stdout="", stderr="", meaning=meaning, phase=phase)
 
     green = AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True),
                      last_test_run=run_in(TddPhase.GREEN))
@@ -225,7 +225,7 @@ def test_a_passing_run_from_the_phase_before_is_never_named(phase, earlier):
     from app.tdd.ledger import TestRunRecord
 
     ledger = PhaseLedger(phase=phase, tests_written=True, green_passed=phase == TddPhase.REFACTOR)
-    for record in (TestRunRecord(test_path=".", exit_code=0, phase=earlier), TestRunRecord(test_path=".", exit_code=0),
+    for record in (TestRunRecord(command=".", exit_code=0, phase=earlier), TestRunRecord(command=".", exit_code=0),
                    None):
         refusal = _refusal(AppState(phase_ledger=ledger, last_test_run=record))
         assert f": {no_run(phase.value)}." in refusal and "exited 0" not in refusal
