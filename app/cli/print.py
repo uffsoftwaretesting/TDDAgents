@@ -230,16 +230,14 @@ def coordinator_context(config: RunConfig) -> dict[str, Any]:
 def session_workspace(thread_id: str) -> LocalWorkspace:
     """
     The session's project (Phase 13): its own folder outside TDDAgents', with seeded settings
-    (`app/workspace/project.py`) and its own venv (`app/workspace/pyenv.py`), activated for every
-    command by the session environment script (`app/utils/session_environment.py`).
+    (`app/workspace/project.py`). No environment is built for it (2026-11-03, user decision: as
+    claude-code): the project sets itself up from its own manifests, with the commands it declares.
     """
     from app.workspace.project import prepare_project
-    from app.workspace.pyenv import ensure_session_python
 
     workspace = LocalWorkspace.for_run(thread_id)
-    project = prepare_project(workspace.root)
-    python = ensure_session_python(project)
-    return LocalWorkspace.for_run(thread_id, env=python.write_env_file(workspace.run_dir / "session-env.sh"))
+    prepare_project(workspace.root)
+    return workspace
 
 
 class NoConversationFound(LookupError):

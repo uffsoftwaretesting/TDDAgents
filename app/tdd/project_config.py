@@ -39,7 +39,7 @@ import pathspec
 logger = logging.getLogger("TDDOrchestrator.ProjectConfig")
 
 #: Where the approved configuration lives, inside the project's protected `.tddagents/` directory.
-PROJECT_CONFIG_PATH = ".tddagents/project.json"
+PROJECT_CONFIG_FILE = ".tddagents/project.json"
 #: The schema version this module reads and writes.
 PROJECT_CONFIG_VERSION = 1
 #: Where RunTests asks the test command to write its reports (discarded before every run).
@@ -299,18 +299,18 @@ def load_project_config(workspace: Any) -> ProjectConfig | None:
     if not callable(reader):
         return None
     try:
-        text = str(reader(PROJECT_CONFIG_PATH))
+        text = str(reader(PROJECT_CONFIG_FILE))
     except Exception:  # noqa: BLE001 - no file (or no readable one) is no configuration
         return None
     config, issues = parse_project_config_text(text)
     if config is None:
-        logger.warning("Ignoring invalid %s: %s", PROJECT_CONFIG_PATH, "; ".join(issues))
+        logger.warning("Ignoring invalid %s: %s", PROJECT_CONFIG_FILE, "; ".join(issues))
     return config
 
 
 def save_project_config(workspace: Any, config: ProjectConfig) -> None:
     """Write the configuration to `.tddagents/project.json` through the workspace."""
-    workspace.write_file(PROJECT_CONFIG_PATH, config.to_json())
+    workspace.write_file(PROJECT_CONFIG_FILE, config.to_json())
 
 
 __all__ = [
@@ -319,7 +319,7 @@ __all__ = [
     "COVERAGE_REPORT_ENV",
     "DEFAULT_JUNIT_REPORT",
     "JUNIT_REPORT_ENV",
-    "PROJECT_CONFIG_PATH",
+    "PROJECT_CONFIG_FILE",
     "PROJECT_CONFIG_SKILL",
     "PROJECT_CONFIG_VERSION",
     "REPORTS_DIR",

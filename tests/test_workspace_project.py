@@ -1,6 +1,6 @@
 """
-Phase 13: each session's project has its own folder outside TDDAgents', a git working tree with
-its own venv, settings seeded from TDDAgents' defaults, and every lookup rooted at it.
+Phase 13: each session's project has its own folder outside TDDAgents', with settings seeded from
+TDDAgents' defaults and every lookup rooted at it. Since 2026-11-03 no environment is built for it.
 """
 
 from __future__ import annotations
@@ -15,11 +15,8 @@ from app.cli.print import project_root_of, run_permission_context
 from app.query.config import build_run_config
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
-from app.tdd.run_tests_tool.run_tests_tool import (
-    SuiteExecutionResult,
-    build_run_tests_tool,
-    skipped_count,
-)
+from app.tdd.junit_report import JUnitReport
+from app.tdd.run_tests_tool.run_tests_tool import SuiteExecutionResult, build_run_tests_tool
 from app.tool import tool_context_for
 from app.types.permissions import PermissionMode
 from app.workspace.local import LocalWorkspace, workspaces_root
@@ -65,22 +62,21 @@ def test_without_shipped_settings_none_are_seeded(tmp_path):
     assert not (project / ".tddagents").exists()
 
 
-def test_the_venv_is_activated_by_the_session_environment_script_after_the_profile(tmp_path, session_python):
+def test_the_shipped_settings_hold_no_allow_rules():
+    """As upstream, which ships none (user decision 2026-11-03): only the default mode."""
+    assert json.loads(SHIPPED_SETTINGS.read_text()) == {"permissions": {"defaultMode": "acceptEdits"}}
+
+
+def test_an_external_environment_script_runs_after_the_profile(tmp_path):
     # `bashProvider.ts`: the session env script (upstream's `CLAUDE_ENV_FILE`) runs after the shell
-    # profile, so a profile that prepends its own bin (as `~/.profile` does with `~/.local/bin`)
-    # cannot shadow the project's venv.
+    # profile, so a profile that prepends its own bin (as `~/.profile` does) cannot shadow it.
     home = tmp_path / "home"
     (home / "bin").mkdir(parents=True)
-    (home / "bin" / "python").write_text("#!/bin/sh\necho shadow\n")
-    (home / "bin" / "python").chmod(0o755)
-    (home / ".bash_profile").write_text(f'export PATH="{home / "bin"}:$PATH"\n')
-    env = session_python.write_env_file(tmp_path / "session-env.sh")
-    assert env == {"TDDAGENTS_ENV_FILE": str(tmp_path / "session-env.sh")}
-    assert (tmp_path / "session-env.sh").read_text() == (
-        f"export VIRTUAL_ENV={session_python.venv_dir}\nexport PATH=\"$VIRTUAL_ENV/bin:$PATH\"\n")
-    ws = LocalWorkspace(tmp_path / "p", env={**env, "HOME": str(home)})
-    assert ws.execute("python -c 'import sys; print(sys.prefix)'").stdout.strip() == str(session_python.venv_dir)
-    assert ws.execute('echo "$VIRTUAL_ENV"').stdout.strip() == str(session_python.venv_dir)
+    (home / ".bash_profile").write_text(f'export PATH="{home / "bin"}:$PATH"\nexport WHO=profile\n')
+    script = tmp_path / "env.sh"
+    script.write_text("export WHO=script\n")
+    ws = LocalWorkspace(tmp_path / "p", env={"TDDAGENTS_ENV_FILE": str(script), "HOME": str(home)})
+    assert ws.execute('echo "$WHO"').stdout.strip() == "script"
 
 
 # ── everything is read from the project ──────────────────────────────────────
@@ -101,22 +97,14 @@ def test_settings_come_from_the_project_not_the_process_cwd(tmp_path, monkeypatc
 
 # ── a skipped test is not a pass ─────────────────────────────────────────────
 
-@pytest.mark.parametrize("output, count", [
-    ("== 3 passed, 1 skipped in 0.1s ==", 1),
-    ("== 2 skipped in 0.1s ==", 2),
-    ("== 1 passed, 10 skipped, 1 warning in 0.1s ==", 10),
-    ("== 4 passed in 0.1s ==", 0),
-    ("", 0),
-])
-def test_skipped_tests_are_counted_from_pytests_summary(output, count):
-    assert skipped_count(output) == count
-
 
 def skip_lines(phase: TddPhase) -> list[str]:
     """The observation and the ledger line of a passing run with one skipped test (2026-10-28: no advice)."""
     from app.tdd.run_tests_tool.run_tests_tool import PHASE_RULES
 
-    return ["Exit code 0 (pytest: all tests passed)", "Skipped: 1", "Coverage: not measured",
+    return ["Exit code 0 (the test command completed)", "JUnit report: 4 test(s), 0 failed, 0 errored, 1 skipped",
+            "Declared test files the JUnit report does not name: unknown (the report names no files)",
+            "Coverage: not measured",
             f"TDD ledger: still {phase.value}. {PHASE_RULES[phase]}: 1 test(s) were skipped."]
 
 
@@ -124,29 +112,18 @@ def skip_lines(phase: TddPhase) -> list[str]:
 def test_a_pass_with_skips_does_not_pass_green_or_refactor(phase):
     ledger = PhaseLedger(phase=phase, tests_written=True, green_passed=phase == TddPhase.REFACTOR)
     store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG, phase_ledger=ledger))
-    result = SuiteExecutionResult(exit_code=0, stdout="== 3 passed, 1 skipped ==")
-    res = asyncio.run(build_run_tests_tool(lambda p: result).call({}, tool_context_for(store)))
+    result = SuiteExecutionResult(exit_code=0, stdout="3 passed, 1 skipped", report=JUnitReport(tests=4, skipped=1))
+    res = asyncio.run(build_run_tests_tool(lambda c: result).call({}, tool_context_for(store)))
     assert res.content.split("\n\n", 1)[0].splitlines() == skip_lines(phase)
     assert store.get().phase_ledger == ledger
     assert not store.get().phase_ledger.is_cycle_complete
 
 
-def test_an_injected_runner_can_report_its_skips():
-    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG,
-                                   phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
-    result = SuiteExecutionResult(exit_code=0, stdout="all good", skipped=1)
-    asyncio.run(build_run_tests_tool(lambda p: result).call({}, tool_context_for(store)))
-    assert store.get().phase_ledger.phase == TddPhase.GREEN
-    zero = SuiteExecutionResult(exit_code=0, stdout="== 1 skipped ==", skipped=0)
-    asyncio.run(build_run_tests_tool(lambda p: zero).call({}, tool_context_for(store)))
-    assert store.get().phase_ledger.phase == TddPhase.REFACTOR
-
-
 def test_skips_do_not_matter_in_red():
-    store = AppStateStore()
+    store = AppStateStore(AppState(project_config=TEST_PROJECT_CONFIG))
     ctx = tool_context_for(store, workspace=FakeWorkspace(files={"tests/test_a.py": "x"}))
-    result = SuiteExecutionResult(exit_code=0, stdout="== 1 skipped ==")
-    asyncio.run(build_run_tests_tool(lambda p: result).call({}, ctx))
+    result = SuiteExecutionResult(exit_code=0, report=JUnitReport(tests=1, skipped=1))
+    asyncio.run(build_run_tests_tool(lambda c: result).call({}, ctx))
     assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
@@ -158,10 +135,10 @@ def test_real_pytest_skips_keep_green_until_the_tool_is_there(python_workspace):
         "\n\ndef test_lint():\n    pytest.importorskip('not_installed_anywhere')\n"))
     store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG,
                                    phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
-    res = asyncio.run(build_run_tests_tool(None).call({"test_path": "tests"}, tool_context_for(store, workspace=ws)))
-    assert res.exit_code == 0 and "Skipped: 1\n" in res.content
-    assert skip_lines(TddPhase.GREEN)[-1] in res.content
-    assert "SKIPPED" in res.content and "not_installed_anywhere" in res.content  # -rs lists the reason
+    res = asyncio.run(build_run_tests_tool(None).call({}, tool_context_for(store, workspace=ws)))
+    assert res.exit_code == 0 and "JUnit report: 2 test(s), 0 failed, 0 errored, 1 skipped\n" in res.content
+    assert ("TDD ledger: still GREEN. GREEN ends with a run that exits 0 and whose JUnit report records tests, none "
+            "failed, errored or skipped, and every declared test file run: 1 test(s) were skipped.") in res.content
     assert store.get().phase_ledger.phase == TddPhase.GREEN
 
 

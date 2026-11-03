@@ -45,7 +45,7 @@ from app.tdd.plan import (
     update_tdd_plan,
 )
 from app.tdd.project_config import (
-    PROJECT_CONFIG_PATH,
+    PROJECT_CONFIG_FILE,
     PROJECT_CONFIG_SKILL,
     ProjectConfig,
     save_project_config,
@@ -203,7 +203,7 @@ def build_exit_plan_mode_tool() -> BuiltTool:
             metadata={"plan": plan, "filePath": str(file_path), "isAgent": bool(agent_id),
                       "planWasEdited": input_plan is not None, "subRequirements": items,
                       "projectConfig": config.to_dict() if config is not None else None,
-                      "projectConfigPath": PROJECT_CONFIG_PATH if config is not None else None},
+                      "projectConfigPath": PROJECT_CONFIG_FILE if config is not None else None},
         )
 
     return build_tool(

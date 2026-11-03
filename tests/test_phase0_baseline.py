@@ -29,15 +29,8 @@ from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tool import tool_context_for
 from app.types.permissions import PermissionMode
-from app.workspace import pyenv
-from app.workspace.local import LocalWorkspace
-from app.workspace.pyenv import (
-    REQUIRED_PACKAGES,
-    SESSION_VENV_DIRNAME,
-    SessionPython,
-    SessionPythonError,
-    ensure_session_python,
-)
+from app.workspace.local import LocalWorkspace, orchestrator_free_environment
+from tests.conftest import REQUIRED_PACKAGES
 from tests.source_scan import calls_to, original_nodes
 
 REPO = Path(__file__).resolve().parent.parent
@@ -55,104 +48,48 @@ def initial_tdd_state(sub_requirement: str) -> str:
     )
 
 
-# ── session Python environment ───────────────────────────────────────────────
-
-class FakeRunner:
-    """Scripted subprocess.run: records argv, answers by the first matching rule."""
-
-    def __init__(self, rules: list[tuple[str, Any]], create_python: bool = True) -> None:
-        self.rules = rules
-        self.calls: list[list[str]] = []
-        self.create_python = create_python
-
-    def __call__(self, argv: list[str], **kwargs: Any) -> Any:
-        assert kwargs == {"capture_output": True, "text": True}
-        self.calls.append(argv)
-        if self.create_python and "venv" in argv:
-            python = Path(argv[-1]) / "bin" / "python"
-            python.parent.mkdir(parents=True)
-            python.write_text("")
-        for needle, code in self.rules:
-            if needle in " ".join(argv):
-                if isinstance(code, tuple):
-                    code = code[0] if len(self.calls) <= code[1] else code[2]
-                return SimpleNamespace(returncode=code, stdout="out", stderr="boom" if code else "")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+# ── the test venv and the project's environment (2026-11-03) ─────────────────
 
 
 def test_required_packages_pin_matches_requirements():
     reqs = (REPO / "requirements.txt").read_text().split()
     assert REQUIRED_PACKAGES == ("pip==26.0.1", "pytest==9.0.1", "pytest-cov==7.0.0", "coverage==7.11.3")
     assert all(pkg in reqs for pkg in REQUIRED_PACKAGES)
-    assert SESSION_VENV_DIRNAME == ".venv"
 
 
-def test_session_python_paths_and_env_file(tmp_path):
-    sp = SessionPython(tmp_path / "venv")
-    assert sp.bin_dir == tmp_path / "venv" / "bin"
-    assert sp.python == tmp_path / "venv" / "bin" / "python"
-    env = sp.write_env_file(tmp_path / "deep" / "session-env.sh")
-    assert env == {"TDDAGENTS_ENV_FILE": str(tmp_path / "deep" / "session-env.sh")}
-    assert (tmp_path / "deep" / "session-env.sh").read_text() == (
-        f"export VIRTUAL_ENV={tmp_path / 'venv'}\nexport PATH=\"$VIRTUAL_ENV/bin:$PATH\"\n")
+def test_no_session_venv_is_built_any_more():
+    """User decision 2026-11-03: as claude-code, the project sets itself up from its own manifests."""
+    assert not (REPO / "app" / "workspace" / "pyenv.py").exists()
 
 
-def test_ensure_creates_then_provisions(tmp_path):
-    # import probe fails once (before install), then succeeds
-    runner = FakeRunner([("import pip, pytest, pytest_cov", (1, 2, 0))])
-    sp = ensure_session_python(tmp_path / "run", creator="/py", runner=runner)
-    assert sp.venv_dir == tmp_path / "run" / ".venv"
-    assert runner.calls[0] == ["/py", "-m", "venv", "--without-pip", str(sp.venv_dir)]
-    assert runner.calls[1] == [str(sp.python), "-c", "import pip, pytest, pytest_cov"]
-    assert runner.calls[2] == ["/py", "-m", "pip", "--python", str(sp.python), "install", "--quiet",
-                               *REQUIRED_PACKAGES]
-    assert runner.calls[3] == [str(sp.python), "-c", "import pip, pytest, pytest_cov"]
-
-
-def test_ensure_is_idempotent(tmp_path):
-    (tmp_path / ".venv" / "bin").mkdir(parents=True)
-    (tmp_path / ".venv" / "bin" / "python").write_text("")
-    runner = FakeRunner([])
-    ensure_session_python(tmp_path, creator="/py", runner=runner)
-    assert runner.calls == [[str(tmp_path / ".venv" / "bin" / "python"), "-c", "import pip, pytest, pytest_cov"]]
-
-
-@pytest.mark.parametrize("failing, message", [
-    ("--without-pip", "could not create the session venv: boom"),
-    ("install", "could not install the test toolchain into the session venv: boom"),
-])
-def test_ensure_reports_provisioning_failures(tmp_path, failing, message):
-    runner = FakeRunner([(failing, 1), ("import pip, pytest, pytest_cov", 1)], create_python=failing != "--without-pip")
-    with pytest.raises(SessionPythonError, match=f"^{message}$"):
-        ensure_session_python(tmp_path, creator="/py", runner=runner)
-
-
-def test_ensure_fails_when_install_does_not_take(tmp_path):
-    runner = FakeRunner([("import pip, pytest, pytest_cov", 1)])
-    with pytest.raises(SessionPythonError, match="still not importable"):
-        ensure_session_python(tmp_path, creator="/py", runner=runner)
-
-
-def test_failure_without_output_reports_exit_code(tmp_path):
-    def runner(argv, **kw):
-        return SimpleNamespace(returncode=7, stdout="", stderr="")
-
-    with pytest.raises(SessionPythonError, match="exit 7"):
-        ensure_session_python(tmp_path, creator="/py", runner=runner)
-
-
-def test_session_python_is_real_and_isolated(session_python):
+def test_the_test_venv_is_real_and_isolated(test_venv):
+    python = test_venv / "bin" / "python"
     script = "import pytest, pytest_cov, sys; print(pytest.__version__);print(sys.prefix)"
-    out = subprocess.run([str(session_python.python), "-c", script],
-                         capture_output=True, text=True, check=True).stdout.split()
-    assert out[0] == "9.0.1"
-    assert out[1] == str(session_python.venv_dir)
+    out = subprocess.run([str(python), "-c", script], capture_output=True, text=True, check=True).stdout.split()
+    assert out == ["9.0.1", str(test_venv)]
     # TDDAgents' own dependencies are not visible to generated code
-    probe = subprocess.run(
-        [str(session_python.python), "-c", "import langchain_core"], capture_output=True, check=False
-    )
-    assert probe.returncode != 0
-    assert pyenv.has_packages(session_python.python, subprocess.run) is True
+    assert subprocess.run([str(python), "-c", "import langchain_core"], capture_output=True).returncode != 0
+
+
+@pytest.mark.parametrize(("environ", "expected"), [
+    ({"PATH": "/own/bin:/usr/bin::/own/bin/../bin"}, {"PATH": "/usr/bin:"}),
+    ({"PATH": "/usr/bin", "VIRTUAL_ENV": "/own"}, {"PATH": "/usr/bin"}),
+    ({"PATH": "/usr/bin", "VIRTUAL_ENV": "/other"}, {"PATH": "/usr/bin", "VIRTUAL_ENV": "/other"}),
+    ({"HOME": "/h"}, {"HOME": "/h"}),
+])
+def test_the_orchestrators_interpreter_leaves_the_environment(environ, expected):
+    assert orchestrator_free_environment(environ, prefix="/own") == expected
+
+
+def test_a_project_command_never_resolves_the_orchestrators_python(tmp_path, monkeypatch):
+    """PATH isolation: TDDAgents runs from its venv, and the project must not see it."""
+    own_bin = os.path.join(sys.prefix, "bin")
+    monkeypatch.setenv("PATH", f"{own_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("VIRTUAL_ENV", sys.prefix)
+    ws = LocalWorkspace(str(tmp_path / "w"))
+    path = ws.execute('echo "$PATH"').stdout.strip().split(os.pathsep)
+    assert own_bin not in path
+    assert ws.execute('echo "${VIRTUAL_ENV:-unset}"').stdout.strip() == "unset"
 
 
 # ── workspace environment ────────────────────────────────────────────────────
@@ -173,10 +110,13 @@ def test_workspace_run_dir_and_for_run_env(tmp_path, monkeypatch):
     assert ws.execute('echo "$X"').stdout.strip() == "1"
 
 
-def test_python_workspace_runs_the_session_interpreter(python_workspace, session_python):
-    assert python_workspace.execute("python -c 'import sys; print(sys.prefix)'").stdout.strip() == str(
-        session_python.venv_dir)
-    assert python_workspace.execute("python -m pytest --version").exit_code == 0
+def test_python_workspace_declares_the_test_venvs_pytest(python_workspace, test_venv):
+    from app.tdd.project_config import load_project_config
+    from tests.plan_helpers import TEST_PROJECT_CONFIG
+
+    assert load_project_config(python_workspace) == TEST_PROJECT_CONFIG
+    assert python_workspace.execute('"$TDDAGENTS_TEST_PYTHON" -m pytest --version').exit_code == 0
+    assert python_workspace.execute('echo "$TDDAGENTS_TEST_PYTHON"').stdout.strip() == str(test_venv / "bin" / "python")
 
 
 # ── entry point health and the optional E2B key ──────────────────────────────
@@ -480,7 +420,8 @@ def test_runner_writes_the_transcript_outside_the_workspace(python_workspace):
     assert len(transcripts) == 1
     assert (project / transcripts[0].stem / "events.jsonl").is_file()
     # The project's `.tddagents/` holds only its settings (Phase 13), never run output.
-    assert sorted(p.name for p in (python_workspace.root / ".tddagents").iterdir()) == ["settings.json"]
+    assert sorted(p.name for p in (python_workspace.root / ".tddagents").iterdir()) == [
+        "project.json", "settings.json"]
 
 
 def _recording_deps(seen: list[Any]) -> Any:
@@ -540,21 +481,17 @@ def test_runner_tolerates_a_workspace_without_a_run_dir(make_fake_workspace):
     assert result.terminal_reason == "aborted_streaming"
 
 
-def test_session_workspace_wires_the_session_venv(tmp_path, monkeypatch):
+def test_session_workspace_is_the_seeded_project_with_no_environment(tmp_path, monkeypatch):
     import app.cli.print as runner_mod
 
     monkeypatch.setenv("TDDAGENTS_WORKSPACES_DIR", str(tmp_path / "runs"))
-    seen: list[Path] = []
-
-    def fake_ensure(project_dir: Path) -> SessionPython:
-        seen.append(Path(project_dir))
-        return SessionPython(Path(project_dir) / ".venv")
-
-    monkeypatch.setattr("app.workspace.pyenv.ensure_session_python", fake_ensure)
+    monkeypatch.delenv("TDDAGENTS_ENV_FILE", raising=False)
     ws = runner_mod.session_workspace("t-9")
     project = (tmp_path / "runs" / "t-9" / "project").resolve()
-    assert seen == [project] and ws.root == project
-    assert ws.execute('echo "$VIRTUAL_ENV"').stdout.strip() == str(project / ".venv")
+    assert ws.root == project and ws.run_dir == project.parent
+    # No venv and no session environment script (2026-11-03, as upstream).
+    assert not (project / ".venv").exists() and not (project.parent / "session-env.sh").exists()
+    assert ws.execute('echo "${TDDAGENTS_ENV_FILE:-unset}"').stdout.strip() == "unset"
     # The project has its seeded settings, and no git of ours (Phase 13, as upstream).
     assert not (project / ".git").exists() and not (project / ".gitignore").exists()
     shipped = (REPO / ".tddagents" / "settings.json").read_text()
@@ -591,27 +528,6 @@ def test_production_stop_hooks_enforce_barrier_three():
     assert "TDD cycle incomplete: RED." in str(result.blocking_errors[0].content)
 
 
-def test_provisioning_failure_reports_stdout_when_stderr_is_empty(tmp_path):
-    def runner(argv: list[str], **kw: Any) -> Any:
-        return subprocess.CompletedProcess(argv, 3, stdout="  only stdout  ", stderr="")
-
-    with pytest.raises(SessionPythonError, match="^could not create the session venv: only stdout$"):
-        ensure_session_python(tmp_path, runner=runner)
-
-
-def test_install_that_does_not_take_names_the_cause_exactly(tmp_path):
-    def runner(argv: list[str], **kw: Any) -> Any:
-        code = 1 if argv[1:3] == ["-c", "import pip, pytest, pytest_cov"] else 0
-        return subprocess.CompletedProcess(argv, code, stdout="", stderr="")
-
-    (tmp_path / "venv" / "bin").mkdir(parents=True)
-    (tmp_path / "venv" / "bin" / "python").write_text("")
-    with pytest.raises(SessionPythonError,
-                       match=("^pip, pytest and pytest-cov are still not importable in the session venv after "
-                              "installing them$")):
-        ensure_session_python(tmp_path, runner=runner)
-
-
 def test_local_execute_replaces_undecodable_output(tmp_path):
     ws = LocalWorkspace(tmp_path)
     res = ws.execute("printf 'a\\377b'")
@@ -630,12 +546,14 @@ def test_run_tests_carries_workspace_stderr(make_fake_workspace):
     from app.tdd.run_tests_tool.run_tests_tool import _default_test_runner
     from app.workspace.base import CommandResult
 
+    from tests.plan_helpers import TEST_PROJECT_CONFIG
+
     ws = make_fake_workspace()
-    ws.execute = lambda cmd, timeout=None: CommandResult(exit_code=1, stdout="out", stderr="err", duration=0.0,
-                                                         workspace="local")
-    ctx = tool_context_for(AppStateStore(), workspace=ws)
-    res = asyncio.run(_default_test_runner("tests", ctx))
-    assert (res.exit_code, res.stdout, res.stderr) == (1, "out", "err")
+    ws.execute = lambda cmd, timeout=None, env=None: CommandResult(exit_code=1, stdout="out", stderr="err",
+                                                                   duration=0.0, workspace="local")
+    ctx = tool_context_for(AppStateStore(AppState(project_config=TEST_PROJECT_CONFIG)), workspace=ws)
+    res = asyncio.run(_default_test_runner(ctx))
+    assert (res.exit_code, res.stdout, res.stderr, res.command) == (1, "out", "err", TEST_PROJECT_CONFIG.test)
 
 
 def test_run_tests_rejects_a_runner_result_without_an_exit_code():
@@ -644,9 +562,9 @@ def test_run_tests_rejects_a_runner_result_without_an_exit_code():
         _default_test_runner,
     )
 
-    ctx: Any = SimpleNamespace(test_runner=lambda path: object())
+    ctx: Any = SimpleNamespace(test_runner=lambda context: object())
     with pytest.raises(RunTestsUnavailable, match="^the attached test runner returned no exit code$"):
-        asyncio.run(_default_test_runner("tests", ctx))
+        asyncio.run(_default_test_runner(ctx))
 
 
 def test_run_tests_tool_is_serial():

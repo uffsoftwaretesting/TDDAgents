@@ -17,7 +17,7 @@ from app.tdd.project_config import (
     COVERAGE_REPORT_ENV,
     DEFAULT_JUNIT_REPORT,
     JUNIT_REPORT_ENV,
-    PROJECT_CONFIG_PATH,
+    PROJECT_CONFIG_FILE,
     REPORTS_DIR,
     CoverageReportConfig,
     ProjectConfig,
@@ -43,7 +43,7 @@ FULL: dict[str, Any] = {
 
 
 def test_the_constants_are_the_declared_ones():
-    assert (PROJECT_CONFIG_PATH, REPORTS_DIR, DEFAULT_JUNIT_REPORT) == (
+    assert (PROJECT_CONFIG_FILE, REPORTS_DIR, DEFAULT_JUNIT_REPORT) == (
         ".tddagents/project.json", ".tddagents/reports", ".tddagents/reports/junit.xml")
     assert (JUNIT_REPORT_ENV, COVERAGE_REPORT_ENV) == ("TDDAGENTS_JUNIT_REPORT", "TDDAGENTS_COVERAGE_REPORT")
     assert PROJECT_CONFIG_HEADING == "Project Configuration"
@@ -237,14 +237,14 @@ def test_save_and_load_through_the_workspace():
     ws = FakeWorkspace()
     config = ProjectConfig(test="t", test_files=("x",), setup="s")
     save_project_config(ws, config)
-    assert json.loads(ws.files[PROJECT_CONFIG_PATH]) == config.to_dict()
+    assert json.loads(ws.files[PROJECT_CONFIG_FILE]) == config.to_dict()
     assert load_project_config(ws) == config
 
 
 def test_no_file_an_invalid_file_and_no_workspace_load_nothing(caplog: pytest.LogCaptureFixture):
     assert load_project_config(FakeWorkspace()) is None
     assert load_project_config(None) is None
-    ws = FakeWorkspace(files={PROJECT_CONFIG_PATH: '{"version": 1}'})
+    ws = FakeWorkspace(files={PROJECT_CONFIG_FILE: '{"version": 1}'})
     with caplog.at_level("WARNING"):
         assert load_project_config(ws) is None
     assert "Ignoring invalid .tddagents/project.json" in caplog.text

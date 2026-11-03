@@ -44,7 +44,7 @@ def test_the_rule_of_thumb_is_named_once_in_code_and_filled_into_the_prompts():
     assert TDD_PROMPT_VARS["JUNIT_REPORT_ENV"] == "TDDAGENTS_JUNIT_REPORT"
     assert TDD_PROMPT_VARS["COVERAGE_REPORT_ENV"] == "TDDAGENTS_COVERAGE_REPORT"
     assert TDD_PROMPT_VARS["PROJECT_CONFIG_HEADING"] == "Project Configuration"
-    assert TDD_PROMPT_VARS["PROJECT_CONFIG_PATH"] == ".tddagents/project.json"
+    assert TDD_PROMPT_VARS["PROJECT_CONFIG_FILE"] == ".tddagents/project.json"
     assert TDD_PROMPT_VARS["PROJECT_CONFIG_SKILL"] == "tdd-project-config"
     contract = _file_section("tdd-contract.md")()
     start = development_approved_prompt(TddPlan.from_texts(["a"]))
