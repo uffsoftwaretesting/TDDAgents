@@ -236,7 +236,7 @@ class TestDefinition:
         reg = get_skill_registry(tmp_path, tmp_path / "home", tmp_path / "etc", bundled_dir=tmp_path / "none")
         command = reg.find_command("tdd-project-config")
         assert command is not None and skill_has_only_safe_properties(command)
-        assert [c.name for c in reg.get_skill_tool_commands()] == ["tdd-project-config"]
+        assert [c.name for c in reg.get_skill_tool_commands()] == ["update-config", "tdd-project-config"]
 
 
 def test_the_skill_tool_launches_it(tmp_path):
@@ -272,4 +272,4 @@ def test_the_skill_is_offered_ahead_of_the_file_roster():
     reg = get_skill_registry(BUNDLED_SKILLS_DIR, bundled_dir=BUNDLED_SKILLS_DIR, user_home=Path("/nonexistent"),
                              managed_dir=Path("/nonexistent"))
     assert [c.name for c in reg.get_skill_tool_commands()] == [
-        "tdd-project-config", "tdd-mutation-defense", "tdd-refactor-clean", "tdd-test-design"]
+        "update-config", "tdd-project-config", "tdd-mutation-defense", "tdd-refactor-clean", "tdd-test-design"]
