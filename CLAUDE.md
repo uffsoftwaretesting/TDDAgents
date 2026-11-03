@@ -31,14 +31,15 @@ enforcing the TDD cycle**. Each divergence from upstream is a recorded user deci
 ## What this is
 
 TDDAgents is a research prototype (UFF / SBES 2026). A multi-agent system turns a
-natural-language request into tested Python code by driving the Red–Green–Refactor phases of
-TDD. It is **claude-code's loop (v2.1.88) ported to Python**, one conversation per session:
+natural-language request into tested code, in any language, by driving the Red–Green–Refactor
+phases of TDD. It is **claude-code's loop (v2.1.88) ported to Python**, one conversation per session:
 plan mode (the Analyst) writes the plan and gets it approved, then the same conversation
 develops it item by item.
 
 Generated code is written and run in a **per-session project folder outside TDDAgents' own**:
-`~/.tddagents/workspaces/<thread_id>/project` (`TDDAGENTS_WORKSPACES_DIR` overrides). It has
-its own `project/.venv` with pip, pytest and pytest-cov pinned. Reports go to
+`~/.tddagents/workspaces/<thread_id>/project` (`TDDAGENTS_WORKSPACES_DIR` overrides). TDDAgents
+prepares no environment: the project declares how it sets up and runs its tests in
+`.tddagents/project.json` (see [The declared project](#subsystems-current-behaviour)). Reports go to
 `<thread_id>/metrics_and_logging/`. `E2BWorkspace` remains available behind the `Workspace`
 protocol; `E2B_API_KEY` is optional.
 
@@ -59,7 +60,7 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 | `cli/print.py` | `cli/print.ts` | `open_session_run` → `DevelopmentRun`: MCP, SessionStart / UserPromptSubmit, one `QueryEngine` per session, the background-task wait loop, resume, SessionEnd; `run_headless` + `HeadlessStreaming` (the stream-json loop and every control request) |
 | `cli/structured_io.py`, `utils/sdk_messages.py`, `utils/sdk_event_queue.py` | `cli/structuredIO.ts`, `queryHelpers.ts`, `sdkEventQueue.ts` | NDJSON in/out, control requests both ways, the host's `can_use_tool`; the SDK wire shapes; task / session-state events |
 | `screens/repl.py`, `screens/terminal_io.py` | `screens/REPL.tsx` | The REPL: queued input, Esc abort, permission questions, slash commands; `terminal_io.py` is the `prompt_toolkit` seam |
-| `commands.py` | `commands.ts` | `local` slash commands, `/plan` operations |
+| `commands/commands.py`, `commands/init.py`, `project_onboarding_state.py` | `commands.ts`, `commands/init.ts`, `projectOnboardingState.ts` | `local` slash commands, `/plan` operations; built-in prompt commands (`/init`, both upstream prompts, `TDDAGENTS_NEW_INIT`); the "Tips for getting started" onboarding |
 | `hooks/use_can_use_tool.py`, `components/permissions/permission_options.py` | `useCanUseTool.tsx`, permission options | The interactive `canUseTool` and each tool's choices |
 | `query_engine.py` | `QueryEngine.ts` | `submit`: transcript recorded before the loop, `ResultMessage` |
 | `query/query.py` | `query.ts` | `run_loop` (yields `Terminated` last), `drain`, every continue/terminal site, the pre-model pipeline |
@@ -79,15 +80,15 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 | `state/app_state_store.py` | `AppStateStore.ts` | `AppState` (ledger, plan, todos, permission context, last test run, tasks) |
 | `task.py`, `tasks/`, `utils/task/` | `Task.ts`, `tasks/` | `LocalAgentTask`, `<task-notification>`, `stopTask` |
 | `coordinator/coordinator_mode.py` | `coordinatorMode.ts` | Coordinator mode (`TDDAGENTS_COORDINATOR_MODE`, off by default) |
-| `skills/` | `skills/` | Skill loader (bundled `app/prompts/skills` < policy < user < project), bundled-skill extraction |
+| `skills/` | `skills/` | Skill loader (bundled `app/prompts/skills` < policy < user < project), bundled-skill extraction; code-built bundled skills (`bundled_skills.py`, `bundled/`: `update-config`, `tdd-project-config`) |
 | `cost_tracker.py`, `utils/model_cost.py` | `cost-tracker.ts`, `modelCost.ts` | `CostTracker` callback; Claude + OpenAI price tables |
 | `utils/permissions/`, `utils/settings/`, `types/permissions.py` | same | `hasPermissionsToUseTool`, rules, filesystem, updates, dangerous patterns, denial tracking, the auto-mode classifier; the five settings sources |
 | `utils/hooks/`, `schemas/hooks.py`, `types/hooks.py` | `utils/hooks*` | `executeHooks`, all four hook types, the config snapshot, SSRF guard, `build_hook_dispatcher` |
 | `utils/attachments.py` | `attachments.ts` | Every ported attachment source (the TDD source is in `app/tdd/`) |
 | `utils/` (rest) | `utils/*.ts` | Messages, queue, `claudemd.py`, session storage + resume, tokens, tool-result storage, ripgrep, file state, plans and slugs, plan mode |
-| **`tdd/`** | — | `ledger.py`, `run_tests_tool/`, `phase_permissions.py` + `bash_phase_permissions.py`, `stop_hook.py`, `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py`, `plan.py` (`TddPlan`, `update_tdd_plan`), `plan_advance.py`, `tdd_plan_tool/` (`UpdatePlan`), `coverage_gate.py`, `collection_gate.py`, `suite_fingerprint.py` |
+| **`tdd/`** | — | `ledger.py`, `run_tests_tool/`, `phase_permissions.py` + `bash_phase_permissions.py`, `stop_hook.py`, `phase_on_spawn.py`, `tdd_state_attachment.py`, `events.py` + `event_log.py`, `plan.py` (`TddPlan`, `update_tdd_plan`), `plan_advance.py`, `tdd_plan_tool/` (`UpdatePlan`), `coverage_gate.py` (cobertura / lcov), `collection_gate.py`, `suite_fingerprint.py`, `project_config.py` (`.tddagents/project.json`), `junit_report.py`, `run_judgement.py` (`judge`), `final_run.py`, `prompt_vars.py`, `project_config_skill.py` |
 | `session/` | — | `driver.py` (`develop_interactive` / `develop_headless`), `prompts.py` |
-| `workspace/`, `sandbox/` | — | `Workspace` protocol, `LocalWorkspace`, `project.py`, `pyenv.py`, `E2BWorkspace` over the E2B adapter |
+| `workspace/`, `sandbox/` | — | `Workspace` protocol, `LocalWorkspace` (strips TDDAgents' own interpreter from commands; pruned `walk_files`), `project.py`, `E2BWorkspace` over the E2B adapter |
 | `prompts/` | prompts, bundled agents/skills | System sections, TDD agents (`AGENT.md` + `references/`), skills, compact / permission prompts, specs |
 
 ### Loop invariants (load-bearing, easy to undo by accident)
@@ -118,9 +119,11 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
    restored** on resume; RED must be observed again.
 2. **The phase permission tier**, in the gate above step 1a, **failing closed**, **only while
    the plan has a current item** (an empty or finished plan leaves the normal rules in charge):
-   RED writes tests only, GREEN production only (tests locked), REFACTOR both. It covers the
-   file tools, Bash redirect targets and the pool's deny rules. Agent memory and the session
-   plan file are exempt in every phase. A PreToolUse hook's `allow`, a hook `ask`, an
+   RED writes tests only, GREEN production only (tests locked), REFACTOR both. Test files are
+   what the project's declared `testFiles` / `testSupportFiles` globs match. It covers the file
+   tools, Bash redirect targets and the pool's deny rules. Agent memory, the session plan file and
+   the declared manifests (`manifestFiles`) are exempt in every phase. With no declared
+   configuration while an item is current, every write is denied (fail closed). A PreToolUse hook's `allow`, a hook `ask`, an
    auto-mode classifier allow and a PermissionRequest hook's `updatedInput` are all re-checked
    against it.
 3. **The stop hook** (`app/tdd/stop_hook.py`) refuses to end an incomplete cycle, in any
@@ -130,8 +133,8 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 
 **What each phase needs:**
 - **RED**: a RunTests run (pass or fail) after the test files changed. The fingerprint is
-  compared with `AppState.tdd_item_test_baseline`, taken when an item starts. Exit 2 counts
-  only when pytest's JUnit report records collection errors.
+  compared with `AppState.tdd_item_test_baseline`, taken when an item starts. A run that fails to
+  load or compile its tests is a failed run, so it counts.
 - **GREEN**: a passing run.
 - **REFACTOR** (mandatory): a passing run. Coverage is measured and reported every run;
   `COVERAGE_RULE_OF_THUMB = 90` is a rule of thumb, **not a gate**. Tests assert behaviour and
@@ -139,12 +142,16 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 - **A skipped test is not a pass**, and **an uncollected test file is not a pass**, in GREEN
   and REFACTOR. Every test must run in a plain RunTests run.
 
-**RunTests reports what it observed, never a cause or advice** (as upstream's Bash): the exit
-code with pytest's meaning (`PYTEST_EXIT_SEMANTICS`), what pytest's reports record, a
-`TDD ledger:` line with the phase rule (`PHASE_RULES`), then the raw output. Exit 0 and 1 are
-not errors; other codes, timeouts and a missing runner are, and leave the ledger untouched.
-`pytest_command` pins `--rootdir=.` and adds `-c /dev/null` when the workspace has no pytest
-config. A background worker's RunTests writes nothing.
+**RunTests reports what it observed, never a cause or advice** (as upstream's Bash). It runs the
+project's declared `test` command (always the whole suite) with `TDDAGENTS_JUNIT_REPORT` /
+`TDDAGENTS_COVERAGE_REPORT` pointing into `.tddagents/reports/`, then reports the exit code with
+its shell meaning (`SHELL_EXIT_SEMANTICS`), what the JUnit report records (tests, failures, errors,
+skips, the files it names), the coverage the declared cobertura/lcov report records, a
+`TDD ledger:` line with the phase rule (`PHASE_RULES`), then the raw output. `judge` decides:
+exit 0 is a pass only if the report records tests and no failures, errors or skips; any other
+non-zero exit is a failed run; 126/127, signals, timeouts and a missing configuration are errors
+and leave the ledger untouched. A test file the report does not name did not run ("unknown" when
+the report names no files). A background worker's RunTests writes nothing.
 
 **The plan advances only through the ledger.** `TddPlan` lives on `AppState` and in
 `<session dir>/tdd-plan.json`. `plan_advance` runs between tool batches on the main thread and
@@ -158,7 +165,9 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
 - **Plan mode (the Analyst)** is upstream's: permission mode `plan`, a plan file
   (`<plans dir>/<slug>.md`), `EnterPlanMode` / `ExitPlanMode`. The plan's
   `## Implementation Plan` numbered items become the sub-requirements through
-  `update_tdd_plan(replace_pending)`; a plan without items fails `validate_input`. A session
+  `update_tdd_plan(replace_pending)`; a plan without items fails `validate_input`. The plan also
+  carries a `## Project Configuration` fenced-json block (the declared project, below); a missing
+  or invalid one fails `validate_input` too, naming the `tdd-project-config` skill. A session
   whose plan has no items opens in `plan`. **Plain `-p` denies `ExitPlanMode`**, so a new session
   plans and stops there; under `--input-format stream-json` the SDK host answers it.
 - **Permissions** are `hasPermissionsToUseToolInner` step for step. The shipped
@@ -202,10 +211,18 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
 - **The project is the root of every lookup** (settings, skills, agents, `.mcp.json`, hooks),
   never `Path.cwd()`. Absolute paths are real paths, bounded to the project
   (`normalize_path`). TDDAgents never runs `git init` and never commits.
-  `GIT_CEILING_DIRECTORIES` isolates each project. The venv is activated through
-  `<thread>/session-env.sh` (`TDDAGENTS_ENV_FILE`), never announced to the model.
-- **The final run** is the project's own suite (`run_suite`), written to
-  `metrics_and_logging/final_test_run.txt`.
+  `GIT_CEILING_DIRECTORIES` isolates each project. TDDAgents prepares no environment and strips
+  its own interpreter from the commands' `PATH`; an external `TDDAGENTS_ENV_FILE` still applies.
+- **The declared project** (`app/tdd/project_config.py`): `.tddagents/project.json`, written by
+  `ExitPlanMode` on approval into the protected `.tddagents/` and loaded at session open: `setup`,
+  `test`, `junitReport`, `coverageReport` (`format` cobertura | lcov, optional `path`), `testFiles`,
+  `testSupportFiles`, `manifestFiles`, `exclude`. The contract tells the model to declare every
+  dependency it installs in the project's own manifest. The `tdd-project-config` skill (claude-api
+  pattern) injects the reference for the project's ecosystem.
+- **The final run** (`app/tdd/final_run.py`) copies the project into a clean folder, runs the
+  declared `setup` then `test` there, judges it with the same `judge`, writes
+  `metrics_and_logging/final_test_run.txt` and deletes the copy: a dependency installed but not
+  declared reads "NOT passing".
 - **Models**: `Config.CHAT_MODEL = "anthropic"`, `Config.MODEL = "claude-haiku-5-5"`; the
   small fast model is Claude Haiku 4.5 on a Claude run (`TDDAGENTS_SMALL_FAST_MODEL` wins).
   Anthropic clients get `get_max_output_tokens_for_model` unless a caller passes one.
@@ -313,9 +330,12 @@ package) **and an end-to-end pipeline run**. Code layered above them is not exem
 - **Live tests** (`@pytest.mark.live`) run only with `RUN_LIVE_LLM_TESTS=1`;
   `config.py` calls `load_dotenv()`, so a key in `.env` would otherwise turn skips into calls.
 - **The integration tests' venv is built once** (`shared_test_venv`, under `$TMPDIR`, behind a
-  file lock), with plain `venv` + `pip`, never the mutated `ensure_session_python`.
-- **Real-pytest integration tests use the `python_workspace` fixture**; a bare
-  `LocalWorkspace` may have no pytest on `PATH` (exit 127).
+  file lock), with plain `venv` + `pip`; it is a test asset, not part of TDDAgents.
+- **Real-pytest integration tests use the `py_project` fixture** (alias `python_workspace`): a
+  project whose `project.json` declares the shared venv's pytest. `script_project` is a fake
+  POSIX-sh ecosystem for the language-neutral core and the final run.
+- **A test asserts no `sleep 30` process exists** (`test_execute_timeout_kills_the_whole_group`):
+  don't keep one running on the host during the suite.
 - `--coordinator` writes `os.environ`; a fixture must `setenv` before `delenv` or the mode
   leaks into later tests.
 
@@ -348,8 +368,8 @@ python -m app.main plugin list | install <p@m> | marketplace add <src> …   # [
 The REPL opens in plan mode (`⏸ plan mode on`). `ExitPlanMode` shows upstream's choices
 ("Yes", "No, keep planning" with feedback, or `/edit`). Afterwards the same conversation
 develops the plan. Type at any time; Esc interrupts. `/help` lists `/plan`, `/pause`,
-`/resume`, `/requirements`, `/context`, `/mcp`, `/reload-plugins` and `/exit` (resumable with
-`--thread-id`). A new interactive session first asks to trust its folder (upstream's trust dialog),
+`/resume`, `/requirements`, `/context`, `/mcp`, `/reload-plugins`, `/init` and `/exit` (resumable
+with `--thread-id`). A new interactive session first asks to trust its folder (upstream's trust dialog),
 then to approve the project's pending `.mcp.json` servers; `-p` treats trust as implicit and
 approves them, as `claude -p`.
 

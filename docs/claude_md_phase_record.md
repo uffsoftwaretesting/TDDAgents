@@ -2040,6 +2040,153 @@ stages 1–2.*
     connection keeps its full config. `-p` runs it as before.
   - Not ported: claude.ai connector menus, agent-only MCP servers, `McpParsingWarnings`.
 
+#### Part 9 — TDDAgents works with every language (2026-11-03, branch `feat/language-generic`)
+
+The CPF live run `tdd-b842b60803c04632` passed every barrier, but its CI failed in a fresh environment.
+The model had installed `types-PyYAML` ad hoc into the session's `.venv` without declaring it. Two
+texts pointed that way:
+- the contract said dependencies "are installed by the plan";
+- every RunTests run, and the final run, used that one persistent `.venv`.
+
+The user's direction, "TDDAgents tem que trabalhar com todas as linguagens", made the whole TDD cycle
+language-agnostic, the way claude-code is: it runs the project's own commands, ships no venv and no
+allow rules, and takes language knowledge from skills (`skills/bundled/claudeApi.ts`).
+
+*User decisions (2026-11-03):*
+
+**The project declares its configuration**, in `.tddagents/project.json` (`app/tdd/project_config.py`).
+- **Keys:**
+
+  | Key | Meaning |
+  |---|---|
+  | `version` | the schema version |
+  | `setup` | optional: builds the environment from the manifests |
+  | `test` | the whole suite; writes a JUnit report to `$TDDAGENTS_JUNIT_REPORT` |
+  | `junitReport` | optional path override |
+  | `coverageReport` | `{format: cobertura \| lcov, path?}`; the path defaults to `$TDDAGENTS_COVERAGE_REPORT` |
+  | `testFiles` | gitignore globs |
+  | `testSupportFiles` | |
+  | `manifestFiles` | manifests and lockfiles |
+  | `exclude` | |
+
+- **Where it comes from:** the Analyst writes it as a `## Project Configuration` fenced-json section of
+  the plan.
+  - `ExitPlanMode.validate_input` refuses a missing or invalid block. It lists every issue and names
+    the `tdd-project-config` skill.
+  - On approval it writes the file into the protected `.tddagents/` folder.
+  - `open_session_run` loads it (a resume reads it back).
+- **No built-in adapters per ecosystem.**
+- **No declared configuration while an item is current:** fail closed. Every write is denied, and
+  RunTests says the project declares no test command.
+
+**RunTests runs the declared test command and reads one JUnit report** (`app/tdd/junit_report.py`,
+`app/tdd/run_judgement.py`).
+- Shell-generic exit semantics:
+  - `0` is a pass only if the report agrees: more than 0 tests, and no failures, errors or skips;
+  - `126`/`127`, `≥128` and a timeout are errors, not evidence;
+  - any other non-zero is a failed run, so load and compile errors count for RED.
+- It always runs the whole suite; `test_path` is gone.
+- A test file the report does not name did not run. When the report names no files, that check is
+  "unknown", and RunTests says so.
+- **A report split across many files** (Surefire, Gradle, Minitest) is joined into one by the
+  project's command. Following claude-code, the core reads one file.
+- Coverage readers: cobertura and lcov only, no JaCoCo. The contract tells the model coverage is
+  measured on every run, with `COVERAGE_RULE_OF_THUMB` as a rule of thumb, not a gate.
+
+**The phase tier and the fingerprint read the declared globs.**
+- Declared manifests and lockfiles are writable in every phase. claude-code treats them as ordinary
+  files, and the first RED of a non-Python project needs one.
+- `TDDAGENTS.md` stays production code in RED.
+
+**No pre-built environment.**
+- `app/workspace/pyenv.py` is deleted: the project's declared `setup` builds the environment, and the
+  runner is a dev dependency in the project's own manifest.
+- `LocalWorkspace` strips TDDAgents' own interpreter prefix and `VIRTUAL_ENV` from commands.
+- The shipped `.tddagents/settings.json` loses every pytest/pip/python allow rule. claude-code ships
+  none, and its plan-approved `allowedPrompts` is ant-only.
+
+**The contract** (`tdd-contract.md`) is language-neutral:
+- "Declare every dependency you install in the project's own manifest. The session ends by running the
+  declared setup and test commands in a clean copy of the project, in an environment built from its
+  manifests alone."
+- The auto-mode classifier's environment and allow lines are neutral too.
+
+**The final run** (`app/tdd/final_run.py`):
+- It copies the project into `<thread>/final-run/project`, leaving out `.git`, `.tddagents/` (except
+  `project.json`) and the declared excludes.
+- It runs `setup` then `test` with a scrubbed environment, judges the result with the same `judge`,
+  writes `final_test_run.txt` and deletes the copy.
+- A dependency installed but not declared reads "NOT passing". The report shows the clean run only.
+
+**`tdd-project-config` skill** (`app/tdd/project_config_skill.py`), a port of the `claude-api` pattern:
+- It is a code-built bundled skill (`registerBundledSkill` + `getPromptForCommand`, in
+  `app/skills/bundled_skills.py`).
+- It takes the language from its argument, or detects it from the project's top-level files
+  (`LANGUAGE_INDICATORS`).
+- It injects that ecosystem's reference plus `shared.md`. References: python, javascript-typescript,
+  go, rust, java, csharp, ruby, php.
+
+**The TDD skills and agents** (`tdd-mutation-defense`, `tdd-refactor-clean`, `tdd-test-design`, the
+refactorer catalogue, tester, developer) are worded without Python-only idioms, in claude-code's
+prompt style.
+
+**`/init`** is a port of `commands/init.ts` (`app/commands/init.py`).
+- `app/commands.py` moved to `app/commands/commands.py`, following the convention for a file and
+  directory that share a name.
+- It ports both prompts: `OLD_INIT_PROMPT` by default, and `NEW_INIT_PROMPT` with `TDDAGENTS_NEW_INIT`.
+- Built-in prompt commands are found after the skills, as upstream orders them. They work in the REPL,
+  `-p` and stream-json, and are not listed to the model.
+- `projectOnboardingState.ts` is ported: the REPL header shows "Tips for getting started" until
+  `TDDAGENTS.md` exists or the seen count reaches 4.
+
+**NEW_INIT and `update-config`:**
+- The `update-config` bundled skill (`skills/bundled/updateConfig.ts`) is ported.
+- NEW_INIT's hooks step calls it, verbatim.
+- The REPL renders AskUserQuestion option `preview` boxes (the upstream dialog's preview), and sends a
+  chosen option's preview back as `annotations`.
+- NEW_INIT's official-plugin suggestions stay out: they come from a marketplace packaged in
+  `.claude-plugin/`.
+
+*Divergences, recorded:*
+
+- **Prompt substitutions.** "Claude Code"/"Claude" → "TDDAgents", `CLAUDE.md`/`CLAUDE.local.md` →
+  `TDDAGENTS.md`/`TDDAGENTS.local.md`, `.claude/` → `.tddagents/`. The `/init` prefix drops the
+  `claude.ai/code` URL. In NEW_INIT:
+  - the `Write|Edit` matcher → `WriteFile|Edit`;
+  - the `/verify` example and the official-plugin lines are dropped;
+  - "Browse official plugins with /plugin" → the `plugin list --available` CLI.
+- **Onboarding.** The seen count goes up once per REPL session that shows the tips; upstream counts
+  once per release.
+- **`tdd-project-config`.**
+  - `allowedTools` is empty, so a headless Analyst is not asked.
+  - With no language detected it lists the ecosystems and includes only `shared.md`; upstream inlines
+    every document.
+  - The argument can name the language.
+  - JavaScript and Rust were added to `LANGUAGE_INDICATORS`.
+- **`update-config`.**
+  - Tool names: `Write`/`Read` → `WriteFile`/`ReadFile`.
+  - PostToolUse hooks get the tool result as text, so the `jq` examples read `.tool_input.file_path`.
+  - The settings TDDAgents lacks are dropped: `env`, `model`, `agent`, `attribution`, and the
+    Config-tool section.
+  - The "prove the hook fires" step, the `--debug` step and the generated settings schema are pending:
+    the user decided to port live settings change detection, `--debug` and the schema, which restores
+    them verbatim.
+- **Test-file classes.**
+  - Declared test-support files count as test code for the tier and the fingerprint, so `conftest.py`
+    and helpers can be written in RED.
+  - The "did not run" check uses `testFiles` only.
+  - A path outside the project is production code.
+  - Coverage leaves out declared test, support and excluded files when the report has per-file data.
+- **pytest exit codes.** Exit 2 (collection errors) and 5 (no tests) are now plain failed runs. Exit 2
+  still counts for RED once test files changed.
+- **Test fixture.** The fixture is `py_project`, because pytest reserves the `pytest_` prefix;
+  `python_workspace` stays as an alias.
+- **Final-run timeout.** The final run uses upstream's maximum Bash timeout for `test` as well as
+  `setup`.
+- **Pending (user decisions 2026-11-03, in progress):**
+  - the stop hook states the no-configuration reason;
+  - the final-run copy follows claude-code's ripgrep listing, so every `.gitignore` applies.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
