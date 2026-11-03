@@ -1,6 +1,6 @@
 # Java: Maven Surefire or Gradle, JUnit 5
 
-Both Maven Surefire and Gradle write one JUnit XML file per test class (`TEST-<class>.xml`), never one file for the run. The test command therefore removes the previous run's reports, runs the build, and joins the per-class files into the one report TDDAgents reads, keeping the build's exit status. The joined file wraps each class's `<testsuite>` in a `<testsuites>` root.
+Both Maven Surefire and Gradle write one JUnit XML file per test class (`TEST-<class>.xml`), never one file for the run. TDDAgents reads a single JUnit file, so the test command removes the previous run's reports, runs the build, and joins the per-class files into that one report, keeping the build's exit status. The joined file wraps each class's `<testsuite>` in a `<testsuites>` root.
 
 ## Example: Maven
 
@@ -38,7 +38,7 @@ Both Maven Surefire and Gradle write one JUnit XML file per test class (`TEST-<c
 
 ## Coverage
 
-JaCoCo (`jacoco-maven-plugin`, Gradle's `jacoco` plugin) is the usual tool, but its XML report is neither Cobertura nor LCOV, which are the formats TDDAgents reads. Either leave `coverageReport` out (coverage is then not reported), or add a step to the test command that converts JaCoCo's XML to Cobertura with a converter the project declares; check the converter's docs.
+JaCoCo (`jacoco-maven-plugin`, Gradle's `jacoco` plugin) is the usual tool, but TDDAgents does not read JaCoCo's XML report: it reads Cobertura or LCOV only. Add a step to the test command that converts JaCoCo's XML to Cobertura with a converter the project declares (check the converter's docs), so coverage is reported on every run; without one, leave `coverageReport` out and coverage is not reported.
 
 ## Pitfalls
 

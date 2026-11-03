@@ -52,15 +52,12 @@ def _literal(source: str, name: str) -> str:
 
 #: NEW_INIT_PROMPT: what TDDAgents lacks, its equivalent where a route exists, otherwise dropped.
 NEW_INIT_ONLY = [
-    # No `update-config` skill: the hook goes straight into the settings file's `hooks`.
-    ("  3. **Load the hook reference** (once per `/init` run, before the first hook): invoke the Skill tool with "
-     "`skill: 'update-config'` and args starting with `[hooks-only]` followed by a one-line summary of what you're "
-     "building — e.g., `[hooks-only] Constructing a PostToolUse/Write|Edit format hook for .claude/settings.json "
-     "using ruff`. This loads the hooks schema and verification flow into context. Subsequent hooks reuse it — don't "
-     "re-invoke.\n\n  4. Follow the skill's **\"Constructing a Hook\"** flow:",
-     "  3. Write the hook into the target file's `hooks` setting, following this flow:"),
+    # Hooks are read when a session starts here, so the `update-config` flow has no in-turn live proof.
+    (" → live-proof (for `Pre|PostToolUse` on triggerable matchers) → cleanup → handoff.", " → handoff."),
     # This build's tool names.
     ("`PostToolUse` with matcher `Write|Edit`", "`PostToolUse` with matcher `WriteFile|Edit`"),
+    ("`[hooks-only] Constructing a PostToolUse/Write|Edit format hook",
+     "`[hooks-only] Constructing a PostToolUse/WriteFile|Edit format hook"),
     # No bundled `/verify` skill.
     ("existing bundled skill (e.g., `/verify`), write", "existing bundled skill, write"),
     # The official marketplace's plugins are `.claude-plugin/` packages, which this build does not load.

@@ -38,6 +38,7 @@ from app.tdd.project_config_vars import (
     PROJECT_CONFIG_PROMPT_VARS,
     PROJECT_CONFIG_VERSION,
 )
+from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB, TDD_PROMPT_VARS
 from app.tools.skill_tool.skill_tool import skill_has_only_safe_properties
 from app.utils.process_user_input.process_slash_command import (
     get_messages_for_prompt_slash_command,
@@ -217,6 +218,51 @@ class TestShippedPrompt:
         assert set(PROJECT_CONFIG_PROMPT_VARS) == {
             "JUNIT_REPORT_ENV", "COVERAGE_REPORT_ENV", "PROJECT_CONFIG_HEADING", "PROJECT_CONFIG_FILE",
             "PROJECT_CONFIG_VERSION"}
+        rule = f"{COVERAGE_RULE_OF_THUMB:.0f}%"
+        for path in (SKILL_DIR / "prompt.md", SKILL_DIR / "references" / "shared.md"):
+            raw = Path(path).read_text(encoding="utf-8")
+            assert rule not in raw and "{{COVERAGE_RULE_OF_THUMB}}%" in raw, path.name
+
+
+class TestCoverageAndReports:
+    """What every ecosystem is told about coverage and the single JUnit report."""
+
+    @pytest.mark.parametrize("language", [*LANGUAGES, None])
+    def test_coverage_is_worth_declaring_with_the_rule_of_thumb(self, language):
+        text = _prompt(language or "")
+        shared = text[text.index('<doc path="references/shared.md">'):]
+        rule = f"{TDD_PROMPT_VARS['COVERAGE_RULE_OF_THUMB']}% is a good rule of thumb, not a gate"
+        assert f"{COVERAGE_RULE_OF_THUMB:.0f}" == TDD_PROMPT_VARS["COVERAGE_RULE_OF_THUMB"]
+        assert "## Coverage\n\nDeclare a coverage report. On every run, RunTests reports the line and branch " \
+               "coverage the declared report records, in Cobertura XML or LCOV" in shared
+        assert rule in shared and "Coverage never decides whether a run passes." in shared
+        assert "shows the untested code and helps raise quality" in text and rule in text
+
+    def test_the_coverage_path_is_optional_and_defaults_to_the_variable(self):
+        shared = (SKILL_DIR / "references" / "shared.md").read_text(encoding="utf-8")
+        assert ('`{"format": "cobertura"}` or `{"format": "lcov"}`, with an optional `path`' in shared
+                and "`path` defaults to `${{COVERAGE_REPORT_ENV}}`" in shared)
+
+    @pytest.mark.parametrize("language", list(LANGUAGES))
+    def test_each_example_writes_its_coverage_where_tddagents_reads_it(self, language):
+        doc = _prompt(language)
+        doc = doc[doc.index(f'<doc path="references/{language}.md">'):]
+        for config in (json.loads(b) for b in _JSON_BLOCK.findall(doc)):
+            if "coverageReport" in config and "path" not in config["coverageReport"]:
+                assert COVERAGE_REPORT_ENV in config["test"] or COVERAGE_REPORT_ENV in doc, language
+
+    def test_a_split_junit_report_is_joined_into_one(self):
+        shared = (SKILL_DIR / "references" / "shared.md").read_text(encoding="utf-8")
+        assert "It reads **one** JUnit report file" in shared
+        assert "(Maven Surefire, Gradle, Minitest's JUnit reporter)" in shared
+        java = (SKILL_DIR / "references" / "java.md").read_text(encoding="utf-8")
+        ruby = (SKILL_DIR / "references" / "ruby.md").read_text(encoding="utf-8")
+        for text in (java, ruby):
+            assert "TDDAgents reads a single JUnit file" in text
+        assert "a Minitest test command must join those files into one report" in ruby
+        assert "TDDAgents does not read JaCoCo's XML report: it reads Cobertura or LCOV only." in java
+        prompt = (SKILL_DIR / "prompt.md").read_text(encoding="utf-8")
+        assert "TDDAgents reads a single report file, so the test command must join them into one." in prompt
 
 
 class TestDefinition:
@@ -236,7 +282,7 @@ class TestDefinition:
         reg = get_skill_registry(tmp_path, tmp_path / "home", tmp_path / "etc", bundled_dir=tmp_path / "none")
         command = reg.find_command("tdd-project-config")
         assert command is not None and skill_has_only_safe_properties(command)
-        assert [c.name for c in reg.get_skill_tool_commands()] == ["tdd-project-config"]
+        assert [c.name for c in reg.get_skill_tool_commands()] == ["update-config", "tdd-project-config"]
 
 
 def test_the_skill_tool_launches_it(tmp_path):
@@ -272,4 +318,4 @@ def test_the_skill_is_offered_ahead_of_the_file_roster():
     reg = get_skill_registry(BUNDLED_SKILLS_DIR, bundled_dir=BUNDLED_SKILLS_DIR, user_home=Path("/nonexistent"),
                              managed_dir=Path("/nonexistent"))
     assert [c.name for c in reg.get_skill_tool_commands()] == [
-        "tdd-project-config", "tdd-mutation-defense", "tdd-refactor-clean", "tdd-test-design"]
+        "update-config", "tdd-project-config", "tdd-mutation-defense", "tdd-refactor-clean", "tdd-test-design"]

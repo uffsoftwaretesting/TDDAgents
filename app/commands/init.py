@@ -10,8 +10,9 @@ the product substitutions ("Claude Code" and "Claude" → "TDDAgents", `CLAUDE.m
 `TDDAGENTS.md`, `CLAUDE.local.md` → `TDDAGENTS.local.md`, `.claude/` → `.tddagents/`, and the
 prefix line without the claude.ai URL), pinned by `tests/test_init_command.py`. `NEW_INIT_PROMPT`
 also follows "the TDDAgents equivalent where a route exists, otherwise dropped" for what this
-build lacks: the `update-config` skill step becomes writing the hook into the settings file's
-`hooks`, the `Write|Edit` matcher names this build's `WriteFile`, the `/verify` bundled-skill example
+build lacks: the hooks step loads the `update-config` skill (`app/skills/bundled/update_config.py`)
+with `[hooks-only]` as upstream's does, its flow without the in-turn live proof (hooks are read when a
+session starts here), the `Write|Edit` matchers name this build's `WriteFile`, the `/verify` bundled-skill example
 and the `claude-plugins-official` plugin suggestions are dropped (their packages are
 `.claude-plugin/` ones, which this build's plugin loader does not read), and `/plugin` is the
 `plugin` CLI (`{{PLUGIN_CLI}}`).

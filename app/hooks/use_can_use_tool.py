@@ -19,7 +19,9 @@ answer here can open a phase-forbidden write.
 
 `AskUserQuestion` has its own question, as upstream's `PermissionRequest` routes it to
 `AskUserQuestionPermissionRequest`: the user answers each question (`ask_questions`) and the
-call is allowed with the answers in its input; declining aborts the turn (`onReject`).
+call is allowed with the answers in its input, and the preview of each option picked as its
+question's `annotations` (`selected_preview_annotations`, upstream's submit handler; the REPL has no
+notes field); declining aborts the turn (`onReject`).
 
 `ExitPlanMode` has its own too, as upstream's `ExitPlanModePermissionRequest`: the plan is shown
 with upstream's choices; a "Yes" sets the mode the work goes on in (`onAllow` with a `setMode`
@@ -35,7 +37,7 @@ input, the classifier pre-check and the bridge/channel relays are not ported.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -91,6 +93,25 @@ EditPlan = Callable[[str], tuple[str | None, str]]
 
 #: What the user types at the plan approval to edit the plan in their editor (upstream's ctrl-g).
 EDIT_PLAN_COMMAND = "/edit"
+
+
+def selected_preview_annotations(
+    questions: Sequence[Mapping[str, Any]], answers: Mapping[str, str]
+) -> dict[str, dict[str, str]]:
+    """
+    `AskUserQuestionPermissionRequest`'s submit handler: for each answered question, the `preview`
+    of the option whose label is the answer, as that question's annotation.
+    """
+    annotations: dict[str, dict[str, str]] = {}
+    for question in questions:
+        text = str(question.get("question", ""))
+        answer = answers.get(text)
+        selected = next((o for o in question.get("options") or () if answer and o.get("label") == answer), None)
+        if selected is not None and selected.get("preview"):
+            annotations[text] = {"preview": str(selected["preview"])}
+    return annotations
+
+
 #: `AskUserQuestion`'s questions in, the answers out (question text -> answer); `None` declines.
 AskQuestions = Callable[[tuple[dict[str, Any], ...]], Awaitable[dict[str, str] | None]]
 #: `CanUseToolFn`: the gate's 'ask', resolved — (tool, input, ask, context, tool_use_id) -> decision.
@@ -187,7 +208,10 @@ def build_interactive_can_use_tool(
             if answers is None:
                 context.cancel.cancel()
                 return rejection(None)
-            return PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input={**input_args, "answers": answers},
+            annotations = selected_preview_annotations(input_args.get("questions") or (), answers)
+            return PermissionResult(behavior=PermissionBehavior.ALLOW,
+                                    updated_input={**input_args, "answers": answers,
+                                                   **({"annotations": annotations} if annotations else {})},
                                     decision_reason={"type": "user", "option": "answered"})
         options = permission_options(tool.name, input_args, result.suggestions, perm, permission_cwd(context))
         # A plan change shows its before/after diff (its message), as ExitPlanMode shows its plan.
