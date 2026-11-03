@@ -5,8 +5,11 @@ Tests for TDD phase-derived deny rules in pool assembly (Part D3) and runtime ga
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Callable
 from typing import Any, ClassVar
+
+import pytest
 
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
@@ -17,7 +20,8 @@ from app.tdd.phase_permissions import (
     check_tdd_phase_permission,
     get_phase_deny_rules,
     is_implementation_writing_tool,
-    is_test_path,
+    NO_PROJECT_CONFIG,
+    classify_path,
     is_test_writing_tool,
 )
 from app.tdd.run_tests_tool.run_tests_tool import RunTests
@@ -31,7 +35,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 
 def make_dummy_tool(
@@ -49,45 +53,30 @@ def make_dummy_tool(
     )
 
 
-def test_is_test_path():
-
-    # Standard posix paths
-    assert is_test_path("tests/test_engine.py") is True
-    assert is_test_path("test/test_core.py") is True
-    assert is_test_path("app/tests/sub/test_foo.py") is True
-    assert is_test_path("test_something.py") is True
-    assert is_test_path("something_test.py") is True
-
-    # Windows paths with backslashes
-    assert is_test_path("tests\\test_engine.py") is True
-    assert is_test_path("test\\test_core.py") is True
-    assert is_test_path("tests\\fixtures\\sample.json") is True
-    assert is_test_path("test\\helpers\\util.py") is True
-    assert is_test_path("src\\sub\\my_test.py") is True
-    assert is_test_path("src\\sub\\test_my.py") is True
-
-    # Segments in directory vs filename
-    assert is_test_path("tests/helpers/util.py") is True
-    assert is_test_path("test/helpers/util.py") is True
-    assert is_test_path("src/components/foo_test.py") is True
-    assert is_test_path("src/components/test_foo.py") is True
-
-    # Case insensitivity
-    assert is_test_path("TESTS/test_engine.py") is True
-    assert is_test_path("Test/Core.py") is True
-    assert is_test_path("src/TEST_FOO.py") is True
-    assert is_test_path("src/FOO_TEST.PY") is True
-
-    # Non-test paths
-    assert is_test_path("src/engine.py") is False
-    assert is_test_path("app/query/query.py") is False
-    assert is_test_path("main.py") is False
-    assert is_test_path("") is False
-    assert is_test_path("   ") is False
-    assert is_test_path("tests_extended/util.py") is False
-    assert is_test_path("src/sub/mytests/foo.py") is False
-    assert is_test_path("src/sub/tests/foo.py") is True
-    assert is_test_path("src/sub/test/foo.py") is True
+@pytest.mark.parametrize(("path", "kind"), [
+    ("tests/test_engine.py", "test"),
+    ("test/test_core.py", "test"),
+    ("app/tests/sub/test_foo.py", "test"),
+    ("test_something.py", "test"),
+    ("something_test.py", "test"),
+    ("tests/helpers/util.py", "test"),
+    ("src/components/test_foo.py", "test"),
+    ("/proj/tests/test_x.py", "test"),
+    ("src/engine.py", "production"),
+    ("main.py", "production"),
+    ("tests_extended/util.py", "production"),
+    ("src/sub/mytests/foo.py", "production"),
+    (".venv/lib/tests/test_x.py", "production"),
+    ("/elsewhere/tests/test_x.py", "production"),
+    ("../tests/test_x.py", "production"),
+    ("pyproject.toml", "manifest"),
+    ("tests/requirements.txt", "manifest"),
+    ("/proj/requirements.txt", "manifest"),
+])
+def test_paths_are_classified_by_the_declared_patterns(path: str, kind: str):
+    """2026-11-03: which files are tests is the project's declaration, matched from its root."""
+    config = dataclasses.replace(TEST_PROJECT_CONFIG, manifest_files=("pyproject.toml", "requirements.txt"))
+    assert classify_path(path, config.rules, "/proj") == kind
 
 
 def test_tool_classification_helpers():
@@ -219,72 +208,57 @@ def test_tool_classification_helpers():
 
 
 def test_get_phase_deny_rules_exact_generation():
-    # RED phase rules
-    red_ledger = PhaseLedger(phase=TddPhase.RED)
+    """Only the dedicated writers are removed from the pool; a generic file tool's path is judged at the gate."""
+    def deny(names: frozenset[str]) -> tuple[PermissionRule, ...]:
+        return tuple(PermissionRule(tool_name=name, rule_behavior=PermissionBehavior.DENY, rule_content=None,
+                                    source=PermissionRuleSource.POLICY_SETTINGS) for name in sorted(names))
 
-    red_rules = get_phase_deny_rules(red_ledger)
-
-    expected_red_rules = []
-    for name in sorted(IMPLEMENTATION_WRITER_TOOL_NAMES):
-        expected_red_rules.append(
-            PermissionRule(
-                tool_name=name,
-                rule_behavior=PermissionBehavior.DENY,
-                rule_content=None,
-                source=PermissionRuleSource.POLICY_SETTINGS,
-            )
-        )
-    for name in sorted(GENERIC_WRITER_TOOL_NAMES):
-        expected_red_rules.append(
-            PermissionRule(
-                tool_name=name,
-                rule_behavior=PermissionBehavior.DENY,
-                rule_content="src/*",
-                source=PermissionRuleSource.POLICY_SETTINGS,
-            )
-        )
-        expected_red_rules.append(
-            PermissionRule(
-                tool_name=name,
-                rule_behavior=PermissionBehavior.DENY,
-                rule_content="app/*",
-                source=PermissionRuleSource.POLICY_SETTINGS,
-            )
-        )
-
-    assert red_rules == tuple(expected_red_rules)
+    red_rules = get_phase_deny_rules(PhaseLedger(phase=TddPhase.RED))
+    assert red_rules == deny(IMPLEMENTATION_WRITER_TOOL_NAMES)
     assert "RunTests" not in {r.tool_name for r in red_rules}
-
-    # GREEN phase rules
-    green_ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
-    green_rules = get_phase_deny_rules(green_ledger)
-
-    expected_green_rules = []
-    for name in sorted(TEST_WRITER_TOOL_NAMES):
-        expected_green_rules.append(
-            PermissionRule(
-                tool_name=name,
-                rule_behavior=PermissionBehavior.DENY,
-                rule_content=None,
-                source=PermissionRuleSource.POLICY_SETTINGS,
-            )
-        )
-    for name in sorted(GENERIC_WRITER_TOOL_NAMES):
-        expected_green_rules.append(
-            PermissionRule(
-                tool_name=name,
-                rule_behavior=PermissionBehavior.DENY,
-                rule_content="tests/*",
-                source=PermissionRuleSource.POLICY_SETTINGS,
-            )
-        )
-
-    assert green_rules == tuple(expected_green_rules)
-    assert "RunTests" not in {r.tool_name for r in green_rules}
+    green_rules = get_phase_deny_rules(PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
+    assert green_rules == deny(TEST_WRITER_TOOL_NAMES)
+    assert not GENERIC_WRITER_TOOL_NAMES & {r.tool_name for r in (*red_rules, *green_rules)}
 
     # REFACTOR denies nothing: it improves both the code and the tests (Phase 12)
     refactor_ledger = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True)
     assert get_phase_deny_rules(refactor_ledger) == ()
+
+
+@pytest.mark.parametrize("phase", list(TddPhase))
+def test_a_declared_manifest_is_writable_in_every_phase(phase: TddPhase):
+    """User decision 2026-11-03: manifests and lockfiles are ordinary files, as upstream."""
+    config = dataclasses.replace(TEST_PROJECT_CONFIG, manifest_files=("package.json", "tests/fixtures.lock"))
+    ledger = PhaseLedger(phase=phase, tests_written=phase != TddPhase.RED,
+                         green_passed=phase == TddPhase.REFACTOR)
+    for name in sorted(GENERIC_WRITER_TOOL_NAMES):
+        for path in ("package.json", "sub/package.json", "tests/fixtures.lock"):
+            assert check_tdd_phase_permission(make_dummy_tool(name), {"file_path": path}, ledger,
+                                              rules=config.rules) == (True, ""), (name, path)
+
+
+@pytest.mark.parametrize("phase", list(TddPhase))
+def test_with_no_declaration_every_judged_write_is_refused(phase: TddPhase):
+    """Fail closed (user decision 2026-11-03): no patterns, no way to tell a test from production code."""
+    ledger = PhaseLedger(phase=phase, tests_written=phase != TddPhase.RED,
+                         green_passed=phase == TddPhase.REFACTOR)
+    for name in sorted(GENERIC_WRITER_TOOL_NAMES):
+        for path in ("tests/test_a.py", "calc.py"):
+            assert check_tdd_phase_permission(make_dummy_tool(name), {"file_path": path}, ledger, rules=None) == (
+                False, f"TDD phase {phase} denies '{name}': {NO_PROJECT_CONFIG}")
+    for name in sorted(IMPLEMENTATION_WRITER_TOOL_NAMES | TEST_WRITER_TOOL_NAMES):
+        assert check_tdd_phase_permission(make_dummy_tool(name), {}, ledger, rules=None)[0] is False
+    # A file tool without a path, a reader and RunTests are not judged.
+    assert check_tdd_phase_permission(make_dummy_tool("Edit"), {}, ledger, rules=None) == (True, "")
+    assert check_tdd_phase_permission(make_dummy_tool("Read"), {"file_path": "a"}, ledger, rules=None) == (True, "")
+    assert check_tdd_phase_permission(RunTests, {}, ledger, rules=None) == (True, "")
+    # The session's plan file and agent memory stay writable.
+    assert check_tdd_phase_permission(make_dummy_tool("Edit"), {"file_path": "/p.md"}, ledger, rules=None,
+                                      plan_file=True) == (True, "")
+    assert NO_PROJECT_CONFIG == (
+        "the project declares no test command, so its test files cannot be told from its production code. "
+        'The project\'s configuration is declared in the plan\'s "## Project Configuration" section and approved '
+        "with the plan (ExitPlanMode).")
 
 
 BACK_TO_RED = ("If a test is wrong (it contradicts the specification), go back to RED: spawn the tester agent "
@@ -306,11 +280,11 @@ def test_check_tdd_phase_permission_comprehensive():
         is_test_writer=True,
     )
     for ledger in (red_ledger, green_ledger, refactor_ledger):
-        allowed, reason = check_tdd_phase_permission(RunTests, {}, ledger)
+        allowed, reason = check_tdd_phase_permission(RunTests, {}, ledger, rules=TEST_PROJECT_CONFIG.rules)
         assert allowed is True
         assert reason == ""
 
-        allowed2, reason2 = check_tdd_phase_permission(custom_run_tests, {}, ledger)
+        allowed2, reason2 = check_tdd_phase_permission(custom_run_tests, {}, ledger, rules=TEST_PROJECT_CONFIG.rules)
         assert allowed2 is True
         assert reason2 == ""
 
@@ -318,7 +292,7 @@ def test_check_tdd_phase_permission_comprehensive():
 
     # Dedicated implementation tool denied
     impl_tool = make_dummy_tool("WriteImplementation")
-    allowed, reason = check_tdd_phase_permission(impl_tool, {}, red_ledger)
+    allowed, reason = check_tdd_phase_permission(impl_tool, {}, red_ledger, rules=TEST_PROJECT_CONFIG.rules)
     assert allowed is False
     assert (
         reason
@@ -329,7 +303,8 @@ def test_check_tdd_phase_permission_comprehensive():
     # Generic writer with path targeting production
     for gen_name in GENERIC_WRITER_TOOL_NAMES:
         gen_tool = make_dummy_tool(gen_name)
-        allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "src/core.py"}, red_ledger)
+        allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "src/core.py"}, red_ledger,
+                                                     rules=TEST_PROJECT_CONFIG.rules)
         assert allowed is False
         assert (
             reason
@@ -338,7 +313,8 @@ def test_check_tdd_phase_permission_comprehensive():
         )
 
         # with file_path argument
-        allowed, reason = check_tdd_phase_permission(gen_tool, {"file_path": "app/core.py"}, red_ledger)
+        allowed, reason = check_tdd_phase_permission(gen_tool, {"file_path": "app/core.py"}, red_ledger,
+                                                     rules=TEST_PROJECT_CONFIG.rules)
         assert allowed is False
         assert (
             reason
@@ -347,60 +323,67 @@ def test_check_tdd_phase_permission_comprehensive():
         )
 
         # with test path argument allowed in RED
-        allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "tests/test_core.py"}, red_ledger)
+        allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "tests/test_core.py"}, red_ledger,
+                                                     rules=TEST_PROJECT_CONFIG.rules)
         assert allowed is True
         assert reason == ""
 
         # with empty path allowed
-        allowed, reason = check_tdd_phase_permission(gen_tool, {}, red_ledger)
+        allowed, reason = check_tdd_phase_permission(gen_tool, {}, red_ledger, rules=TEST_PROJECT_CONFIG.rules)
         assert allowed is True
         assert reason == ""
 
     # Non-writing tool allowed in RED
     read_tool = make_dummy_tool("ReadFile")
-    allowed, reason = check_tdd_phase_permission(read_tool, {"path": "src/core.py"}, red_ledger)
+    allowed, reason = check_tdd_phase_permission(read_tool, {"path": "src/core.py"}, red_ledger,
+                                                 rules=TEST_PROJECT_CONFIG.rules)
     assert allowed is True
     assert reason == ""
 
     # In REFACTOR every writer may touch tests and code alike (Phase 12)
     for tool_name in ("WriteTest", *GENERIC_WRITER_TOOL_NAMES):
         for path in ("tests/test_core.py", "src/core.py"):
-            assert check_tdd_phase_permission(make_dummy_tool(tool_name), {"path": path}, refactor_ledger) == (True, "")
+            assert check_tdd_phase_permission(make_dummy_tool(tool_name), {"path": path}, refactor_ledger,
+                                              rules=TEST_PROJECT_CONFIG.rules) == (True, "")
 
     # In GREEN:
     for g_ledger in (green_ledger,):
         # Dedicated test tool denied
         test_tool = make_dummy_tool("WriteTest")
-        allowed, reason = check_tdd_phase_permission(test_tool, {}, g_ledger)
+        allowed, reason = check_tdd_phase_permission(test_tool, {}, g_ledger, rules=TEST_PROJECT_CONFIG.rules)
         assert allowed is False
         assert reason == f"TDD phase {g_ledger.phase} denies test-writing tool 'WriteTest'."
 
         # Generic writer targeting test file denied
         for gen_name in GENERIC_WRITER_TOOL_NAMES:
             gen_tool = make_dummy_tool(gen_name)
-            allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "tests/test_core.py"}, g_ledger)
+            allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "tests/test_core.py"}, g_ledger,
+                                                         rules=TEST_PROJECT_CONFIG.rules)
             assert allowed is False
             assert reason == (f"TDD phase {g_ledger.phase} denies modifying test file 'tests/test_core.py': GREEN "
                               f"implements what the tests describe. Tests can be improved in REFACTOR. {BACK_TO_RED}")
 
             # with file_path argument
-            allowed, reason = check_tdd_phase_permission(gen_tool, {"file_path": "tests/test_core.py"}, g_ledger)
+            allowed, reason = check_tdd_phase_permission(gen_tool, {"file_path": "tests/test_core.py"}, g_ledger,
+                                                         rules=TEST_PROJECT_CONFIG.rules)
             assert allowed is False
             assert reason == (f"TDD phase {g_ledger.phase} denies modifying test file 'tests/test_core.py': GREEN "
                               f"implements what the tests describe. Tests can be improved in REFACTOR. {BACK_TO_RED}")
 
             # with production path allowed in GREEN
-            allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "src/core.py"}, g_ledger)
+            allowed, reason = check_tdd_phase_permission(gen_tool, {"path": "src/core.py"}, g_ledger,
+                                                         rules=TEST_PROJECT_CONFIG.rules)
             assert allowed is True
             assert reason == ""
 
             # with empty path allowed
-            allowed, reason = check_tdd_phase_permission(gen_tool, {}, g_ledger)
+            allowed, reason = check_tdd_phase_permission(gen_tool, {}, g_ledger, rules=TEST_PROJECT_CONFIG.rules)
             assert allowed is True
             assert reason == ""
 
         # Non-writing tool allowed
-        allowed, reason = check_tdd_phase_permission(read_tool, {"path": "tests/test_core.py"}, g_ledger)
+        allowed, reason = check_tdd_phase_permission(read_tool, {"path": "tests/test_core.py"}, g_ledger,
+                                                     rules=TEST_PROJECT_CONFIG.rules)
         assert allowed is True
         assert reason == ""
 
@@ -477,7 +460,9 @@ class TestRuntimePermissionGatePhaseRules:
 
     def test_red_phase_denies_implementation_writer_even_in_bypass_mode(self):
         async def go():
-            store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+            store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                           project_config=TEST_PROJECT_CONFIG,
+                                           phase_ledger=PhaseLedger(phase=TddPhase.RED)))
             perm_ctx = ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS)
             ctx = tool_context_for(store, permission_context=perm_ctx)
 
@@ -490,7 +475,9 @@ class TestRuntimePermissionGatePhaseRules:
 
     def test_red_phase_denies_generic_writer_targeting_production_file(self):
         async def go():
-            store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+            store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                           project_config=TEST_PROJECT_CONFIG,
+                                           phase_ledger=PhaseLedger(phase=TddPhase.RED)))
             ctx = tool_context_for(store)
 
             write_tool = make_dummy_tool("WriteFile")
@@ -507,7 +494,9 @@ class TestRuntimePermissionGatePhaseRules:
     def test_green_phase_denies_test_writer_even_in_bypass_mode(self):
         async def go():
             store = AppStateStore(
-                AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
+                AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                         project_config=TEST_PROJECT_CONFIG,
+                         phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
             )
             perm_ctx = ToolPermissionContext(mode=PermissionMode.BYPASS_PERMISSIONS)
             ctx = tool_context_for(store, permission_context=perm_ctx)
@@ -522,7 +511,9 @@ class TestRuntimePermissionGatePhaseRules:
     def test_green_phase_denies_generic_writer_targeting_test_file(self):
         async def go():
             store = AppStateStore(
-                AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
+                AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                         project_config=TEST_PROJECT_CONFIG,
+                         phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
             )
             ctx = tool_context_for(store)
 
@@ -540,7 +531,9 @@ class TestRuntimePermissionGatePhaseRules:
     def test_run_tests_is_never_denied_in_any_phase(self):
         async def go():
             for phase in (TddPhase.RED, TddPhase.GREEN, TddPhase.REFACTOR):
-                store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=phase)))
+                store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                               project_config=TEST_PROJECT_CONFIG,
+                                               phase_ledger=PhaseLedger(phase=phase)))
                 ctx = tool_context_for(store)
                 res = await has_permissions_to_use_tool(RunTests, {}, ctx)
                 assert res.behavior == "allow"

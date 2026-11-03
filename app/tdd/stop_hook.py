@@ -54,10 +54,10 @@ RED_DUPLICATE_WAY = ("If an earlier sub-requirement already built and tested thi
 
 def _red_fact(state: LoopState) -> str:
     """Whether the test files changed since the sub-requirement started, as RunTests observes it."""
-    from app.tdd.suite_fingerprint import fingerprint_test_files, have_tests_changed
+    from app.tdd.suite_fingerprint import context_test_fingerprint, have_tests_changed
 
     app_state = state.tool_context.get_app_state()
-    current = fingerprint_test_files(getattr(state.tool_context, "workspace", None))
+    current = context_test_fingerprint(state.tool_context)
     if current is None:
         return "they could not be read"
     if not have_tests_changed(current, app_state.tdd_item_test_baseline):

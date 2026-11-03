@@ -5,6 +5,7 @@ every issue at once, the gitignore matchers, the plan-file section and the file 
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -151,6 +152,9 @@ def test_the_rules_are_built_once_per_configuration():
     config = ProjectConfig(test="t", test_files=("x",))
     assert config.rules is config.rules
     assert config == ProjectConfig(test="t", test_files=("x",))
+    # A replaced configuration builds its own matchers, never its source's.
+    other = dataclasses.replace(config, test_files=("y",))
+    assert other.rules.is_test_file("y") and not other.rules.is_test_file("x")
 
 
 @pytest.mark.parametrize(("path", "root", "expected"), [

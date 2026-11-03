@@ -21,6 +21,7 @@ import signal
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from app.config.config import Config
@@ -199,6 +200,22 @@ class LocalWorkspace:
                 )
 
         return sorted(entries, key=lambda e: e.path)
+
+    def walk_files(self, prune: Callable[[str], bool]) -> list[str]:
+        """
+        Every file under the root, as root-relative POSIX paths, without descending into a directory
+        `prune` refuses (it is given the directory's relative path with a trailing `/`). The TDD walks
+        (`app/tdd/suite_fingerprint.py::project_files`) prune the declared `exclude` patterns, so a
+        dependency tree such as `node_modules/` is never listed, let alone read. Symlinked
+        directories are not followed.
+        """
+        files: list[str] = []
+        for current, dirnames, filenames in os.walk(self._root):
+            relative = Path(current).relative_to(self._root).as_posix()
+            prefix = "" if relative == "." else f"{relative}/"
+            dirnames[:] = sorted(name for name in dirnames if not prune(f"{prefix}{name}/"))
+            files.extend(f"{prefix}{name}" for name in filenames)
+        return sorted(files)
 
     def exists(self, path: str) -> bool:
         try:

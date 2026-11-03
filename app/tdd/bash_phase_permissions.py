@@ -12,7 +12,9 @@ bypassable by rephrasing, which is exactly the kind of hole a model finds by acc
 redirection from a command and runs each target through `validatePath(..., 'create')`,
 which `utils/permissions/pathValidation.ts` maps onto the `Edit` permission type — so
 `Edit(...)` rules govern redirect targets without the `Edit` tool ever running. The same
-extraction here feeds `is_test_path`, so the TDD phase rules govern them the same way.
+extraction here feeds the project's declared test-file patterns (`classify_path`), so the TDD phase
+rules govern them the same way. A declared manifest is writable in every phase, and with no
+declaration a redirect is refused (the tier fails closed).
 
 Two details carried over deliberately:
 
@@ -35,7 +37,8 @@ import os
 import posixpath
 
 from app.tdd.ledger import PhaseLedger, TddPhase
-from app.tdd.phase_permissions import BACK_TO_RED, is_test_path
+from app.tdd.phase_permissions import BACK_TO_RED, NO_PROJECT_CONFIG, classify_path
+from app.tdd.project_config import TestFileRules
 from app.utils.bash.commands import extract_output_redirections
 
 #: Redirecting here writes nothing, so no phase can object. Upstream short-circuits it too.
@@ -57,7 +60,8 @@ def redirect_targets(command: str) -> tuple[tuple[str, ...], bool]:
     return targets, extraction.has_dangerous_redirection
 
 
-def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | None = None) -> tuple[bool, str]:
+def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | None = None, *,
+                         rules: TestFileRules | None, root: str | None = None) -> tuple[bool, str]:
     """
     Decide whether `command`'s writes are allowed in the current phase.
 
@@ -72,6 +76,9 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | No
                         else posixpath.normpath(posixpath.join(cwd_offset, t)) for t in targets)
     if not targets and not dangerous:
         return True, ""
+    if rules is None:
+        return False, f"TDD phase {ledger.phase} denies this command's redirection: {NO_PROJECT_CONFIG}"
+    kinds = {target: classify_path(target, rules, root) for target in targets}
 
     if ledger.phase == TddPhase.RED:
         if dangerous:
@@ -82,7 +89,7 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | No
                  "with WriteFile instead."),
             )
         for target in targets:
-            if not is_test_path(target):
+            if kinds[target] == "production":
                 return (
                     False,
                     (f"TDD phase RED denies writing to production file '{target}' through a "
@@ -98,7 +105,7 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | No
                  "redirection target uses shell expansion or could not be parsed."),
             )
         for target in targets:
-            if is_test_path(target):
+            if kinds[target] == "test":
                 return (
                     False,
                     (f"TDD phase {ledger.phase} denies modifying test file '{target}' through "

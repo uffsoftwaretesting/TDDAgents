@@ -601,7 +601,10 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
         return summary
     output = f"{result.stdout}\n{result.stderr}".strip()
     skipped = result.skipped if result.skipped is not None else skipped_count(output)
-    uncollected = uncollected_test_files(workspace, ".", files_that_ran(result))
+    from app.tdd.project_config import load_project_config
+
+    config = load_project_config(workspace)
+    uncollected = uncollected_test_files(workspace, config.rules if config else None, files_that_ran(result))
     verdict = "passed" if result.exit_code == 0 and skipped == 0 and not uncollected else "NOT passing"
     meaning = exit_semantic(result.exit_code).meaning
     summary = f"{verdict} (exit {result.exit_code}: {meaning}, {skipped} skipped, {result.coverage.describe()})"

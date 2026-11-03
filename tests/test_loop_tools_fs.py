@@ -62,7 +62,7 @@ from app.utils.file import FILE_NOT_FOUND_CWD_NOTE, add_line_numbers
 from app.utils.file_state_cache import FileState
 from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
-from tests.plan_helpers import CURRENT_ITEM_PLAN
+from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
 L1, R1, L2, R2 = "‘", "’", "“", "”"
 
@@ -271,10 +271,14 @@ def test_write_primitives_survive_pool_assembly_in_every_phase(phase):
 def test_runtime_gate_classifies_write_primitives_by_path():
     write, edit = build_write_file_tool(), build_edit_tool()
     red, green = PhaseLedger(phase=TddPhase.RED), PhaseLedger(phase=TddPhase.GREEN)
-    assert check_tdd_phase_permission(write, {"file_path": "tests/test_a.py"}, red)[0] is True
-    assert check_tdd_phase_permission(write, {"file_path": "src/a.py"}, red)[0] is False
-    assert check_tdd_phase_permission(edit, {"file_path": "src/a.py"}, green)[0] is True
-    assert check_tdd_phase_permission(edit, {"file_path": "tests/test_a.py"}, green)[0] is False
+    assert check_tdd_phase_permission(write, {"file_path": "tests/test_a.py"}, red,
+                                      rules=TEST_PROJECT_CONFIG.rules)[0] is True
+    assert check_tdd_phase_permission(write, {"file_path": "src/a.py"}, red,
+                                      rules=TEST_PROJECT_CONFIG.rules)[0] is False
+    assert check_tdd_phase_permission(edit, {"file_path": "src/a.py"}, green,
+                                      rules=TEST_PROJECT_CONFIG.rules)[0] is True
+    assert check_tdd_phase_permission(edit, {"file_path": "tests/test_a.py"}, green,
+                                      rules=TEST_PROJECT_CONFIG.rules)[0] is False
 
 
 @pytest.mark.parametrize("builder, name, args, expected", [
@@ -669,7 +673,8 @@ def test_edit_through_pipeline():
     """Validation runs before the TDD gate; RED permits test files only."""
     path = "tests/test_f.py"
     ws = FakeWorkspace(files={path: "abc", "src/m.py": "abc"})
-    ctx = tool_context_for(AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN)), workspace=ws)
+    ctx = tool_context_for(AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                                  project_config=TEST_PROJECT_CONFIG)), workspace=ws)
     ctx.permission_context = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
     msg = via_pipeline(build_edit_tool, edit_args(path=path), ctx)
     assert msg.content == f"<tool_use_error>{FILE_NOT_READ_ERROR}</tool_use_error>"

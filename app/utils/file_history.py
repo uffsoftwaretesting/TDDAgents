@@ -958,7 +958,7 @@ async def handle_rewind_files(
     from app.tdd.file_rewind import tdd_state_after_file_rewind
     from app.tdd.suite_fingerprint import fingerprint_test_files
 
-    baseline = fingerprint_test_files(workspace)
+    baseline = fingerprint_test_files(workspace, app_state.project_config)
     set_app_state(lambda state: tdd_state_after_file_rewind(state, baseline))
     return RewindFilesResult(can_rewind=True)
 

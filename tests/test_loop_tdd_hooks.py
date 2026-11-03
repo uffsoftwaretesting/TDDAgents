@@ -173,13 +173,15 @@ def test_red_says_the_test_files_have_not_changed_since_the_item_started():
     from tests.conftest import FakeWorkspace
 
     ws = FakeWorkspace(files={"tests/test_adapter.py": "def test_a():\n    pass\n"})
-    baseline = fingerprint_test_files(ws)
-    assert _refusal(AppState(tdd_item_test_baseline=baseline), ws) == (
+    from tests.plan_helpers import TEST_PROJECT_CONFIG
+
+    baseline = fingerprint_test_files(ws, TEST_PROJECT_CONFIG)
+    assert _refusal(AppState(tdd_item_test_baseline=baseline, project_config=TEST_PROJECT_CONFIG), ws) == (
         f"TDD cycle incomplete: RED. {RED_RULE}: they have not changed since this sub-requirement started. "
         f"{WRITE_TESTS}")
     ws.write_file("tests/test_adapter.py", "def test_a():\n    assert True\n")
     assert f"{RED_RULE}: they changed, and no RunTests run has counted since." in _refusal(
-        AppState(tdd_item_test_baseline=baseline), ws)
+        AppState(tdd_item_test_baseline=baseline, project_config=TEST_PROJECT_CONFIG), ws)
 
 
 def test_red_names_the_update_plan_way_only_when_the_pool_has_it():

@@ -45,6 +45,7 @@ from app.workspace.base import (
     normalize_path,
 )
 from app.workspace.local import LocalWorkspace
+from tests.plan_helpers import TEST_PROJECT_CONFIG
 
 
 def _dummy_call(input_dict: dict[str, object], context: object) -> ToolResult:
@@ -234,18 +235,18 @@ def test_tdd_phase_rule_strictly_denies_implementation_writers_in_red() -> None:
     tool_run_tests = build_tool(name="RunTests", prompt="", call=_dummy_call)
 
     # Assert implementation writers are blocked in RED
-    ok1, reason1 = check_tdd_phase_permission(tool_write_impl, {}, ledger_red)
+    ok1, reason1 = check_tdd_phase_permission(tool_write_impl, {}, ledger_red, rules=TEST_PROJECT_CONFIG.rules)
     assert ok1 is False
     assert "denies implementation-writing" in reason1
 
-    ok2, _reason2 = check_tdd_phase_permission(tool_edit_impl, {}, ledger_red)
+    ok2, _reason2 = check_tdd_phase_permission(tool_edit_impl, {}, ledger_red, rules=TEST_PROJECT_CONFIG.rules)
     assert ok2 is False
 
     # Test writers and RunTests must be permitted in RED
-    ok_test, _ = check_tdd_phase_permission(tool_write_test, {}, ledger_red)
+    ok_test, _ = check_tdd_phase_permission(tool_write_test, {}, ledger_red, rules=TEST_PROJECT_CONFIG.rules)
     assert ok_test is True
 
-    ok_run, _ = check_tdd_phase_permission(tool_run_tests, {}, ledger_red)
+    ok_run, _ = check_tdd_phase_permission(tool_run_tests, {}, ledger_red, rules=TEST_PROJECT_CONFIG.rules)
     assert ok_run is True
 
     deny_rules = get_phase_deny_rules(ledger_red)
@@ -257,11 +258,13 @@ def test_tdd_phase_rule_generic_writer_target_path_classification() -> None:
     tool_generic_write = build_tool(name="WriteFile", prompt="", call=_dummy_call)
 
     # Writing to a test file in RED is allowed
-    ok_test, _ = check_tdd_phase_permission(tool_generic_write, {"path": "tests/test_calculator.py"}, ledger_red)
+    ok_test, _ = check_tdd_phase_permission(tool_generic_write, {"path": "tests/test_calculator.py"}, ledger_red,
+                                            rules=TEST_PROJECT_CONFIG.rules)
     assert ok_test is True
 
     # Writing to a production code file in RED is DENIED
-    ok_impl, reason_impl = check_tdd_phase_permission(tool_generic_write, {"path": "app/calculator.py"}, ledger_red)
+    ok_impl, reason_impl = check_tdd_phase_permission(tool_generic_write, {"path": "app/calculator.py"}, ledger_red,
+                                                      rules=TEST_PROJECT_CONFIG.rules)
     assert ok_impl is False
     assert "denies writing to production file" in reason_impl
 

@@ -352,10 +352,13 @@ def test_a_new_current_item_fingerprints_its_tests_as_red_baseline():
     from app.tdd.suite_fingerprint import fingerprint_test_files
     from tests.conftest import FakeWorkspace
 
+    from tests.plan_helpers import TEST_PROJECT_CONFIG
+
     ws = FakeWorkspace(files={"tests/test_a.py": "A"})
-    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old"))
+    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old",
+                                         project_config=TEST_PROJECT_CONFIG))
     update_tdd_plan(tool_context_for(store, workspace=ws), lambda p: p.remove("1"))
-    assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws)
+    assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws, TEST_PROJECT_CONFIG) is not None
     # Without a workspace no baseline can be taken.
     store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old"))
     update_tdd_plan(tool_context_for(store), lambda p: p.remove("1"))

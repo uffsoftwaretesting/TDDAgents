@@ -52,6 +52,7 @@ from app.memdir.team_mem_paths import (
 from app.memdir.team_mem_prompts import build_combined_memory_prompt
 from app.utils.settings.settings import SettingsLocations
 from tests.conftest import REPO_ROOT
+from tests.plan_helpers import TEST_PROJECT_CONFIG
 
 MEMDIR_TS = REPO_ROOT / "reference" / "claude-code" / "src" / "memdir"
 needs_reference = pytest.mark.skipif(not MEMDIR_TS.is_dir(), reason="claude-code reference snapshot not present")
@@ -495,7 +496,8 @@ def test_auto_memory_files_are_carved_out_for_read_write_and_the_tdd_tier(tmp_pa
 
     monkeypatch.setenv("TDDAGENTS_ENABLE_AUTO_MEMORY", "1")
     ws = _ws(tmp_path)
-    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                   project_config=TEST_PROJECT_CONFIG, phase_ledger=PhaseLedger(phase=TddPhase.RED)))
     ctx = tool_context_for(store, workspace=ws)
     path = get_auto_mem_path(str(ws.root)) + "user_role.md"
     write = asyncio.run(build_write_file_tool().check_permissions({"file_path": path, "content": "x"}, ctx))

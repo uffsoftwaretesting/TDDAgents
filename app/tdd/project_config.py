@@ -91,7 +91,7 @@ class ProjectConfig:
     manifest_files: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
     #: The matchers built from the patterns, once per configuration.
-    _rules: list[TestFileRules] = field(default_factory=list, compare=False, repr=False)
+    _rules: list[TestFileRules] = field(default_factory=list, init=False, compare=False, repr=False)
 
     @property
     def junit_report_path(self) -> str:

@@ -715,7 +715,7 @@ async def open_session_run(
             ctx.tools = refresh_tools()
         # The current sub-requirement starts here (or restarts, on resume: the ledger is never
         # restored), so its tests are fingerprinted as RED's baseline (Phase 12).
-        baseline = fingerprint_test_files(workspace)
+        baseline = fingerprint_test_files(workspace, store.get().project_config)
         store.update(lambda s: replace(s, tdd_item_test_baseline=baseline))
         recorder = TransitionEventRecorder(store, events_path(run_id, cwd), session_id=run_id, plan_index=plan_index)
         run_deps = replace(deps, emit_event=_both(recorder, deps.emit_event))

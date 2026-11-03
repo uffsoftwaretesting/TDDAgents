@@ -555,8 +555,10 @@ def test_handle_rewind_files_rewinds_and_restarts_the_ledger_in_red(h: Harness) 
     from app.tdd.ledger import TestRunRecord
 
     run = TestRunRecord(test_path="tests", exit_code=0)
+    from tests.plan_helpers import TEST_PROJECT_CONFIG
+
     h.store.update(lambda s: dataclasses.replace(s, phase_ledger=green, last_test_run=run,
-                                                 tdd_item_test_baseline="old"))
+                                                 tdd_item_test_baseline="old", project_config=TEST_PROJECT_CONFIG))
     workspace = FakeWorkspace()
     workspace.write_file("tests/test_a.py", "def test_a():\n    assert True\n")
     result = asyncio.run(fh.handle_rewind_files("u1", h.store.get(), h.store.update, False, workspace=workspace))
@@ -570,7 +572,7 @@ def test_handle_rewind_files_rewinds_and_restarts_the_ledger_in_red(h: Harness) 
     assert state.last_test_run is None
     from app.tdd.suite_fingerprint import fingerprint_test_files
 
-    assert state.tdd_item_test_baseline == fingerprint_test_files(workspace)
+    assert state.tdd_item_test_baseline == fingerprint_test_files(workspace, TEST_PROJECT_CONFIG)
     assert state.tdd_item_test_baseline not in (None, "old")
 
 

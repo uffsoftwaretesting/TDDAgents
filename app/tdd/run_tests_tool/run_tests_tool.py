@@ -389,11 +389,13 @@ def build_run_tests_tool(
             return ToolResult(content=f"RunTests could not run the tests: {exc}\nTDD ledger: unchanged.", is_error=True)
 
         workspace = getattr(context, "workspace", None)
+        config = context.get_app_state().project_config
+        rules = config.rules if config is not None else None
         outcome, is_error = run_outcome(exec_result)
         skipped = exec_result.skipped if exec_result.skipped is not None else skipped_count(
             f"{exec_result.stdout}\n{exec_result.stderr}")
         uncollected = await asyncio.to_thread(
-            uncollected_test_files, workspace, test_path, files_that_ran(exec_result))
+            uncollected_test_files, workspace, rules, files_that_ran(exec_result))
         facts = RunFacts(collection_errors=tuple(sorted(exec_result.collection_errors or ())),
                          uncollected=tuple(uncollected), skipped=skipped, coverage=exec_result.coverage)
         code = exec_result.exit_code
@@ -407,7 +409,7 @@ def build_run_tests_tool(
         phase = before.phase_ledger.phase
         changed = False
         if phase == TddPhase.RED:
-            current = await asyncio.to_thread(fingerprint_test_files, workspace)
+            current = await asyncio.to_thread(fingerprint_test_files, workspace, config)
             # A test file pytest did not collect ran nothing, so RED gets no evidence from the run.
             changed = have_tests_changed(current, before.tdd_item_test_baseline) and not uncollected
         # The ledger's input: 0 a pass, 1 a non-pass. In GREEN and REFACTOR a skipped test or an
