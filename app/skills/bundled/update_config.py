@@ -25,10 +25,11 @@ The texts are `app/prompts/skills/update-config/` (`prompt.md` is `UPDATE_CONFIG
 - **`tool_response`:** a PostToolUse hook receives the tool's result text here, so the hook input
   sample shows a string and the examples read `.tool_input.file_path` alone (upstream's
   `.tool_response.filePath // …` fails in `jq` on a string).
-- **No `/hooks` menu:** the settings watcher reloads a hook written mid-session
-  (`app/utils/settings/change_detector.py`), so the verification flow's in-turn proof (step 6) is
-  upstream's; where it sends the user to `/hooks` (to reload, or to review the hook later), the
-  restart is named instead and the review pointer is dropped.
+- **`/hooks`** is upstream's menu (`app/commands/hooks/hooks.py`), and opening it reloads the run's
+  hooks, so the verification flow's watcher caveat and handoff (step 6, step 7) are upstream's as
+  written; the settings watcher (`app/utils/settings/change_detector.py`) makes the in-turn proof
+  work. The "Ran N hooks" notice step 7 names is the REPL's stop-hook summary
+  (`app/components/messages/system_text_message.py`).
 - **`claude --debug`** is `{{CLI_COMMAND}} --debug` (`app/constants/product.py`, `app/utils/debug.py`).
 - **Settings this build does not read, dropped:** `env`, `model`, `agent` (the block keeps
   `alwaysThinkingEnabled`, under "Thinking"), `attribution` (TDDAgents never commits), the "Other
