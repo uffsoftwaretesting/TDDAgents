@@ -2,7 +2,8 @@
 Permission-mode transitions for plan mode.
 
 Ported from `reference/claude-code/src/utils/permissions/permissionSetup.ts` ->
-`prepareContextForPlanMode`, `transitionPermissionMode`, and `bootstrap/state.ts` ->
+`prepareContextForPlanMode`, `transitionPermissionMode`, `createDisabledBypassPermissionsContext`,
+and `bootstrap/state.ts` ->
 `handlePlanModeTransition`, `setHasExitedPlanMode`. Upstream keeps the two plan-mode flags in
 process state; here they live on the run's `AppState` (`has_exited_plan_mode`,
 `needs_plan_mode_exit_attachment`).
@@ -69,7 +70,18 @@ def set_permission_mode(state: AppState, to_mode: PermissionMode) -> AppState:
     return dataclasses.replace(state, tool_permission_context=dataclasses.replace(context, mode=to_mode))
 
 
+def create_disabled_bypass_permissions_context(context: ToolPermissionContext) -> ToolPermissionContext:
+    """
+    `createDisabledBypassPermissionsContext`: settings now disable bypass mode, so a context in it
+    drops to `default` and the mode is no longer available.
+    """
+    if context.mode == PermissionMode.BYPASS_PERMISSIONS:
+        context = dataclasses.replace(context, mode=PermissionMode.DEFAULT)
+    return dataclasses.replace(context, is_bypass_permissions_mode_available=False)
+
+
 __all__ = [
+    "create_disabled_bypass_permissions_context",
     "handle_plan_mode_transition",
     "prepare_context_for_plan_mode",
     "set_permission_mode",

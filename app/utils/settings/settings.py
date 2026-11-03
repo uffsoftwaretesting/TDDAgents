@@ -269,23 +269,49 @@ def parse_settings_file(path: Path) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         logger.warning("Ignoring malformed settings at %s: not a JSON object", path)
         return None
+    return validate_settings_document(data, str(path))
+
+
+def validate_settings_document(data: Mapping[str, Any], origin: str) -> dict[str, Any] | None:
+    """
+    The part of `SettingsSchema().safeParse` this build checks: the plugin keys and the `hooks`
+    block. A document failing it is `None` (ignored whole, logged); a valid one comes back as
+    parsed (nested unknown plugin keys stripped).
+    """
     plugin_errors, plugin_keys = parse_plugin_settings(data)
     if plugin_errors:
         # Same rule as the hooks below: a document failing `SettingsSchema` is ignored whole.
-        logger.warning("Invalid settings at %s, file ignored:\n%s", path, "\n".join(plugin_errors))
+        logger.warning("Invalid settings at %s, file ignored:\n%s", origin, "\n".join(plugin_errors))
         return None
     # `parseSettingsFileUncached` returns the parsed document: nested unknown keys stripped.
-    data = {**data, **plugin_keys}
-    if "hooks" in data:
+    parsed = {**data, **plugin_keys}
+    if "hooks" in parsed:
         # `parseSettingsFileUncached`: a document failing `SettingsSchema` yields
         # `settings: null` — the whole file (its hooks, rules and `defaultMode`) is ignored.
         from app.schemas.hooks import hooks_schema_errors
 
-        errors = hooks_schema_errors(data["hooks"])
+        errors = hooks_schema_errors(parsed["hooks"])
         if errors:
-            logger.warning("Invalid settings at %s, file ignored:\n%s", path, "\n".join(errors))
+            logger.warning("Invalid settings at %s, file ignored:\n%s", origin, "\n".join(errors))
             return None
-    return data
+    return parsed
+
+
+#: Where the SDK's inline flag settings are named in a warning.
+INLINE_FLAG_SETTINGS_ORIGIN = "the inline flag settings"
+
+
+def get_inline_flag_settings() -> dict[str, Any] | None:
+    """
+    `getFlagSettingsInline()` as the settings readers use it: the SDK host's `apply_flag_settings`
+    document (`app/bootstrap/state.py`) when it is valid (`SettingsSchema().safeParse`), else `None`.
+    """
+    from app.bootstrap.state import get_flag_settings_inline
+
+    inline = get_flag_settings_inline()
+    if not inline:
+        return None
+    return validate_settings_document(inline, INLINE_FLAG_SETTINGS_ORIGIN)
 
 
 def merge_settings(target: Mapping[str, Any], source: Mapping[str, Any]) -> dict[str, Any]:
@@ -340,13 +366,19 @@ def load_managed_file_settings(managed_dir: Path) -> dict[str, Any] | None:
 
 
 def get_settings_for_source(source: PermissionRuleSource, locations: SettingsLocations) -> dict[str, Any] | None:
-    """`getSettingsForSource`: one source's document, or `None`."""
+    """
+    `getSettingsForSource`: one source's document, or `None`. `flagSettings` is the `--settings`
+    file with the SDK's inline flag settings merged over it.
+    """
     if source == PermissionRuleSource.POLICY_SETTINGS:
         return load_managed_file_settings(locations.managed_dir)
     path = settings_file_path_for_source(source, locations)
-    if path is None:
-        return None
-    return parse_settings_file(path)
+    file_settings = parse_settings_file(path) if path is not None else None
+    if source == PermissionRuleSource.FLAG_SETTINGS:
+        inline = get_inline_flag_settings()
+        if inline is not None:
+            return merge_settings(file_settings or {}, inline)
+    return file_settings
 
 
 def load_settings(locations: SettingsLocations) -> dict[str, Any]:
@@ -360,17 +392,24 @@ def load_settings(locations: SettingsLocations) -> dict[str, Any]:
         merged = merge_settings(merged, plugin_settings)
     seen: set[Path] = set()
     for source in SETTING_SOURCES:
-        if source != PermissionRuleSource.POLICY_SETTINGS:
-            path = settings_file_path_for_source(source, locations)
-            if path is None:
-                continue
+        if source == PermissionRuleSource.POLICY_SETTINGS:
+            settings = get_settings_for_source(source, locations)
+            if settings:
+                merged = merge_settings(merged, settings)
+            continue
+        path = settings_file_path_for_source(source, locations)
+        if path is not None:
             resolved = path.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-        settings = get_settings_for_source(source, locations)
-        if settings:
-            merged = merge_settings(merged, settings)
+            if resolved not in seen:
+                seen.add(resolved)
+                settings = parse_settings_file(path)
+                if settings:
+                    merged = merge_settings(merged, settings)
+        if source == PermissionRuleSource.FLAG_SETTINGS:
+            # `loadSettingsFromDisk`: the SDK's inline flag settings, merged even without a file.
+            inline = get_inline_flag_settings()
+            if inline:
+                merged = merge_settings(merged, inline)
     return merged
 
 
@@ -688,6 +727,9 @@ __all__ = [
     "normalize_legacy_tool_name",
     "parse_settings_file",
     "parse_tool_list_from_cli",
+    "get_inline_flag_settings",
+    "validate_settings_document",
+    "INLINE_FLAG_SETTINGS_ORIGIN",
     "permission_mode_from_string",
     "permission_rule_value_from_string",
     "settings_file_path_for_source",

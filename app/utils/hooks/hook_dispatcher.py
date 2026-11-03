@@ -5,7 +5,9 @@ The production assembly of `HookDispatcher`: the config snapshot is captured fro
 settings files as the permission rules (`captureHooksConfigSnapshot` at startup), and the
 three executors a non-command hook needs are bound to the run — the prompt hook and the
 agent hook to the run's model as their fallback (`getSmallFastModel` first, see
-`utils/hooks/exec_prompt_hook.py`), the HTTP hook to the settings' URL and env-var allowlists.
+`utils/hooks/exec_prompt_hook.py`), the HTTP hook to the settings' URL and env-var allowlists,
+read at each call as upstream's `getHttpHookPolicy()` reads the current settings (so a settings
+change during the session applies to the next HTTP hook).
 
 The run's `locations` stay on the dispatcher: the plugins' hooks are loaded from them
 (`app/utils/plugins/load_plugin_hooks.py`) and a plugin hook's saved options read from them.
@@ -44,6 +46,15 @@ from app.utils.settings.settings import (
 )
 
 
+async def _exec_http_hook_with_current_policy(
+    hook: Any, hook_event: str, json_input: str, signal: Any, *, locations: SettingsLocations, transport: Any
+) -> Any:
+    """`execHttpHook` with `getHttpHookPolicy()`: the allowlists of the settings as they are now."""
+    policy_settings = get_settings_for_source(PermissionRuleSource.POLICY_SETTINGS, locations)
+    policy = http_hook_policy_from_settings(load_settings(locations), policy_settings)
+    return await exec_http_hook(hook, hook_event, json_input, signal, policy=policy, transport=transport)
+
+
 def build_hook_dispatcher(
     locations: SettingsLocations,
     *,
@@ -58,8 +69,6 @@ def build_hook_dispatcher(
 ) -> HookDispatcher:
     """The run's dispatcher, with production executors unless fakes are injected."""
     snapshot = capture_hooks_config_snapshot(locations)
-    policy_settings = get_settings_for_source(PermissionRuleSource.POLICY_SETTINGS, locations)
-    http_policy = http_hook_policy_from_settings(load_settings(locations), policy_settings)
     caller = prompt_model_caller if prompt_model_caller is not None else build_prompt_model_caller()
     runner = agent_runner if agent_runner is not None else build_agent_hook_runner()
     return HookDispatcher(
@@ -73,7 +82,7 @@ def build_hook_dispatcher(
         agent_executor=partial(
             exec_agent_hook, agent_runner=runner, transcript_path=transcript_path, default_model=model
         ),
-        http_executor=partial(exec_http_hook, policy=http_policy, transport=http_transport),
+        http_executor=partial(_exec_http_hook_with_current_policy, locations=locations, transport=http_transport),
         settings_locations=locations,
     )
 

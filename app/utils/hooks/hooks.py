@@ -2,7 +2,8 @@
 Running the hooks configured for an event, and the per-event entry points.
 
 Ported from `reference/claude-code/src/utils/hooks.ts` -> `createBaseHookInput`,
-`hasHookForEvent`, `executeHooks`, `executeHooksOutsideREPL`, `executePreToolHooks`,
+`hasHookForEvent`, `executeHooks`, `executeHooksOutsideREPL`, `hasBlockingResult`,
+`executeConfigChangeHooks`, `executePreToolHooks`,
 `executePostToolHooks`, `executePostToolUseFailureHooks`, `executePermissionRequestHooks`,
 `executeStopHooks`, `executeStopFailureHooks`, `executeUserPromptSubmitHooks`,
 `executeSessionStartHooks`, `executeSubagentStartHooks`, `executePreCompactHooks`,
@@ -1205,6 +1206,43 @@ async def execute_session_end_hooks(
     return results
 
 
+def has_blocking_result(results: Sequence[HookOutsideReplResult]) -> bool:
+    """`hasBlockingResult`."""
+    return any(result.blocked for result in results)
+
+
+#: `ConfigChangeSource`.
+CONFIG_CHANGE_SOURCES: tuple[str, ...] = (
+    "user_settings", "project_settings", "local_settings", "policy_settings", "skills",
+)
+
+
+async def execute_config_change_hooks(
+    dispatcher: HookDispatcher | None,
+    source: str,
+    file_path: str | None = None,
+    timeout_ms: int = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+) -> list[HookOutsideReplResult]:
+    """
+    `executeConfigChangeHooks`: a configuration file changed during the session. A blocking result
+    (exit 2, `decision: block`) keeps the change from being applied, except for policy settings,
+    whose hooks fire for the record but never block.
+    """
+    if dispatcher is None:
+        return []
+    hook_input: dict[str, Any] = {
+        **dispatcher.create_base_hook_input(None),
+        "hook_event_name": HookEvent.CONFIG_CHANGE.value,
+        "source": source,
+    }
+    if file_path is not None:
+        hook_input["file_path"] = file_path
+    results = await dispatcher.execute_hooks_outside_repl(hook_input, match_query=source, timeout_ms=timeout_ms)
+    if source == "policy_settings":
+        return [replace(result, blocked=False) for result in results]
+    return results
+
+
 async def execute_stop_failure_hooks(
     context: Any,
     error: str | None,
@@ -1895,6 +1933,7 @@ def _is_async_line(line: str) -> bool:
 
 
 __all__ = [
+    "CONFIG_CHANGE_SOURCES",
     "PROJECT_DIR_ENV",
     "AgentHookExecutor",
     "CommandHookResult",
@@ -1910,6 +1949,7 @@ __all__ = [
     "PromptHookExecutor",
     "dispatcher_of",
     "exec_command_hook",
+    "execute_config_change_hooks",
     "execute_elicitation_hooks",
     "execute_elicitation_result_hooks",
     "execute_notification_hooks",
@@ -1929,6 +1969,7 @@ __all__ = [
     "get_hooks_config",
     "get_legacy_tool_names",
     "get_matching_hooks",
+    "has_blocking_result",
     "hook_display_text",
     "hook_env",
     "last_assistant_text",

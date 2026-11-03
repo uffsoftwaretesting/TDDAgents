@@ -114,15 +114,19 @@ def _isolated_bundled_skills_root(tmp_path_factory: Any, monkeypatch: Any) -> An
 def _process_wide_session_state(monkeypatch: Any) -> Any:
     """
     Upstream's process-wide state a test may set, cleared around every test as a new process
-    starts clean: the debug flags (`app/utils/debug.py`; `DEBUG` / `DEBUG_SDK` unset).
+    starts clean: the debug flags (`app/utils/debug.py`; `DEBUG` / `DEBUG_SDK` unset) and the SDK's
+    inline flag settings (`app/bootstrap/state.py`).
     """
+    from app.bootstrap.state import set_flag_settings_inline
     from app.utils.debug import reset_debug_state
 
     monkeypatch.delenv("DEBUG", raising=False)
     monkeypatch.delenv("DEBUG_SDK", raising=False)
     reset_debug_state()
+    set_flag_settings_inline(None)
     yield
     reset_debug_state()
+    set_flag_settings_inline(None)
 
 
 def read_dotenv_key(name: str) -> str | None:
