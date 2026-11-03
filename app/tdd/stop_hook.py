@@ -26,7 +26,7 @@ from langchain_core.messages import HumanMessage
 from app.query.stop_hooks import StopHookResult
 from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
 from app.tdd.ledger import PhaseLedger, TddPhase
-from app.tdd.phase_permissions import BACK_TO_RED
+from app.tdd.phase_permissions import BACK_TO_RED, NO_PROJECT_CONFIG
 from app.tdd.tdd_plan_tool.tdd_plan_tool import UPDATE_PLAN_TOOL_NAME
 from app.tools.ask_user_question_tool.ask_user_question_tool import (
     ASK_USER_QUESTION_TOOL_NAME,
@@ -78,21 +78,43 @@ def _last_run_fact(state: LoopState, phase: TddPhase) -> str:
     return f"the last RunTests run in {phase.value} exited {run.exit_code} ({run.meaning}) and did not meet it"
 
 
+def _open_phase(ledger: PhaseLedger) -> TddPhase:
+    """The first phase of the cycle whose evidence the ledger does not hold."""
+    if not ledger.tests_written:
+        return TddPhase.RED
+    return TddPhase.GREEN if not ledger.green_passed else TddPhase.REFACTOR
+
+
+def _fails_closed(state: LoopState) -> bool:
+    """
+    Whether the TDD tier fails closed (2026-11-03): a sub-requirement is current and the project declares
+    no configuration, so RunTests cannot run and no write is judged allowed. The refusal then states the
+    tier's own reason (`NO_PROJECT_CONFIG`, one source) in every phase, instead of a fact the missing
+    declaration caused ("they could not be read") or a way forward the tier refuses.
+    """
+    app_state = state.tool_context.get_app_state()
+    return app_state.project_config is None and app_state.tdd_plan.current is not None
+
+
 def incomplete_cycle_message(ledger: PhaseLedger, state: LoopState) -> str:
     """
     The phase, its rule (RunTests' `PHASE_RULES`, one source) and the observed fact, then what is
     open (2026-10-28): the refusal states what the ledger needs, as RunTests does, so a model cannot
-    take tests written for an earlier sub-requirement as this one's.
+    take tests written for an earlier sub-requirement as this one's. While the tier fails closed
+    (`_fails_closed`), the fact is the tier's reason and nothing else is open but the declaration.
     """
     from app.tdd.run_tests_tool.run_tests_tool import PHASE_RULES
 
+    phase = _open_phase(ledger)
+    if _fails_closed(state):
+        return f"TDD cycle incomplete: {phase.value}. {PHASE_RULES[phase]}: {NO_PROJECT_CONFIG}"
     tools = {getattr(tool, "name", None) for tool in state.tool_context.tools}
-    if not ledger.tests_written:
+    if phase == TddPhase.RED:
         open_work = RED_WAYS_FORWARD
         if UPDATE_PLAN_TOOL_NAME in tools:
             open_work = f"{open_work} {RED_DUPLICATE_WAY}"
         return f"TDD cycle incomplete: RED. {PHASE_RULES[TddPhase.RED]}: {_red_fact(state)}. {open_work}"
-    if not ledger.green_passed:
+    if phase == TddPhase.GREEN:
         fact = _last_run_fact(state, TddPhase.GREEN)
         return (f"TDD cycle incomplete: GREEN. {PHASE_RULES[TddPhase.GREEN]}: {fact}. Implement "
                 f"the code the tests describe and run RunTests until every test passes. {BACK_TO_RED}")

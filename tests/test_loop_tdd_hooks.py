@@ -229,3 +229,56 @@ def test_a_passing_run_from_the_phase_before_is_never_named(phase, earlier):
                    None):
         refusal = _refusal(AppState(phase_ledger=ledger, last_test_run=record))
         assert f": {no_run(phase.value)}." in refusal and "exited 0" not in refusal
+
+
+# ── no declared configuration while an item is current (user decision 2026-11-03) ──────────
+#
+# The tier fails closed then (`NO_PROJECT_CONFIG`). The RED refusal used to say the test files "could
+# not be read", a fact the missing declaration caused, so the model never learned to declare it.
+
+NO_CONFIG_REASON = (
+    "the project declares no test command, so its test files cannot be told from its production code. "
+    'The project\'s configuration is declared in the plan\'s "## Project Configuration" section and approved '
+    "with the plan (ExitPlanMode).")
+
+
+@pytest.mark.parametrize("ledger, rule", [
+    (PhaseLedger(), RED_RULE),
+    (PhaseLedger(phase=TddPhase.GREEN, tests_written=True), GREEN_RULE),
+    (PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, coverage=50.0), REFACTOR_RULE),
+])
+def test_every_phase_states_the_tiers_reason_when_no_configuration_is_declared(ledger, rule):
+    from types import SimpleNamespace
+
+    from app.tdd.ledger import TestRunRecord
+    from app.tdd.phase_permissions import NO_PROJECT_CONFIG
+    from tests.conftest import FakeWorkspace
+    from tests.plan_helpers import CURRENT_ITEM_PLAN
+
+    assert NO_PROJECT_CONFIG == NO_CONFIG_REASON
+    phase = ledger.phase.value
+    record = TestRunRecord(command=".", exit_code=1, meaning="the test command failed", phase=ledger.phase)
+    ws = FakeWorkspace(files={"tests/test_adapter.py": "def test_a():\n    pass\n"})
+    refusal = _refusal(AppState(phase_ledger=ledger, tdd_plan=CURRENT_ITEM_PLAN, last_test_run=record), ws,
+                       tools=(SimpleNamespace(name="UpdatePlan"),))
+    item = CURRENT_ITEM_PLAN.current
+    assert item is not None
+    assert refusal == (f"Current sub-requirement {item.id}: {item.text}\n\n"
+                       f"TDD cycle incomplete: {phase}. {rule}: {NO_CONFIG_REASON}")
+
+
+def test_without_a_current_item_a_missing_declaration_keeps_the_observed_fact():
+    """The tier fails closed only while an item is current; otherwise the refusal is unchanged."""
+    assert _refusal(AppState()) == RED_MSG
+    assert _refusal(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))) == GREEN_MSG
+
+
+def test_with_a_declaration_and_a_current_item_the_refusal_states_the_observed_fact():
+    from tests.conftest import FakeWorkspace
+    from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
+
+    ws = FakeWorkspace(files={"tests/test_adapter.py": "def test_a():\n    pass\n"})
+    refusal = _refusal(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG), ws)
+    assert refusal.endswith(f"TDD cycle incomplete: RED. {RED_RULE}: they changed, and no RunTests run has counted "
+                            f"since. {WRITE_TESTS}")
+    assert NO_CONFIG_REASON not in refusal
