@@ -22,8 +22,8 @@ React/Ink) is not ported: the `plugin` CLI subcommand does its work (`app/cli/ha
 `formatContextAsMarkdownTable`: the Markdown report, which upstream's interactive build replaces
 with a coloured grid (`context.tsx`, `components/ContextVisualization.tsx`, React/Ink, not
 ported). `collect_context_data` is also what the SDK's `get_context_usage` control request
-answers with (`cli/print.ts`). Upstream keeps it in `src/commands/context/`; here `commands` is a
-module, not a package, so it lives in this module. Not ported: the context-collapse status
+answers with (`cli/print.ts`). Upstream keeps it in `src/commands/context/`; here it lives in this
+module. Not ported: the context-collapse status
 (`CONTEXT_COLLAPSE`, off in the external build) and the `[ANT-ONLY]` tables.
 
 | Command | What it does |

@@ -17,7 +17,7 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
   `ask_questions` shows one question at a time with its options and an "Other"; a number (or
   several, for a multiSelect question) picks, any other text is the user's own answer, and Esc
   declines.
-* **Slash commands** (`app/commands.py`): never run mid-turn, as upstream's queue processor;
+* **Slash commands** (`app/commands/commands.py`): never run mid-turn, as upstream's queue processor;
   the immediate ones (`/help`, `/plan`, `/pause`, `/mcp`, `/exit`) do.
 * **Dialogs** (`app/components/design_system/dialog.py`): `/mcp` (`app/components/mcp/mcp_command.py`)
   and an MCP server's elicitation (`app/components/mcp/elicitation_dialog.py`, upstream's
@@ -54,7 +54,7 @@ from app.cli.print import (
     start_session,
     submit_prompt,
 )
-from app.commands import (
+from app.commands.commands import (
     HELP_TEXT,
     Command,
     CommandError,

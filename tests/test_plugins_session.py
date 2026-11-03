@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage
 
 from app.bootstrap.state import set_inline_plugins
 from app.cli.print import HeadlessOptions, open_session_run, run_headless
-from app.commands import (
+from app.commands.commands import (
     Command,
     SlashCommand,
     format_description_with_source,

@@ -3,8 +3,8 @@ The `/mcp` command: the MCP dialog, or one of its argument forms.
 
 Ported from `reference/claude-code/src/commands/mcp/mcp.tsx` -> `call`, `MCPToggle`, and
 `commands/mcp/index.ts` (the command's description and argument hint, registered in
-`app/commands.py`). Upstream keeps it in `src/commands/mcp/`; here `app/commands` is a module,
-not a package, so the command's body lives beside the dialog it opens.
+`app/commands/commands.py`). Upstream keeps it in `src/commands/mcp/`; here the command's body
+lives beside the dialog it opens.
 
 * `/mcp` (and `/mcp no-redirect`): the dialog (`app/components/mcp/mcp_settings.py`);
 * `/mcp reconnect <server>`: that server reconnected (`mcp_reconnect.py`);

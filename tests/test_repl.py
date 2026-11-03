@@ -1,6 +1,6 @@
 """
 Phase 11: the interactive development session (`app/screens/repl.py`), its slash commands
-(`app/commands.py`) and `develop_interactive`, against a fake terminal and a scripted model.
+(`app/commands/commands.py`) and `develop_interactive`, against a fake terminal and a scripted model.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.cli.print import open_session_run
-from app.commands import (
+from app.commands.commands import (
     HELP_TEXT,
     CommandError,
     SlashCommand,

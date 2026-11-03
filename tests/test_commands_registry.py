@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.commands import (
+from app.commands.commands import (
     HELP_TEXT,
     Command,
     SlashCommand,

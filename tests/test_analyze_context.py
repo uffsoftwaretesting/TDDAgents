@@ -1,6 +1,6 @@
 """
 Context usage (`app/utils/analyze_context.py`, upstream `analyzeContext.ts`) and `/context`
-(`app/commands.py`, upstream `context-noninteractive.ts`), with a deterministic fake counter:
+(`app/commands/commands.py`, upstream `context-noninteractive.ts`), with a deterministic fake counter:
 nothing here reaches a model or a token-counting endpoint.
 """
 
@@ -14,7 +14,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 import app.utils.analyze_context as ac
-from app.commands import (
+from app.commands.commands import (
     HELP_TEXT,
     collect_context_data,
     format_context_as_markdown_table,
