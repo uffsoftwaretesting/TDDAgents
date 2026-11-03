@@ -17,9 +17,10 @@ Every other key stays as leniently read as before.
 `DeniedMcpServerEntrySchema`, `ExtraKnownMarketplaceSchema` and `CUSTOMIZATION_SURFACES`) as Zod's
 `toJSONSchema` prints it, **limited to the keys this build reads** (`SUPPORTED_SETTINGS_KEYS`), each
 with upstream's `.describe()` text after the product substitutions ("Claude Code" -> "TDDAgents",
-`.claude/` -> `.tddagents/`). It is the "Full Settings JSON Schema" the `update-config` skill prints
-(`app/utils/settings/schema_output.py`). Upstream's other keys (`env`, `model`, `attribution`,
-`statusLine`, ...) are left out: a key this build does not read would be documented but do nothing.
+`.claude/` -> `.tddagents/`, the plugin folder `.claude-plugin/` -> `.tddagents-plugin/`). It is the
+"Full Settings JSON Schema" the `update-config` skill prints (`app/utils/settings/schema_output.py`).
+Upstream's other keys (`env`, `model`, `attribution`, `statusLine`, ...) are left out: a key
+this build does not read would be documented but do nothing.
 `permissions.defaultMode` lists this build's modes (`PERMISSION_MODES`, `auto` included, as upstream's
 `TRANSCRIPT_CLASSIFIER` build); `permissions.disableAutoMode` is not read here and is left out.
 """

@@ -1092,8 +1092,8 @@ def plugin_source_json_schema() -> dict[str, Any]:
     ref = opt(_git_ref())
     return union(
         describe(string(pattern="^\\./.*"), (
-            "Path to the plugin root, relative to the marketplace root (the directory containing .claude-plugin/, "
-            "not .claude-plugin/ itself)")),
+            "Path to the plugin root, relative to the marketplace root (the directory containing .tddagents-plugin/, "
+            "not .tddagents-plugin/ itself)")),
         describe(obj({
             "source": req(literal("npm")),
             "package": req(describe(union(string(), string()), (
@@ -1126,7 +1126,7 @@ def plugin_source_json_schema() -> dict[str, Any]:
             "source": req(literal("git-subdir")),
             "url": req(describe(string(), "Git repository: GitHub owner/repo shorthand, https://, or git@ URL")),
             "path": req(describe(string(min_length=1), (
-                'Subdirectory within the repo containing the plugin (e.g., "tools/claude-plugin"). Cloned sparsely '
+                'Subdirectory within the repo containing the plugin (e.g., "tools/tddagents-plugin"). Cloned sparsely '
                 "using partial clone (--filter=tree:0) to minimize bandwidth for monorepos."))),
             "ref": ref,
             "sha": sha,
@@ -1163,10 +1163,11 @@ def marketplace_source_json_schema() -> dict[str, Any]:
     )
 
     ref = opt(_git_ref())
-    path = opt(describe(string(), "Path to marketplace.json within repo (defaults to .claude-plugin/marketplace.json)"))
+    path = opt(describe(string(), (
+        "Path to marketplace.json within repo (defaults to .tddagents-plugin/marketplace.json)")))
     sparse = opt(describe(array(string()), (
         "Directories to include via git sparse-checkout (cone mode). Use for monorepos where the marketplace lives "
-        'in a subdirectory. Example: [".claude-plugin", "plugins"]. If omitted, the full repository is cloned.')))
+        'in a subdirectory. Example: [".tddagents-plugin", "plugins"]. If omitted, the full repository is cloned.')))
     settings_plugin = obj({
         "name": req(describe(string(min_length=1), "Plugin name as it appears in the target repository")),
         "source": req(describe(plugin_source_json_schema(), (
@@ -1206,7 +1207,7 @@ def marketplace_source_json_schema() -> dict[str, Any]:
         }),
         obj({
             "source": req(literal("directory")),
-            "path": req(describe(string(), "Local directory containing .claude-plugin/marketplace.json")),
+            "path": req(describe(string(), "Local directory containing .tddagents-plugin/marketplace.json")),
         }),
         obj({
             "source": req(literal("hostPattern")),

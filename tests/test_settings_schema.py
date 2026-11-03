@@ -96,7 +96,7 @@ def test_generated_text():
     assert json.loads(text) == SCHEMA
     assert text.startswith('{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "type": "object"')
     assert "—" in text and "\\u2014" not in text  # non-ASCII as is, as `JSON.stringify`
-    assert "Claude" not in text and ".claude/" not in text.replace(".claude-plugin/", "")
+    assert "Claude" not in text and ".claude" not in text
 
 
 # ── agreement with this build's validators ───────────────────────────────────
@@ -189,5 +189,5 @@ def test_every_description_is_upstreams_after_the_product_substitutions():
     upstream = _upstream_text()
     for text in set(_descriptions(SCHEMA)):
         original = (text.replace("TDDAgents needs", "Claude Code needs").replace("TDDAgents will", "Claude will")
-                    .replace(".tddagents/", ".claude/"))
+                    .replace(".tddagents/", ".claude/").replace("tddagents-plugin", "claude-plugin"))
         assert original in upstream, text
