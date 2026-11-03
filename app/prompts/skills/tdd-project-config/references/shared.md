@@ -32,7 +32,7 @@ Keys are camelCase. Unknown keys are invalid.
 | `setup` | no | A shell command, run from the project root, that builds the environment from the project's manifests alone: create a virtual environment and install the requirements, `npm ci`, `bundle install`, `composer install`, `dotnet restore`. Omit it when the test command needs nothing installed first. |
 | `test` | yes | A shell command, run from the project root, that runs the **whole** suite and writes a JUnit XML report to the path in `${{JUNIT_REPORT_ENV}}` and, optionally, a coverage report to the path in `${{COVERAGE_REPORT_ENV}}`. |
 | `junitReport` | no | The report's path, relative to the project root, when the runner cannot write to `${{JUNIT_REPORT_ENV}}` (it always writes to a fixed place). TDDAgents then reads that file. |
-| `coverageReport` | no | `{"path": "<file>", "format": "cobertura"}` or `"lcov"`: the coverage report's format, and its path when the tool cannot write to `${{COVERAGE_REPORT_ENV}}`. Without it, coverage is not reported. |
+| `coverageReport` | no | `{"format": "cobertura"}` or `{"format": "lcov"}`, with an optional `path`: the format of the coverage report the test command writes. `path` defaults to `${{COVERAGE_REPORT_ENV}}`; give it, relative to the project root, only when the tool writes to a fixed place. Without `coverageReport`, coverage is not reported. |
 | `testFiles` | yes | Gitignore-style globs matching **every** file of test code, helpers and fixtures included. |
 | `testSupportFiles` | no | The subset of `testFiles` that never appears in a report as a test file: fixtures, shared helpers, the runner's own test configuration. |
 | `manifestFiles` | no | Dependency and build manifests and lockfiles. They are writable in every TDD phase. |
@@ -42,13 +42,17 @@ Globs follow `.gitignore` rules: a pattern without a slash matches at any depth 
 
 ## How TDDAgents judges a run
 
-RunTests runs `test` as declared, with `${{JUNIT_REPORT_ENV}}` and `${{COVERAGE_REPORT_ENV}}` set, and reads the reports afterwards. It reads the exit code as a shell does:
+RunTests runs `test` as declared, with `${{JUNIT_REPORT_ENV}}` and `${{COVERAGE_REPORT_ENV}}` set, and reads the reports afterwards. It reads **one** JUnit report file: a runner that writes one file per test class or suite (Maven Surefire, Gradle, Minitest's JUnit reporter) needs a test command that joins those files into one report, each `<testsuite>` inside a single `<testsuites>` root, and keeps the runner's exit status. It reads the exit code as a shell does:
 
 - **Exit 0** is a pass only if the JUnit report agrees: the report exists, records at least one test, and records no failures, errors or skips. Exit 0 with no report, or with zero tests, is not evidence.
 - **Exit 126 or 127** (not executable, command not found), **a signal (128 and above)** and **a timeout** are errors. They are not evidence, and the ledger does not change.
 - **Any other non-zero exit** is a failed run. A load or compile error counts as a failure, which RED accepts: a test of code that does not exist yet may fail to compile.
 - **A skipped test is not a pass.** Every test must run.
 - **A test file that did not run is not a pass.** A file `testFiles` matches (and `testSupportFiles` does not) that the report does not name did not run. TDDAgents can check this only when the report names files (a `file` attribute on each `<testcase>`), so prefer a reporter option that writes it. When the report names no files, the check is unknown and RunTests says so.
+
+## Coverage
+
+Declare a coverage report. On every run, RunTests reports the line and branch coverage the declared report records, in Cobertura XML or LCOV (the only formats TDDAgents reads; JaCoCo's XML, for one, is not read). Coverage shows the code no test exercises, which is where a missing test or dead code hides, and raising it is part of REFACTOR: {{COVERAGE_RULE_OF_THUMB}}% is a good rule of thumb, not a gate. A test must assert behaviour, never only execute code to cover it. Coverage never decides whether a run passes.
 
 ## The final run
 

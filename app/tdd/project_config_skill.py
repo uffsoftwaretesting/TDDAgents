@@ -17,7 +17,8 @@ directories. Its prompt is built in code at each invocation, as upstream's `clau
   `LANGUAGE_INDICATORS` order with a matching file name or extension wins.
 - **The documentation.** `references/<language>.md` and `references/shared.md` are inlined in
   `<doc path="…">` tags after the reading guide. HTML comments are stripped and `{{VAR}}`
-  placeholders rendered from `PROJECT_CONFIG_PROMPT_VARS` (upstream's `SKILL_MODEL_VARS`); an
+  placeholders rendered from `PROJECT_CONFIG_PROMPT_VARS` (upstream's `SKILL_MODEL_VARS`) and
+  `TDD_PROMPT_VARS` (the coverage rule of thumb); an
   unknown placeholder stays visible.
 - **No language.** The prompt lists the available ecosystems and inlines only `shared.md`.
 
@@ -41,6 +42,7 @@ import re
 from pathlib import Path
 
 from app.skills.bundled_skills import BundledSkillContext, BundledSkillDefinition
+from app.tdd.coverage_gate import TDD_PROMPT_VARS
 from app.tdd.project_config_vars import (
     PROJECT_CONFIG_FILE,
     PROJECT_CONFIG_HEADING,
@@ -176,7 +178,8 @@ def _between(text: str, start: str, end: str | None) -> str:
 
 def build_prompt(language: str | None, args: str, prompt: str, files: dict[str, str]) -> str:
     """`buildPrompt`: the base prompt, the reading guide, the documentation, the pitfalls."""
-    variables = {**PROJECT_CONFIG_PROMPT_VARS, "LANGUAGE": language or "", "ECOSYSTEMS": ecosystem_listing()}
+    variables = {**PROJECT_CONFIG_PROMPT_VARS, **TDD_PROMPT_VARS, "LANGUAGE": language or "",
+                 "ECOSYSTEMS": ecosystem_listing()}
     clean = process_content(prompt, variables)
     guide_at = clean.find(READING_GUIDE_HEADING)
     parts = [(clean[:guide_at] if guide_at != -1 else clean).rstrip()]

@@ -13,7 +13,7 @@ One `json` block under `## {{PROJECT_CONFIG_HEADING}}`, next to the plan's `## I
 - `test`: the command that runs the **whole** suite from the project root and writes a JUnit XML report to `${{JUNIT_REPORT_ENV}}` (and, when it can, a coverage report to `${{COVERAGE_REPORT_ENV}}`).
 - The globs that tell TDDAgents which files are tests, test support, manifests, and environment directories.
 
-Choose the ecosystem's usual test runner and coverage tool, and declare both in the project's own manifest as (development) dependencies. Prefer a runner option that records each test's source file in the report.
+Choose the ecosystem's usual test runner and coverage tool, and declare both in the project's own manifest as (development) dependencies. Prefer a runner option that records each test's source file in the report. Declare a Cobertura or LCOV coverage report (`coverageReport`): RunTests then reports the coverage on every run, which shows the untested code and helps raise quality ({{COVERAGE_RULE_OF_THUMB}}% is a good rule of thumb, not a gate).
 
 ## Reading Guide
 
@@ -38,4 +38,5 @@ The schema and TDDAgents' rules, which hold for every ecosystem, are included be
 - A dependency installed by hand during the session but missing from the manifest: the final run builds a clean copy from the manifests alone, so the suite fails there.
 - A JUnit report written somewhere other than `${{JUNIT_REPORT_ENV}}` without a `junitReport` override: TDDAgents finds no report, and a run without one is not evidence.
 - A reporter that only prints to the terminal: TDDAgents reads the XML report, never the console output, to decide a pass.
+- A runner that writes one JUnit file per test class (Maven Surefire, Gradle, Minitest's reporter) with no join step: TDDAgents reads a single report file, so the test command must join them into one.
 - Tests inside production files (Rust `#[cfg(test)]` modules, doctests): they are not supported. Put tests in separate files that `testFiles` matches.
