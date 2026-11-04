@@ -2246,8 +2246,24 @@ verbatim):*
   are checked (upstream keys this build doesn't read pass unchecked); an ignored file's errors go to the
   `--debug` log; the tips carry no documentation links; error ordering is plain string order and
   invalid values print in Python form; a valid-JSON non-object file is replaced by a permission write.
-  In progress (user decisions 2026-11-04): the strict edit check accepts upstream's full list of
-  top-level keys, `/doctor` is ported and its pointer restored, `autoMode` joins the schema.
+- **The strict edit check knows upstream's top-level keys** (`STRICT_SETTINGS_KEYS`, user decision
+  2026-11-04): only real typos are refused. **`autoMode`** joins the schema with upstream's public-build
+  shape; the ant-only `deny` alias is stripped before the classifier reads it.
+- **`/doctor`** (`app/commands/doctor/doctor.py`, `app/screens/doctor.py`,
+  `app/utils/doctor_diagnostic.py`; user decision): a local REPL command (not immediate,
+  `DISABLE_DOCTOR_COMMAND` turns it off) with upstream's sections in order — diagnostics (running from
+  source, install path, ripgrep, the managed `strictPluginOnlyCustomization` warning), invalid
+  settings, MCP config diagnostics, capped or invalid output-length environment variables, agent parse
+  errors, plugin errors, unreachable permission rules, context-usage warnings. Upstream's "/doctor"
+  pointers are restored: the settings-issues notice, `/reload-plugins`' error line, and `/mcp` with no
+  servers ("Please run /doctor if this is unexpected."). Not ported (no counterpart): updates, sandbox,
+  keybinding warnings, version locks, package-manager and multiple-install checks. Divergences: "Path"
+  is TDDAgents' own folder; the MCP section has no docs links; failed agent files come from a separate
+  rescan; a failed ripgrep probe is remembered so `/doctor` can say "Not working".
+- In progress (user decisions 2026-11-04): every upstream `SettingsSchema` key's definition is ported
+  (the printed schema and the value checks match upstream; keys TDDAgents doesn't act on stay unread),
+  the build-gated keys whose code is in the snapshot are accepted, TDDAgents gets the version `0.1.0`,
+  and `python -m app.main doctor` is added.
 
 *Live verification (2026-11-04, the language-generic code):*
 
