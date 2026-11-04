@@ -52,12 +52,12 @@ def _skill(tmp_path: Path) -> Path:
 
 
 def test_the_root_is_per_user_versioned_and_carries_a_per_process_nonce(root, tmp_path):
-    from app.services.mcp.client import client_version
+    from app.constants.product import VERSION
 
     temp = os.path.realpath(tmp_path)
     assert get_tddagents_temp_dir() == os.path.join(temp, f"tddagents-{os.getuid()}")
     parent, nonce = os.path.split(root)
-    assert parent == os.path.join(temp, f"tddagents-{os.getuid()}", "bundled-skills", client_version())
+    assert parent == os.path.join(temp, f"tddagents-{os.getuid()}", "bundled-skills", VERSION) and VERSION == "0.1.0"
     assert len(nonce) == 32 and int(nonce, 16) >= 0
     assert get_bundled_skills_root() == root  # memoized for the life of the process
     get_bundled_skills_root.cache_clear()

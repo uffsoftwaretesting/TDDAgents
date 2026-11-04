@@ -94,6 +94,7 @@ from typing import Any
 
 from langchain_core.messages import ToolMessage, message_to_dict, messages_from_dict
 
+from app.constants.product import VERSION
 from app.services.compact.compact import BOUNDARY_KEY, is_compact_boundary_message
 from app.utils.file_history import FileHistorySnapshot, snapshot_from_json, snapshot_to_json
 from app.utils.messages import ATTACHMENT_KEY, Message, tool_calls_in
@@ -229,9 +230,6 @@ def entry_to_message(entry: Mapping[str, Any]) -> Message | None:
 SKIP_PROMPT_HISTORY_ENV = "TDDAGENTS_SKIP_PROMPT_HISTORY"
 
 _TRUTHY = ("1", "true", "yes", "on")
-
-#: The TDDAgents checkout, whose commit stands in for upstream's build-time `VERSION`.
-_APP_ROOT = Path(__file__).resolve().parents[2]
 
 _RESOLVE: Any = object()
 
@@ -423,9 +421,8 @@ class TranscriptStore:
 
     def _session_stamp(self) -> EntryStamp:
         if self._stamp is None:
-            version = self._version if self._version is not None else (
-                _git(["rev-parse", "--short", "HEAD"], _APP_ROOT) or "unknown"
-            )
+            # `VERSION` (`MACRO.VERSION`): `app/constants/product.py`.
+            version = self._version if self._version is not None else VERSION
             branch = self._git_branch
             if branch is _RESOLVE:
                 branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], self.cwd)

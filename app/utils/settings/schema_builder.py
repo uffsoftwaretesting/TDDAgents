@@ -8,7 +8,8 @@ declared with these helpers, one per Zod construct, each producing the fragment 
 produces for it (input mode):
 
     z.string()                    {"type": "string"}  (+ minLength, pattern, format "uri")
-    z.number().positive()         {"type": "number", "exclusiveMinimum": 0}
+    z.number().positive()         {"type": "number", "exclusiveMinimum": 0}  (+ minimum, maximum)
+    z.number().int()              {"type": "integer", "minimum": -MAX_SAFE_INTEGER, "maximum": MAX_SAFE_INTEGER}
     z.boolean()                   {"type": "boolean"}
     z.literal(x) / z.enum([...])  {"type": "string", "const": x} / {"type": "string", "enum": [...]}
     z.array(T)                    {"type": "array", "items": T}  (+ minItems)
@@ -16,7 +17,12 @@ produces for it (input mode):
     z.object({...})               {"type": "object", "properties": {...}, "required": [...]}
     .passthrough()                + "additionalProperties": {}
     z.union / discriminatedUnion  {"anyOf": [...]}
-    .describe(text)               + "description": text
+    .describe(text)               "description": text, first
+
+`.int()` sets the safe-integer bounds over any bound declared before it: `z.number().nonnegative().int()`
+prints `.int()`'s bounds alone, and the minimum is enforced by the validator
+(`app/utils/settings/types.py` -> `NONNEGATIVE_INTEGER_SETTINGS_KEYS`). A bound declared after `.int()`
+(`.int().positive()`, `.int().min(-1)`) replaces `.int()`'s.
 
 Refinements Zod cannot express in JSON Schema (`.refine`, `.superRefine`, `.check`) are absent
 from its output too; the validators of this build enforce them (`app/schemas/hooks.py`,
@@ -34,11 +40,13 @@ Property = tuple[JsonSchema, bool]
 
 #: `toJSONSchema`'s default target, written as the document's `$schema`.
 JSON_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
+#: `Number.MAX_SAFE_INTEGER`: the bounds `.int()` (Zod's `safeint` format) checks and prints.
+MAX_SAFE_INTEGER = 9007199254740991
 
 
 def describe(schema: JsonSchema, text: str) -> JsonSchema:
-    """`.describe(text)`."""
-    return {**schema, "description": text}
+    """`.describe(text)`: Zod writes the description before the schema it describes."""
+    return {"description": text, **{key: value for key, value in schema.items() if key != "description"}}
 
 
 def string(*, min_length: int | None = None, length: int | None = None, pattern: str | None = None,
@@ -57,11 +65,26 @@ def string(*, min_length: int | None = None, length: int | None = None, pattern:
     return schema
 
 
-def number(*, positive: bool = False) -> JsonSchema:
-    """`z.number()`, `.positive()`."""
+def number(*, positive: bool = False, minimum: float | None = None, maximum: float | None = None) -> JsonSchema:
+    """`z.number()`, `.positive()`, `.min(n)` / `.nonnegative()`, `.max(n)`."""
     schema: JsonSchema = {"type": "number"}
     if positive:
         schema["exclusiveMinimum"] = 0
+    if minimum is not None:
+        schema["minimum"] = minimum
+    if maximum is not None:
+        schema["maximum"] = maximum
+    return schema
+
+
+def integer(*, positive: bool = False, minimum: int | None = None) -> JsonSchema:
+    """`z.number().int()`, then `.positive()` or `.min(n)`: a bound after `.int()` replaces its lower bound."""
+    schema: JsonSchema = {"type": "integer"}
+    if positive:
+        schema["exclusiveMinimum"] = 0
+    else:
+        schema["minimum"] = -MAX_SAFE_INTEGER if minimum is None else minimum
+    schema["maximum"] = MAX_SAFE_INTEGER
     return schema
 
 
@@ -81,11 +104,9 @@ def enum(values: Sequence[str]) -> JsonSchema:
 
 
 def array(items: JsonSchema, *, min_items: int | None = None) -> JsonSchema:
-    """`z.array(items)`, `.min(n)`."""
-    schema: JsonSchema = {"type": "array", "items": items}
-    if min_items is not None:
-        schema["minItems"] = min_items
-    return schema
+    """`z.array(items)`, `.min(n)` (Zod writes `minItems` first)."""
+    schema: JsonSchema = {} if min_items is None else {"minItems": min_items}
+    return {**schema, "type": "array", "items": items}
 
 
 def record(values: JsonSchema, keys: JsonSchema | None = None) -> JsonSchema:
@@ -128,12 +149,14 @@ def document(schema: JsonSchema) -> JsonSchema:
 __all__ = [
     "JSON_SCHEMA_DRAFT",
     "JsonSchema",
+    "MAX_SAFE_INTEGER",
     "Property",
     "array",
     "boolean",
     "describe",
     "document",
     "enum",
+    "integer",
     "literal",
     "number",
     "obj",

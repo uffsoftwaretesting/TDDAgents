@@ -8,7 +8,7 @@ Ported from `reference/claude-code/src/utils/doctorDiagnostic.ts` -> `Installati
 * TDDAgents always runs from its source tree (`python -m app.main`), which is upstream's `development`
   installation: the path is that tree, and only the configuration check that runs before upstream's
   `development` early return applies (the policy settings' `strictPluginOnlyCustomization` values that
-  the schema silently drops). TDDAgents has no version, so it is upstream's fallback, `unknown`.
+  the schema silently drops). The version is `app/constants/product.py` -> `VERSION` (`MACRO.VERSION`).
 * The search status is the session workspace's ripgrep (`app/utils/ripgrep.py` -> `get_ripgrep_status`).
 
 *Divergence:* upstream's development path is the working directory; here it is the folder TDDAgents runs
@@ -26,14 +26,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from app.constants.product import VERSION
 from app.utils.ripgrep import get_ripgrep_status
 from app.utils.settings.settings import MANAGED_SETTINGS_FILENAME, SettingsLocations
 from app.utils.settings.types import CUSTOMIZATION_SURFACES
 
 InstallationType = Literal["npm-global", "npm-local", "native", "package-manager", "development", "unknown"]
 
-#: `MACRO.VERSION`'s fallback: TDDAgents has no version.
-UNKNOWN_VERSION = "unknown"
 #: The folder TDDAgents runs from (the parent of the `app` package).
 INSTALLATION_ROOT = Path(__file__).resolve().parents[2]
 
@@ -123,7 +122,7 @@ def get_doctor_diagnostic(locations: SettingsLocations | None, workspace: Any) -
     mode, command, working = get_ripgrep_status(workspace)
     return DiagnosticInfo(
         installation_type=get_current_installation_type(),
-        version=UNKNOWN_VERSION,
+        version=VERSION,
         installation_path=str(INSTALLATION_ROOT),
         invoked_binary=get_invoked_binary(),
         # "Assume working if not yet tested".
@@ -135,7 +134,6 @@ def get_doctor_diagnostic(locations: SettingsLocations | None, workspace: Any) -
 
 __all__ = [
     "INSTALLATION_ROOT",
-    "UNKNOWN_VERSION",
     "ConfigurationWarning",
     "DiagnosticInfo",
     "InstallationType",

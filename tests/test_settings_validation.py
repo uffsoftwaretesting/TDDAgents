@@ -36,6 +36,7 @@ from app.utils.settings.settings import (
     parse_settings_document,
     parse_settings_file_with_errors,
 )
+from app.utils.settings.types import GATED_OFF_SETTINGS_KEYS, SETTINGS_SCHEMA_URL
 from app.utils.settings.validate_edit_tool import (
     SETTINGS_VALIDATION_ERROR_CODE,
     validate_input_for_settings_file_edit,
@@ -82,7 +83,7 @@ def test_the_shipped_settings_are_valid() -> None:
 
 def test_a_valid_file_is_the_parsed_document_unknown_keys_as_zod() -> None:
     document: dict[str, Any] = {
-        "$schema": "anything", "model": "sonnet", "env": {"A": 1},  # upstream keys this build does not read
+        "$schema": SETTINGS_SCHEMA_URL, "model": "sonnet", "env": {"A": 1},  # keys this build does not read
         "permissions": {"allow": ["Bash(ls)"], "defaultMode": "plan", "futureKey": True},
         "hooks": {"Stop": [{"matcher": "", "note": 1, "hooks": [{"type": "command", "command": "x", "junk": 2}]}]},
         "allowedMcpServers": [{"serverName": "ok", "comment": "x"}],
@@ -91,7 +92,7 @@ def test_a_valid_file_is_the_parsed_document_unknown_keys_as_zod() -> None:
     parsed, errors = _parse(document)
     assert errors == []
     assert parsed == {
-        "$schema": "anything", "model": "sonnet", "env": {"A": 1},
+        "$schema": SETTINGS_SCHEMA_URL, "model": "sonnet", "env": {"A": "1"},  # `z.coerce.string()`
         "permissions": {"allow": ["Bash(ls)"], "defaultMode": "plan", "futureKey": True},
         "hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "x"}]}]},
         "allowedMcpServers": [{"serverName": "ok"}],
@@ -126,7 +127,7 @@ def test_empty_and_missing_files(tmp_path: Path) -> None:
     ({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "timeout": -1}]}]}},
      [("hooks.Stop.0.hooks.0.timeout", "Number must be greater than or equal to 0")]),
     ({"hooks": {"Stop": [{"hooks": [{"type": "http", "url": "not a url"}]}]}},
-     [("hooks.Stop.0.hooks.0", "'url' must be a valid URL")]),
+     [("hooks.Stop.0.hooks.0.url", "Invalid URL")]),
     ({"allowedMcpServers": [{"serverName": "a", "serverUrl": "b"}, {"serverName": "bad name"}]}, [
         ("allowedMcpServers.1.serverName", "Server name can only contain letters, numbers, hyphens, and underscores"),
         ("allowedMcpServers.0", 'Entry must have exactly one of "serverName", "serverCommand", or "serverUrl"')]),
@@ -436,18 +437,82 @@ def test_strict_parsing_reports_the_unknown_keys_issue() -> None:
     assert safe_parse_settings({"a": 1})[0] == {"a": 1}  # not strict: passed through
 
 
-@pytest.mark.parametrize("key", ["$schema", "env", "model", "statusLine", "sandbox", "attribution",
-                                 "disableAutoMode", "skipAutoPermissionPrompt", "claudeMdExcludes"])
-def test_strict_parsing_accepts_upstreams_keys_this_build_does_not_read(key: str) -> None:
-    document = {key: {"any": "value"}, "disableAllHooks": True}
+UNREAD_KEY_VALUES: list[tuple[str, Any]] = [
+    ("$schema", SETTINGS_SCHEMA_URL), ("env", {"A": "1"}), ("model", "opus"),
+    ("statusLine", {"type": "command", "command": "x", "padding": 1}), ("sandbox", {"enabled": True, "x": 1}),
+    ("attribution", {"commit": ""}), ("disableAutoMode", "disable"), ("skipAutoPermissionPrompt", True),
+    ("claudeMdExcludes", ["**/x"]), ("cleanupPeriodDays", 0), ("feedbackSurveyRate", 0.5),
+    ("sshConfigs", [{"id": "i", "name": "n", "sshHost": "h", "sshPort": 22}]),
+]
+
+
+@pytest.mark.parametrize("key, value", UNREAD_KEY_VALUES)
+def test_strict_parsing_accepts_upstreams_keys_this_build_does_not_read(key: str, value: Any) -> None:
+    document = {key: value, "disableAllHooks": True}
     assert safe_parse_settings(document, strict=True) == (document, [])
     assert validate_settings_file_content(json.dumps(document)) == SettingsFileContentValidation(True)
 
 
-@pytest.mark.parametrize("key", ["envv", "Model", "statusline", "voiceEnabled", "xaaIdp", "deny", "allow"])
+@pytest.mark.parametrize("key, value, expected", [
+    ("model", 3, [("model", "Expected string, but received number")]),
+    ("env", "A=1", [("env", "Expected record, but received string")]),
+    ("$schema", "https://example.com/s.json", [("$schema", 'Invalid value. Expected one of: '
+                                                '"https://json.schemastore.org/claude-code-settings.json"')]),
+    ("statusLine", {"type": "script"}, [("statusLine.type", 'Invalid value. Expected one of: "command"'),
+                                        ("statusLine.command", "Expected string, but received undefined")]),
+    ("cleanupPeriodDays", -1, [("cleanupPeriodDays", "Number must be greater than or equal to 0")]),
+    ("cleanupPeriodDays", 1.5, [("cleanupPeriodDays", "Expected int, but received number")]),
+    ("feedbackSurveyRate", 2, [("feedbackSurveyRate", "Too big: expected number to be <=1")]),
+    ("sandbox", {"network": {"httpProxyPort": "80"}},
+     [("sandbox.network.httpProxyPort", "Expected number, but received string")]),
+    ("xaaIdp", {"issuer": "not a url", "clientId": "c", "callbackPort": 0},
+     [("xaaIdp.issuer", "Invalid URL"), ("xaaIdp.callbackPort", "Number must be greater than or equal to 0")]),
+])
+def test_a_wrongly_typed_unread_key_makes_the_whole_file_invalid(key: str, value: Any,
+                                                                 expected: list[tuple[str, str]]) -> None:
+    """As upstream: the file is ignored as a whole, whatever key fails, read here or not."""
+    parsed, errors = _parse({key: value, "permissions": {"allow": ["Bash(ls)"]}})
+    assert parsed is None and errors == expected
+
+
+@pytest.mark.parametrize("document, tip", [
+    ({"cleanupPeriodDays": -1}, "Must be 0 or greater. Set a positive number for days to retain transcripts"),
+    ({"apiKeyHelper": 1}, "Provide a shell command that outputs your API key to stdout."),
+])
+def test_the_unread_keys_tips_are_upstreams(document: dict[str, Any], tip: str) -> None:
+    errors = parse_settings_document(document, "f.json")[1]
+    assert len(errors) == 1 and (errors[0].suggestion or "").startswith(tip)
+
+
+def test_env_values_are_coerced_to_strings_as_zod() -> None:
+    parsed, errors = _parse({"env": {"N": 3, "F": 1.5, "B": False, "Z": None, "L": [1, None, "x"], "O": {"a": 1},
+                                     "E": 1e21, "S": "s"}})
+    assert errors == [] and parsed == {"env": {"N": "3", "F": "1.5", "B": "false", "Z": "null", "L": "1,,x",
+                                               "O": "[object Object]", "E": "1e+21", "S": "s"}}
+
+
+@pytest.mark.parametrize("value", ["max", 3, None])
+def test_an_invalid_effort_level_is_dropped_not_fatal(value: Any) -> None:
+    """`effortLevel` is `.catch(undefined)`: an invalid value leaves the key out, the file stays valid."""
+    assert _parse({"effortLevel": value, "model": "m"}) == ({"model": "m"}, [])
+    assert _parse({"effortLevel": "high"}) == ({"effortLevel": "high"}, [])
+
+
+@pytest.mark.parametrize("key, value", [
+    ("xaaIdp", {"issuer": "https://idp.example", "clientId": "c", "callbackPort": 8080}),
+    ("disableDeepLinkRegistration", "disable"), ("voiceEnabled", True), ("defaultView", "chat"),
+])
+def test_the_gated_keys_whose_code_is_in_the_snapshot_are_declared(key: str, value: Any) -> None:
+    assert safe_parse_settings({key: value}, strict=True) == ({key: value}, [])
+    _, issues = safe_parse_settings({key: 12345678}, strict=True)
+    assert issues and issues[0].path[0] == key and issues[0].code != "unrecognized_keys"
+
+
+@pytest.mark.parametrize("key", ["envv", "Model", "statusline", "deny", "allow", *GATED_OFF_SETTINGS_KEYS])
 def test_strict_parsing_refuses_a_key_upstream_does_not_declare(key: str) -> None:
     _, issues = safe_parse_settings({key: 1}, strict=True)
     assert [(i.code, i.keys) for i in issues] == [("unrecognized_keys", (key,))]
+    assert safe_parse_settings({key: 1}) == ({key: 1}, [])  # not strict: passed through, unchecked
 
 
 def test_an_edit_adding_an_upstream_key_passes_and_a_typo_is_refused(tmp_path: Path) -> None:

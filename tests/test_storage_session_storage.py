@@ -232,28 +232,28 @@ def test_sidechain_writes_are_not_deduped_against_the_main_file():
     assert [e["uuid"] for e in read(store.path)] == ["u1"]
 
 
-def test_version_and_branch_are_resolved_once_when_not_given(monkeypatch):
+def test_the_branch_is_resolved_once_when_not_given(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
     def fake_git(args, cwd):
         calls.append((*args, str(cwd)))
-        return {"--short": "abc1234", "--abbrev-ref": "feature"}[args[1]]
+        return {"--abbrev-ref": "feature"}[args[1]]
 
     monkeypatch.setattr(session_storage, "_git", fake_git)
     store = TranscriptStore("s1", "/w", uuid=lambda: "x", now=lambda: 0.0)
     store.record_transcript([HumanMessage(content="a")])
     entry = read(store.path)[0]
-    assert (entry["version"], entry["gitBranch"]) == ("abc1234", "feature")
-    assert calls[1] == ("rev-parse", "--abbrev-ref", "HEAD", "/w")
-    assert len(calls) == 2
+    assert (entry["version"], entry["gitBranch"]) == ("0.1.0", "feature")
+    assert calls[0] == ("rev-parse", "--abbrev-ref", "HEAD", "/w")
+    assert len(calls) == 1
 
 
-def test_git_failures_fall_back(monkeypatch):
+def test_a_git_failure_leaves_the_branch_out(monkeypatch):
     monkeypatch.setattr(session_storage, "_git", lambda args, cwd: None)
     store = TranscriptStore("s1", "/w", uuid=lambda: "x", now=lambda: 0.0)
     store.record_transcript([HumanMessage(content="a")])
     entry = read(store.path)[0]
-    assert entry["version"] == "unknown"
+    assert entry["version"] == "0.1.0"
     assert "gitBranch" not in entry
 
 
@@ -324,7 +324,8 @@ def test_the_env_skip_is_case_insensitive(monkeypatch):
     assert not store.path.exists()
 
 
-def test_the_version_is_this_checkouts_head(monkeypatch):
+def test_the_version_is_the_products_version(monkeypatch):
+    """`VERSION` (`MACRO.VERSION`), not a git query: only the branch asks git."""
     calls: list[tuple[Any, ...]] = []
 
     def fake_git(args, cwd):
@@ -332,9 +333,9 @@ def test_the_version_is_this_checkouts_head(monkeypatch):
         return "abc"
 
     monkeypatch.setattr(session_storage, "_git", fake_git)
-    TranscriptStore("s1", "/w", uuid=lambda: "x", now=lambda: 0.0, git_branch=None).record_transcript(
-        [HumanMessage(content="a")])
-    assert calls == [(("rev-parse", "--short", "HEAD"), session_storage._APP_ROOT)]
+    store = TranscriptStore("s1", "/w", uuid=lambda: "x", now=lambda: 0.0, git_branch=None)
+    store.record_transcript([HumanMessage(content="a")])
+    assert calls == [] and read(store.path)[0]["version"] == "0.1.0"
 
 
 def test_a_failed_git_is_none_even_with_output(monkeypatch):

@@ -54,8 +54,8 @@ def test_an_unsupported_type_raises():
 
 
 def test_user_agent_and_version():
-    assert mtr.get_mcp_user_agent() == f"tddagents/{mtr.client_version()}"
-    assert mtr.client_version()
+    assert mtr.get_mcp_user_agent() == "tddagents/0.1.0"
+    assert not hasattr(mtr, "client_version")  # the version is `app/constants/product.py`'s, not a git sha
 
 
 def helper_config(script: str) -> McpServerConfig:

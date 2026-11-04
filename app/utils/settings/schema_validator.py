@@ -4,7 +4,7 @@
 Upstream validates every settings document against its Zod `SettingsSchema`
 (`reference/claude-code/src/utils/settings/types.ts`) and ignores a document that fails
 (`settings.ts` -> `parseSettingsFileUncached`). This build has no Zod: the schema is the JSON Schema
-`app/utils/settings/types.py` -> `settings_json_schema` ports (the keys this build reads), and
+`app/utils/settings/types.py` -> `settings_json_schema` ports (every key upstream declares), and
 `safe_parse_settings` validates a document against it with `jsonschema`, reporting each failure as
 the Zod issue it stands for (`app/utils/settings/validation.py` -> `SchemaIssue`), then runs the
 refinements JSON Schema cannot express, as Zod runs them after the shape:
@@ -15,20 +15,22 @@ refinements JSON Schema cannot express, as Zod runs them after the shape:
   invalid rules filtered out before (`filterInvalidPermissionRules`), so only an unfiltered document
   (the SDK's inline flag settings, an edit checked by `validate_settings_file_content`) meets it;
 * `AllowedMcpServerEntrySchema` / `DeniedMcpServerEntrySchema`'s "exactly one of" `.refine`;
+* `.nonnegative()` before `.int()` (`cleanupPeriodDays`), which Zod's JSON Schema does not print;
 * the plugin keys, validated by their own port (`app/utils/settings/types.py` -> `parse_plugin_settings`,
   with `extraKnownMarketplaces`' `.check`), and left out of the JSON Schema run so each issue is
   reported once.
 
-`strictPluginOnlyCustomization` is `z.preprocess(...).catch(undefined)` upstream: unknown surface names
-are dropped from an array, and any other invalid value drops the key instead of failing the document.
+Before the shape: `strictPluginOnlyCustomization`'s `z.preprocess` drops unknown surface names from an
+array; `env`'s `z.coerce.string()` turns each value into `String(value)` (`js_string`); and a
+`.catch(undefined)` key (`strictPluginOnlyCustomization`, `effortLevel`) with an invalid value is dropped
+instead of failing the document. `z.string().url()` (`format: "uri"`) is `new URL()`, approximated by
+`app/utils/plugins/schemas.py` -> `is_url`; `.int()` reports a fractional number as `expected int`, and a
+record of the wrong type as `expected record`, as Zod.
 
-**Unknown keys follow Zod:** the top-level object and `permissions` are `.passthrough()`, so their
-unknown keys are kept; every other object strips its unknown keys from the parsed document
-(`strip_unknown_keys`), as Zod returns `result.data`. Upstream's keys this build does not read are not
-in the schema, so they pass through unchecked (*divergence:* a wrongly typed `model` or `env`, which
-upstream rejects, is accepted here, where nothing reads it). `strict` (`SettingsSchema().strict()`) knows
-their names too (`app/utils/settings/types.py` -> `STRICT_SETTINGS_KEYS`), so only a key upstream does not
-declare is unrecognized.
+**Unknown keys follow Zod:** the top-level object, `permissions` and `sandbox` are `.passthrough()`, so
+their unknown keys are kept; every other object strips its unknown keys from the parsed document
+(`strip_unknown_keys`), as Zod returns `result.data`. `strict` (`SettingsSchema().strict()`) refuses a
+top-level key the schema does not declare (`app/utils/settings/types.py` -> `STRICT_SETTINGS_KEYS`).
 
 A discriminated union (a hook's `type`, a marketplace source's `source`) reports the issues of the
 branch its discriminator selects, and `invalid_union` ("Invalid input") when none matches; a plain
@@ -38,11 +40,12 @@ union reports `invalid_union`.
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from functools import cache
 from typing import Any
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema import ValidationError as JsonSchemaError
 
 from app.utils.settings.validation import UNDEFINED, SchemaIssue, get_received_type
@@ -69,16 +72,58 @@ def _schema() -> dict[str, Any]:
     return {**schema, "properties": properties}
 
 
+def _is_url(value: Any) -> bool:
+    """`z.string().url()`: `new URL(value)` succeeds (a non-string is the type check's to report)."""
+    from app.utils.plugins.schemas import is_url
+
+    return not isinstance(value, str) or is_url(value)
+
+
+#: The one format the schema declares (`format: "uri"`, `z.string().url()`), checked as Zod checks it.
+_FORMAT_CHECKER = FormatChecker(formats=())
+_FORMAT_CHECKER.checks("uri")(_is_url)
+
+
 @cache
 def _validator() -> Draft202012Validator:
-    return Draft202012Validator(_schema())
+    return Draft202012Validator(_schema(), format_checker=_FORMAT_CHECKER)
 
 
-def _js_type(schema_type: Any) -> str:
-    """A JSON Schema type as Zod names it (`integer` is a `number`)."""
+def _js_type(schema_type: Any, value: Any = None) -> str:
+    """
+    A JSON Schema type as Zod names it: `integer` is a `number`, or an `int` once the value is a number
+    (`.int()`'s own type check).
+    """
     if isinstance(schema_type, list):
-        return " | ".join(_js_type(t) for t in schema_type)
-    return "number" if schema_type == "integer" else str(schema_type)
+        return " | ".join(_js_type(t, value) for t in schema_type)
+    if schema_type == "integer":
+        return "int" if isinstance(value, (int, float)) and not isinstance(value, bool) else "number"
+    return str(schema_type)
+
+
+def _js_number(value: float) -> str:
+    """`String(number)`: an integral value without a fraction, a JS exponent without padding zeros."""
+    if value.is_integer() and abs(value) < 1e21:
+        return str(int(value))
+    return re.sub(r"e([+-])0*(\d)", r"e\1\2", repr(value))
+
+
+def js_string(value: Any) -> str:
+    """`String(value)` for a JSON value: what `z.coerce.string()` makes of it."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return _js_number(value)
+    if isinstance(value, list):
+        # `Array.prototype.toString`: `null` items are empty.
+        return ",".join("" if item is None else js_string(item) for item in value)
+    return "[object Object]"
 
 
 def _invalid_type(path: tuple[str | int, ...], expected: str, value: Any) -> SchemaIssue:
@@ -123,7 +168,10 @@ def _issues(error: JsonSchemaError) -> list[SchemaIssue]:
         return [SchemaIssue(code="invalid_key", path=(*path, str(value)), input=value,
                             message="Invalid key in record")]
     if validator == "type":
-        return [_invalid_type(path, _js_type(rule), value)]
+        is_record = isinstance(error.schema, Mapping) and "propertyNames" in error.schema
+        return [_invalid_type(path, "record" if is_record else _js_type(rule, value), value)]
+    if validator == "format":
+        return [SchemaIssue(code="invalid_format", path=path, input=value, message="Invalid URL")]
     if validator == "enum":
         return [SchemaIssue(code="invalid_value", path=path, values=tuple(rule), input=value, message="Invalid option")]
     if validator == "const":
@@ -132,12 +180,15 @@ def _issues(error: JsonSchemaError) -> list[SchemaIssue]:
         name = ast.literal_eval(error.message.split(" is a required property")[0])
         schema = (error.schema.get("properties") or {}).get(name, {}) if isinstance(error.schema, Mapping) else {}
         return [_missing((*path, name), schema)]
-    if validator in ("minItems", "minLength", "exclusiveMinimum"):
-        minimum = 0 if validator == "exclusiveMinimum" else rule
-        return [SchemaIssue(code="too_small", path=path, minimum=minimum, input=value, message="Too small")]
+    if validator in ("minItems", "minLength", "exclusiveMinimum", "minimum"):
+        return [SchemaIssue(code="too_small", path=path, minimum=rule, input=value, message="Too small")]
     if validator == "maxLength":
         return [SchemaIssue(code="too_big", path=path, input=value,
                             message=f"Too big: expected string to have <={rule} characters")]
+    if validator == "maximum":
+        is_int = isinstance(error.schema, Mapping) and error.schema.get("type") == "integer"
+        bound = f"int to be <{rule}" if is_int else f"number to be <={_js_number(float(rule))}"
+        return [SchemaIssue(code="too_big", path=path, input=value, message=f"Too big: expected {bound}")]
     if validator == "pattern":
         pattern = str(rule)
         message = PATTERN_MESSAGES.get(pattern, f"Invalid string: must match pattern /{pattern}/")
@@ -169,16 +220,23 @@ def _split(line: str) -> SchemaIssue:
 
 
 def _preprocess(document: Mapping[str, Any]) -> dict[str, Any]:
-    """`strictPluginOnlyCustomization`'s `z.preprocess(...).catch(undefined)`."""
-    from app.utils.settings.types import CUSTOMIZATION_SURFACES
+    """
+    What runs before the shape checks: `strictPluginOnlyCustomization`'s `z.preprocess`, `env`'s
+    `z.coerce.string()` values, and the `.catch(undefined)` keys, dropped when their value is invalid.
+    """
+    from app.utils.settings.types import CATCH_SETTINGS_KEYS, COERCED_STRING_RECORD_KEYS, CUSTOMIZATION_SURFACES
 
     data = dict(document)
-    if _STRICT_PLUGIN_ONLY in data:
-        value = data[_STRICT_PLUGIN_ONLY]
-        if isinstance(value, list):
-            data[_STRICT_PLUGIN_ONLY] = [v for v in value if isinstance(v, str) and v in CUSTOMIZATION_SURFACES]
-        elif not isinstance(value, bool):
-            del data[_STRICT_PLUGIN_ONLY]
+    value = data.get(_STRICT_PLUGIN_ONLY)
+    if isinstance(value, list):
+        data[_STRICT_PLUGIN_ONLY] = [v for v in value if isinstance(v, str) and v in CUSTOMIZATION_SURFACES]
+    for key in COERCED_STRING_RECORD_KEYS:
+        if isinstance(data.get(key), dict):
+            data[key] = {name: js_string(item) for name, item in data[key].items()}
+    properties = _schema()["properties"]
+    for key in CATCH_SETTINGS_KEYS:
+        if key in data and not _branch_validator(properties[key]).is_valid(data[key]):
+            del data[key]
     return data
 
 
@@ -186,6 +244,7 @@ def _refinements(data: Mapping[str, Any], shape_issues: Iterable[SchemaIssue]) -
     """The checks JSON Schema cannot express, on the values whose shape passed."""
     from app.schemas.hooks import hooks_schema_errors
     from app.utils.settings.permission_validation import permission_rule_issue_message, validate_permission_rule
+    from app.utils.settings.types import NONNEGATIVE_INTEGER_SETTINGS_KEYS
 
     paths = [issue.path for issue in shape_issues]
     failed = {path[0] for path in paths if path}
@@ -203,6 +262,11 @@ def _refinements(data: Mapping[str, Any], shape_issues: Iterable[SchemaIssue]) -
                     issues.append(SchemaIssue(code="custom", path=("permissions", key, index), input=rule,
                                               message=permission_rule_issue_message(result), has_params=True,
                                               params_received=rule))
+    for key in NONNEGATIVE_INTEGER_SETTINGS_KEYS:
+        value = data.get(key)
+        if key not in failed and isinstance(value, (int, float)) and not isinstance(value, bool) and value < 0:
+            issues.append(SchemaIssue(code="too_small", path=(key,), minimum=0, input=value,
+                                      message="Too small: expected number to be >=0"))
     if "hooks" in data and "hooks" not in failed:
         issues.extend(_split(line) for line in hooks_schema_errors(data["hooks"]))
     for key in _MCP_ENTRY_KEYS:
@@ -280,4 +344,4 @@ def safe_parse_settings(document: Any, *, strict: bool = False) -> tuple[dict[st
     return {**strip_unknown_keys(_schema(), data), **plugin_keys}, []
 
 
-__all__ = ["MCP_ENTRY_EXACTLY_ONE", "PATTERN_MESSAGES", "safe_parse_settings", "strip_unknown_keys"]
+__all__ = ["MCP_ENTRY_EXACTLY_ONE", "PATTERN_MESSAGES", "js_string", "safe_parse_settings", "strip_unknown_keys"]

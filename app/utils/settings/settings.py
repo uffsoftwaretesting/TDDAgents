@@ -34,7 +34,7 @@ come from the deep merge of all sources, later sources winning — `loadSettings
 
 **Validation is upstream's** (`parseSettingsFileUncached`): every settings file has its invalid
 permission rules dropped with a warning (`filterInvalidPermissionRules`), then is checked against the
-ported `SettingsSchema` (`app/utils/settings/schema_validator.py`, the keys this build reads); a file
+ported `SettingsSchema` (`app/utils/settings/schema_validator.py`, every key upstream declares); a file
 that fails is ignored whole and its issues become `ValidationError`s (`formatZodError`,
 `app/utils/settings/validation.py`), which `get_settings_with_errors` collects. The interactive startup
 shows them (`app/components/invalid_settings_dialog.py`) and the REPL repeats their count after each

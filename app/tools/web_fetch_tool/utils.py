@@ -25,6 +25,7 @@ import httpx
 from markdownify import markdownify
 
 from app.tools.web_fetch_tool.preapproved import is_preapproved_host
+from app.utils.user_agent import get_tddagents_user_agent
 
 #: Truncate to not spend too many tokens.
 MAX_MARKDOWN_LENGTH = 100_000
@@ -37,7 +38,7 @@ MAX_REDIRECTS = 10
 CACHE_TTL_MS = 15 * 60 * 1000
 MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024
 #: `getWebFetchUserAgent` (`Claude-User (<agent>; +<support URL>)`), with this product's name and no URL.
-USER_AGENT = "TDDAgents-User (TDDAgents)"
+USER_AGENT = f"TDDAgents-User ({get_tddagents_user_agent()})"
 
 #: `(user prompt, model) -> text`: the small, fast model's answer (`queryHaiku`).
 SecondaryModel = Callable[[str], Awaitable[str]]

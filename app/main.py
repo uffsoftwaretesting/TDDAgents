@@ -40,6 +40,9 @@ handlers in `app/cli/handlers/plugins.py`): `validate`, `list`, `install`, `unin
 project scope is the directory it runs in, as upstream's, or with `--thread-id <id>` that session's
 project folder (user decision 2026-11-02: the session projects live outside the repository;
 `plugin_cli_locations`).
+
+`doctor` is upstream's `claude doctor` (`main.tsx`'s `doctor` command, `app/cli/handlers/util.py` ->
+`doctor_handler`): the `/doctor` screen without a session, for the directory it runs in.
 """
 
 import argparse
@@ -60,6 +63,7 @@ if __package__ in (None, ""):
 from dotenv import load_dotenv
 
 from app.cli.print import DevelopmentOutcome, HeadlessOptions
+from app.constants.product import CLI_COMMAND
 from app.components.trust_dialog.trust_dialog import TrustDialogExit
 from app.query.transitions import Terminal
 from app.session.driver import (
@@ -796,11 +800,28 @@ def run_plugin_command(argv: Sequence[str]) -> int:
     return int(asyncio.run(work))
 
 
+#: `main.tsx`'s `doctor` command.
+DOCTOR_COMMAND = "doctor"
+
+
+def run_doctor_command(argv: Sequence[str]) -> int:
+    """`claude doctor`: no options (`--help` aside), then `doctorHandler`."""
+    import asyncio
+
+    from app.cli.handlers.util import DOCTOR_DESCRIPTION, doctor_handler
+
+    argparse.ArgumentParser(prog=f"{CLI_COMMAND} {DOCTOR_COMMAND}", description=DOCTOR_DESCRIPTION).parse_args(
+        list(argv))
+    return asyncio.run(doctor_handler(plugin_cli_locations(), Path.cwd()))
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] in PLUGIN_COMMANDS:
         return run_plugin_command(arguments[1:])
+    if arguments and arguments[0] == DOCTOR_COMMAND:
+        return run_doctor_command(arguments[1:])
     args = parse_args(argv)
     error = validate_sdk_flags(args)
     if error is not None:
