@@ -26,7 +26,9 @@ are dropped from an array, and any other invalid value drops the key instead of 
 unknown keys are kept; every other object strips its unknown keys from the parsed document
 (`strip_unknown_keys`), as Zod returns `result.data`. Upstream's keys this build does not read are not
 in the schema, so they pass through unchecked (*divergence:* a wrongly typed `model` or `env`, which
-upstream rejects, is accepted here, where nothing reads it).
+upstream rejects, is accepted here, where nothing reads it). `strict` (`SettingsSchema().strict()`) knows
+their names too (`app/utils/settings/types.py` -> `STRICT_SETTINGS_KEYS`), so only a key upstream does not
+declare is unrecognized.
 
 A discriminated union (a hook's `type`, a marketplace source's `source`) reports the issues of the
 branch its discriminator selects, and `invalid_union` ("Invalid input") when none matches; a plain
@@ -259,14 +261,14 @@ def safe_parse_settings(document: Any, *, strict: bool = False) -> tuple[dict[st
     `SettingsSchema().safeParse(document)`: the parsed document, or `None` and its issues. `strict` is
     `SettingsSchema().strict()`: a top-level key outside the schema is an `unrecognized_keys` issue.
     """
-    from app.utils.settings.types import SUPPORTED_SETTINGS_KEYS, parse_plugin_settings
+    from app.utils.settings.types import STRICT_SETTINGS_KEYS, parse_plugin_settings
 
     if not isinstance(document, Mapping):
         return None, [_invalid_type((), "object", document)]
     data = _preprocess(document)
     issues = [issue for error in _validator().iter_errors(data) for issue in _issues(error)]
     issues.extend(_refinements(data, issues))
-    unrecognized = tuple(str(key) for key in document if key not in SUPPORTED_SETTINGS_KEYS) if strict else ()
+    unrecognized = tuple(str(key) for key in document if key not in STRICT_SETTINGS_KEYS) if strict else ()
     if unrecognized:
         noun = "key" if len(unrecognized) == 1 else "keys"
         issues.append(SchemaIssue(code="unrecognized_keys", path=(), keys=unrecognized, input=document,

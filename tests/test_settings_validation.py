@@ -414,12 +414,12 @@ def test_validate_settings_file_content() -> None:
     assert not invalid_json.is_valid and invalid_json.error.startswith("Invalid JSON: Expecting property name")
     assert invalid_json.full_schema == schema
     result = validate_settings_file_content(json.dumps({
-        "disableAllHooks": "no", "env": {}, "model": "x", "permissions": {"allow": ["bash"], "futureKey": 1}}))
+        "disableAllHooks": "no", "envv": {}, "modle": "x", "permissions": {"allow": ["bash"], "futureKey": 1}}))
     assert result == SettingsFileContentValidation(False, "\n".join([
         "Settings validation failed:",
         "- disableAllHooks: Expected boolean, but received string",
         '- permissions.allow.0: Tool names must start with uppercase. Use "Bash"',
-        "- : Unrecognized fields: env, model",
+        "- : Unrecognized fields: envv, modle",
     ]), schema)
     one = validate_settings_file_content('{"x": 1}')
     assert one.error == "Settings validation failed:\n- : Unrecognized field: x"
@@ -434,6 +434,29 @@ def test_strict_parsing_reports_the_unknown_keys_issue() -> None:
     _, issues = safe_parse_settings({"a": 1, "b": 2}, strict=True)
     assert issues[0].message == 'Unrecognized keys: "a", "b"'
     assert safe_parse_settings({"a": 1})[0] == {"a": 1}  # not strict: passed through
+
+
+@pytest.mark.parametrize("key", ["$schema", "env", "model", "statusLine", "sandbox", "attribution",
+                                 "disableAutoMode", "skipAutoPermissionPrompt", "claudeMdExcludes"])
+def test_strict_parsing_accepts_upstreams_keys_this_build_does_not_read(key: str) -> None:
+    document = {key: {"any": "value"}, "disableAllHooks": True}
+    assert safe_parse_settings(document, strict=True) == (document, [])
+    assert validate_settings_file_content(json.dumps(document)) == SettingsFileContentValidation(True)
+
+
+@pytest.mark.parametrize("key", ["envv", "Model", "statusline", "voiceEnabled", "xaaIdp", "deny", "allow"])
+def test_strict_parsing_refuses_a_key_upstream_does_not_declare(key: str) -> None:
+    _, issues = safe_parse_settings({key: 1}, strict=True)
+    assert [(i.code, i.keys) for i in issues] == [("unrecognized_keys", (key,))]
+
+
+def test_an_edit_adding_an_upstream_key_passes_and_a_typo_is_refused(tmp_path: Path) -> None:
+    cwd, valid = str(tmp_path), '{"disableAllHooks": true}'
+    added = '{"disableAllHooks": true, "env": {"A": "1"}, "model": "opus"}'
+    assert validate_input_for_settings_file_edit(".tddagents/settings.json", cwd, None, valid, lambda: added) is None
+    typo = validate_input_for_settings_file_edit(".tddagents/settings.json", cwd, None, valid,
+                                                 lambda: '{"disableAllHooks": true, "envs": {}}')
+    assert typo is not None and "- : Unrecognized field: envs\n" in typo.message
 
 
 def test_auto_mode_is_validated_like_upstream() -> None:
