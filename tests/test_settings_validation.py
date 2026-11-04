@@ -436,6 +436,31 @@ def test_strict_parsing_reports_the_unknown_keys_issue() -> None:
     assert safe_parse_settings({"a": 1})[0] == {"a": 1}  # not strict: passed through
 
 
+def test_auto_mode_is_validated_like_upstream() -> None:
+    rules = {"allow": ["Run the tests"], "soft_deny": ["Push to main"], "environment": ["CI box"]}
+    assert _parse({"autoMode": rules}) == ({"autoMode": rules}, [])
+    # `z.object` strips unknown keys (the ant-only `deny` alias among them).
+    assert _parse({"autoMode": {"allow": ["x"], "deny": ["y"]}}) == ({"autoMode": {"allow": ["x"]}}, [])
+    assert _parse({"autoMode": {"allow": "x"}}) == (None, [("autoMode.allow", "Expected array, but received string")])
+    assert _parse({"autoMode": {"soft_deny": [1]}}) == (
+        None, [("autoMode.soft_deny.0", "Expected string, but received number")])
+    assert _parse({"autoMode": ["x"]}) == (None, [("autoMode", "Expected object, but received array")])
+    assert safe_parse_settings({"autoMode": {}}, strict=True) == ({"autoMode": {}}, [])
+
+
+def test_an_invalid_auto_mode_drops_the_file_and_its_classifier_rules(tmp_path: Path) -> None:
+    from app.types.permissions import ToolPermissionContext
+    from app.utils.permissions.yolo_classifier import AutoModeRules, get_auto_mode_config
+
+    loc = _loc(tmp_path)
+    _write(loc.user_config_dir / "settings.json", {"autoMode": {"allow": ["user rule"]}})
+    _write(loc.project_root / ".tddagents" / "settings.local.json", {"autoMode": {"environment": "not a list"}})
+    context = ToolPermissionContext(settings_locations=loc)
+    assert get_auto_mode_config(context) == AutoModeRules(allow=("user rule",))
+    _, errors = get_settings_with_errors(loc)
+    assert [(e.path, e.message) for e in errors] == [("autoMode.environment", "Expected array, but received string")]
+
+
 @pytest.mark.parametrize("path, expected", [
     (".tddagents/settings.json", True),
     ("sub/./.TDDAgents/Settings.Local.json", True),

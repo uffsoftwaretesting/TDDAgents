@@ -21,7 +21,9 @@ with upstream's `.describe()` text after the product substitutions ("Claude Code
 Upstream's other keys (`env`, `model`, `attribution`, `statusLine`, ...) are left out: a key
 this build does not read would be documented but do nothing.
 `permissions.defaultMode` lists this build's modes (`PERMISSION_MODES`, `auto` included, as upstream's
-`TRANSCRIPT_CLASSIFIER` build); `permissions.disableAutoMode` is not read here and is left out.
+`TRANSCRIPT_CLASSIFIER` build), and `autoMode`, that build's key (the ant-only `deny` alias left out), holds
+the auto-mode classifier's rules (`app/utils/permissions/yolo_classifier.py` -> `get_auto_mode_config`).
+`permissions.disableAutoMode` is not read here and is left out.
 """
 
 from __future__ import annotations
@@ -150,6 +152,7 @@ SUPPORTED_SETTINGS_KEYS: tuple[str, ...] = (
     "autoMemoryEnabled",
     "autoMemoryDirectory",
     "skipDangerousModePermissionPrompt",
+    "autoMode",
     "pluginTrustMessage",
 )
 
@@ -299,6 +302,11 @@ def settings_json_schema() -> dict[str, Any]:
             "defaults to ~/.tddagents/projects/<sanitized-cwd>/memory/."))),
         "skipDangerousModePermissionPrompt": opt(describe(boolean(), (
             "Whether the user has accepted the bypass permissions mode dialog"))),
+        "autoMode": opt(describe(obj({
+            "allow": opt(describe(array(string()), "Rules for the auto mode classifier allow section")),
+            "soft_deny": opt(describe(array(string()), "Rules for the auto mode classifier deny section")),
+            "environment": opt(describe(array(string()), "Entries for the auto mode classifier environment section")),
+        }), "Auto mode classifier prompt customization")),
         "pluginTrustMessage": opt(describe(string(), (
             "Custom message to append to the plugin trust warning shown before installation. Only read from "
             "policy settings (managed-settings.json / MDM). Useful for enterprise administrators to add "

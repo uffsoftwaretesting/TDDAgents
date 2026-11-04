@@ -184,6 +184,17 @@ def _upstream_text() -> str:
     return text.replace("\\'", "'").replace("\\\\", "\\").replace("\\u2014", "—")
 
 
+def test_auto_mode_is_upstreams_external_shape():
+    auto_mode = SCHEMA["properties"]["autoMode"]
+    assert auto_mode["description"] == "Auto mode classifier prompt customization"
+    assert list(auto_mode["properties"]) == ["allow", "soft_deny", "environment"]
+    assert "additionalProperties" not in auto_mode and "required" not in auto_mode
+    assert all(p["type"] == "array" and p["items"] == {"type": "string"} for p in auto_mode["properties"].values())
+    assert VALIDATOR.is_valid({"autoMode": {"allow": ["a"], "soft_deny": [], "environment": ["e"], "deny": 1}})
+    for bad in ({"autoMode": {"allow": "a"}}, {"autoMode": {"environment": [1]}}, {"autoMode": "x"}):
+        assert not VALIDATOR.is_valid(bad), bad
+
+
 @needs_reference
 def test_every_description_is_upstreams_after_the_product_substitutions():
     upstream = _upstream_text()
