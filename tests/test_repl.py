@@ -509,6 +509,31 @@ def test_a_plugin_autoupdate_is_announced_while_the_repl_runs(python_workspace, 
     assert autoupdate._plugin_update_callback is None
 
 
+def test_the_settings_error_count_is_announced_after_a_change(python_workspace, tmp_path):
+    from app.types.permissions import PermissionRuleSource
+
+    model = Model([[AIMessage(content="ok")]])
+    detectors: list[Any] = []
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: not repl.busy and repl.last_terminal is not None)
+        assert not any("settings issue" in line for line in io.out)  # valid settings: no notice at the start
+        locations = repl.run.settings_locations
+        assert locations is not None
+        user = locations.user_config_dir / "settings.json"
+        user.parent.mkdir(parents=True, exist_ok=True)
+        user.write_text('{"disableAllHooks": "no"}')
+        detectors.append(repl.run.settings_change_detector)
+        repl.run.settings_change_detector.notify_change(PermissionRuleSource.USER_SETTINGS)
+        io.lines.put_nowait("/exit")
+
+    _, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    assert io.out.count("Found 1 settings issue") == 1
+    # The REPL is gone: a later change is not announced.
+    detectors[0].notify_change(PermissionRuleSource.USER_SETTINGS)
+    assert io.out.count("Found 1 settings issue") == 1
+
+
 def test_resume_unpauses_and_continues(python_workspace, tmp_path):
     model = Model([[AIMessage(content="stopping")], [AIMessage(content="again")], [AIMessage(content="x")]])
 

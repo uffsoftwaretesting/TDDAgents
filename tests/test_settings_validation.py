@@ -22,6 +22,7 @@ from app.components.validation_errors_list import build_nested_tree, render_vali
 from app.interactive_helpers import launch_invalid_settings_dialog
 from app.types.permissions import PermissionRuleSource
 from app.utils.hooks.hooks_config_snapshot import capture_hooks_config_snapshot
+from app.hooks.notifs.use_settings_errors import settings_errors_notification_text, use_settings_errors
 from app.utils.permissions.filesystem import get_settings_paths, is_tddagents_settings_path
 from app.utils.permissions.permission_update import update_settings_for_source
 from app.utils.settings.permission_validation import permission_rule_issue_message, validate_permission_rule
@@ -515,6 +516,38 @@ def test_the_edit_tool_refuses_to_break_a_settings_file(tmp_path: Path) -> None:
     assert tool.validate_input(one, ctx).error_code == SETTINGS_VALIDATION_ERROR_CODE
     # Not a settings file: no check.
     assert tool.validate_input({"file_path": "a.txt", "old_string": "true", "new_string": "x"}, ctx).valid
+
+
+# ── the REPL's notice ────────────────────────────────────────────────────────
+
+class _Detector:
+    def __init__(self) -> None:
+        self.listeners: list[Any] = []
+
+    def subscribe(self, listener: Any) -> Any:
+        self.listeners.append(listener)
+        return lambda: self.listeners.remove(listener)
+
+
+def test_the_settings_errors_notice(tmp_path: Path) -> None:
+    loc = _loc(tmp_path)
+    out: list[str] = []
+    assert use_settings_errors(out.append, None)() is None and out == []
+    _write(loc.user_config_dir / "settings.json", {"disableAllHooks": 1, "permissions": {"allow": ["bash"]}})
+    detector = _Detector()
+    unsubscribe = use_settings_errors(out.append, loc, detector)
+    assert out == ["Found 2 settings issues"]  # the dropped rule's warning counts, as upstream's
+    _write(loc.project_root / ".mcp.json", {"mcpServers": {"bad": {"type": "http"}}})
+    detector.listeners[0]("userSettings")
+    assert out[-1] == "Found 3 settings issues"
+    _write(loc.user_config_dir / "settings.json", {})
+    (loc.project_root / ".mcp.json").unlink()
+    detector.listeners[0]("userSettings")
+    assert len(out) == 2  # no errors: nothing is written
+    unsubscribe()
+    assert detector.listeners == []
+    use_settings_errors(out.append, loc)  # without a detector: the start only
+    assert settings_errors_notification_text([ValidationError(path="", message="m")]) == "Found 1 settings issue"
 
 
 def test_a_tree_path_part_that_parse_int_reads_shows_the_value() -> None:

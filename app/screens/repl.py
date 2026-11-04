@@ -758,6 +758,7 @@ class Repl:
         and read the user's lines until they leave. A resumed session with nothing to say waits.
         """
         from app.hooks.notifs.use_plugin_autoupdate_notification import use_plugin_autoupdate_notification
+        from app.hooks.notifs.use_settings_errors import use_settings_errors
 
         project = self._project_dir()
         if should_show_project_onboarding(project):
@@ -770,6 +771,10 @@ class Repl:
         self.io.write(f"{header}\n\n{HELP_TEXT}")
         # `usePluginAutoupdateNotification`: registered while the REPL runs.
         unsubscribe = use_plugin_autoupdate_notification(self.io.write)
+        # `useSettingsErrors`: the settings' error count now and after each settings change.
+        unsubscribe_settings_errors = use_settings_errors(
+            self.io.write, getattr(self.run, "settings_locations", None),
+            getattr(self.run, "settings_change_detector", None))
         try:
             self._start(start_session(self.run, request, prompt))
             while not self.exiting:
@@ -783,4 +788,5 @@ class Repl:
             await asyncio.gather(*self._dialog_tasks, return_exceptions=True)
         finally:
             unsubscribe()
+            unsubscribe_settings_errors()
         return self.last_terminal
