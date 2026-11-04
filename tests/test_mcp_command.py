@@ -216,7 +216,8 @@ def test_no_servers_and_dismissing() -> None:
     from app.services.mcp.config import get_global_config_path
 
     assert run(run_mcp_settings(FakeDialog(), context(session()))) == no_servers_message() == (
-        "No MCP servers configured. Add servers to the project's .mcp.json, or to \"mcpServers\" in "
+        "No MCP servers configured. Please run /doctor if this is unexpected. Otherwise, add servers to the "
+        "project's .mcp.json, or to \"mcpServers\" in "
         f"{get_global_config_path()} to use them in every project.")
     assert run(run_mcp_settings(FakeDialog(ESC), context(session(connected("a"))))) == DISMISSED
 

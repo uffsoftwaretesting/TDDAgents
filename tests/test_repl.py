@@ -528,10 +528,10 @@ def test_the_settings_error_count_is_announced_after_a_change(python_workspace, 
         io.lines.put_nowait("/exit")
 
     _, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
-    assert io.out.count("Found 1 settings issue") == 1
+    assert io.out.count("Found 1 settings issue · /doctor for details") == 1
     # The REPL is gone: a later change is not announced.
     detectors[0].notify_change(PermissionRuleSource.USER_SETTINGS)
-    assert io.out.count("Found 1 settings issue") == 1
+    assert io.out.count("Found 1 settings issue · /doctor for details") == 1
 
 
 def test_doctor_shows_the_diagnostics_until_enter(python_workspace, tmp_path):

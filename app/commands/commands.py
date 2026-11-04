@@ -15,7 +15,8 @@ memoized command cache (the list is built from the run's skill registry each tim
 
 `/reload-plugins` is ported from `reference/claude-code/src/commands/reload-plugins/index.ts` and
 `reload-plugins.ts` -> `call`: the run's `refresh_plugins` (`refreshActivePlugins`), reported as
-`Reloaded: N plugins · N skills · …` (`reload_plugins_message`). The `CLAUDE_CODE_REMOTE` user
+`Reloaded: N plugins · N skills · …` (`reload_plugins_message`), with upstream's "Run /doctor for
+details." after the load errors. The `CLAUDE_CODE_REMOTE` user
 settings re-download is not ported (no settings sync). The `/plugin` dialog (`commands/plugin/`,
 React/Ink) is not ported: the `plugin` CLI subcommand does its work (`app/cli/handlers/plugins.py`).
 
@@ -274,10 +275,8 @@ def reload_plugins_message(result: Any) -> str:
     ]
     message = "Reloaded: " + " · ".join(parts)
     if result.error_count > 0:
-        from app.services.plugins.plugin_operations import PLUGIN_CLI
-
-        # Upstream: "Run /doctor for details." (no /doctor here; user decision 2026-11-02).
-        message += f"\n{n(result.error_count, 'error')} during load. Run `{PLUGIN_CLI} list` for details."
+        # `/doctor` lists them (its "Plugin Errors").
+        message += f"\n{n(result.error_count, 'error')} during load. Run /doctor for details."
     return message
 
 

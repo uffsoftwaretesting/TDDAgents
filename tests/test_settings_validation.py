@@ -584,10 +584,10 @@ def test_the_settings_errors_notice(tmp_path: Path) -> None:
     _write(loc.user_config_dir / "settings.json", {"disableAllHooks": 1, "permissions": {"allow": ["bash"]}})
     detector = _Detector()
     unsubscribe = use_settings_errors(out.append, loc, detector)
-    assert out == ["Found 2 settings issues"]  # the dropped rule's warning counts, as upstream's
+    assert out == ["Found 2 settings issues · /doctor for details"]  # the dropped rule's warning counts, as upstream's
     _write(loc.project_root / ".mcp.json", {"mcpServers": {"bad": {"type": "http"}}})
     detector.listeners[0]("userSettings")
-    assert out[-1] == "Found 3 settings issues"
+    assert out[-1] == "Found 3 settings issues · /doctor for details"
     _write(loc.user_config_dir / "settings.json", {})
     (loc.project_root / ".mcp.json").unlink()
     detector.listeners[0]("userSettings")
@@ -595,7 +595,8 @@ def test_the_settings_errors_notice(tmp_path: Path) -> None:
     unsubscribe()
     assert detector.listeners == []
     use_settings_errors(out.append, loc)  # without a detector: the start only
-    assert settings_errors_notification_text([ValidationError(path="", message="m")]) == "Found 1 settings issue"
+    assert settings_errors_notification_text([ValidationError(path="", message="m")]) == (
+        "Found 1 settings issue · /doctor for details")
 
 
 def test_a_tree_path_part_that_parse_int_reads_shows_the_value() -> None:
