@@ -22,6 +22,8 @@ Agent definitions from Markdown (`reference/claude-code/src/tools/AgentTool/load
   (`~/.tddagents/agents/`), then project (`.tddagents/agents/`), a later source replacing an
   earlier agent of the same name, with the plugin agents (given by the caller) between the
   built-ins and the user's. No prompt registry is consulted.
+* `get_failed_agent_files` is its `failedFiles` (with `getParseError`), which `/doctor` lists; it
+  scans the user and project folders again rather than being returned with the agents.
 
 Not ported (no subsystem here): `color`, `effort`, `isolation`, `mcpServers`,
 `initialPrompt`, and `omitClaudeMd` on file agents (upstream sets it on built-ins only).
@@ -347,6 +349,21 @@ def _load_if_agent(path: Path, source: str, vars: Mapping[str, Any] | None) -> A
         return None
 
 
+def _agent_files(directory: Path) -> list[Path]:
+    """A directory's agent files: `<dir>/AGENT.md` entries and flat `.md` files."""
+    if not directory.is_dir():
+        return []
+    files: list[Path] = []
+    for entry in sorted(directory.iterdir()):
+        if entry.is_dir():
+            candidate = entry / "AGENT.md"
+            if candidate.is_file():
+                files.append(candidate)
+        elif entry.is_file() and entry.suffix == ".md" and entry.name != "README.md":
+            files.append(entry)
+    return files
+
+
 def _scan_agent_dir(
     directory: Path,
     source: str,
@@ -354,21 +371,55 @@ def _scan_agent_dir(
 ) -> dict[str, AgentDefinition]:
     """Every agent in a directory: `<dir>/AGENT.md` entries and flat `.md` files."""
     agents: dict[str, AgentDefinition] = {}
-    if not directory.is_dir():
-        return agents
-    for entry in sorted(directory.iterdir()):
-        if entry.is_dir():
-            candidate = entry / "AGENT.md"
-            if not candidate.is_file():
-                continue
-        elif entry.is_file() and entry.suffix == ".md" and entry.name != "README.md":
-            candidate = entry
-        else:
-            continue
+    for candidate in _agent_files(directory):
         agent_def = _load_if_agent(candidate, source, vars)
         if agent_def is not None:
             agents[agent_def.name] = agent_def
     return agents
+
+
+def get_parse_error(frontmatter: Mapping[str, Any]) -> str:
+    """`getParseError`: why a file with a `name` is not an agent."""
+    agent_type = frontmatter.get("name")
+    if not agent_type or not isinstance(agent_type, str):
+        return 'Missing required "name" field in frontmatter'
+    description = frontmatter.get("description")
+    if not description or not isinstance(description, str):
+        return 'Missing required "description" field in frontmatter'
+    return "Unknown parsing error"
+
+
+def get_failed_agent_files(
+    project_dir: Path | str,
+    user_home: Path | str | None = None,
+    vars: Mapping[str, Any] | None = None,
+) -> list[tuple[str, str]]:
+    """
+    `AgentDefinitionsResult.failedFiles`: the user and project agent files that are not agents although
+    their frontmatter has a `name` (a file without one is a co-located document, skipped silently), each
+    with `getParseError`'s reason; a file whose `phase` fails the load gives that error.
+    """
+    home = Path(user_home) if user_home is not None else Path.home()
+    failed: list[tuple[str, str]] = []
+    for directory in (home / ".tddagents" / "agents", Path(project_dir) / ".tddagents" / "agents"):
+        for path in _agent_files(directory):
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue  # not readable: upstream's file loader skips it too
+            try:
+                agent = load_agent_definition(content, vars, base_dir=str(path.parent))
+            except AgentFrontmatterError as error:
+                failed.append((str(path), str(error)))
+                continue
+            except Exception:  # noqa: BLE001 - as `_load_if_agent`: logged there, reported by its reason here
+                agent = None
+            if agent is not None:
+                continue
+            frontmatter = parse_markdown_frontmatter(content)[0]
+            if frontmatter.get("name"):
+                failed.append((str(path), get_parse_error(frontmatter)))
+    return failed
 
 
 #: `AgentJsonSchema`'s keys, as the Markdown frontmatter names them (`--agents` / SDK `initialize.agents`).

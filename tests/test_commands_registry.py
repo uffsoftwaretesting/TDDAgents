@@ -45,11 +45,12 @@ def test_the_registry_lists_skills_then_built_ins():
     commands = get_commands(SkillRegistry([_skill(), _skill("hidden", user_invocable=False)]))
     assert [(c.name, c.type) for c in commands][:3] == [("design", "prompt"), ("hidden", "prompt"), ("plan", "local")]
     local = {c.name for c in commands if c.type == "local"}
-    assert local == {"plan", "pause", "resume", "requirements", "context", "mcp", "hooks", "reload-plugins", "help",
-                     "exit"}
+    assert local == {"plan", "pause", "resume", "requirements", "context", "mcp", "hooks", "doctor", "reload-plugins",
+                     "help", "exit"}
     assert get_commands(None) == get_commands(SkillRegistry([]))
     assert built_in_command_names() == {
-        "plan", "pause", "resume", "requirements", "context", "mcp", "hooks", "reload-plugins", "help", "exit", "quit"}
+        "plan", "pause", "resume", "requirements", "context", "mcp", "hooks", "doctor", "reload-plugins", "help",
+        "exit", "quit"}
 
 
 def test_find_has_and_get_command():
@@ -58,7 +59,7 @@ def test_find_has_and_get_command():
     assert find_command("Shown", commands).name == "x"  # type: ignore[union-attr]
     assert has_command("plan", commands) and not has_command("nope", commands)
     assert get_command("help", commands).name == "help"
-    message = (r"^Command nope not found\. Available commands: Shown, context, exit \(aliases: "
+    message = (r"^Command nope not found\. Available commands: Shown, context, doctor, exit \(aliases: "
                r"quit\), help, hooks, mcp, pause, plan, reload-plugins, requirements, resume$")
     with pytest.raises(LookupError, match=message):
         get_command("nope", commands)

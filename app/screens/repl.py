@@ -25,7 +25,7 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
   shows the "Tips for getting started" while the project has not completed them; each turn marks
   them complete once they are (`onQueryImpl`).
 * **Dialogs** (`app/components/design_system/dialog.py`): `/mcp` (`app/components/mcp/mcp_command.py`),
-  `/hooks` (`app/commands/hooks/hooks.py`) and an MCP server's elicitation
+  `/hooks` (`app/commands/hooks/hooks.py`), `/doctor` (`app/screens/doctor.py`) and an MCP server's elicitation
   (`app/components/mcp/elicitation_dialog.py`, upstream's `ElicitationDialog`, set as the session's
   `SessionMcp.ask_host`; the Elicitation hooks still run first) take the screen like a permission
   question, one at a time, answered by the lines typed. Esc closes them without aborting the turn,
@@ -62,11 +62,11 @@ from app.cli.print import (
     submit_prompt,
 )
 from app.commands.commands import (
-    HELP_TEXT,
     Command,
     CommandError,
     SlashCommand,
     apply_plan_command,
+    base_help_text,
     collect_context_data,
     find_command,
     format_context_as_markdown_table,
@@ -564,6 +564,8 @@ class Repl:
             self._spawn_dialog(self._mcp(command.args))
         elif name == "hooks":
             self._spawn_dialog(self._hooks())
+        elif name == "doctor":
+            self._spawn_dialog(self._doctor())
         else:  # exit, quit
             self.exiting = True
             await self._stop_turn()
@@ -620,6 +622,45 @@ class Repl:
                 result = await call(ReplDialog(self), menu_context(locations, tools, dispatcher), dispatcher)
             except Exception as error:  # noqa: BLE001 - a failed /hooks is reported, and the session goes on
                 logger.exception("/hooks failed")
+                result = f"Error: {error}"
+        if result:
+            self.io.write(result)
+
+    def _doctor_context(self) -> Any:
+        """What `/doctor` reads (`Doctor`'s `useAppState` selectors): this session's settings, tools and agents."""
+        from app.screens.doctor import DoctorContext
+        from app.services.token_estimation import api_token_counter
+        from app.tools.agent_tool.load_agents_dir import get_failed_agent_files
+        from app.utils.claudemd import get_memory_files
+
+        run = self.run
+        ctx = run.ctx
+        locations = getattr(run, "settings_locations", None)
+        workspace = getattr(ctx, "workspace", None)
+        # The run's project folder: where its settings and agents are read from.
+        project = locations.project_root if locations is not None else project_root_of(workspace)
+        home = getattr(locations, "home", None)
+        model = parse_user_specified_model(run.user_specified_model) if run.user_specified_model else run.config.model
+        listed = getattr(run, "get_agent_definitions", None)
+        definitions = listed() if listed is not None else get_agent_definitions_with_overrides(project_dir=project)
+        state = run.store.get()
+        return DoctorContext(
+            locations=locations, workspace=workspace,
+            tools=ctx.refresh_tools() if getattr(ctx, "refresh_tools", None) is not None else ctx.tools,
+            active_agents=list(definitions.values()), permission_context=state.tool_permission_context,
+            plugin_errors=state.plugins.errors, count_tokens=api_token_counter(model),
+            memory_files=lambda: get_memory_files(workspace),
+            failed_agent_files=lambda: get_failed_agent_files(project, home))
+
+    async def _doctor(self) -> None:
+        """`/doctor`: the diagnostics hold the screen until dismissed; the result is shown."""
+        from app.commands.doctor.doctor import call
+
+        async with self._asking:
+            try:
+                result = await call(ReplDialog(self), self._doctor_context())
+            except Exception as error:  # noqa: BLE001 - a failed /doctor is reported, and the session goes on
+                logger.exception("/doctor failed")
                 result = f"Error: {error}"
         if result:
             self.io.write(result)
@@ -768,7 +809,7 @@ class Repl:
             increment_project_onboarding_seen_count(project)
         in_plan = self.run.store.get().tool_permission_context.mode == PermissionMode.PLAN
         header = PLAN_MODE_ON if in_plan else f"TDD plan:\n{render_plan(self.plan)}"
-        self.io.write(f"{header}\n\n{HELP_TEXT}")
+        self.io.write(f"{header}\n\n{base_help_text()}")
         # `usePluginAutoupdateNotification`: registered while the REPL runs.
         unsubscribe = use_plugin_autoupdate_notification(self.io.write)
         # `useSettingsErrors`: the settings' error count now and after each settings change.

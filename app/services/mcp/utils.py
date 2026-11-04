@@ -2,7 +2,7 @@
 Small MCP helpers the `/mcp` menus read.
 
 Ported from `reference/claude-code/src/services/mcp/utils.ts` -> `filterToolsByServer`,
-`describeMcpConfigFilePath`. Upstream reads the cwd and the enterprise file's location from
+`describeMcpConfigFilePath`, `getScopeLabel`. Upstream reads the cwd and the enterprise file's location from
 module state; here the caller passes the project folder and the policy directory.
 """
 
@@ -39,4 +39,20 @@ def describe_mcp_config_file_path(scope: str, cwd: str | Path, managed_dir: str 
     return scope
 
 
-__all__ = ["describe_mcp_config_file_path", "filter_tools_by_server"]
+#: `getScopeLabel`'s labels.
+SCOPE_LABELS: dict[str, str] = {
+    "local": "Local config (private to you in this project)",
+    "project": "Project config (shared via .mcp.json)",
+    "user": "User config (available in all your projects)",
+    "dynamic": "Dynamic config (from command line)",
+    "enterprise": "Enterprise config (managed by your organization)",
+    "claudeai": "claude.ai config",
+}
+
+
+def get_scope_label(scope: str) -> str:
+    """`getScopeLabel`: a configuration scope as `/doctor` names it."""
+    return SCOPE_LABELS.get(scope, scope)
+
+
+__all__ = ["SCOPE_LABELS", "describe_mcp_config_file_path", "filter_tools_by_server", "get_scope_label"]

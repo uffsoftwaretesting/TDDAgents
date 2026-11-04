@@ -111,12 +111,26 @@ def ensure_ripgrep(ws: Any) -> None:
     if not working and command.startswith(SANDBOX_RIPGREP_DIR):
         provision_sandbox_ripgrep(ws)
         working = _probe(ws, command)
-    if not working:
-        raise RipgrepUnavailableError(f"ripgrep is not available at {command}")
     try:
-        _status[ws] = True
+        _status[ws] = working
     except TypeError:
         pass
+    if not working:
+        raise RipgrepUnavailableError(f"ripgrep is not available at {command}")
+
+
+def get_ripgrep_status(ws: Any) -> tuple[str, str, bool | None]:
+    """
+    `getRipgrepStatus` for a workspace: the mode (`system` or `builtin`), the command, and whether it
+    worked when first used (`None` before any use). A failed probe is tried again on the next use.
+    """
+    command = ripgrep_command(ws)
+    mode = "system" if command == "rg" else "builtin"
+    try:
+        working = _status.get(ws)
+    except TypeError:
+        working = None
+    return mode, command, working
 
 
 def _lines(stdout: str) -> list[str]:

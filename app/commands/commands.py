@@ -42,6 +42,7 @@ module. Not ported: the context-collapse status
 | `/reload-plugins` | Activate pending plugin changes in the current session |
 | `/mcp` | Manage MCP servers; `/mcp enable [server]`, `/mcp disable [server]`, `/mcp reconnect <server>` |
 | `/hooks` | View hook configurations for tool events (`app/commands/hooks/hooks.py`) |
+| `/doctor` | Diagnose the installation and settings (`app/commands/doctor/`); off under `DISABLE_DOCTOR_COMMAND` |
 | `/init` | Ask the agents to write the project's `TDDAGENTS.md` (a `prompt` command) |
 | `/help` | This list |
 | `/exit`, `/quit` | Leave (the session can be continued with `--thread-id`) |
@@ -57,6 +58,8 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from app.commands.doctor.doctor import DESCRIPTION as DOCTOR_DESCRIPTION
+from app.commands.doctor.doctor import is_enabled as is_doctor_enabled
 from app.services.compact.compact import get_messages_after_compact_boundary
 from app.services.compact.micro_compact import microcompact_messages
 from app.tdd.plan import PlanError, TddPlan
@@ -73,8 +76,8 @@ from app.utils.format import format_tokens
 from app.utils.messages import Message
 from app.utils.settings.constants import get_source_display_name
 
-COMMANDS = ("plan", "pause", "resume", "requirements", "context", "mcp", "hooks", "reload-plugins", "help",
-            "exit", "quit")
+COMMANDS = ("plan", "pause", "resume", "requirements", "context", "mcp", "hooks", "doctor", "reload-plugins",
+            "help", "exit", "quit")
 
 #: Commands that run even while a turn is in flight (upstream's `immediate`).
 IMMEDIATE = frozenset({"help", "pause", "mcp", "hooks", "exit", "quit"})
@@ -92,6 +95,7 @@ HELP_TEXT = """Commands:
   /reload-plugins               activate pending plugin changes in the current session
   /mcp                          manage MCP servers ([enable|disable [server-name]])
   /hooks                        view hook configurations for tool events
+  /doctor                       diagnose and verify your TDDAgents installation and settings
   /init                         initialize a new TDDAGENTS.md file with codebase documentation
   /help                         this list
   /exit, /quit                  leave (continue later with --thread-id)
@@ -132,6 +136,8 @@ BUILT_IN_DESCRIPTIONS: dict[str, str] = {
     "mcp": "Manage MCP servers",
     #: `commands/hooks/index.ts`.
     "hooks": "View hook configurations for tool events",
+    #: `commands/doctor/index.ts`.
+    "doctor": DOCTOR_DESCRIPTION,
     "help": "Show the commands",
     "exit": "Leave (continue later with --thread-id)",
 }
@@ -145,15 +151,27 @@ SOURCE_NAMES: dict[str, str] = {
 }
 
 
+def is_command_enabled(name: str) -> bool:
+    """A built-in's `isEnabled`: `/doctor` can be turned off (`DISABLE_DOCTOR_COMMAND`), the rest cannot."""
+    return name != "doctor" or is_doctor_enabled()
+
+
 def built_in_commands() -> list[Command]:
-    """The REPL's `local` commands."""
+    """The REPL's enabled `local` commands."""
     return [Command(name, description, "local", aliases=BUILT_IN_ALIASES.get(name, ()))
-            for name, description in BUILT_IN_DESCRIPTIONS.items()]
+            for name, description in BUILT_IN_DESCRIPTIONS.items() if is_command_enabled(name)]
+
+
+def base_help_text() -> str:
+    """`HELP_TEXT` without the lines of the commands that are turned off."""
+    if is_command_enabled("doctor"):
+        return HELP_TEXT
+    return "\n".join(line for line in HELP_TEXT.split("\n") if not line.startswith("  /doctor "))
 
 
 def built_in_command_names() -> frozenset[str]:
-    """`builtInCommandNames`: every built-in name and alias."""
-    return frozenset(n for c in built_in_commands() for n in (c.name, *c.aliases))
+    """`builtInCommandNames`: every built-in name and alias, enabled or not."""
+    return frozenset(n for name in BUILT_IN_DESCRIPTIONS for n in (name, *BUILT_IN_ALIASES.get(name, ())))
 
 
 def get_commands(skill_registry: Any) -> list[Command]:
@@ -205,10 +223,10 @@ def help_text(commands: Sequence[Command]) -> str:
     """`/help`: the built-ins (`/init` among them), then the skills the user can type."""
     skills = [c for c in commands if c.type == "prompt" and not c.is_hidden and c.source != "builtin"]
     if not skills:
-        return HELP_TEXT
+        return base_help_text()
     width = max(len(c.user_facing_name()) for c in skills) + 3
     lines = [f"  /{c.user_facing_name():<{width}}{format_description_with_source(c)}" for c in skills]
-    return HELP_TEXT + "\nSkills:\n" + "\n".join(lines)
+    return base_help_text() + "\nSkills:\n" + "\n".join(lines)
 
 
 class CommandError(ValueError):
@@ -234,7 +252,7 @@ def parse_slash_command(line: str) -> SlashCommand | None:
     if not stripped.startswith("/"):
         return None
     name, _, args = stripped[1:].partition(" ")
-    if name not in COMMANDS:
+    if name not in COMMANDS or not is_command_enabled(name):
         return None
     return SlashCommand(name=name, args=args.strip())
 
