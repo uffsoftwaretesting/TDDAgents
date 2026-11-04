@@ -368,6 +368,8 @@ python -m app.main --thread-id "tdd-<hash>" ["<next message>"]   # continue a se
 python -m app.main -c | --resume [id] | --fork-session | --session-id <uuid>
 python -m app.main --fresh                                       # new thread
 python -m app.main plugin list | install <p@m> | marketplace add <src> …   # [--thread-id <id>] for project/local scope
+python -m app.main doctor [--thread-id <id>]                    # /doctor without a session
+python -m app.main -v | --version                               # 0.1.0 (TDDAgents)
 # Flags: --permission-mode, --settings <file>, --dangerously-skip-permissions, --coordinator,
 # --system-prompt[-file], --append-system-prompt[-file], --agents <json>, --rewind-files <uuid>;
 # -p only: --max-turns, --max-budget-usd, --json-schema, --include-partial-messages,

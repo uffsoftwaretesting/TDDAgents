@@ -2260,10 +2260,33 @@ verbatim):*
   keybinding warnings, version locks, package-manager and multiple-install checks. Divergences: "Path"
   is TDDAgents' own folder; the MCP section has no docs links; failed agent files come from a separate
   rescan; a failed ripgrep probe is remembered so `/doctor` can say "Not working".
-- In progress (user decisions 2026-11-04): every upstream `SettingsSchema` key's definition is ported
-  (the printed schema and the value checks match upstream; keys TDDAgents doesn't act on stay unread),
-  the build-gated keys whose code is in the snapshot are accepted, TDDAgents gets the version `0.1.0`,
-  and `python -m app.main doctor` is added.
+- **Every upstream `SettingsSchema` key is declared** (`app/utils/settings/schema_builder.py`, user
+  decision 2026-11-04): all 82 top-level keys with upstream's types and descriptions, the printed schema
+  compared byte for byte with the real Zod output. A wrongly typed key TDDAgents never reads (`model`,
+  `env`, ...) now makes the file invalid, as upstream; the keys stay unread. The descriptions keep
+  upstream's values verbatim (the schemastore URL, `claude-cli://`, "Claude Pro/Max", `claude/channel`;
+  user decision), with only the product renames. Ported with them: `SandboxSettingsSchema`,
+  `permissions.disableAutoMode`, the `$schema` literal, Zod's `.int()` / min / max / `minItems`
+  messages, `z.coerce.string()` for `env`, `effortLevel`'s `.catch`, `.url()`, and upstream's
+  `apiKeyHelper`, `cleanupPeriodDays` and `env` tips. The Edit refusal prints Zod's output mode,
+  `update-config` the input mode.
+- **Build-gated keys** (user decision: accept the ones that exist): `xaaIdp`,
+  `disableDeepLinkRegistration`, `voiceEnabled` and `defaultView`, whose code is in the snapshot, are
+  declared; the rest stay undeclared (`GATED_OFF_SETTINGS_KEYS`), so the strict edit check refuses them.
+- Divergences: `defaultMode`'s enum lists TDDAgents' modes in its own order; `enabledPlugins` has no
+  `{}` branch; `cleanupPeriodDays` states its minimum (upstream's hidden `.nonnegative()`) in the
+  validator only.
+- **One version constant** (`VERSION = "0.1.0"` in `app/constants/product.py`, user decision), for
+  upstream's `MACRO.VERSION`: it replaces the git sha and the "unknown" fallback in `/doctor`, the SDK
+  init message's `claude_code_version`, the MCP `clientInfo` version, the User-Agent
+  (`tddagents/<version>`, `app/utils/user_agent.py` ports `userAgent.ts`), WebFetch's User-Agent, the
+  transcript stamp and the bundled-skills folder. **`-v` / `--version`** prints `0.1.0 (TDDAgents)`, as
+  upstream's `.version(...)` (user decision).
+- **`python -m app.main doctor`** (`run_doctor_command`, `app/cli/handlers/util.py`), upstream's
+  `claude doctor`: the `/doctor` screen without a session, with the configured MCP servers connected
+  (no approval prompt) and the plugins loaded, then exit 0. It diagnoses the directory it runs in, or with
+  **`--thread-id <id>`** that session's project folder (user decision 2026-11-04, as the `plugin`
+  subcommand; an unknown id exits 1). Divergence: it doesn't pass the plugins' agents to the screen.
 
 *Live verification (2026-11-04, the language-generic code):*
 
