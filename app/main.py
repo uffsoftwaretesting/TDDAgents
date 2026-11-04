@@ -42,7 +42,9 @@ project folder (user decision 2026-11-02: the session projects live outside the 
 `plugin_cli_locations`).
 
 `doctor` is upstream's `claude doctor` (`main.tsx`'s `doctor` command, `app/cli/handlers/util.py` ->
-`doctor_handler`): the `/doctor` screen without a session, for the directory it runs in.
+`doctor_handler`): the `/doctor` screen without a session, for the directory it runs in, or with
+`--thread-id <id>` that session's project folder (user decision 2026-11-04). `-v` / `--version`
+prints `VERSION`, as upstream's `.version(...)`.
 """
 
 import argparse
@@ -63,7 +65,7 @@ if __package__ in (None, ""):
 from dotenv import load_dotenv
 
 from app.cli.print import DevelopmentOutcome, HeadlessOptions
-from app.constants.product import CLI_COMMAND
+from app.constants.product import CLI_COMMAND, VERSION
 from app.components.trust_dialog.trust_dialog import TrustDialogExit
 from app.query.transitions import Terminal
 from app.session.driver import (
@@ -175,6 +177,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Runs the TDDAgents pipeline: requirements, plan, then test-driven development of the plan.",
     )
     parser.add_argument("prompt", nargs="?", default=None, help="The initial request (instead of the menu).")
+    # `main.tsx`: `.version(`${MACRO.VERSION} (Claude Code)`, '-v, --version', 'Output the version number')`.
+    parser.add_argument("-v", "--version", action="version", version=f"{VERSION} (TDDAgents)",
+                        help="Output the version number")
     parser.add_argument("-p", "--print", action="store_true", help="Headless: ask nothing, exit non-zero on failure.")
     parser.add_argument("--spec", default=None, help="Read the initial request from this file.")
     parser.add_argument("--fresh", action="store_true", help="Forces a new run by generating a random thread_id.")
@@ -805,14 +810,25 @@ DOCTOR_COMMAND = "doctor"
 
 
 def run_doctor_command(argv: Sequence[str]) -> int:
-    """`claude doctor`: no options (`--help` aside), then `doctorHandler`."""
+    """
+    `claude doctor` (`doctorHandler`), for the directory it runs in, or, with `--thread-id`, that
+    session's project folder (user decision 2026-11-04: TDDAgents runs from its own repository, so the
+    current directory is never a session's project; the `plugin` subcommand has the same option).
+    """
     import asyncio
 
     from app.cli.handlers.util import DOCTOR_DESCRIPTION, doctor_handler
 
-    argparse.ArgumentParser(prog=f"{CLI_COMMAND} {DOCTOR_COMMAND}", description=DOCTOR_DESCRIPTION).parse_args(
-        list(argv))
-    return asyncio.run(doctor_handler(plugin_cli_locations(), Path.cwd()))
+    parser = argparse.ArgumentParser(prog=f"{CLI_COMMAND} {DOCTOR_COMMAND}", description=DOCTOR_DESCRIPTION)
+    parser.add_argument("--thread-id", dest="thread_id", default=None, metavar="<id>",
+                        help="Diagnose that session's project folder (default: the current directory)")
+    args = parser.parse_args(list(argv))
+    try:
+        locations = plugin_cli_locations(args.thread_id)
+    except LookupError as error:
+        print(error, file=sys.stderr)
+        return 1
+    return asyncio.run(doctor_handler(locations, Path(locations.project_root)))
 
 
 def main(argv: list[str] | None = None) -> int:

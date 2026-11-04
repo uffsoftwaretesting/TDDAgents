@@ -132,11 +132,47 @@ def test_main_routes_doctor_to_the_handler(monkeypatch, tmp_path):
     assert seen == [(tmp_path, tmp_path)]
 
 
-def test_doctor_takes_no_options(capsys):
+def test_doctor_thread_id_diagnoses_that_sessions_project(monkeypatch, tmp_path):
+    seen: list[Any] = []
+
+    async def handler(locations, project, io_=None):
+        seen.append((locations.project_root, project))
+        return 0
+
+    project = tmp_path / "workspaces" / "tdd-abc" / "project"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("TDDAGENTS_WORKSPACES_DIR", str(tmp_path / "workspaces"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(util, "doctor_handler", handler)
+    assert main_module.main(["doctor", "--thread-id", "tdd-abc"]) == 0
+    assert seen == [(project.resolve(), project.resolve())]
+
+
+def test_doctor_with_an_unknown_thread_id_fails(monkeypatch, tmp_path, capsys):
+    async def handler(locations, project, io_=None):  # pragma: no cover - must not run
+        raise AssertionError("the handler ran")
+
+    monkeypatch.setenv("TDDAGENTS_WORKSPACES_DIR", str(tmp_path / "workspaces"))
+    monkeypatch.setattr(util, "doctor_handler", handler)
+    assert main_module.main(["doctor", "--thread-id", "tdd-missing"]) == 1
+    assert capsys.readouterr().err == "No session found with thread id: tdd-missing\n"
+
+
+def test_doctor_takes_only_the_thread_id(capsys):
     with pytest.raises(SystemExit) as exit_info:
         main_module.main(["doctor", "--fast"])
     assert exit_info.value.code == 2
     with pytest.raises(SystemExit):
         main_module.main(["doctor", "--help"])
     out = capsys.readouterr().out
-    assert out.startswith("usage: python -m app.main doctor [-h]") and "TDDAgents auto-updater" in out
+    assert out.startswith("usage: python -m app.main doctor [-h] [--thread-id <id>]")
+    assert "TDDAgents auto-updater" in out and "Diagnose that session's project folder" in out
+
+
+def test_version_prints_the_constant(capsys):
+    # `main.tsx`: `.version(`${MACRO.VERSION} (Claude Code)`, '-v, --version', ...)`.
+    for flag in ("--version", "-v"):
+        with pytest.raises(SystemExit) as exit_info:
+            main_module.main([flag])
+        assert exit_info.value.code == 0
+        assert capsys.readouterr().out == f"{VERSION} (TDDAgents)\n"

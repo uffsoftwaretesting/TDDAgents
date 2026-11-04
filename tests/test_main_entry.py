@@ -375,6 +375,7 @@ def test_parser_help_and_metadata() -> None:
     assert helps == {
         "help": "show this help message and exit",
         "prompt": "The initial request (instead of the menu).",
+        "version": "Output the version number",
         "print": "Headless: ask nothing, exit non-zero on failure.",
         "spec": "Read the initial request from this file.",
         "fresh": "Forces a new run by generating a random thread_id.",
