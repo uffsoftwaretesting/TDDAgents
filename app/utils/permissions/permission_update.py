@@ -50,6 +50,7 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permission_rule_parser import permission_rule_value_to_string
+from app.utils.debug import log_for_debugging
 from app.utils.settings.internal_writes import mark_internal_write
 from app.utils.settings.settings import (
     SettingsLocations,
@@ -341,9 +342,17 @@ def update_settings_for_source(
         return None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        existing = parse_settings_file(path)
+        existing: Any = parse_settings_file(path)
         if existing is None and path.exists():
-            return f"Invalid JSON syntax in settings file at {path}"
+            # Upstream: a file failing validation is merged into as it is (its invalid fields kept for
+            # the user to fix); only a JSON syntax error refuses the write.
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return f"Invalid JSON syntax in settings file at {path}"
+            if isinstance(raw, dict):
+                existing = raw
+                log_for_debugging(f"Using raw settings from {path} due to validation failure")
         merged = _merge_for_write(existing or {}, patch)
         # Before the write lands, so the settings watcher knows this change is ours.
         mark_internal_write(str(path.resolve()))

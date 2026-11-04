@@ -237,15 +237,16 @@ def test_settings_file_paths_and_roots(tmp_path):
     assert st.settings_root_path_for_source(S.POLICY_SETTINGS, loc) is None
 
 
-def test_parse_settings_file(tmp_path, caplog):
+def test_parse_settings_file(tmp_path, settings_debug_log):
     assert st.parse_settings_file(tmp_path / "missing") is None
     assert st.parse_settings_file(write(tmp_path / "empty.json", "  \n")) == {}
     assert st.parse_settings_file(write(tmp_path / "ok.json", {"a": 1})) == {"a": 1}
-    with caplog.at_level(logging.WARNING, logger="TDDOrchestrator.Permissions"):
-        assert st.parse_settings_file(write(tmp_path / "list.json", [1])) is None
-        assert st.parse_settings_file(write(tmp_path / "bad.json", "{")) is None
-    assert f"Ignoring malformed settings at {tmp_path / 'list.json'}: not a JSON object" in [
-        r.getMessage() for r in caplog.records]
+    assert st.parse_settings_file(write(tmp_path / "list.json", [1])) is None
+    assert st.parse_settings_file(write(tmp_path / "bad.json", "{")) is None
+    assert settings_debug_log == [
+        f"Invalid settings at {tmp_path / 'list.json'}, file ignored:\nExpected object, but received array",
+        f"Invalid settings at {tmp_path / 'bad.json'}, file ignored:\nInvalid or malformed JSON",
+    ]
 
 
 def test_merge_settings_is_lodash_merge_with_array_union():
@@ -292,9 +293,9 @@ def test_load_settings_merges_every_source_in_order_and_reads_a_file_once(tmp_pa
     assert st.load_settings(loc)["v"] == "policy"
     # A flag file that *is* the project file is read once, not twice.
     same = locations(tmp_path, tmp_path / "proj/.tddagents/settings.json")
-    write(tmp_path / "proj/.tddagents/settings.json", {"permissions": {"allow": ["x"]}})
+    write(tmp_path / "proj/.tddagents/settings.json", {"permissions": {"allow": ["X"]}})
     write(tmp_path / "etc/managed-settings.json", "{}")
-    assert st.load_settings(same) == {"v": "local", "useronly": 1, "permissions": {"allow": ["x"]}}
+    assert st.load_settings(same) == {"v": "local", "useronly": 1, "permissions": {"allow": ["X"]}}
 
 
 def test_rules_from_every_source_and_managed_only(tmp_path):
@@ -440,6 +441,10 @@ def test_additional_directories_must_be_strings(tmp_path):
     (tmp_path / "d").mkdir()
     write(tmp_path / "proj/.tddagents/settings.json",
           {"permissions": {"additionalDirectories": [3, str(tmp_path / "d")]}})
+    ctx, _ = st.initialize_tool_permission_context(locations(tmp_path), permission_mode=PermissionMode.DEFAULT)
+    # A non-string entry fails the settings schema: the whole file is ignored, as upstream's.
+    assert ctx.additional_working_directories == ()
+    write(tmp_path / "proj/.tddagents/settings.json", {"permissions": {"additionalDirectories": [str(tmp_path / "d")]}})
     ctx, _ = st.initialize_tool_permission_context(locations(tmp_path), permission_mode=PermissionMode.DEFAULT)
     assert ctx.additional_working_directories == (str(tmp_path / "d"),)
     write(tmp_path / "proj/.tddagents/settings.json", {"permissions": {"additionalDirectories": "nope"}})

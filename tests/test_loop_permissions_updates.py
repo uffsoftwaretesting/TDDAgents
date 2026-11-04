@@ -268,12 +268,15 @@ def test_remove_rules_persist_normalizes_existing_entries(tmp_path):
     loc = locations(tmp_path)
     user = tmp_path / "home/.tddagents/settings.json"
     user.parent.mkdir(parents=True)
-    user.write_text(json.dumps({"permissions": {"allow": ["Task", "Bash(*)", "Bash(ls)"], "deny": "x"}}))
+    user.write_text(json.dumps({"permissions": {"allow": ["Task", "Bash(*)", "Bash(ls)"]}}))
     up.persist_permission_update(parsed({**add("allow", "userSettings", ("Agent", None), ("Bash", None)),
                                          "type": "removeRules"})[0], loc)
     assert read(user)["permissions"]["allow"] == ["Bash(ls)"]
+    # A file failing the settings schema reads as no settings (upstream's `getSettingsForSource`), so the
+    # rules kept are none, merged into the file as it is.
+    user.write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"], "deny": "x"}}))
     up.persist_permission_update(parsed({**add("deny", "userSettings", ("X", None)), "type": "removeRules"})[0], loc)
-    assert read(user)["permissions"]["deny"] == []
+    assert read(user)["permissions"] == {"allow": ["Bash(ls)"], "deny": []}
 
 
 def test_settings_locations_for():

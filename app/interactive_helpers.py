@@ -5,9 +5,11 @@ Ported from `reference/claude-code/src/interactiveHelpers.tsx` -> `showSetupDial
 `SetupDialogIO`: a dialog asked on the terminal before the REPL exists, Esc read from the
 terminal's interrupt) and `showSetupScreens`' MCP step: "If settings are valid, check for any
 mcp.json servers that need approval" (`getSettingsWithAllErrors`, then
-`handleMcpjsonServerApprovals`, `app/services/mcp_server_approval.py`). The trust step itself is
-`app/components/trust_dialog/trust_dialog.py`; `app/session/driver.py` runs both, in that order,
-before the session (and its MCP connections) opens.
+`handleMcpjsonServerApprovals`, `app/services/mcp_server_approval.py`); then `main.tsx`' settings
+validation step (`launch_invalid_settings_dialog`, `dialogLaunchers.tsx` ->
+`launchInvalidSettingsDialog`). The trust step itself is `app/components/trust_dialog/trust_dialog.py`;
+`app/session/driver.py` runs the three, in that order, before the session (and its MCP connections)
+opens.
 
 Upstream's `Dialog` exits the process on Ctrl-C / Ctrl-D pressed twice
 (`useExitOnCtrlCDWithKeybindings`, Ink's `exit`); here closing the input (Ctrl-D) exits 0 at once
@@ -23,10 +25,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.components.invalid_settings_dialog import invalid_settings_dialog
 from app.components.trust_dialog.trust_dialog import TrustDialogExit
 from app.services.mcp_server_approval import handle_mcpjson_server_approvals
-from app.utils.settings.all_errors import get_settings_with_all_errors
-from app.utils.settings.settings import MANAGED_DIR, SettingsLocations
+from app.utils.settings.all_errors import get_settings_with_all_errors, is_mcp_error
+from app.utils.settings.settings import MANAGED_DIR, SettingsLocations, get_settings_with_errors
 
 PROMPT = "❯ "
 #: `read_setup_line` when Esc was pressed.
@@ -98,6 +101,18 @@ async def show_mcpjson_server_approvals(io: Any, escape: asyncio.Event, location
         await handle_mcpjson_server_approvals(SetupDialogIO(io, escape), locations)
 
 
+async def launch_invalid_settings_dialog(io: Any, escape: asyncio.Event, locations: SettingsLocations) -> None:
+    """
+    `main.tsx`' "Show settings validation errors after trust is established" with
+    `dialogLaunchers.tsx` -> `launchInvalidSettingsDialog`: when the settings files have errors (the MCP
+    configs' excluded: they do not keep settings from loading), the dialog asks; exiting ends the
+    process with code 1 (`gracefulShutdownSync(1)`), continuing goes on without the invalid files.
+    """
+    errors = [error for error in get_settings_with_errors(locations)[1] if not is_mcp_error(error)]
+    if errors and not await invalid_settings_dialog(SetupDialogIO(io, escape), errors):
+        raise SetupDialogExit(1)
+
+
 __all__ = [
     "ESCAPE",
     "PROMPT",
@@ -105,5 +120,6 @@ __all__ = [
     "SetupDialogIO",
     "read_setup_line",
     "setup_settings_locations",
+    "launch_invalid_settings_dialog",
     "show_mcpjson_server_approvals",
 ]

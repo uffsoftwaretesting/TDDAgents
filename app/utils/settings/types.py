@@ -7,11 +7,10 @@ check for settings-sourced marketplaces), `strictKnownMarketplaces`, `blockedMar
 `pluginConfigs` and `pluginTrustMessage`.
 
 Upstream validates a whole settings file against `SettingsSchema`, and a failure ignores the file
-(`parseSettingsFileUncached` yields `settings: null`). This repository validates only some blocks
-(the `hooks` block, `app/schemas/hooks.py`, and these plugin keys). `parse_plugin_settings` lists
-the issues and the parsed keys: `parse_settings_file` ignores a file that has any issue and
-otherwise keeps the parsed keys (unknown keys of nested objects stripped, as Zod returns them).
-Every other key stays as leniently read as before.
+(`parseSettingsFileUncached` yields `settings: null`); so does this build, against `settings_json_schema`
+below (`app/utils/settings/schema_validator.py` -> `safe_parse_settings`). The plugin keys are checked by
+their own port here: `parse_plugin_settings` lists the issues and the parsed keys (unknown keys of
+nested objects stripped, as Zod returns them), and `safe_parse_settings` reports them with the rest.
 
 `settings_json_schema` is `SettingsSchema` (with `PermissionsSchema`, `AllowedMcpServerEntrySchema`,
 `DeniedMcpServerEntrySchema`, `ExtraKnownMarketplaceSchema` and `CUSTOMIZATION_SURFACES`) as Zod's

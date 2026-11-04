@@ -132,27 +132,26 @@ def test_load_permission_rules_reads_all_three_scopes_in_order(tmp_path):
     assert load_permission_rules(str(project), home)[1].source == PROJECT
 
 
-def test_load_permission_rules_missing_and_malformed_files(tmp_path, caplog):
+def test_load_permission_rules_missing_and_malformed_files(tmp_path, settings_debug_log):
     home, project = tmp_path / "home", tmp_path / "proj"
     assert load_permission_rules(project, home) == []
     write_settings(project / ".tddagents/settings.json", "{not json")
-    (project / ".tddagents/settings.local.json").mkdir()  # a directory, not a file
-    with caplog.at_level(logging.WARNING, logger="TDDOrchestrator.Permissions"):
-        assert load_permission_rules(project, home) == []
-    assert any(r.getMessage().startswith("Ignoring malformed settings at ") for r in caplog.records)
+    (project / ".tddagents/settings.local.json").mkdir()  # a directory, not a file: no errors
+    assert load_permission_rules(project, home) == []
+    assert settings_debug_log == [
+        f"Invalid settings at {project / '.tddagents/settings.json'}, file ignored:\nInvalid or malformed JSON"]
 
 
-def test_non_utf8_settings_are_logged_and_skipped(tmp_path, caplog):
+def test_non_utf8_settings_are_logged_and_skipped(tmp_path, settings_debug_log):
     project = tmp_path / "proj"
     bad = project / ".tddagents/settings.json"
     bad.parent.mkdir(parents=True)
     bad.write_bytes(b"\xff\xfe")
     write_settings(project / ".tddagents/settings.local.json", {"permissions": {"allow": ["Bash(ok)"]}})
     assert st.parse_settings_file(tmp_path / "missing.json") is None
-    with caplog.at_level(logging.WARNING, logger="TDDOrchestrator.Permissions"):
-        rules = load_permission_rules(project, tmp_path / "home")
+    rules = load_permission_rules(project, tmp_path / "home")
     assert [r.rule_content for r in rules] == ["ok"]
-    assert any(r.getMessage().startswith(f"Ignoring malformed settings at {bad}") for r in caplog.records)
+    assert f"Invalid settings at {bad}, file ignored:\nInvalid or malformed JSON" in settings_debug_log
 
 
 def test_build_tool_permission_context(tmp_path):
@@ -266,17 +265,18 @@ def test_build_context_uses_the_given_home(tmp_path):
     assert [r.rule_content for r in ctx.always_allow_rules] == ["from-home"]
 
 
-def test_warnings_name_the_file_and_the_error(tmp_path, caplog):
+def test_warnings_name_the_file_and_the_error(tmp_path, settings_debug_log):
     project = tmp_path / "proj"
     bad = project / ".tddagents/settings.json"
     write_settings(bad, "{nope")
     local = project / ".tddagents/settings.local.json"
     write_settings(local, {"permissions": {"allow": "Bash"}})
-    with caplog.at_level(logging.WARNING, logger="TDDOrchestrator.Permissions"):
-        load_permission_rules(project, tmp_path / "home")
-    messages = [r.getMessage() for r in caplog.records]
-    assert any(m.startswith(f"Ignoring malformed settings at {bad}: Expecting") for m in messages)
-    assert f"Ignoring non-list permissions.allow in {local}." in messages
+    load_permission_rules(project, tmp_path / "home")
+    messages = settings_debug_log
+    assert f"Invalid settings at {bad}, file ignored:\nInvalid or malformed JSON" in messages
+    # A non-list rule array fails the settings schema: the whole file is ignored, as upstream's.
+    assert f"Invalid settings at {local}, file ignored:\npermissions.allow: Expected array, but received string" \
+        in messages
 
 
 def test_backslash_at_index_zero_escapes_the_star():
