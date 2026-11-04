@@ -32,7 +32,7 @@ from app.skills.load_skills_dir import get_skill_registry
 from app.services.plugins.plugin_operations import PLUGIN_CLI
 from app.tools.skill_tool.skill_tool import skill_has_only_safe_properties
 from app.utils.process_user_input.process_slash_command import get_messages_for_prompt_slash_command
-from app.utils.settings.schema_output import generate_settings_json_schema
+from app.utils.settings import schema_output
 from app.utils.settings.types import settings_json_schema
 
 REPO = Path(__file__).resolve().parent.parent
@@ -209,7 +209,8 @@ def test_the_texts_name_this_builds_settings_files_and_tools():
 
 def _full() -> str:
     """The whole prompt and the schema, as `getPromptForCommand` builds them without a request."""
-    return f"{UPDATE_CONFIG_PROMPT}\n\n## Full Settings JSON Schema\n\n```json\n{generate_settings_json_schema()}\n```"
+    schema = schema_output.generate_settings_schema()
+    return f"{UPDATE_CONFIG_PROMPT}\n\n## Full Settings JSON Schema\n\n```json\n{schema}\n```"
 
 
 class TestPrompt:
@@ -235,7 +236,7 @@ class TestPrompt:
 
     def test_the_full_prompt_ends_with_the_generated_settings_schema(self):
         schema = generate_settings_schema()
-        assert schema == generate_settings_json_schema()
+        assert schema == schema_output.generate_settings_schema() != schema_output.generate_settings_json_schema()
         assert _full().endswith(f"\n\n## Full Settings JSON Schema\n\n```json\n{schema}\n```")
         assert json.loads(schema) == settings_json_schema()
 

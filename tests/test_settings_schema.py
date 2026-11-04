@@ -1,7 +1,7 @@
 """
 The settings JSON Schema (`reference/claude-code/src/utils/settings/types.ts` -> `SettingsSchema`,
-`schemaOutput.ts` -> `generateSettingsJSONSchema`): the keys this build reads, upstream's
-descriptions, and agreement with this build's own validators.
+`schemaOutput.ts` -> `generateSettingsJSONSchema`): every key upstream declares, upstream's
+descriptions, Zod's two output modes, and agreement with this build's own validators.
 """
 
 from __future__ import annotations
@@ -18,10 +18,12 @@ from app.schemas.hooks import hooks_json_schema, hooks_schema_errors
 from app.types.permissions import PERMISSION_MODES
 from app.utils.hooks.hook_events import HookEvent
 from app.utils.settings import schema_builder as zb
-from app.utils.settings.schema_output import generate_settings_json_schema
+from app.utils.settings.schema_output import generate_settings_json_schema, generate_settings_schema
 from app.utils.settings.types import (
     CUSTOMIZATION_SURFACES,
+    GATED_OFF_SETTINGS_KEYS,
     PLUGIN_SETTINGS_KEYS,
+    SETTINGS_KEYS,
     STRICT_SETTINGS_KEYS,
     SUPPORTED_SETTINGS_KEYS,
     UNREAD_UPSTREAM_SETTINGS_KEYS,
@@ -45,6 +47,10 @@ def test_builder_shapes():
         "type": "string", "minLength": 1, "format": "uri", "pattern": "^x"}
     assert zb.string(length=40) == {"type": "string", "minLength": 40, "maxLength": 40}
     assert zb.number(positive=True) == {"type": "number", "exclusiveMinimum": 0}
+    assert zb.number(minimum=0, maximum=1) == {"type": "number", "minimum": 0, "maximum": 1}
+    assert zb.integer() == {"type": "integer", "minimum": -zb.MAX_SAFE_INTEGER, "maximum": zb.MAX_SAFE_INTEGER}
+    assert zb.integer(minimum=-1) == {"type": "integer", "minimum": -1, "maximum": 9007199254740991}
+    assert zb.integer(positive=True) == {"type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991}
     assert zb.number() == {"type": "number"} and zb.boolean() == {"type": "boolean"}
     assert zb.literal("a") == {"type": "string", "const": "a"}
     assert zb.enum(("a", "b")) == {"type": "string", "enum": ["a", "b"]}
@@ -61,19 +67,52 @@ def test_builder_shapes():
                                          "type": "boolean"}
 
 
+def test_builder_key_order_is_zods():
+    """`toJSONSchema` writes a description first, and an array's `minItems` before its type."""
+    assert list(zb.describe(zb.integer(positive=True), "d")) == ["description", "type", "exclusiveMinimum", "maximum"]
+    assert list(zb.describe(zb.describe(zb.boolean(), "old"), "new").items()) == [
+        ("description", "new"), ("type", "boolean")]
+    assert list(zb.array(zb.boolean(), min_items=1)) == ["minItems", "type", "items"]
+    assert list(zb.array(zb.boolean())) == ["type", "items"]
+
+
 # ── the document ─────────────────────────────────────────────────────────────
 
-def test_the_document_is_a_valid_schema_of_the_supported_keys():
+def test_the_document_is_a_valid_schema_of_every_key():
     Draft202012Validator.check_schema(SCHEMA)
     assert SCHEMA["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     assert (SCHEMA["type"], SCHEMA["additionalProperties"]) == ("object", {})
-    assert tuple(SCHEMA["properties"]) == SUPPORTED_SETTINGS_KEYS
+    assert tuple(SCHEMA["properties"]) == SETTINGS_KEYS and len(SETTINGS_KEYS) == 82
     assert PLUGIN_SETTINGS_KEYS <= set(SUPPORTED_SETTINGS_KEYS) and "required" not in SCHEMA
-    assert all(prop.get("description") for prop in SCHEMA["properties"].values())
+    # `sandbox` is `SandboxSettingsSchema().optional()`, the one key upstream does not `.describe()`.
+    assert [k for k, prop in SCHEMA["properties"].items() if not prop.get("description")] == ["sandbox"]
+    assert STRICT_SETTINGS_KEYS == set(SETTINGS_KEYS)
+    assert UNREAD_UPSTREAM_SETTINGS_KEYS == tuple(k for k in SETTINGS_KEYS if k not in SUPPORTED_SETTINGS_KEYS)
+    assert [k for k in SETTINGS_KEYS if k in SUPPORTED_SETTINGS_KEYS] == list(SUPPORTED_SETTINGS_KEYS)
+    assert not set(GATED_OFF_SETTINGS_KEYS) & set(SETTINGS_KEYS)
+
+
+def test_the_unread_keys_are_typed_as_upstream():
+    props = SCHEMA["properties"]
+    assert props["model"] == {"description": "Override the default model used by TDDAgents", "type": "string"}
+    assert props["env"] == {"description": "Environment variables to set for TDDAgents sessions", "type": "object",
+                            "propertyNames": {"type": "string"}, "additionalProperties": {"type": "string"}}
+    assert props["$schema"]["const"] == "https://json.schemastore.org/claude-code-settings.json"
+    # `.nonnegative().int()`: Zod prints `.int()`'s bounds only (the validator still checks >= 0).
+    assert props["cleanupPeriodDays"]["minimum"] == -zb.MAX_SAFE_INTEGER
+    assert props["xaaIdp"]["properties"]["callbackPort"]["exclusiveMinimum"] == 0
+    assert props["xaaIdp"]["properties"]["issuer"]["format"] == "uri"
+    assert props["xaaIdp"]["required"] == ["issuer", "clientId"]
+    assert props["effortLevel"]["enum"] == ["low", "medium", "high"]  # the external build's levels
+    assert props["sandbox"]["additionalProperties"] == {}  # `.passthrough()`
+    assert "additionalProperties" not in props["sandbox"]["properties"]["network"]
+    assert props["sshConfigs"]["items"]["properties"]["startDirectory"]["description"].endswith(
+        "`python -m app.main ssh <config> [dir]`.")
+    assert props["permissions"]["properties"]["disableAutoMode"]["enum"] == ["disable"]
 
 
 def test_every_supported_key_is_read_by_the_app():
-    """No key is documented that this build ignores: each is read somewhere outside the schema itself."""
+    """The keys said to be read are read somewhere outside the schema itself."""
     sources = "\n".join(path.read_text(encoding="utf-8") for path in (REPO / "app").rglob("*.py")
                         if path.name not in ("types.py",) and "prompts" not in path.parts)
     for key in SUPPORTED_SETTINGS_KEYS:
@@ -93,12 +132,31 @@ def test_hooks_events_are_every_hook_event():
     assert SCHEMA["properties"]["hooks"]["propertyNames"]["enum"][0] == "PreToolUse"
 
 
-def test_generated_text():
-    text = generate_settings_json_schema()
-    assert json.loads(text) == SCHEMA
+def _closed(node: Any) -> Any:
+    """`node` with every object that has properties and no `additionalProperties` closed."""
+    if isinstance(node, list):
+        return [_closed(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    closed = {key: _closed(value) for key, value in node.items()}
+    if node.get("type") == "object" and "properties" in node and "additionalProperties" not in node:
+        closed["additionalProperties"] = False
+    return closed
+
+
+def test_generated_text_in_both_modes():
+    text = generate_settings_schema()
+    assert json.loads(text) == SCHEMA  # `update-config`: the input mode
     assert text.startswith('{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "type": "object"')
     assert "—" in text and "\\u2014" not in text  # non-ASCII as is, as `JSON.stringify`
-    assert "Claude" not in text and ".claude" not in text
+    # Upstream's own service names stay: the subscription plan is the one "Claude".
+    assert text.count("Claude") == 1 and "Claude Pro/Max" in text and ".claude" not in text
+    output = json.loads(generate_settings_json_schema())  # an Edit refusal: the output mode
+    assert output == _closed(SCHEMA) and output != SCHEMA
+    assert output["additionalProperties"] == {} and output["properties"]["sandbox"]["additionalProperties"] == {}
+    assert output["properties"]["statusLine"]["additionalProperties"] is False
+    assert list(output["properties"]["statusLine"])[-1] == "additionalProperties"
+    assert output["properties"]["env"]["additionalProperties"] == {"type": "string"}  # a record stays a record
 
 
 # ── agreement with this build's validators ───────────────────────────────────
@@ -179,16 +237,15 @@ def _descriptions(node: Any) -> list[str]:
 
 
 def _upstream_text() -> str:
-    """The three source files, string concatenations joined and JS escapes resolved."""
+    """The four source files, string concatenations joined and JS escapes resolved."""
     text = "".join((SRC / rel).read_text(encoding="utf-8") for rel in (
-        "utils/settings/types.ts", "schemas/hooks.ts", "utils/plugins/schemas.ts"))
+        "utils/settings/types.ts", "entrypoints/sandboxTypes.ts", "schemas/hooks.ts", "utils/plugins/schemas.ts"))
     text = re.sub(r"(['\"`])\s*\+\s*\n\s*(['\"`])", "", text)
     return text.replace("\\'", "'").replace("\\\\", "\\").replace("\\u2014", "—")
 
 
-#: Upstream's top-level keys behind a build or environment gate the external build leaves off.
-GATED_OFF_KEYS = ("xaaIdp", "disableDeepLinkRegistration", "classifierPermissionsEnabled", "minSleepDurationMs",
-                  "maxSleepDurationMs", "voiceEnabled", "assistant", "assistantName", "defaultView")
+#: Upstream's gated top-level keys whose code is in the reference snapshot, declared here.
+GATED_ON_KEYS = ("xaaIdp", "disableDeepLinkRegistration", "voiceEnabled", "defaultView")
 
 
 def _upstream_top_level_keys() -> list[str]:
@@ -210,13 +267,39 @@ def _upstream_top_level_keys() -> list[str]:
 
 
 @needs_reference
-def test_the_strict_keys_are_upstreams_top_level_keys():
-    upstream = [key for key in _upstream_top_level_keys() if key not in GATED_OFF_KEYS]
-    assert set(GATED_OFF_KEYS) <= set(_upstream_top_level_keys())
-    assert len(upstream) == len(set(upstream))
-    assert STRICT_SETTINGS_KEYS == set(upstream)
-    assert list(UNREAD_UPSTREAM_SETTINGS_KEYS) == [k for k in upstream if k not in SUPPORTED_SETTINGS_KEYS]
-    assert [k for k in upstream if k in SUPPORTED_SETTINGS_KEYS] == list(SUPPORTED_SETTINGS_KEYS)
+def test_the_keys_are_upstreams_top_level_keys():
+    """Every key of upstream's `SettingsSchema`, in its order, but the gated keys whose code is absent."""
+    upstream = _upstream_top_level_keys()
+    assert len(upstream) == len(set(upstream)) == len(SETTINGS_KEYS) + len(GATED_OFF_SETTINGS_KEYS)
+    assert [k for k in upstream if k not in GATED_OFF_SETTINGS_KEYS] == list(SETTINGS_KEYS)
+    assert set(GATED_ON_KEYS) <= set(SETTINGS_KEYS)
+
+
+#: Each gated key and the snapshot files its code lives in: all present when declared, one absent when not.
+GATED_KEY_EVIDENCE: dict[str, tuple[str, ...]] = {
+    "xaaIdp": ("services/mcp/xaaIdpLogin.ts", "commands/mcp/xaaIdpCommand.ts"),
+    "disableDeepLinkRegistration": ("utils/deepLink/registerProtocol.ts",),
+    "voiceEnabled": ("commands/voice/voice.ts", "services/voice.ts", "hooks/useVoiceEnabled.ts"),
+    "defaultView": ("tools/BriefTool/BriefTool.ts",),
+    "minSleepDurationMs": ("tools/SleepTool/SleepTool.ts",),
+    "maxSleepDurationMs": ("tools/SleepTool/SleepTool.ts",),
+    "assistant": ("assistant/index.ts", "assistant/gate.ts"),
+    "assistantName": ("assistant/index.ts",),
+}
+
+
+@needs_reference
+@pytest.mark.parametrize("key", list(GATED_KEY_EVIDENCE))
+def test_a_gated_key_is_declared_exactly_when_its_code_is_in_the_snapshot(key: str):
+    present = all((SRC / rel).is_file() for rel in GATED_KEY_EVIDENCE[key])
+    assert (key in SETTINGS_KEYS) == present and (key in GATED_OFF_SETTINGS_KEYS) == (not present)
+
+
+@needs_reference
+def test_classifier_permissions_is_off_because_the_external_classifier_is_a_stub():
+    stub = (SRC / "utils" / "permissions" / "bashClassifier.ts").read_text(encoding="utf-8")
+    assert stub.startswith("// Stub for external builds")
+    assert "classifierPermissionsEnabled" in GATED_OFF_SETTINGS_KEYS
 
 
 def test_auto_mode_is_upstreams_external_shape():
@@ -230,10 +313,21 @@ def test_auto_mode_is_upstreams_external_shape():
         assert not VALIDATOR.is_valid(bad), bad
 
 
+#: This build's text -> upstream's, most specific first.
+PRODUCT_SUBSTITUTIONS = (
+    ("TDDAgents' client_id", "Claude Code's client_id"), ("TDDAgents' co-authored", "Claude's co-authored"),
+    ("TDDAgents' system prompt", "Claude's system prompt"), ("TDDAgents responses", "Claude responses"),
+    ("TDDAgents needs", "Claude Code needs"), ("TDDAgents will", "Claude will"), ("TDDAgents", "Claude Code"),
+    ("TDDAGENTS.md", "CLAUDE.md"), (".tddagents/", ".claude/"), ("~/.tddagents", "~/.claude"),
+    ("tddagents-plugin", "claude-plugin"), ("python -m app.main ssh", "claude ssh"),
+)
+
+
 @needs_reference
 def test_every_description_is_upstreams_after_the_product_substitutions():
     upstream = _upstream_text()
     for text in set(_descriptions(SCHEMA)):
-        original = (text.replace("TDDAgents needs", "Claude Code needs").replace("TDDAgents will", "Claude will")
-                    .replace(".tddagents/", ".claude/").replace("tddagents-plugin", "claude-plugin"))
+        original = text
+        for ours, theirs in PRODUCT_SUBSTITUTIONS:
+            original = original.replace(ours, theirs)
         assert original in upstream, text

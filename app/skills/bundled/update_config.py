@@ -36,8 +36,8 @@ The texts are `app/prompts/skills/update-config/` (`prompt.md` is `UPDATE_CONFIG
   Settings" list, and the description's env-var trigger and example.
 - **No Config tool**: the "Config Tool vs Direct Edit" section and the description's Config-tool
   sentence are dropped.
-- **The settings schema** lists the keys this build reads (`app/utils/settings/types.py` ->
-  `settings_json_schema`), not upstream's whole `SettingsSchema`.
+- **The settings schema** is upstream's whole `SettingsSchema` in Zod's input mode
+  (`app/utils/settings/schema_output.py` -> `generate_settings_schema`), with the product substitutions.
 - **Plugin sources:** a marketplace's name (listed by `{{PLUGIN_CLI}} marketplace list`) or
   `builtin`; upstream's official marketplaces hold `.claude-plugin/` packages, which this build does
   not load.
@@ -92,10 +92,10 @@ DESCRIPTION = (
 
 
 def generate_settings_schema() -> str:
-    """`generateSettingsSchema`: the settings JSON Schema, generated to stay in sync with the types."""
-    from app.utils.settings.schema_output import generate_settings_json_schema
+    """`generateSettingsSchema`: the settings JSON Schema (Zod's input mode), generated to stay in sync."""
+    from app.utils.settings import schema_output
 
-    return generate_settings_json_schema()
+    return schema_output.generate_settings_schema()
 
 
 def get_prompt_for_command(args: str, context: BundledSkillContext) -> str:

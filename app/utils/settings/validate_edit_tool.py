@@ -9,10 +9,10 @@ edit must pass it too, or the edit is refused (error code 10) with the issues an
 file already invalid before the edit can be edited freely: the edit may be the fix.
 
 The strict check accepts every top-level key upstream's schema declares (`STRICT_SETTINGS_KEYS`), so
-only a real typo is an unrecognized field, as upstream (user decision 2026-11-04). *Divergences:*
-"Claude Code settings.json" is "TDDAgents settings.json" (the product substitution), and the value of a
-key this build does not read (`env`, `model`, ...) is not checked; the full schema shown with a refusal
-is the keys this build reads (`app/utils/settings/schema_output.py`).
+only a real typo is an unrecognized field, and checks every value, those of the keys this build does not
+read (`env`, `model`, ...) included, as upstream (user decisions 2026-11-04). The full schema shown with a
+refusal is upstream's (`app/utils/settings/schema_output.py` -> `generate_settings_json_schema`).
+*Divergence:* "Claude Code settings.json" is "TDDAgents settings.json" (the product substitution).
 """
 
 from __future__ import annotations

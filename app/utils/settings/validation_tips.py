@@ -2,13 +2,13 @@
 A fixing tip for a settings validation error.
 
 Ported from `reference/claude-code/src/utils/settings/validationTips.ts` -> `ValidationTip`,
-`TipContext`, `TIP_MATCHERS`, `getValidationTip`. The suggestions are upstream's, in its order, for
-the keys this build reads (`app/utils/settings/types.py` -> `SUPPORTED_SETTINGS_KEYS`); the hook
-example names this build's `WriteFile` tool.
+`TipContext`, `TIP_MATCHERS`, `getValidationTip`. The suggestions are upstream's, in its order (the
+schema declares every upstream key, `app/utils/settings/types.py` -> `SETTINGS_KEYS`, so the tips for
+`apiKeyHelper`, `cleanupPeriodDays` and `env.*` apply too); the hook example names this build's
+`WriteFile` tool.
 
 *Divergences:* the documentation links (`docLink`, `PATH_DOC_LINKS`, Claude Code's pages) are left
-out, as TDDAgents has no such pages; the tips for keys this build does not read (`apiKeyHelper`,
-`cleanupPeriodDays`, `env.*`) are left out; the `additionalDirectories` tip drops "You can also use
+out, as TDDAgents has no such pages; the `additionalDirectories` tip drops "You can also use
 --add-dir flag or /add-dir command" (neither exists here).
 """
 
@@ -46,6 +46,16 @@ TIP_MATCHERS: tuple[_TipMatcher, ...] = (
     (lambda c: c.path == "permissions.defaultMode" and c.code == "invalid_value",
      ValidationTip('Valid modes: "acceptEdits" (ask before file changes), "plan" (analysis only), "bypassPermissions" '
                    '(auto-accept all), or "default" (standard behavior)')),
+    (lambda c: c.path == "apiKeyHelper" and c.code == "invalid_type",
+     ValidationTip("Provide a shell command that outputs your API key to stdout. The script should output only the "
+                   'API key. Example: "/bin/generate_temp_api_key.sh"')),
+    (lambda c: c.path == "cleanupPeriodDays" and c.code == "too_small" and c.expected == "0",
+     ValidationTip("Must be 0 or greater. Set a positive number for days to retain transcripts (default is 30). "
+                   "Setting 0 disables session persistence entirely: no transcripts are written and existing "
+                   "transcripts are deleted at startup.")),
+    (lambda c: c.path.startswith("env.") and c.code == "invalid_type",
+     ValidationTip('Environment variables must be strings. Wrap numbers and booleans in quotes. Example: "DEBUG": '
+                   '"true", "PORT": "3000"')),
     (lambda c: c.path in ("permissions.allow", "permissions.deny") and c.code == "invalid_type"
      and c.expected == "array",
      ValidationTip('Permission rules must be in an array. Format: ["Tool(specifier)"]. Examples: '
