@@ -450,6 +450,25 @@ def test_context_reports_the_sessions_context_usage(python_workspace, tmp_path, 
     assert "| flag-reviewer | Flag |" in report
 
 
+def test_hooks_reloads_the_hooks_and_lists_them_until_esc(python_workspace, tmp_path):
+    model = Model([[AIMessage(content="planned the calculator")]])
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: not repl.busy and repl.last_terminal is not None)
+        settings = tmp_path / ".tddagents" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text('{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo done"}]}]}}')
+        io.lines.put_nowait("/hooks")
+        await until(lambda: any(line.startswith("Hooks\n1 hook configured") for line in io.out))
+        repl.interrupt()  # Esc
+        await until(lambda: "Hooks dialog dismissed" in io.out)
+        io.lines.put_nowait("/exit")
+
+    _, repl, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    stop = repl.run.ctx.hook_dispatcher.snapshot.matchers_for("Stop")
+    assert [hook.command for matcher in stop for hook in matcher.hooks] == ["echo done"]
+
+
 def test_an_interactive_session_checks_trust_before_a_headers_helper(python_workspace, tmp_path, monkeypatch):
     import app.utils.config as config_mod
 
@@ -488,6 +507,31 @@ def test_a_plugin_autoupdate_is_announced_while_the_repl_runs(python_workspace, 
     _, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
     assert "Plugin updated: lint · Run /reload-plugins to apply" in io.out
     assert autoupdate._plugin_update_callback is None
+
+
+def test_the_settings_error_count_is_announced_after_a_change(python_workspace, tmp_path):
+    from app.types.permissions import PermissionRuleSource
+
+    model = Model([[AIMessage(content="ok")]])
+    detectors: list[Any] = []
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: not repl.busy and repl.last_terminal is not None)
+        assert not any("settings issue" in line for line in io.out)  # valid settings: no notice at the start
+        locations = repl.run.settings_locations
+        assert locations is not None
+        user = locations.user_config_dir / "settings.json"
+        user.parent.mkdir(parents=True, exist_ok=True)
+        user.write_text('{"disableAllHooks": "no"}')
+        detectors.append(repl.run.settings_change_detector)
+        repl.run.settings_change_detector.notify_change(PermissionRuleSource.USER_SETTINGS)
+        io.lines.put_nowait("/exit")
+
+    _, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    assert io.out.count("Found 1 settings issue") == 1
+    # The REPL is gone: a later change is not announced.
+    detectors[0].notify_change(PermissionRuleSource.USER_SETTINGS)
+    assert io.out.count("Found 1 settings issue") == 1
 
 
 def test_resume_unpauses_and_continues(python_workspace, tmp_path):

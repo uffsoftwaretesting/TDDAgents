@@ -13,8 +13,8 @@ lines, so `ReadSearchGroup` is fed one call and one result at a time and the REP
 of each call as it arrives and the past-tense summary when the group closes (user decision
 2026-11-01). Not ported, because their subsystems do not exist here: the REPL tool and its
 primitives, Snip and ToolSearch absorption, team memory (`TEAMMEM`), PreToolUse hook summaries
-(this port emits no `stop_hook_summary` message) and the `(ctrl+o to expand)` hint (the REPL's
-`--verbose` flag is the expanded view).
+(upstream emits them for its internal users only; this port emits the stop hooks' summary alone) and
+the `(ctrl+o to expand)` hint (the REPL's `--verbose` flag is the expanded view).
 """
 
 from __future__ import annotations

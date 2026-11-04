@@ -124,14 +124,17 @@ def test_settings_with_a_null_enabled_plugin_are_ignored(tmp_path: Path):
         "enabledPlugins": {"p@m": ["^1"]}}
 
 
-def test_the_settings_name_check_reports_alongside_other_issues(tmp_path: Path, caplog):
+def test_the_settings_name_check_reports_alongside_other_issues(tmp_path: Path):
+    from app.utils.settings.settings import parse_settings_file_with_errors
+
     path = write(tmp_path / "s.json", {
         "pluginTrustMessage": 3,
         "extraKnownMarketplaces": {"k": {"source": {"source": "settings", "name": "other", "plugins": []}}},
     })
     assert parse_settings_file(path) is None
-    assert "pluginTrustMessage" in caplog.text
-    assert 'got key "k" but source.name "other"' in caplog.text
+    errors = parse_settings_file_with_errors(path)[1]
+    assert [e.path for e in errors] == ["pluginTrustMessage", "extraKnownMarketplaces.k.source.name"]
+    assert 'got key "k" but source.name "other"' in errors[1].message
 
 
 def test_plugin_option_integers_survive_the_settings_load(locations: SettingsLocations):

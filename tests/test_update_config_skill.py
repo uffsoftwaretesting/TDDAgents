@@ -85,14 +85,6 @@ TOOL_RESPONSE: list[Substitution] = [
     (".tool_response.filePath // .tool_input.file_path", ".tool_input.file_path"),
     (".tool_input.file_path // .tool_response.filePath", ".tool_input.file_path"),
 ]
-#: No `/hooks` menu in this build (the settings watcher reloads hooks; a restart is the fallback).
-NO_HOOKS_MENU: list[Substitution] = [
-    ("Tell the user to open `/hooks` once (reloads config) or restart — you can't do this yourself; `/hooks` is a "
-     "user UI menu and opening it ends this turn.",
-     "Tell the user to restart (resume the session with `--thread-id`) — you can't do this yourself."),
-    ("(or needs `/hooks`/restart per the watcher caveat)", "(or needs a restart per the watcher caveat)"),
-    ("Point them at `/hooks` to review, edit, or disable it later. ", ""),
-]
 #: Settings this build does not read, sections dropped, the plugin sources it has.
 SETTINGS_ONLY: list[Substitution] = [
     ('### Environment Variables\n```json\n{\n  "env": {\n    "DEBUG": "true",\n    "MY_API_KEY": "value"\n  }\n}\n'
@@ -130,7 +122,7 @@ PRODUCT: list[Substitution] = [
 _ONLY: dict[str, list[Substitution]] = {
     "SETTINGS_EXAMPLES_DOCS": [*SETTINGS_ONLY],
     "HOOKS_DOCS": [],
-    "HOOK_VERIFICATION_FLOW": [*NO_HOOKS_MENU],
+    "HOOK_VERIFICATION_FLOW": [],
     "UPDATE_CONFIG_PROMPT": [*PROMPT_ONLY],
     "description": [*DESCRIPTION_ONLY],
 }
@@ -202,7 +194,11 @@ def test_the_texts_name_this_builds_settings_files_and_tools():
         assert path in SETTINGS_EXAMPLES_DOCS
     assert '"matcher": "WriteFile|Edit"' in HOOKS_DOCS and '"matcher": "Write|' not in UPDATE_CONFIG_PROMPT
     assert ".tool_response.filePath" not in UPDATE_CONFIG_PROMPT
-    assert "/hooks" not in UPDATE_CONFIG_PROMPT and "/tmp/tddagents-hook-check.txt" in HOOK_VERIFICATION_FLOW
+    assert "/tmp/tddagents-hook-check.txt" in HOOK_VERIFICATION_FLOW
+    # The `/hooks` menu exists (`app/commands/hooks/hooks.py`), and opening it reloads the hooks.
+    assert "Tell the user to open `/hooks` once (reloads config) or restart" in HOOK_VERIFICATION_FLOW
+    assert "Point them at `/hooks` to review, edit, or disable it later." in HOOK_VERIFICATION_FLOW
+    assert "--thread-id" not in UPDATE_CONFIG_PROMPT
     assert UPDATE_CONFIG_PROMPT.endswith(
         "6. **Use --debug** - Run `python -m app.main --debug` to see hook execution logs\n")
     assert "6. **Prove the hook fires**" in HOOK_VERIFICATION_FLOW and "7. **Handoff.**" in HOOK_VERIFICATION_FLOW

@@ -8,8 +8,8 @@ Ported from claude-code v2.1.88:
 * `src/utils/settings/settings.ts` -> `getSettingsFilePathForSource`,
   `getSettingsRootPathForSource`, `loadManagedFileSettings`, `loadSettingsFromDisk`,
   `settingsMergeCustomizer`, `getInitialSettings` (`getSettings_DEPRECATED`),
-  `hasSkipDangerousModePermissionPrompt`, `getSettingsWithErrors` (its ignored files only,
-  `get_settings_file_errors`); the plugin settings base layer is `app/utils/settings/settings_cache.py`
+  `hasSkipDangerousModePermissionPrompt`, `getSettingsWithErrors`, `parseSettingsFile`; the plugin
+  settings base layer is `app/utils/settings/settings_cache.py`
 * `src/utils/permissions/permissionRuleParser.ts` -> `permissionRuleValueFromString`,
   `unescapeRuleContent`, `normalizeLegacyToolName`
 * `src/utils/permissions/permissionsLoader.ts` -> `shouldAllowManagedPermissionRulesOnly`,
@@ -32,17 +32,28 @@ time. With `allowManagedPermissionRulesOnly` in policy settings, only policy rul
 Non-rule settings (`defaultMode`, `disableBypassPermissionsMode`, `additionalDirectories`)
 come from the deep merge of all sources, later sources winning — `loadSettingsFromDisk`.
 
+**Validation is upstream's** (`parseSettingsFileUncached`): every settings file has its invalid
+permission rules dropped with a warning (`filterInvalidPermissionRules`), then is checked against the
+ported `SettingsSchema` (`app/utils/settings/schema_validator.py`, the keys this build reads); a file
+that fails is ignored whole and its issues become `ValidationError`s (`formatZodError`,
+`app/utils/settings/validation.py`), which `get_settings_with_errors` collects. The interactive startup
+shows them (`app/components/invalid_settings_dialog.py`) and the REPL repeats their count after each
+settings change (`app/hooks/notifs/use_settings_errors.py`); `-p` reports them nowhere, as upstream's
+print mode. The SDK's inline flag settings are checked unfiltered and their errors dropped (upstream's
+`loadSettingsFromDisk`). The valid document is the parsed one: unknown keys kept at the top level and
+in `permissions` (`.passthrough()`), stripped elsewhere. Files are read from disk on every load (no
+settings cache), so a fixed file counts at once, and the live reload (the change detector) validates
+the same way.
+
 Divergences: policy settings have one tier here, the file plus drop-ins; upstream's remote,
-MDM and HKCU tiers have no equivalent. Settings are read leniently (malformed files and
-entries are logged and skipped) rather than validated against upstream's Zod schema, except
-the `hooks` block and the plugin keys (`app/utils/settings/types.py`), whose failure ignores the
-whole file as upstream's schema failure does; valid plugin keys are kept as parsed (nested
-unknown keys stripped), as upstream returns the parsed document.
+MDM and HKCU tiers have no equivalent. An ignored file's errors are also written to the debug log
+(`--debug`); upstream logs nothing there.
 `--base-tools` and the PWD-symlink working directory are not ported: no CLI exists yet.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -59,9 +70,10 @@ from app.types.permissions import (
     PermissionRuleSource,
     ToolPermissionContext,
 )
+from app.utils.debug import log_for_debugging
 from app.utils.permissions.permission_rule_parser import escape_rule_content
 from app.utils.settings.settings_cache import get_plugin_settings_base
-from app.utils.settings.types import parse_plugin_settings
+from app.utils.settings.validation import ValidationError
 
 logger = logging.getLogger("TDDOrchestrator.Permissions")
 
@@ -248,71 +260,80 @@ def settings_root_path_for_source(source: PermissionRuleSource, locations: Setti
     return None
 
 
-def parse_settings_file(path: Path) -> dict[str, Any] | None:
+#: `stripBOM`'s mark (EF BB BF), as decoded text.
+UTF8_BOM = "\ufeff"
+
+
+def parse_settings_file_with_errors(path: Path) -> tuple[dict[str, Any] | None, list[ValidationError]]:
     """
-    `parseSettingsFile`, leniently: a missing file is `None`, an empty one `{}`, a
-    malformed one is logged and `None`. A non-object document is malformed.
+    `parseSettingsFile` (`parseSettingsFileUncached`): a missing or unreadable file is `None` with no
+    errors, an empty one `{}`; otherwise the document is validated (`parse_settings_document`), and
+    text that is not JSON is the `null` document ("Invalid or malformed JSON"). A leading UTF-8 BOM is
+    ignored (JS `trim`, and `safeParseJSON`'s `stripBOM`).
     """
     try:
         text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        text = None
     except OSError:
-        return None
-    except UnicodeDecodeError as exc:
-        logger.warning("Ignoring malformed settings at %s: %s", path, exc)
-        return None
-    if text.strip() == "":
-        return {}
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        logger.warning("Ignoring malformed settings at %s: %s", path, exc)
-        return None
-    if not isinstance(data, dict):
-        logger.warning("Ignoring malformed settings at %s: not a JSON object", path)
-        return None
-    return validate_settings_document(data, str(path))
+        return None, []
+    if text is not None:
+        text = text.removeprefix(UTF8_BOM)
+    if text is not None and text.strip() == "":
+        return {}, []
+    data: Any = None
+    if text is not None:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            data = None  # `safeParseJSON`: `null`, which the schema then rejects
+    return parse_settings_document(data, str(path))
 
 
-def validate_settings_document(data: Mapping[str, Any], origin: str) -> dict[str, Any] | None:
+def parse_settings_file(path: Path) -> dict[str, Any] | None:
+    """`parseSettingsFile(path).settings`: the validated document, or `None` (missing, or ignored)."""
+    return parse_settings_file_with_errors(path)[0]
+
+
+def parse_settings_document(data: Any, origin: str) -> tuple[dict[str, Any] | None, list[ValidationError]]:
     """
-    The part of `SettingsSchema().safeParse` this build checks: the plugin keys and the `hooks`
-    block. A document failing it is `None` (ignored whole, logged); a valid one comes back as
-    parsed (nested unknown plugin keys stripped).
+    `parseSettingsFileUncached` on a parsed document: the invalid permission rules are dropped first,
+    with a warning each (`filterInvalidPermissionRules`), then `SettingsSchema().safeParse`
+    (`app/utils/settings/schema_validator.py`). A document failing it is `None` (ignored whole: its
+    hooks, rules and `defaultMode` too), with every issue as a `ValidationError` (`formatZodError`),
+    logged; a valid one comes back as parsed (unknown keys of nested objects stripped, the top level's
+    and `permissions`' kept), with the rule warnings.
     """
-    plugin_errors, plugin_keys = parse_plugin_settings(data)
-    if plugin_errors:
-        # Same rule as the hooks below: a document failing `SettingsSchema` is ignored whole.
-        logger.warning("Invalid settings at %s, file ignored:\n%s", origin, "\n".join(plugin_errors))
-        return None
-    # `parseSettingsFileUncached` returns the parsed document: nested unknown keys stripped.
-    parsed = {**data, **plugin_keys}
-    if "hooks" in parsed:
-        # `parseSettingsFileUncached`: a document failing `SettingsSchema` yields
-        # `settings: null` — the whole file (its hooks, rules and `defaultMode`) is ignored.
-        from app.schemas.hooks import hooks_schema_errors
+    from app.utils.settings.schema_validator import safe_parse_settings
+    from app.utils.settings.validation import filter_invalid_permission_rules, format_zod_error
 
-        errors = hooks_schema_errors(parsed["hooks"])
-        if errors:
-            logger.warning("Invalid settings at %s, file ignored:\n%s", origin, "\n".join(errors))
-            return None
-    return parsed
-
-
-#: Where the SDK's inline flag settings are named in a warning.
-INLINE_FLAG_SETTINGS_ORIGIN = "the inline flag settings"
+    document = copy.deepcopy(data)
+    rule_warnings = filter_invalid_permission_rules(document, origin)
+    parsed, issues = safe_parse_settings(document)
+    if parsed is None:
+        errors = format_zod_error(issues, origin)
+        # Upstream reports nothing here (`safeParseJSON(content, false)` does not even log): the errors
+        # reach the user through `get_settings_with_errors` (the dialog). The debug log names the file.
+        log_for_debugging("Invalid settings at {}, file ignored:\n{}".format(
+            origin, "\n".join(f"{e.path}: {e.message}" if e.path else e.message for e in errors)))
+        return None, [*rule_warnings, *errors]
+    return parsed, rule_warnings
 
 
 def get_inline_flag_settings() -> dict[str, Any] | None:
     """
     `getFlagSettingsInline()` as the settings readers use it: the SDK host's `apply_flag_settings`
-    document (`app/bootstrap/state.py`) when it is valid (`SettingsSchema().safeParse`), else `None`.
+    document (`app/bootstrap/state.py`) when `SettingsSchema().safeParse` accepts it, else `None`. As
+    upstream's, its permission rules are not filtered first (an invalid rule rejects the document) and
+    its errors are reported nowhere.
     """
     from app.bootstrap.state import get_flag_settings_inline
+    from app.utils.settings.schema_validator import safe_parse_settings
 
     inline = get_flag_settings_inline()
     if not inline:
         return None
-    return validate_settings_document(inline, INLINE_FLAG_SETTINGS_ORIGIN)
+    return safe_parse_settings(inline)[0]
 
 
 def merge_settings(target: Mapping[str, Any], source: Mapping[str, Any]) -> dict[str, Any]:
@@ -340,12 +361,19 @@ def merge_settings(target: Mapping[str, Any], source: Mapping[str, Any]) -> dict
 
 def load_managed_file_settings(managed_dir: Path) -> dict[str, Any] | None:
     """
-    `loadManagedFileSettings`: the base file, then every `*.json` drop-in (not dot-files)
+    `loadManagedFileSettings().settings`: the base file, then every `*.json` drop-in (not dot-files)
     in name order, each merged on top. `None` when nothing with content was found.
     """
+    return load_managed_file_settings_with_errors(managed_dir)[0]
+
+
+def load_managed_file_settings_with_errors(managed_dir: Path) -> tuple[dict[str, Any] | None, list[ValidationError]]:
+    """`loadManagedFileSettings`: the merged policy settings and every file's errors."""
     merged: dict[str, Any] = {}
+    errors: list[ValidationError] = []
     found = False
-    base = parse_settings_file(managed_dir / MANAGED_SETTINGS_FILENAME)
+    base, base_errors = parse_settings_file_with_errors(managed_dir / MANAGED_SETTINGS_FILENAME)
+    errors.extend(base_errors)
     if base:
         merged = merge_settings(merged, base)
         found = True
@@ -359,11 +387,12 @@ def load_managed_file_settings(managed_dir: Path) -> dict[str, Any] | None:
     except OSError:
         names = []
     for name in names:
-        settings = parse_settings_file(drop_in_dir / name)
+        settings, file_errors = parse_settings_file_with_errors(drop_in_dir / name)
+        errors.extend(file_errors)
         if settings:
             merged = merge_settings(merged, settings)
             found = True
-    return merged if found else None
+    return (merged if found else None), errors
 
 
 def get_settings_for_source(source: PermissionRuleSource, locations: SettingsLocations) -> dict[str, Any] | None:
@@ -383,27 +412,47 @@ def get_settings_for_source(source: PermissionRuleSource, locations: SettingsLoc
 
 
 def load_settings(locations: SettingsLocations) -> dict[str, Any]:
+    """`loadSettingsFromDisk().settings`: the merged settings of every source."""
+    return load_settings_with_errors(locations)[0]
+
+
+def load_settings_with_errors(locations: SettingsLocations) -> tuple[dict[str, Any], list[ValidationError]]:
     """
-    `loadSettingsFromDisk`: the plugin settings base (`settings_cache`), then every source merged
-    in order over it, each file read once.
+    `loadSettingsFromDisk` (`getSettingsWithErrors`): the plugin settings base (`settings_cache`), then
+    every source merged in order over it, each file read once; and every file's validation errors, each
+    reported once (by file, path and message). A file that fails validation adds its errors, not its
+    settings. The SDK's inline flag settings are merged when valid, their errors not reported (as
+    upstream's).
     """
     merged: dict[str, Any] = {}
     plugin_settings = get_plugin_settings_base()
     if plugin_settings:
         merged = merge_settings(merged, plugin_settings)
+    errors: list[ValidationError] = []
+    seen_errors: set[tuple[str | None, str, str]] = set()
+
+    def add(file_errors: list[ValidationError]) -> None:
+        for error in file_errors:
+            key = (error.file, error.path, error.message)
+            if key not in seen_errors:
+                seen_errors.add(key)
+                errors.append(error)
+
     seen: set[Path] = set()
     for source in SETTING_SOURCES:
         if source == PermissionRuleSource.POLICY_SETTINGS:
-            settings = get_settings_for_source(source, locations)
+            settings, policy_errors = load_managed_file_settings_with_errors(locations.managed_dir)
             if settings:
                 merged = merge_settings(merged, settings)
+            add(policy_errors)
             continue
         path = settings_file_path_for_source(source, locations)
         if path is not None:
             resolved = path.resolve()
             if resolved not in seen:
                 seen.add(resolved)
-                settings = parse_settings_file(path)
+                settings, file_errors = parse_settings_file_with_errors(path)
+                add(file_errors)
                 if settings:
                     merged = merge_settings(merged, settings)
         if source == PermissionRuleSource.FLAG_SETTINGS:
@@ -411,27 +460,17 @@ def load_settings(locations: SettingsLocations) -> dict[str, Any]:
             inline = get_inline_flag_settings()
             if inline:
                 merged = merge_settings(merged, inline)
-    return merged
+    return merged, errors
+
+
+def get_settings_with_errors(locations: SettingsLocations) -> tuple[dict[str, Any], list[ValidationError]]:
+    """`getSettingsWithErrors`: the merged settings and the validation errors (read from disk each time)."""
+    return load_settings_with_errors(locations)
 
 
 def get_initial_settings(locations: SettingsLocations) -> dict[str, Any]:
     """`getInitialSettings` / `getSettings_DEPRECATED`: the merged settings of every source."""
     return load_settings(locations)
-
-
-def get_settings_file_errors(locations: SettingsLocations) -> list[Path]:
-    """
-    `getSettingsWithErrors`' errors, as far as the lenient reading here records them: every
-    settings file that exists but is ignored (malformed JSON, not an object, or failing the
-    hooks / plugin schema; `parse_settings_file`). Upstream's per-field Zod issues have no
-    equivalent: an unknown or mistyped key is skipped when read, never reported.
-    """
-    invalid: list[Path] = []
-    for source in SETTING_SOURCES:
-        path = settings_file_path_for_source(source, locations)
-        if path is not None and path.is_file() and parse_settings_file(path) is None:
-            invalid.append(path)
-    return invalid
 
 
 #: The sources `hasSkipDangerousModePermissionPrompt` trusts: never `projectSettings`.
@@ -715,13 +754,17 @@ __all__ = [
     "escape_rule_content",
     "get_initial_settings",
     "get_permission_rules_for_source",
-    "get_settings_file_errors",
     "get_settings_for_source",
     "has_skip_dangerous_mode_permission_prompt",
     "initial_permission_mode_from_cli",
     "initialize_tool_permission_context",
     "load_all_permission_rules_from_disk",
     "load_managed_file_settings",
+    "load_managed_file_settings_with_errors",
+    "load_settings_with_errors",
+    "get_settings_with_errors",
+    "parse_settings_document",
+    "parse_settings_file_with_errors",
     "load_permission_rules",
     "load_settings",
     "merge_settings",
@@ -729,8 +772,6 @@ __all__ = [
     "parse_settings_file",
     "parse_tool_list_from_cli",
     "get_inline_flag_settings",
-    "validate_settings_document",
-    "INLINE_FLAG_SETTINGS_ORIGIN",
     "permission_mode_from_string",
     "permission_rule_value_from_string",
     "settings_file_path_for_source",

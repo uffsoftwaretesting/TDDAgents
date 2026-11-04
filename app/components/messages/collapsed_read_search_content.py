@@ -16,7 +16,8 @@ lines instead of re-rendering a row (user decision 2026-11-01):
   errored call), and the recalled memories after the group.
 
 Attachments, meta and system messages never close a group (upstream defers them past it), and a
-tool-use summary is not shown (the REPL ignores it upstream too).
+tool-use summary is not shown (the REPL ignores it upstream too). A stop-hook summary closes the
+group and prints as `app/components/messages/system_text_message.py` renders it (the turn is ending).
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from app.components.messages.system_text_message import render_stop_hook_summary
 from app.tool import Tool, find_tool_by_name
 from app.utils.attachments import attachment_of
 from app.utils.collapse_read_search import (
@@ -34,6 +36,7 @@ from app.utils.collapse_read_search import (
     collapsed_summary_text,
     get_tool_search_or_read_info,
 )
+from app.utils.messages import StopHookSummaryMessage
 
 #: The `MessageResponse` gutter and its continuation indent.
 RESPONSE_GUTTER = "  ⎿  "
@@ -83,6 +86,8 @@ class CollapsedReadSearchRenderer:
                 return [*self.flush(), *self._plain(event)]
         if getattr(event, "type", None) == "tool_use_summary":
             return []
+        if isinstance(event, StopHookSummaryMessage):
+            return [*self.flush(), *render_stop_hook_summary(event, verbose=self.verbose)]
         # Anything else (the turn's verdict, its result) closes the group.
         return [*self.flush(), *self._plain(event)]
 

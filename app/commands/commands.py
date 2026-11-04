@@ -41,12 +41,13 @@ module. Not ported: the context-collapse status
 | `/context` | Show current context usage |
 | `/reload-plugins` | Activate pending plugin changes in the current session |
 | `/mcp` | Manage MCP servers; `/mcp enable [server]`, `/mcp disable [server]`, `/mcp reconnect <server>` |
+| `/hooks` | View hook configurations for tool events (`app/commands/hooks/hooks.py`) |
 | `/init` | Ask the agents to write the project's `TDDAGENTS.md` (a `prompt` command) |
 | `/help` | This list |
 | `/exit`, `/quit` | Leave (the session can be continued with `--thread-id`) |
 
 As upstream, a slash command never runs mid-turn: one typed while the agents work waits for
-the turn to end. `/help`, `/plan` (showing), `/pause`, `/mcp` and `/exit` are immediate.
+the turn to end. `/help`, `/plan` (showing), `/pause`, `/mcp`, `/hooks` and `/exit` are immediate.
 """
 
 from __future__ import annotations
@@ -72,11 +73,11 @@ from app.utils.format import format_tokens
 from app.utils.messages import Message
 from app.utils.settings.constants import get_source_display_name
 
-COMMANDS = ("plan", "pause", "resume", "requirements", "context", "mcp", "reload-plugins", "help",
+COMMANDS = ("plan", "pause", "resume", "requirements", "context", "mcp", "hooks", "reload-plugins", "help",
             "exit", "quit")
 
 #: Commands that run even while a turn is in flight (upstream's `immediate`).
-IMMEDIATE = frozenset({"help", "pause", "mcp", "exit", "quit"})
+IMMEDIATE = frozenset({"help", "pause", "mcp", "hooks", "exit", "quit"})
 
 HELP_TEXT = """Commands:
   /plan                         show the TDD plan
@@ -90,6 +91,7 @@ HELP_TEXT = """Commands:
   /context                      show current context usage
   /reload-plugins               activate pending plugin changes in the current session
   /mcp                          manage MCP servers ([enable|disable [server-name]])
+  /hooks                        view hook configurations for tool events
   /init                         initialize a new TDDAGENTS.md file with codebase documentation
   /help                         this list
   /exit, /quit                  leave (continue later with --thread-id)
@@ -128,6 +130,8 @@ BUILT_IN_DESCRIPTIONS: dict[str, str] = {
     "reload-plugins": "Activate pending plugin changes in the current session",
     #: `commands/mcp/index.ts`.
     "mcp": "Manage MCP servers",
+    #: `commands/hooks/index.ts`.
+    "hooks": "View hook configurations for tool events",
     "help": "Show the commands",
     "exit": "Leave (continue later with --thread-id)",
 }

@@ -135,13 +135,12 @@ def test_capture_with_no_files(tmp_path):
 
 # ── an invalid hooks block invalidates its whole settings file (upstream) ─────
 
-def test_an_invalid_hook_discards_the_whole_settings_file(tmp_path, caplog):
+def test_an_invalid_hook_discards_the_whole_settings_file(tmp_path, settings_debug_log):
     """
     `parseSettingsFileUncached`: `SettingsSchema().safeParse` failing returns `settings: null`,
     so the file's hooks, permission rules and `defaultMode` are all ignored.
     """
     import json as _json
-    import logging as _logging
 
     from app.utils.hooks.hooks_config_snapshot import capture_hooks_config_snapshot
     from app.utils.settings.settings import (
@@ -157,9 +156,8 @@ def test_an_invalid_hook_discards_the_whole_settings_file(tmp_path, caplog):
         "permissions": {"deny": ["Bash(rm:*)"], "defaultMode": "acceptEdits"},
         "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": 42}]}]},
     }))
-    with caplog.at_level(_logging.WARNING):
-        assert parse_settings_file(path) is None
-    assert any("Invalid settings" in r.getMessage() for r in caplog.records)
+    assert parse_settings_file(path) is None
+    assert any("Invalid settings" in message for message in settings_debug_log)
     locations = SettingsLocations(project_root=proj, home=tmp_path / "home", managed_dir=tmp_path / "etc")
     assert capture_hooks_config_snapshot(locations).hooks == {}
     assert load_permission_rules(proj, tmp_path / "home") == []
@@ -183,6 +181,7 @@ def test_each_hook_schema_violation_invalidates_the_file(tmp_path):
         assert parse_settings_file(path) is None, document
     good = tmp_path / "good.json"
     good.write_text(_json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "extra": 1}]}]}}))
+    # The parsed document is Zod's `result.data`: a hook's unknown key is stripped.
     assert parse_settings_file(good) == {
-        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "extra": 1}]}]}
+        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}
     }

@@ -551,6 +551,9 @@ async def run_loop(
             stop_hook_res = await deps.stop_hooks(
                 replace(state, messages=(*messages_for_query, *assistant_messages)), config
             )
+            # `handleStopHooks` yields its summary for the UI before the loop acts on the result.
+            for summary_message in stop_hook_res.messages:
+                yield summary_message
             if stop_hook_res.prevent_continuation:
                 term = Terminated(reason=Terminal.STOP_HOOK_PREVENTED)
                 deps.emit_event(term)

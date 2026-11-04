@@ -11,6 +11,8 @@ Ported from claude-code v2.1.88:
   `patternWithRoot`, `getPatternsByRoot`, `matchingRuleForInput`,
   `checkWritePermissionForTool`, `generateSuggestions` (Phase 11: what the permission prompt
   offers as "allow during this session")
+  `getSettingsPaths`, `isClaudeSettingsPath` (`is_tddagents_settings_path`, for the Edit tool's settings
+  validation, `app/utils/settings/validate_edit_tool.py`)
 * `src/utils/permissions/pathValidation.ts` -> `isPathAllowed`
 * `src/utils/fsOperations.ts` -> `getPathsForPermissionCheck` (original + resolved path)
 
@@ -69,6 +71,7 @@ from app.utils.shell.read_only_command_validation import contains_vulnerable_unc
 
 if TYPE_CHECKING:
     from app.tool import ToolContext
+    from app.utils.settings.settings import SettingsLocations
 
 FileOperationType = Literal["read", "write", "create"]
 ToolType = Literal["edit", "read"]
@@ -132,6 +135,27 @@ def expand_path(path: str, cwd: str) -> str:
     elif path.startswith("~/"):
         path = os.path.join(os.path.expanduser("~"), path[2:])
     return posixpath.normpath(path if posixpath.isabs(path) else posixpath.join(cwd, path))
+
+
+def get_settings_paths(locations: SettingsLocations | None) -> list[str]:
+    """`getSettingsPaths`: every settings source's file (`getSettingsFilePathForSource`), as absolute paths."""
+    from app.utils.settings.settings import SETTING_SOURCES, settings_file_path_for_source
+
+    if locations is None:
+        return []
+    paths = (settings_file_path_for_source(source, locations) for source in SETTING_SOURCES)
+    return [os.path.abspath(path) for path in paths if path is not None]
+
+
+def is_tddagents_settings_path(file_path: str, cwd: str, locations: SettingsLocations | None) -> bool:
+    """
+    `isClaudeSettingsPath`: a `.tddagents/settings.json` or `.tddagents/settings.local.json` anywhere (any
+    project's), or one of this run's settings files; compared normalized and case-insensitively.
+    """
+    normalized = normalize_case_for_comparison(expand_path(file_path, cwd))
+    if normalized.endswith("/.tddagents/settings.json") or normalized.endswith("/.tddagents/settings.local.json"):
+        return True
+    return any(normalize_case_for_comparison(path) == normalized for path in get_settings_paths(locations))
 
 
 def get_paths_for_permission_check(path: str) -> tuple[str, ...]:
@@ -822,11 +846,13 @@ __all__ = [
     "get_file_read_ignore_patterns",
     "get_paths_for_permission_check",
     "get_patterns_by_root",
+    "get_settings_paths",
     "get_tddagents_temp_dir",
     "has_suspicious_windows_path_pattern",
     "is_dangerous_file_path_to_auto_edit",
     "is_path_allowed",
     "is_project_dir_path",
+    "is_tddagents_settings_path",
     "matching_rule_for_input",
     "normalize_case_for_comparison",
     "normalize_pattern_to_path",

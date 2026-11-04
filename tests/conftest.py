@@ -373,3 +373,15 @@ def no_retry_sleep(monkeypatch: Any) -> list[float]:
 
     monkeypatch.setattr("app.services.api.with_retry._default_sleep", record)
     return delays
+
+
+@pytest.fixture
+def settings_debug_log(monkeypatch: Any) -> list[str]:
+    """What the settings reader writes to the debug log (an ignored file's errors), in order."""
+    messages: list[str] = []
+
+    def record(message: str, **_: Any) -> None:
+        messages.append(message)
+
+    monkeypatch.setattr("app.utils.settings.settings.log_for_debugging", record)
+    return messages

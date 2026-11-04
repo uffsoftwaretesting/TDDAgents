@@ -49,7 +49,7 @@ from app.utils.settings.all_errors import get_settings_with_all_errors
 from app.utils.settings.settings import (
     MANAGED_DIR,
     SettingsLocations,
-    get_settings_file_errors,
+    get_settings_with_errors,
     has_skip_dangerous_mode_permission_prompt,
 )
 from tests.dialog_fakes import ESC, FakeDialog
@@ -252,12 +252,14 @@ def test_the_project_cannot_accept_the_bypass_dialog(loc: SettingsLocations) -> 
 # ── settings errors skip the step ────────────────────────────────────────────
 
 def test_settings_file_errors(tmp_path: Path, loc: SettingsLocations) -> None:
-    assert get_settings_file_errors(loc) == []
+    assert get_settings_with_errors(loc)[1] == []
     project_settings(loc, {})
     write(loc.user_config_dir / "settings.json", "[1]")
     bad_local = write(loc.project_root / ".tddagents" / "settings.local.json", "{nope")
     (tmp_path / "etc" / "managed-settings.json").mkdir(parents=True)  # not a file: nothing to report
-    assert get_settings_file_errors(loc) == [loc.user_config_dir / "settings.json", bad_local]
+    assert [(e.file, e.message) for e in get_settings_with_errors(loc)[1]] == [
+        (str(loc.user_config_dir / "settings.json"), "Expected object, but received array"),
+        (str(bad_local), "Invalid or malformed JSON")]
 
 
 def test_all_errors_join_the_settings_and_the_mcp_configs(loc: SettingsLocations) -> None:
@@ -265,8 +267,11 @@ def test_all_errors_join_the_settings_and_the_mcp_configs(loc: SettingsLocations
     write(loc.project_root / ".mcp.json", {"mcpServers": {"bad": {"type": "http"}}})
     write(loc.project_root / ".tddagents" / "settings.local.json", "{nope")
     errors = get_settings_with_all_errors(loc)
-    assert errors[0] == f"{loc.project_root / '.tddagents' / 'settings.local.json'}: invalid settings file, ignored"
-    assert len(errors) == 2 and errors[1].startswith(f"{loc.project_root / '.mcp.json'}: ")
+    assert len(errors) == 2
+    assert (errors[0].file, errors[0].path, errors[0].message, errors[0].mcp_error_metadata) == (
+        str(loc.project_root / ".tddagents" / "settings.local.json"), "", "Invalid or malformed JSON", None)
+    assert errors[1].file == str(loc.project_root / ".mcp.json") and errors[1].mcp_error_metadata is not None
+    assert errors[1].mcp_error_metadata["scope"] == "project"
 
 
 def test_a_user_scope_mcp_error_names_its_scope(loc: SettingsLocations, tmp_path: Path,
@@ -274,7 +279,8 @@ def test_a_user_scope_mcp_error_names_its_scope(loc: SettingsLocations, tmp_path
     monkeypatch.setenv("TDDAGENTS_CONFIG_DIR", str(tmp_path / "cfg"))
     write(tmp_path / "cfg" / ".tddagents.json", {"mcpServers": {"bad": {"type": "http"}}})
     errors = get_settings_with_all_errors(loc)
-    assert len(errors) == 1 and errors[0].startswith("user: ")
+    assert len(errors) == 1 and errors[0].mcp_error_metadata is not None
+    assert errors[0].mcp_error_metadata["scope"] == "user"
 
 
 def test_invalid_settings_skip_the_approvals(loc: SettingsLocations) -> None:
