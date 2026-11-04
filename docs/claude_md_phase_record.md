@@ -2169,9 +2169,8 @@ prompt style.
   - The settings TDDAgents lacks are dropped: `env`, `model`, `agent`, `attribution`, and the
     Config-tool section.
   - The "prove the hook fires" step, the `--debug` step and the generated "Full Settings JSON Schema"
-    are verbatim again, now that live settings, `--debug` and the schema are ported (below). Where
-    upstream points at `/hooks`, the text says to restart with `--thread-id` until `/hooks` is ported
-    (user decision: port it).
+    are verbatim again, now that live settings, `--debug`, the schema and `/hooks` are ported (below),
+    and so are its `/hooks` mentions.
 - **Test-file classes.**
   - Declared test-support files count as test code for the tier and the fingerprint, so `conftest.py`
     and helpers can be written in RED.
@@ -2226,9 +2225,42 @@ verbatim):*
 - **Settings JSON Schema** (`app/utils/settings/schema_builder.py`, `schema_output.py`;
   `utils/settings/types.ts` `SettingsSchema`): the 25 keys this build reads, upstream's descriptions with
   the product renames (`.claude-plugin/` → `.tddagents-plugin/`); a small helper reproduces Zod's JSON
-  Schema shapes (not compared byte for byte with Zod). Whole-file validation like upstream is a user
-  decision in progress.
+  Schema shapes (not compared byte for byte with Zod). Settings files are validated against it like
+  upstream (below).
 - `app/constants/product.py` holds `CLI_COMMAND`; `PLUGIN_CLI` derives from it.
+
+*`/hooks`, the stop-hook summary, settings validation (user decisions 2026-11-03):*
+
+- **`/hooks`** (`app/commands/`, upstream's `HooksConfigMenu`): the REPL's read-only hooks menu;
+  `update-config` and NEW_INIT point at it verbatim.
+- **"Ran N stop hooks"** (upstream's stop-hook summary): the REPL shows the summary of the stop hooks
+  that ran, as upstream's UI does.
+- **Settings files are validated like upstream** (`app/utils/settings/validation.py`,
+  `schema_validator.py`, `permission_validation.py`, `tool_validation_config.py`, `validation_tips.py`,
+  `app/utils/treeify.py`): a file that fails the schema is ignored whole and its errors are collected;
+  invalid permission rules are filtered; the interactive session shows the "Settings Error" dialog
+  before it opens (choosing exit ends with code 1); the REPL writes "Found N settings issue(s)" when it
+  opens and after each change (`app/hooks/notifs/use_settings_errors.py`); the Edit tool refuses an
+  edit that would make a valid settings file invalid (`validateInputForSettingsFileEdit`, error code
+  10). Inline flag settings are checked unfiltered, as upstream. Divergences: only the supported keys
+  are checked (upstream keys this build doesn't read pass unchecked); an ignored file's errors go to the
+  `--debug` log; the tips carry no documentation links; error ordering is plain string order and
+  invalid values print in Python form; a valid-JSON non-object file is replaced by a permission write.
+  In progress (user decisions 2026-11-04): the strict edit check accepts upstream's full list of
+  top-level keys, `/doctor` is ported and its pointer restored, `autoMode` joins the schema.
+
+*Live verification (2026-11-04, the language-generic code):*
+
+- **TypeScript** (`tdd-d0ba0b49755944f9`, a CPF validator with vitest): the Analyst declared npm /
+  `npx vitest run --coverage` / lcov / `tests/**/*.test.ts`; 6 items through the cycle on the declared
+  command (222 tests, 100% coverage); the clean final run (`npm install` from the manifests) passed.
+- **Python** (`tdd-a20dd790db6640a3`, the CPF API with gate, Docker and CI): uv / `uv run pytest` /
+  cobertura; 11 items, 296 tests, 100% coverage; the agent itself rebuilt a clean copy from the
+  manifests, ran the real gate and a `docker build`; the final run passed.
+- **The original defect is closed**: a package installed into that project's `.venv` but not declared
+  passes in place and reads "NOT passing" in TDDAgents' clean final run (`ImportError` at collection).
+- Both Analysts left out the reporter option that names files (vitest `addFileAttribute`, pytest
+  `junit_family=xunit1`), so the "uncollected test files" check read "unknown" — stated, as decided.
 
 ### The three things that changed most
 

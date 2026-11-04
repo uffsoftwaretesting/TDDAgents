@@ -184,10 +184,17 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
 - **`AskUserQuestion`** is upstream's tool, main thread only. Headless denies it, and the
   session stops `stop_hook_prevented` with the questions; `--thread-id <id> "<answer>"`
   continues.
-- **Hooks**: all four types and 27 events, from a frozen snapshot of the five settings
-  sources, plus upstream's `callback` hooks (an SDK host's, `initialize.hooks`) and `function`
-  hooks (`--json-schema`'s Stop enforcement). Hook output becomes messages. Configured stop hooks
-  can only *add* blocks.
+- **Hooks**: all four types and 27 events, from a snapshot of the five settings sources, plus
+  upstream's `callback` hooks (an SDK host's, `initialize.hooks`) and `function` hooks
+  (`--json-schema`'s Stop enforcement). Hook output becomes messages. Configured stop hooks can
+  only *add* blocks. `/hooks` lists them; the REPL shows "Ran N stop hooks".
+- **Settings** are watched during the session (`app/utils/settings/change_detector.py`): a changed
+  file runs the ConfigChange hooks and reloads the permission rules and the hooks snapshot
+  (dangerous allows stripped again, the TDD tier unaffected). Each file is validated against the
+  ported `SettingsSchema` like upstream: an invalid file is ignored whole, its errors shown in the
+  "Settings Error" dialog / "Found N settings issue(s)" notice, and the Edit tool refuses an edit
+  that would break a valid settings file. `--debug [filter]` writes upstream's debug log to
+  `<config home>/debug/<thread id>.txt`.
 - **`-p` is the SDK protocol** (`app/cli/structured_io.py`, `run_headless`): a text prompt is the
   one user message of a closed input; `--output-format text|json|stream-json` (stream-json needs
   `--verbose`), `--input-format stream-json` (user messages and every control request on stdin;
@@ -370,7 +377,7 @@ python -m app.main plugin list | install <p@m> | marketplace add <src> …   # [
 The REPL opens in plan mode (`⏸ plan mode on`). `ExitPlanMode` shows upstream's choices
 ("Yes", "No, keep planning" with feedback, or `/edit`). Afterwards the same conversation
 develops the plan. Type at any time; Esc interrupts. `/help` lists `/plan`, `/pause`,
-`/resume`, `/requirements`, `/context`, `/mcp`, `/reload-plugins`, `/init` and `/exit` (resumable
+`/resume`, `/requirements`, `/context`, `/mcp`, `/hooks`, `/reload-plugins`, `/init` and `/exit` (resumable
 with `--thread-id`). A new interactive session first asks to trust its folder (upstream's trust dialog),
 then to approve the project's pending `.mcp.json` servers; `-p` treats trust as implicit and
 approves them, as `claude -p`.
