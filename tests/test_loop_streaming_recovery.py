@@ -50,7 +50,7 @@ def make_deps(
         return CompactionResult(compacted=False, messages=state.messages)
 
     async def stop_hooks(state: LoopState, config: RunConfig) -> Any:
-        return SimpleNamespace(blocking_errors=(), prevent_continuation=False)
+        return SimpleNamespace(blocking_errors=(), prevent_continuation=False, messages=())
 
     async def run_tools(
         calls: tuple[ToolCall, ...],
