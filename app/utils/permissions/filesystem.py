@@ -557,9 +557,9 @@ def get_bundled_skills_root() -> str:
     else could have pre-created would let them plant files the read allowlist then trusts.
     Memoized, so the extraction writes and the permission check agree for the life of the process.
     """
-    from app.services.mcp.client import client_version
+    from app.constants.product import VERSION
 
-    return os.path.join(get_tddagents_temp_dir(), "bundled-skills", client_version(), secrets.token_hex(16))
+    return os.path.join(get_tddagents_temp_dir(), "bundled-skills", VERSION, secrets.token_hex(16))
 
 
 def check_readable_internal_path(

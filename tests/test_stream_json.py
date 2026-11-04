@@ -130,6 +130,7 @@ def test_the_init_message() -> None:
     assert init["tools"] == ["Task", "Bash"] and init["mcp_servers"] == [{"name": "srv", "status": "connected"}]
     assert (init["type"], init["subtype"], init["permissionMode"], init["output_style"]) == (
         "system", "init", "plan", "default")
+    assert init["claude_code_version"] == "0.1.0"  # `MACRO.VERSION`: `app/constants/product.py`
 
 
 def test_status_and_tdd_messages() -> None:

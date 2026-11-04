@@ -353,7 +353,7 @@ def test_the_diagnostic(tmp_path, monkeypatch):
 
     ws = Ws()
     diagnostic = get_doctor_diagnostic(loc, ws)
-    assert (diagnostic.installation_type, diagnostic.version) == ("development", "unknown")
+    assert (diagnostic.installation_type, diagnostic.version) == ("development", "0.1.0")
     assert diagnostic.installation_path == str(INSTALLATION_ROOT) and (INSTALLATION_ROOT / "app" / "main.py").is_file()
     assert diagnostic.invoked_binary == get_invoked_binary() == (sys.argv[0] or "unknown")
     assert diagnostic.ripgrep_status == RipgrepStatus(working=True, mode="builtin", system_path=None)
@@ -540,4 +540,4 @@ def test_the_screen_is_dismissed_by_enter_or_esc():
 def test_the_command_calls_the_screen():
     io = FakeDialog("")
     assert run(call(io, DoctorContext(locations=None, environ={}))) == DISMISSED
-    assert io.asked[0].startswith("Diagnostics\n└ Currently running: development (unknown)\n")
+    assert io.asked[0].startswith("Diagnostics\n└ Currently running: development (0.1.0)\n")

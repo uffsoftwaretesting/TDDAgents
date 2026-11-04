@@ -666,7 +666,7 @@ def test_the_client_introduces_itself_as_tddagents(monkeypatch):
 
     run(scenario())
     info = seen["client_info"]
-    assert (info.name, info.title) == ("tddagents", "TDDAgents")
+    assert (info.name, info.title, info.version) == ("tddagents", "TDDAgents", "0.1.0")
 
 
 class Answer(BaseModel):

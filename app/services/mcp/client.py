@@ -91,7 +91,6 @@ import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -114,6 +113,7 @@ from mcp.types import (
 )
 from pydantic import FileUrl
 
+from app.constants.product import VERSION
 from app.services.mcp.auth import (
     ClaudeAuthProvider,
     McpTransportAuth,
@@ -141,6 +141,7 @@ from app.utils.mcp_validation import (
     truncate_mcp_content_if_needed,
 )
 from app.utils.tool_result_storage import config_home, tool_results_dir
+from app.utils.user_agent import get_tddagents_user_agent
 
 if TYPE_CHECKING:
     from mcp.client.session import ElicitationFnT, MessageHandlerFnT
@@ -156,24 +157,10 @@ HEADERS_HELPER_TIMEOUT_SECONDS = 10.0
 #: `(server name, config) -> transport`.
 TransportFactory = Callable[[str, McpServerConfig], AbstractAsyncContextManager[TransportStreams]]
 
-_APP_ROOT = Path(__file__).resolve().parents[3]
-
-
-@cache
-def client_version() -> str:
-    """`MACRO.VERSION`: this checkout's short git sha, as the transcript stamp uses."""
-    try:
-        done = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"], check=False, cwd=_APP_ROOT, capture_output=True, text=True
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
-    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else "unknown"
-
 
 def get_mcp_user_agent() -> str:
-    """`getMCPUserAgent` (no entrypoint or SDK suffixes: neither exists here)."""
-    return f"tddagents/{client_version()}"
+    """`getMCPUserAgent`: `tddagents/<version>` (no entrypoint or SDK suffixes: neither exists here)."""
+    return get_tddagents_user_agent()
 
 
 def get_mcp_headers_from_helper(server_name: str, config: McpServerConfig) -> dict[str, str] | None:
@@ -523,7 +510,7 @@ async def connect_to_server(
                     elicitation_callback=_elicitation_callback(name, elicitation_callback),
                     list_roots_callback=_roots_callback(cwd),
                     message_handler=_message_handler(name, on_elicitation_complete),
-                    client_info=Implementation(name="tddagents", title="TDDAgents", version=client_version()),
+                    client_info=Implementation(name="tddagents", title="TDDAgents", version=VERSION),
                 ) as session,
             ):
                 box["init"] = await session.initialize()
@@ -871,7 +858,6 @@ __all__ = [
     "TransportFactory",
     "call_mcp_tool",
     "clear_mcp_auth_cache",
-    "client_version",
     "connect_to_server",
     "fetch_resources_for_client",
     "fetch_tools_for_client",

@@ -38,6 +38,8 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from app.constants.product import VERSION
+
 #: `AGENT_TOOL_NAME` / `LEGACY_AGENT_TOOL_NAME`: the wire still says `Task` (`sdkCompatToolName`).
 AGENT_TOOL_NAME = "Agent"
 LEGACY_AGENT_TOOL_NAME = "Task"
@@ -179,7 +181,6 @@ class SystemInitInputs:
     skills: Sequence[str]
     plugins: Sequence[Mapping[str, str]] = ()
     api_key_source: str = "none"
-    version: str = ""
     output_style: str = DEFAULT_OUTPUT_STYLE_NAME
 
 
@@ -197,7 +198,7 @@ def build_system_init_message(inputs: SystemInitInputs, session_id: str) -> dict
         "slash_commands": list(inputs.commands),
         "apiKeySource": inputs.api_key_source,
         "betas": [],
-        "claude_code_version": inputs.version,
+        "claude_code_version": VERSION,
         "output_style": inputs.output_style,
         "agents": list(inputs.agents),
         "skills": list(inputs.skills),

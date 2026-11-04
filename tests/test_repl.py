@@ -555,7 +555,7 @@ def test_doctor_shows_the_diagnostics_until_enter(python_workspace, tmp_path):
 
     _, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
     screen = next(line for line in io.out if line.startswith("Diagnostics\n"))
-    assert "└ Currently running: development (unknown)\n" in screen
+    assert "└ Currently running: development (0.1.0)\n" in screen
     assert "\nInvalid Settings\n" in screen and "disableAllHooks: Expected boolean, but received string" in screen
     assert "Agent Parse Errors\n└ Failed to parse 1 agent file(s):\n" in screen
     assert 'half.md: Missing required "description" field in frontmatter' in screen
