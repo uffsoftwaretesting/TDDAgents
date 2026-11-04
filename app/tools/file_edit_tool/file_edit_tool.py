@@ -2,7 +2,8 @@
 Edit: exact string replacement in a file that was read first.
 
 Ported from `reference/claude-code/src/tools/FileEditTool/FileEditTool.ts` -> `FileEditTool`;
-input contract `FileEditInput` (`sdk-tools.d.ts`).
+input contract `FileEditInput` (`sdk-tools.d.ts`). `validateInput` ends with the settings files' check
+(`app/utils/settings/validate_edit_tool.py`).
 """
 
 from __future__ import annotations
@@ -36,7 +37,10 @@ from app.utils.file import FILE_NOT_FOUND_CWD_NOTE
 from app.utils.path import backfill_path
 from app.utils.permissions.filesystem import (
     check_file_write_permissions,
+    permission_cwd,
 )
+from app.utils.permissions.permission_update import settings_locations_for
+from app.utils.settings.validate_edit_tool import validate_input_for_settings_file_edit
 
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
 
@@ -80,6 +84,13 @@ def build_edit_tool() -> BuiltTool:
                 f"\nString: {old_string}",
                 9,
             )
+        # Additional validation for the settings files: an edit must not break a valid one.
+        locations = settings_locations_for(context.get_app_state().tool_permission_context)
+        settings_check = validate_input_for_settings_file_edit(
+            file_path, permission_cwd(context), locations, content,
+            lambda: content.replace(actual, new_string, -1 if replace_all else 1))
+        if settings_check is not None:
+            return settings_check
         return VALID
 
     async def call_edit(input_args: dict[str, Any], context: ToolContext) -> ToolResult:

@@ -22,6 +22,7 @@ from app.components.validation_errors_list import build_nested_tree, render_vali
 from app.interactive_helpers import launch_invalid_settings_dialog
 from app.types.permissions import PermissionRuleSource
 from app.utils.hooks.hooks_config_snapshot import capture_hooks_config_snapshot
+from app.utils.permissions.filesystem import get_settings_paths, is_tddagents_settings_path
 from app.utils.permissions.permission_update import update_settings_for_source
 from app.utils.settings.permission_validation import permission_rule_issue_message, validate_permission_rule
 from app.utils.settings.schema_output import generate_settings_json_schema
@@ -33,6 +34,10 @@ from app.utils.settings.settings import (
     load_settings,
     parse_settings_document,
     parse_settings_file_with_errors,
+)
+from app.utils.settings.validate_edit_tool import (
+    SETTINGS_VALIDATION_ERROR_CODE,
+    validate_input_for_settings_file_edit,
 )
 from app.utils.settings.validation import (
     UNDEFINED,
@@ -428,6 +433,88 @@ def test_strict_parsing_reports_the_unknown_keys_issue() -> None:
     _, issues = safe_parse_settings({"a": 1, "b": 2}, strict=True)
     assert issues[0].message == 'Unrecognized keys: "a", "b"'
     assert safe_parse_settings({"a": 1})[0] == {"a": 1}  # not strict: passed through
+
+
+@pytest.mark.parametrize("path, expected", [
+    (".tddagents/settings.json", True),
+    ("sub/./.TDDAgents/Settings.Local.json", True),
+    ("/elsewhere/other/.tddagents/settings.json", True),
+    (".tddagents/settings.json.bak", False),
+    ("settings.json", False),
+    ("../managed/MANAGED-SETTINGS.JSON", True),  # the run's policy file
+    ("../flag.json", True),  # the run's --settings file
+    ("../flag.json.bak", False),
+])
+def test_is_tddagents_settings_path(tmp_path: Path, path: str, expected: bool) -> None:
+    loc = SettingsLocations(project_root=tmp_path / "project", home=tmp_path / "home",
+                            managed_dir=tmp_path / "managed", flag_settings_path=tmp_path / "flag.json")
+    assert is_tddagents_settings_path(path, str(tmp_path / "project"), loc) is expected
+
+
+def test_the_run_settings_paths(tmp_path: Path) -> None:
+    loc = _loc(tmp_path)
+    assert get_settings_paths(None) == []
+    assert get_settings_paths(loc) == [
+        str(loc.user_config_dir / "settings.json"), str(loc.project_root / ".tddagents" / "settings.json"),
+        str(loc.project_root / ".tddagents" / "settings.local.json"), str(loc.managed_dir / "managed-settings.json")]
+    assert is_tddagents_settings_path("x.json", str(tmp_path), None) is False
+
+
+def test_an_edit_must_keep_a_valid_settings_file_valid(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    valid, invalid = '{"disableAllHooks": true}', '{"disableAllHooks": "no"}'
+
+    def after(text: str) -> Any:
+        return lambda: text
+
+    assert validate_input_for_settings_file_edit("notes.json", cwd, None, valid, after(invalid)) is None
+    assert validate_input_for_settings_file_edit(".tddagents/settings.json", cwd, None, invalid, after(invalid)) \
+        is None  # already invalid: the edit may be the fix
+    assert validate_input_for_settings_file_edit(".tddagents/settings.json", cwd, None, valid, after(valid)) is None
+    refused = validate_input_for_settings_file_edit(".tddagents/settings.json", cwd, None, valid, after(invalid))
+    assert refused is not None and (refused.valid, refused.error_code) == (False, SETTINGS_VALIDATION_ERROR_CODE)
+    assert refused.message == (
+        "TDDAgents settings.json validation failed after edit:\nSettings validation failed:\n"
+        "- disableAllHooks: Expected boolean, but received string\n\nFull schema:\n"
+        f"{generate_settings_json_schema()}\nIMPORTANT: Do not update the env unless explicitly instructed to do so.")
+
+
+def _edit_context(tmp_path: Path, files: dict[str, str]) -> Any:
+    from app.state.app_state_store import AppState, AppStateStore
+    from app.tool import tool_context_for
+    from app.types.permissions import ToolPermissionContext
+    from tests.conftest import FakeWorkspace
+
+    permission = ToolPermissionContext(settings_locations=_loc(tmp_path))
+    store = AppStateStore(AppState(tool_permission_context=permission))
+    return tool_context_for(store, workspace=FakeWorkspace(files=files))
+
+
+def test_the_edit_tool_refuses_to_break_a_settings_file(tmp_path: Path) -> None:
+    from app.tools.file_edit_tool.file_edit_tool import build_edit_tool
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
+
+    files = {".tddagents/settings.json": '{"disableAllHooks": true, "plansDirectory": "a"}', "a.txt": "true"}
+    ctx = _edit_context(tmp_path, files)
+    for path in files:
+        asyncio.run(build_read_file_tool().call({"file_path": path}, ctx))
+    tool = build_edit_tool()
+    breaking = {"file_path": ".tddagents/settings.json", "old_string": "true", "new_string": '"yes"'}
+    result = tool.validate_input(breaking, ctx)
+    assert (result.valid, result.error_code) == (False, SETTINGS_VALIDATION_ERROR_CODE)
+    assert "- disableAllHooks: Expected boolean, but received string" in result.message
+    fine = {"file_path": ".tddagents/settings.json", "old_string": "true", "new_string": "false"}
+    assert tool.validate_input(fine, ctx).valid
+    # `replace_all` is simulated too: every occurrence changes.
+    files[".tddagents/settings.json"] = '{"disableAllHooks": true, "alwaysThinkingEnabled": true}'
+    ctx = _edit_context(tmp_path, files)
+    for path in files:
+        asyncio.run(build_read_file_tool().call({"file_path": path}, ctx))
+    assert tool.validate_input({**breaking, "replace_all": True}, ctx).error_code == SETTINGS_VALIDATION_ERROR_CODE
+    one = {"file_path": ".tddagents/settings.json", "old_string": 'Hooks": true', "new_string": 'Hooks": "x"'}
+    assert tool.validate_input(one, ctx).error_code == SETTINGS_VALIDATION_ERROR_CODE
+    # Not a settings file: no check.
+    assert tool.validate_input({"file_path": "a.txt", "old_string": "true", "new_string": "x"}, ctx).valid
 
 
 def test_a_tree_path_part_that_parse_int_reads_shows_the_value() -> None:
