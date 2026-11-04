@@ -8,9 +8,11 @@ whose content passes `validateSettingsFileContent` (`SettingsSchema().strict()`)
 edit must pass it too, or the edit is refused (error code 10) with the issues and the full schema. A
 file already invalid before the edit can be edited freely: the edit may be the fix.
 
-*Divergences:* "Claude Code settings.json" is "TDDAgents settings.json" (the product substitution), and
-the strict check knows only the keys this build reads (`SUPPORTED_SETTINGS_KEYS`): a key upstream's
-schema declares but this build does not read (`env`, `model`, ...) is an unrecognized field here.
+The strict check accepts every top-level key upstream's schema declares (`STRICT_SETTINGS_KEYS`), so
+only a real typo is an unrecognized field, as upstream (user decision 2026-11-04). *Divergences:*
+"Claude Code settings.json" is "TDDAgents settings.json" (the product substitution), and the value of a
+key this build does not read (`env`, `model`, ...) is not checked; the full schema shown with a refusal
+is the keys this build reads (`app/utils/settings/schema_output.py`).
 """
 
 from __future__ import annotations

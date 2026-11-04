@@ -15,7 +15,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 
 import app.utils.permissions.yolo_classifier as yc
-from app.types.permissions import ToolPermissionContext
+from app.types.permissions import PermissionRuleSource, ToolPermissionContext
 from app.utils.settings.settings import SettingsLocations
 
 TOOLS = (SimpleNamespace(name="Bash", aliases=()), SimpleNamespace(name="RunTests", aliases=()))
@@ -116,10 +116,25 @@ def test_auto_mode_config_skips_a_source_without_auto_mode_and_reads_the_next(tm
     assert yc.get_auto_mode_config(ctx) == yc.AutoModeRules(allow=("L",))
 
 
-def test_the_ant_only_deny_key_is_still_validated(tmp_path):
-    """Upstream's schema validates `deny` (the ant-only alias); a bad one sinks its source."""
+def test_the_ant_only_deny_key_is_stripped_before_the_classifier_reads_it(tmp_path):
+    """
+    The external build's settings schema has no `deny` in `autoMode`, so Zod strips it: a bad one no
+    longer sinks its source, and its rules are never read.
+    """
     ctx = _settings(tmp_path, user={"autoMode": {"deny": [1], "allow": ["u"]}}, local={"autoMode": {"allow": ["L"]}})
-    assert yc.get_auto_mode_config(ctx) == yc.AutoModeRules(allow=("L",))
+    assert yc.get_auto_mode_config(ctx) == yc.AutoModeRules(allow=("u", "L"))
+    only_deny = _settings(tmp_path / "d", user={"autoMode": {"deny": ["never read"]}})
+    assert yc.get_auto_mode_config(only_deny) is None
+
+
+def test_the_classifiers_own_schema_still_validates_deny(tmp_path, monkeypatch):
+    """Handed a document the settings schema did not strip, the classifier's schema (upstream's) checks `deny`."""
+    import app.utils.settings.settings as settings_mod
+
+    unchecked = {PermissionRuleSource.USER_SETTINGS: {"autoMode": {"deny": [1], "allow": ["u"]}},
+                 PermissionRuleSource.LOCAL_SETTINGS: {"autoMode": {"allow": ["L"], "deny": ["ant only"]}}}
+    monkeypatch.setattr(settings_mod, "get_settings_for_source", lambda source, _loc: unchecked.get(source))
+    assert yc.get_auto_mode_config(_settings(tmp_path)) == yc.AutoModeRules(allow=("L",))
 
 
 def test_user_rules_are_one_bullet_per_line(tmp_path):

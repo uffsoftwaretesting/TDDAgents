@@ -17,7 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 import app.context as assembly
 import app.utils.permissions.yolo_classifier as yc
-from app.types.permissions import ToolPermissionContext
+from app.types.permissions import PermissionRuleSource, ToolPermissionContext
 from app.utils.permissions.classifier_decision import (
     YOLO_CLASSIFIER_TOOL_NAME as NAME_CONSTANT,
 )
@@ -209,13 +209,22 @@ def test_auto_mode_config_reads_user_local_flag_policy_in_order_and_never_projec
     )
 
 
-def test_auto_mode_config_none_cases(tmp_path, caplog):
+def test_auto_mode_config_none_cases(tmp_path, caplog, monkeypatch):
     assert yc.get_auto_mode_config(ToolPermissionContext()) is None
     assert yc.get_auto_mode_config(_settings(tmp_path)) is None
     ctx = _settings(tmp_path, user={"autoMode": {}}, local={"autoMode": "nope"}, flag={"other": 1})
     assert yc.get_auto_mode_config(ctx) is None
+    # A settings file with a malformed `autoMode` fails the settings schema and is ignored whole.
     bad = _settings(tmp_path / "b", user={"autoMode": {"allow": [1], "soft_deny": ["kept?"]}},
                     local={"autoMode": {"allow": ["ok"]}})
+    assert yc.get_auto_mode_config(bad) == yc.AutoModeRules(allow=("ok",))
+    # Every source is schema-checked first; the classifier's own schema (upstream's too) still skips a
+    # malformed source handed to it.
+    import app.utils.settings.settings as settings_mod
+
+    unchecked = {PermissionRuleSource.USER_SETTINGS: {"autoMode": {"allow": [1], "soft_deny": ["kept?"]}},
+                 PermissionRuleSource.LOCAL_SETTINGS: {"autoMode": {"allow": ["ok"]}}}
+    monkeypatch.setattr(settings_mod, "get_settings_for_source", lambda source, _loc: unchecked.get(source))
     with caplog.at_level("WARNING", logger="TDDOrchestrator.Permissions"):
         assert yc.get_auto_mode_config(bad) == yc.AutoModeRules(allow=("ok",))
     assert any("Ignoring malformed autoMode settings" in r.getMessage() for r in caplog.records)

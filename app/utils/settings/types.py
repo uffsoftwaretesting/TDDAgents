@@ -19,9 +19,13 @@ with upstream's `.describe()` text after the product substitutions ("Claude Code
 `.claude/` -> `.tddagents/`, the plugin folder `.claude-plugin/` -> `.tddagents-plugin/`). It is the
 "Full Settings JSON Schema" the `update-config` skill prints (`app/utils/settings/schema_output.py`).
 Upstream's other keys (`env`, `model`, `attribution`, `statusLine`, ...) are left out: a key
-this build does not read would be documented but do nothing.
+this build does not read would be documented but do nothing. Their names are still known
+(`UNREAD_UPSTREAM_SETTINGS_KEYS`), so the strict check of a settings edit refuses only a real typo, as
+upstream's does (*divergence:* their values are not checked; upstream's are).
 `permissions.defaultMode` lists this build's modes (`PERMISSION_MODES`, `auto` included, as upstream's
-`TRANSCRIPT_CLASSIFIER` build); `permissions.disableAutoMode` is not read here and is left out.
+`TRANSCRIPT_CLASSIFIER` build), and `autoMode`, that build's key (the ant-only `deny` alias left out), holds
+the auto-mode classifier's rules (`app/utils/permissions/yolo_classifier.py` -> `get_auto_mode_config`).
+`permissions.disableAutoMode` is not read here and is left out.
 """
 
 from __future__ import annotations
@@ -150,8 +154,74 @@ SUPPORTED_SETTINGS_KEYS: tuple[str, ...] = (
     "autoMemoryEnabled",
     "autoMemoryDirectory",
     "skipDangerousModePermissionPrompt",
+    "autoMode",
     "pluginTrustMessage",
 )
+
+#: Upstream's other top-level `SettingsSchema` keys, in its declaration order: the external build's, its
+#: `TRANSCRIPT_CLASSIFIER` keys included (as `auto` mode is here). This build does not read them, so the
+#: schema leaves them out and their values are not checked, but `SettingsSchema().strict()` knows their
+#: names: an edit that adds one is not refused as an unrecognized field
+#: (`app/utils/settings/validate_edit_tool.py`). Upstream's keys behind other build or environment gates
+#: (`xaaIdp`, `disableDeepLinkRegistration`, `classifierPermissionsEnabled`, `minSleepDurationMs`,
+#: `maxSleepDurationMs`, `voiceEnabled`, `assistant`, `assistantName`, `defaultView`) are left out.
+UNREAD_UPSTREAM_SETTINGS_KEYS: tuple[str, ...] = (
+    "$schema",
+    "apiKeyHelper",
+    "awsCredentialExport",
+    "awsAuthRefresh",
+    "gcpAuthRefresh",
+    "fileSuggestion",
+    "respectGitignore",
+    "cleanupPeriodDays",
+    "env",
+    "attribution",
+    "includeCoAuthoredBy",
+    "includeGitInstructions",
+    "model",
+    "availableModels",
+    "modelOverrides",
+    "worktree",
+    "defaultShell",
+    "statusLine",
+    "forceLoginMethod",
+    "forceLoginOrgUUID",
+    "otelHeadersHelper",
+    "outputStyle",
+    "language",
+    "skipWebFetchPreflight",
+    "sandbox",
+    "feedbackSurveyRate",
+    "spinnerTipsEnabled",
+    "spinnerVerbs",
+    "spinnerTipsOverride",
+    "syntaxHighlightingDisabled",
+    "terminalTitleFromRename",
+    "effortLevel",
+    "advisorModel",
+    "fastMode",
+    "fastModePerSessionOptIn",
+    "promptSuggestionEnabled",
+    "showClearContextOnPlanAccept",
+    "agent",
+    "companyAnnouncements",
+    "remote",
+    "autoUpdatesChannel",
+    "minimumVersion",
+    "channelsEnabled",
+    "allowedChannelPlugins",
+    "prefersReducedMotion",
+    "autoDreamEnabled",
+    "showThinkingSummaries",
+    "skipAutoPermissionPrompt",
+    "useAutoModeDuringPlan",
+    "disableAutoMode",
+    "sshConfigs",
+    "claudeMdExcludes",
+)
+
+#: The top-level keys `SettingsSchema().strict()` accepts: the ones this build reads and upstream's others.
+STRICT_SETTINGS_KEYS: frozenset[str] = frozenset(SUPPORTED_SETTINGS_KEYS + UNREAD_UPSTREAM_SETTINGS_KEYS)
 
 
 def _mcp_server_entry_json_schema(name: str, command: str, url: str) -> dict[str, Any]:
@@ -299,6 +369,11 @@ def settings_json_schema() -> dict[str, Any]:
             "defaults to ~/.tddagents/projects/<sanitized-cwd>/memory/."))),
         "skipDangerousModePermissionPrompt": opt(describe(boolean(), (
             "Whether the user has accepted the bypass permissions mode dialog"))),
+        "autoMode": opt(describe(obj({
+            "allow": opt(describe(array(string()), "Rules for the auto mode classifier allow section")),
+            "soft_deny": opt(describe(array(string()), "Rules for the auto mode classifier deny section")),
+            "environment": opt(describe(array(string()), "Entries for the auto mode classifier environment section")),
+        }), "Auto mode classifier prompt customization")),
         "pluginTrustMessage": opt(describe(string(), (
             "Custom message to append to the plugin trust warning shown before installation. Only read from "
             "policy settings (managed-settings.json / MDM). Useful for enterprise administrators to add "
@@ -311,7 +386,9 @@ def settings_json_schema() -> dict[str, Any]:
 
 __all__ = [
     "CUSTOMIZATION_SURFACES",
+    "STRICT_SETTINGS_KEYS",
     "SUPPORTED_SETTINGS_KEYS",
+    "UNREAD_UPSTREAM_SETTINGS_KEYS",
     "permissions_json_schema",
     "settings_json_schema",
     "PLUGIN_SETTINGS_KEYS",

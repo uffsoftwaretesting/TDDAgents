@@ -22,7 +22,9 @@ from app.utils.settings.schema_output import generate_settings_json_schema
 from app.utils.settings.types import (
     CUSTOMIZATION_SURFACES,
     PLUGIN_SETTINGS_KEYS,
+    STRICT_SETTINGS_KEYS,
     SUPPORTED_SETTINGS_KEYS,
+    UNREAD_UPSTREAM_SETTINGS_KEYS,
     plugin_settings_schema_errors,
     settings_json_schema,
 )
@@ -182,6 +184,50 @@ def _upstream_text() -> str:
         "utils/settings/types.ts", "schemas/hooks.ts", "utils/plugins/schemas.ts"))
     text = re.sub(r"(['\"`])\s*\+\s*\n\s*(['\"`])", "", text)
     return text.replace("\\'", "'").replace("\\\\", "\\").replace("\\u2014", "—")
+
+
+#: Upstream's top-level keys behind a build or environment gate the external build leaves off.
+GATED_OFF_KEYS = ("xaaIdp", "disableDeepLinkRegistration", "classifierPermissionsEnabled", "minSleepDurationMs",
+                  "maxSleepDurationMs", "voiceEnabled", "assistant", "assistantName", "defaultView")
+
+
+def _upstream_top_level_keys() -> list[str]:
+    """`SettingsSchema`'s own keys, in declaration order: six spaces in, or twelve inside a gated spread."""
+    text = (SRC / "utils" / "settings" / "types.ts").read_text(encoding="utf-8")
+    body = text[text.index("export const SettingsSchema = lazySchema("):]
+    body = body[:body.index("\n    .passthrough(),\n)")]
+    keys: list[str] = []
+    in_spread = False
+    for line in body.splitlines():
+        if line.startswith("      ...("):
+            in_spread = True
+        elif line.startswith("        : {}),"):
+            in_spread = False
+        match = re.match(r"( +)(\$?[A-Za-z_]+): (?:z\b|[A-Z]\w*Schema\(\))", line)
+        if match and len(match.group(1)) == (12 if in_spread else 6):
+            keys.append(match.group(2))
+    return keys
+
+
+@needs_reference
+def test_the_strict_keys_are_upstreams_top_level_keys():
+    upstream = [key for key in _upstream_top_level_keys() if key not in GATED_OFF_KEYS]
+    assert set(GATED_OFF_KEYS) <= set(_upstream_top_level_keys())
+    assert len(upstream) == len(set(upstream))
+    assert STRICT_SETTINGS_KEYS == set(upstream)
+    assert list(UNREAD_UPSTREAM_SETTINGS_KEYS) == [k for k in upstream if k not in SUPPORTED_SETTINGS_KEYS]
+    assert [k for k in upstream if k in SUPPORTED_SETTINGS_KEYS] == list(SUPPORTED_SETTINGS_KEYS)
+
+
+def test_auto_mode_is_upstreams_external_shape():
+    auto_mode = SCHEMA["properties"]["autoMode"]
+    assert auto_mode["description"] == "Auto mode classifier prompt customization"
+    assert list(auto_mode["properties"]) == ["allow", "soft_deny", "environment"]
+    assert "additionalProperties" not in auto_mode and "required" not in auto_mode
+    assert all(p["type"] == "array" and p["items"] == {"type": "string"} for p in auto_mode["properties"].values())
+    assert VALIDATOR.is_valid({"autoMode": {"allow": ["a"], "soft_deny": [], "environment": ["e"], "deny": 1}})
+    for bad in ({"autoMode": {"allow": "a"}}, {"autoMode": {"environment": [1]}}, {"autoMode": "x"}):
+        assert not VALIDATOR.is_valid(bad), bad
 
 
 @needs_reference

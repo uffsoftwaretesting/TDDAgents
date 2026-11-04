@@ -528,10 +528,39 @@ def test_the_settings_error_count_is_announced_after_a_change(python_workspace, 
         io.lines.put_nowait("/exit")
 
     _, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
-    assert io.out.count("Found 1 settings issue") == 1
+    assert io.out.count("Found 1 settings issue · /doctor for details") == 1
     # The REPL is gone: a later change is not announced.
     detectors[0].notify_change(PermissionRuleSource.USER_SETTINGS)
-    assert io.out.count("Found 1 settings issue") == 1
+    assert io.out.count("Found 1 settings issue · /doctor for details") == 1
+
+
+def test_doctor_shows_the_diagnostics_until_enter(python_workspace, tmp_path):
+    model = Model([[AIMessage(content="ok")]])
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: not repl.busy and repl.last_terminal is not None)
+        locations = repl.run.settings_locations
+        assert locations is not None
+        user = locations.user_config_dir / "settings.json"
+        user.parent.mkdir(parents=True, exist_ok=True)
+        user.write_text('{"disableAllHooks": "no"}')
+        agents = tmp_path / ".tddagents" / "agents"
+        agents.mkdir(parents=True, exist_ok=True)
+        (agents / "half.md").write_text("---\nname: half\n---\nNo description.\n")
+        io.lines.put_nowait("/doctor")
+        await until(lambda: any(line.startswith("Diagnostics\n") for line in io.out))
+        io.lines.put_nowait("")  # Enter
+        await until(lambda: "TDDAgents diagnostics dismissed" in io.out)
+        io.lines.put_nowait("/exit")
+
+    _, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    screen = next(line for line in io.out if line.startswith("Diagnostics\n"))
+    assert "└ Currently running: development (unknown)\n" in screen
+    assert "\nInvalid Settings\n" in screen and "disableAllHooks: Expected boolean, but received string" in screen
+    assert "Agent Parse Errors\n└ Failed to parse 1 agent file(s):\n" in screen
+    assert 'half.md: Missing required "description" field in frontmatter' in screen
+    assert screen.endswith("\n\nPress Enter to continue…")
+    assert io.out.index("Checking installation status…") < io.out.index(screen)
 
 
 def test_resume_unpauses_and_continues(python_workspace, tmp_path):

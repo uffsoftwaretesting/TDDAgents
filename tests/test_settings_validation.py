@@ -414,12 +414,12 @@ def test_validate_settings_file_content() -> None:
     assert not invalid_json.is_valid and invalid_json.error.startswith("Invalid JSON: Expecting property name")
     assert invalid_json.full_schema == schema
     result = validate_settings_file_content(json.dumps({
-        "disableAllHooks": "no", "env": {}, "model": "x", "permissions": {"allow": ["bash"], "futureKey": 1}}))
+        "disableAllHooks": "no", "envv": {}, "modle": "x", "permissions": {"allow": ["bash"], "futureKey": 1}}))
     assert result == SettingsFileContentValidation(False, "\n".join([
         "Settings validation failed:",
         "- disableAllHooks: Expected boolean, but received string",
         '- permissions.allow.0: Tool names must start with uppercase. Use "Bash"',
-        "- : Unrecognized fields: env, model",
+        "- : Unrecognized fields: envv, modle",
     ]), schema)
     one = validate_settings_file_content('{"x": 1}')
     assert one.error == "Settings validation failed:\n- : Unrecognized field: x"
@@ -434,6 +434,54 @@ def test_strict_parsing_reports_the_unknown_keys_issue() -> None:
     _, issues = safe_parse_settings({"a": 1, "b": 2}, strict=True)
     assert issues[0].message == 'Unrecognized keys: "a", "b"'
     assert safe_parse_settings({"a": 1})[0] == {"a": 1}  # not strict: passed through
+
+
+@pytest.mark.parametrize("key", ["$schema", "env", "model", "statusLine", "sandbox", "attribution",
+                                 "disableAutoMode", "skipAutoPermissionPrompt", "claudeMdExcludes"])
+def test_strict_parsing_accepts_upstreams_keys_this_build_does_not_read(key: str) -> None:
+    document = {key: {"any": "value"}, "disableAllHooks": True}
+    assert safe_parse_settings(document, strict=True) == (document, [])
+    assert validate_settings_file_content(json.dumps(document)) == SettingsFileContentValidation(True)
+
+
+@pytest.mark.parametrize("key", ["envv", "Model", "statusline", "voiceEnabled", "xaaIdp", "deny", "allow"])
+def test_strict_parsing_refuses_a_key_upstream_does_not_declare(key: str) -> None:
+    _, issues = safe_parse_settings({key: 1}, strict=True)
+    assert [(i.code, i.keys) for i in issues] == [("unrecognized_keys", (key,))]
+
+
+def test_an_edit_adding_an_upstream_key_passes_and_a_typo_is_refused(tmp_path: Path) -> None:
+    cwd, valid = str(tmp_path), '{"disableAllHooks": true}'
+    added = '{"disableAllHooks": true, "env": {"A": "1"}, "model": "opus"}'
+    assert validate_input_for_settings_file_edit(".tddagents/settings.json", cwd, None, valid, lambda: added) is None
+    typo = validate_input_for_settings_file_edit(".tddagents/settings.json", cwd, None, valid,
+                                                 lambda: '{"disableAllHooks": true, "envs": {}}')
+    assert typo is not None and "- : Unrecognized field: envs\n" in typo.message
+
+
+def test_auto_mode_is_validated_like_upstream() -> None:
+    rules = {"allow": ["Run the tests"], "soft_deny": ["Push to main"], "environment": ["CI box"]}
+    assert _parse({"autoMode": rules}) == ({"autoMode": rules}, [])
+    # `z.object` strips unknown keys (the ant-only `deny` alias among them).
+    assert _parse({"autoMode": {"allow": ["x"], "deny": ["y"]}}) == ({"autoMode": {"allow": ["x"]}}, [])
+    assert _parse({"autoMode": {"allow": "x"}}) == (None, [("autoMode.allow", "Expected array, but received string")])
+    assert _parse({"autoMode": {"soft_deny": [1]}}) == (
+        None, [("autoMode.soft_deny.0", "Expected string, but received number")])
+    assert _parse({"autoMode": ["x"]}) == (None, [("autoMode", "Expected object, but received array")])
+    assert safe_parse_settings({"autoMode": {}}, strict=True) == ({"autoMode": {}}, [])
+
+
+def test_an_invalid_auto_mode_drops_the_file_and_its_classifier_rules(tmp_path: Path) -> None:
+    from app.types.permissions import ToolPermissionContext
+    from app.utils.permissions.yolo_classifier import AutoModeRules, get_auto_mode_config
+
+    loc = _loc(tmp_path)
+    _write(loc.user_config_dir / "settings.json", {"autoMode": {"allow": ["user rule"]}})
+    _write(loc.project_root / ".tddagents" / "settings.local.json", {"autoMode": {"environment": "not a list"}})
+    context = ToolPermissionContext(settings_locations=loc)
+    assert get_auto_mode_config(context) == AutoModeRules(allow=("user rule",))
+    _, errors = get_settings_with_errors(loc)
+    assert [(e.path, e.message) for e in errors] == [("autoMode.environment", "Expected array, but received string")]
 
 
 @pytest.mark.parametrize("path, expected", [
@@ -536,10 +584,10 @@ def test_the_settings_errors_notice(tmp_path: Path) -> None:
     _write(loc.user_config_dir / "settings.json", {"disableAllHooks": 1, "permissions": {"allow": ["bash"]}})
     detector = _Detector()
     unsubscribe = use_settings_errors(out.append, loc, detector)
-    assert out == ["Found 2 settings issues"]  # the dropped rule's warning counts, as upstream's
+    assert out == ["Found 2 settings issues · /doctor for details"]  # the dropped rule's warning counts, as upstream's
     _write(loc.project_root / ".mcp.json", {"mcpServers": {"bad": {"type": "http"}}})
     detector.listeners[0]("userSettings")
-    assert out[-1] == "Found 3 settings issues"
+    assert out[-1] == "Found 3 settings issues · /doctor for details"
     _write(loc.user_config_dir / "settings.json", {})
     (loc.project_root / ".mcp.json").unlink()
     detector.listeners[0]("userSettings")
@@ -547,7 +595,8 @@ def test_the_settings_errors_notice(tmp_path: Path) -> None:
     unsubscribe()
     assert detector.listeners == []
     use_settings_errors(out.append, loc)  # without a detector: the start only
-    assert settings_errors_notification_text([ValidationError(path="", message="m")]) == "Found 1 settings issue"
+    assert settings_errors_notification_text([ValidationError(path="", message="m")]) == (
+        "Found 1 settings issue · /doctor for details")
 
 
 def test_a_tree_path_part_that_parse_int_reads_shows_the_value() -> None:

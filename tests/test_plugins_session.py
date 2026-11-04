@@ -255,4 +255,4 @@ def test_the_reload_message_counts_each_component() -> None:
     assert reload_plugins_message(result) == (
         "Reloaded: 1 plugin · 3 skills · 5 agents · 2 hooks · 1 plugin MCP server · 0 plugin LSP servers")
     assert reload_plugins_message(dataclasses.replace(result, error_count=2)).endswith(
-        "\n2 errors during load. Run `python -m app.main plugin list` for details.")
+        "\n2 errors during load. Run /doctor for details.")

@@ -7,11 +7,11 @@ Ported from `reference/claude-code/src/components/mcp/MCPSettings.tsx` -> `MCPSe
 configured, SDK and dynamic), sorted by name, without `ide`. An sse or http server is
 authenticated when it has stored OAuth tokens or is connected with tools.
 
-Upstream's empty-list result also says to run `/doctor`, `claude mcp --help` or read Claude Code's
-documentation; TDDAgents has none of them, so it names where servers are configured instead (the
-project's `.mcp.json`, the global config's `mcpServers`; user decision 2026-11-02: TDDAgents
-equivalents where a route exists). Not ported: the agent-only servers (`agent-server-menu`) and
-claude.ai connectors.
+The empty-list result is upstream's "Please run /doctor if this is unexpected" (`app/screens/doctor.py`);
+for upstream's `claude mcp --help` and Claude Code's documentation, which TDDAgents does not have, it
+names where servers are configured instead (the project's `.mcp.json`, the global config's
+`mcpServers`; user decision 2026-11-02: TDDAgents equivalents where a route exists). Not ported: the
+agent-only servers (`agent-server-menu`) and claude.ai connectors.
 """
 
 from __future__ import annotations
@@ -29,11 +29,12 @@ from app.services.mcp.utils import filter_tools_by_server
 
 
 def no_servers_message() -> str:
-    """The empty-list result, pointing at where TDDAgents reads MCP servers from."""
+    """The empty-list result: `/doctor`, then where TDDAgents reads MCP servers from."""
     from app.services.mcp.config import MCP_JSON_FILENAME, get_global_config_path
 
-    return (f"No MCP servers configured. Add servers to the project's {MCP_JSON_FILENAME}, or to "
-            f'"mcpServers" in {get_global_config_path()} to use them in every project.')
+    return (f"No MCP servers configured. Please run /doctor if this is unexpected. Otherwise, add servers to the "
+            f'project\'s {MCP_JSON_FILENAME}, or to "mcpServers" in {get_global_config_path()} to use them in every '
+            "project.")
 
 
 async def prepare_servers(context: McpPanelContext) -> list[ServerInfo]:
