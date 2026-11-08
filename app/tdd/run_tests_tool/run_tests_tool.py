@@ -22,8 +22,9 @@ label, ignoring stdout/stderr, and the model sees `Exit code N` plus the raw out
 (`utils/toolErrors.ts::getErrorParts`). So RunTests says only:
 
 * the command, the exit code and its shell meaning (`app/tdd/run_judgement.py::SHELL_EXIT_SEMANTICS`);
-* what the JUnit report records (tests, failures, errors, skips), the declared test files it does not
-  name (or that this is unknown), and the coverage measured;
+* what the JUnit report records (tests, failures, errors, skips, and each failed or errored test with
+  its message), the declared test files it does not name (or that this is unknown), and the coverage
+  measured;
 * the ledger change and the phase's rule, stated as rules;
 * the raw output, last.
 
@@ -220,6 +221,22 @@ def report_line(report: JUnitReport | None) -> str:
             f"{report.skipped} skipped")
 
 
+def failed_case_lines(report: JUnitReport | None) -> list[str]:
+    """One line per failed or errored case the report records, in its order, with its message verbatim."""
+    if report is None:
+        return []
+    lines = []
+    for case in report.failed_cases:
+        kind = "Failed test" if case.outcome == "failure" else "Errored test"
+        line = f"{kind}: {case.label}"
+        if case.file and case.file not in case.label:
+            line += f" ({case.file})"
+        if case.message:
+            line += f": {case.message}"
+        lines.append(line)
+    return lines
+
+
 def files_line(judgement: Judgement, report: JUnitReport | None) -> str | None:
     """Which declared test files did not run: listed, unknown, or nothing to say."""
     if judgement.uncollected:
@@ -235,6 +252,7 @@ def observation_lines(result: SuiteExecutionResult, judgement: Judgement) -> lis
     if result.command:
         lines.insert(0, f"Command: {result.command}")
     lines.append(report_line(result.report))
+    lines.extend(failed_case_lines(result.report))
     files = files_line(judgement, result.report)
     if files is not None:
         lines.append(files)

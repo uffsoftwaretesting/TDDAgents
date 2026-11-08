@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from app.tdd.collection_gate import project_test_files, uncollected_test_files
-from app.tdd.junit_report import JUnitReport, parse_junit_report
+from app.tdd.junit_report import FailedCase, JUnitReport, parse_junit_report
 from app.tdd.project_config import ProjectConfig
 from tests.conftest import FakeWorkspace
 
@@ -79,12 +79,15 @@ NEXTEST = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 @pytest.mark.parametrize(("text", "expected"), [
-    (PYTEST_XUNIT1, JUnitReport(tests=4, failures=1, skipped=1,
-                                files=frozenset({"tests/test_calc.py", "tests/test_other.py"}))),
+    (PYTEST_XUNIT1, JUnitReport(
+        tests=4, failures=1, skipped=1, files=frozenset({"tests/test_calc.py", "tests/test_other.py"}),
+        failed_cases=(FailedCase("failure", "tests.test_calc", "test_sub", "tests/test_calc.py", "assert 1 == 2"),))),
     (JEST_JUNIT, JUnitReport(tests=2, files=frozenset({"src/sum.test.js"}))),
-    (VITEST, JUnitReport(tests=2, errors=1, files=frozenset({"src/math.test.ts"}))),
+    (VITEST, JUnitReport(tests=2, errors=1, files=frozenset({"src/math.test.ts"}), failed_cases=(
+        FailedCase("error", "src/math.test.ts", "throws", "src/math.test.ts", "boom"),))),
     (SUREFIRE, JUnitReport(tests=3, skipped=1)),
-    (GO_JUNIT_REPORT, JUnitReport(tests=2, failures=1)),
+    (GO_JUNIT_REPORT, JUnitReport(tests=2, failures=1, failed_cases=(
+        FailedCase("failure", "example.com/calc", "TestSub", None, "Failed"),))),
     (NEXTEST, JUnitReport(tests=2)),
 ], ids=["pytest-xunit1", "jest-junit", "vitest", "surefire", "go-junit-report", "nextest"])
 def test_each_ecosystems_report_is_read_by_its_test_cases(text: str, expected: JUnitReport):
@@ -119,7 +122,8 @@ def test_file_names_are_normalized_against_the_project_root():
 def test_a_case_with_several_outcomes_counts_once_failure_first():
     text = ('<testsuite><testcase name="a"><error/><failure/></testcase>'
             '<testcase name="b"><skipped/><error/></testcase></testsuite>')
-    assert parse_junit_report(text) == JUnitReport(tests=2, failures=1, errors=1)
+    assert parse_junit_report(text) == JUnitReport(tests=2, failures=1, errors=1, failed_cases=(
+        FailedCase("failure", "", "a"), FailedCase("error", "", "b")))
 
 
 def test_a_bare_testcase_is_a_report():
@@ -158,3 +162,28 @@ def test_uncollected_files_are_the_declared_test_files_the_report_lacks():
     assert uncollected_test_files(ws, CONFIG.rules, None) is None
     assert uncollected_test_files(ws, None, frozenset()) is None
     assert uncollected_test_files(object(), CONFIG.rules, frozenset()) is None
+
+
+def test_the_failed_cases_are_listed_in_document_order_with_their_first_message_line():
+    text = """<testsuites>
+<testsuite name="s" file="/proj/tests/a.test.ts">
+  <testcase classname="tests/a.test.ts" name="first">
+    <failure message="expected 1&#10;to be 2">trace</failure></testcase>
+  <testcase classname="tests/a.test.ts" name="ok"/>
+  <testcase classname="tests/a.test.ts" name="later"><skipped/></testcase>
+</testsuite>
+<testsuite name="t">
+  <testcase classname="C" name="C"><error>
+
+  Boom: no message attribute
+  at line 3</error></testcase>
+  <testcase classname="" name="last"><failure/></testcase>
+</testsuite></testsuites>"""
+    report = parse_junit_report(text, "/proj")
+    assert report is not None and report.failures == 2 and report.errors == 1
+    assert report.failed_cases == (
+        FailedCase("failure", "tests/a.test.ts", "first", "tests/a.test.ts", "expected 1"),
+        FailedCase("error", "C", "C", None, "Boom: no message attribute"),
+        FailedCase("failure", "", "last", None, None),
+    )
+    assert [case.label for case in report.failed_cases] == ["tests/a.test.ts > first", "C", "last"]

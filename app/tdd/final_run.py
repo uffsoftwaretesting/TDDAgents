@@ -22,7 +22,8 @@ installed. The final run now does what a fresh checkout does:
 4. the declared `test` runs exactly as RunTests runs it (`run_suite`), and the run is judged as a
    GREEN run (`app/tdd/run_judgement.py::judge`): a dependency installed but never declared fails here;
 5. `final_test_run.txt` records the setup command, exit and output, the test exit and its meaning, the
-   JUnit counts, the coverage, the declared test files that did not run, and the raw output;
+   JUnit counts and each failed or errored test it names, the coverage, the declared test files that did
+   not run, and the raw output;
 6. the copy is deleted.
 
 An E2B workspace has no host folder to copy, so its final run is reported as unsupported, and so is
@@ -64,6 +65,7 @@ from app.tdd.run_tests_tool.run_tests_tool import (
     RunTestsUnavailable,
     SuiteExecutionResult,
     coverage_line,
+    failed_case_lines,
     raw_output,
     report_line,
     run_suite,
@@ -167,7 +169,8 @@ def _setup_lines(config: ProjectConfig, exit_code: int | None, output: str) -> l
 
 
 def _test_lines(result: SuiteExecutionResult, uncollected: tuple[str, ...] | None, meaning: str) -> list[str]:
-    lines = [f"Test: {result.command}", f"Test exit code: {result.exit_code} ({meaning})", report_line(result.report)]
+    lines = [f"Test: {result.command}", f"Test exit code: {result.exit_code} ({meaning})", report_line(result.report),
+             *failed_case_lines(result.report)]
     if uncollected:
         lines.append(f"Declared test files the JUnit report does not name: {', '.join(uncollected)}")
     elif result.exit_code == 0 and result.report is not None and result.report.files is None:

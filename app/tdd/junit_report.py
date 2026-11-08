@@ -12,6 +12,10 @@ the details, so only what they share is read, structurally and never from any me
 * the file a case ran from: its own `file` attribute, else the nearest enclosing `<testsuite>`'s.
   `files` is `None` (unknown) unless every case names one: many runners (surefire, go, nextest)
   name none, and a partial list would make every unnamed file look as if it never ran.
+* each failed or errored case, in document order (user decision 2026-11-08): its `classname` and
+  `name`, its file, and the first line of its `<failure>` / `<error>` `message` attribute (else of
+  the element's text), verbatim. A runner whose JUnit reporter replaces its console output (vitest's
+  `--reporter=junit`) otherwise leaves no trace of which test failed.
 
 A namespace on the tags is ignored. An empty, unreadable or non-JUnit file is no report (`None`).
 """
@@ -27,6 +31,26 @@ from app.tdd.project_config import project_relative_path
 
 
 @dataclass(frozen=True, slots=True)
+class FailedCase:
+    """A failed or errored `<testcase>`: what the report records about it, verbatim."""
+
+    outcome: str  # "failure" or "error", the child element's tag
+    classname: str
+    name: str
+    file: str | None = None
+    message: str | None = None
+    __test__ = False
+
+    @property
+    def label(self) -> str:
+        """`classname > name`, either alone when the other is empty or repeats it."""
+        parts = [part for part in (self.classname, self.name) if part]
+        if len(parts) == 2 and parts[0] == parts[1]:
+            parts = parts[:1]
+        return " > ".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
 class JUnitReport:
     """The test cases a JUnit report records, by outcome, and the files they ran from (`None`: unknown)."""
 
@@ -35,6 +59,8 @@ class JUnitReport:
     errors: int = 0
     skipped: int = 0
     files: frozenset[str] | None = None
+    #: The failed and errored cases, in document order.
+    failed_cases: tuple[FailedCase, ...] = ()
     __test__ = False
 
     @property
@@ -48,6 +74,20 @@ def _tag(element: ElementTree.Element) -> str:
 
 def _child_tags(element: ElementTree.Element) -> set[str]:
     return {_tag(child) for child in element}
+
+
+def _first_line(text: str | None) -> str | None:
+    for line in (text or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return None
+
+
+def _failed_case(case: ElementTree.Element, outcome: str, file: str | None) -> FailedCase:
+    child = next(child for child in case if _tag(child) == outcome)
+    return FailedCase(outcome=outcome, classname=(case.get("classname") or "").strip(),
+                      name=(case.get("name") or "").strip(), file=file,
+                      message=_first_line(child.get("message")) or _first_line(child.text))
 
 
 def _normalize_file(name: str, root: str | os.PathLike[str] | None) -> str:
@@ -71,6 +111,7 @@ def parse_junit_report(text: str | None, root: str | os.PathLike[str] | None = N
         return None
     counts = {"tests": 0, "failure": 0, "error": 0, "skipped": 0}
     files: set[str] = set()
+    failed: list[FailedCase] = []
     unnamed = False
     pending: list[tuple[ElementTree.Element, str | None]] = [(document, None)]
     while pending:
@@ -79,20 +120,24 @@ def parse_junit_report(text: str | None, root: str | os.PathLike[str] | None = N
         if tag == "testcase":
             counts["tests"] += 1
             outcome = next((kind for kind in ("failure", "error", "skipped") if kind in _child_tags(element)), None)
+            name = element.get("file") or inherited
+            file = _normalize_file(name, root) if name and name.strip() else None
             if outcome is not None:
                 counts[outcome] += 1
-            name = element.get("file") or inherited
-            if name and name.strip():
-                files.add(_normalize_file(name, root))
+                if outcome != "skipped":
+                    failed.append(_failed_case(element, outcome, file))
+            if file is not None:
+                files.add(file)
             else:
                 unnamed = True
             continue
         here = element.get("file") if tag == "testsuite" else None
-        pending.extend((child, here or inherited) for child in element)
+        # Reversed onto the stack, so the cases are visited in document order.
+        pending.extend((child, here or inherited) for child in reversed(element))
     return JUnitReport(
         tests=counts["tests"], failures=counts["failure"], errors=counts["error"], skipped=counts["skipped"],
-        files=None if unnamed or not files else frozenset(files),
+        files=None if unnamed or not files else frozenset(files), failed_cases=tuple(failed),
     )
 
 
-__all__ = ["JUnitReport", "parse_junit_report"]
+__all__ = ["FailedCase", "JUnitReport", "parse_junit_report"]

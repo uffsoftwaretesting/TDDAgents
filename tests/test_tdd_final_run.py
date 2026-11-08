@@ -65,7 +65,9 @@ def test_a_dependency_installed_but_never_declared_fails_in_the_clean_copy(tmp_p
     result = final(ws)
     assert result.summary == ("NOT passing (exit 1: the test command failed, coverage could not be measured); the "
                               "test command exited 1, 1 test(s) failed")
-    assert "JUnit report: 1 test(s), 1 failed, 0 errored, 0 skipped" in result.lines
+    report_at = result.lines.index("JUnit report: 1 test(s), 1 failed, 0 errored, 0 skipped")
+    # The failed test is named from the JUnit report, right below its counts (user decision 2026-11-08).
+    assert result.lines[report_at + 1] == "Failed test: tests/test_greet.sh: exit 2"
 
 
 def test_a_setup_that_fails_is_not_passing_with_its_output(tmp_path: Path):

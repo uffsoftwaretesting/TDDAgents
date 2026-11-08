@@ -18,7 +18,7 @@ import pytest
 
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.coverage_gate import UNAVAILABLE, CoverageReading, CoverageStatus
-from app.tdd.junit_report import JUnitReport
+from app.tdd.junit_report import FailedCase, JUnitReport
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.tdd.plan import TddPlan
 from app.tdd.project_config import CoverageReportConfig, ProjectConfig
@@ -35,6 +35,7 @@ from app.tdd.run_tests_tool.run_tests_tool import (
     SuiteExecutionResult,
     _default_test_runner,
     build_run_tests_tool,
+    failed_case_lines,
     report_environment,
     run_suite,
     run_tests_timeout_seconds,
@@ -338,6 +339,22 @@ def test_the_phase_rules_and_the_non_evidence_line_read_exactly_this():
     }
     assert NOT_EVIDENCE == ("TDD ledger: unchanged. A run is evidence only when the test command completes: it "
                             "fails, or it exits 0 with a JUnit report that records tests; this one did not.")
+
+
+def test_each_failed_or_errored_test_is_named_below_the_counts():
+    report = JUnitReport(tests=3, failures=1, errors=1, failed_cases=(
+        FailedCase("failure", "tests/a.test.ts", "adds", "tests/a.test.ts", "expected 1 to be 2"),
+        FailedCase("error", "tests.test_b", "test_b", "tests/test_b.py", None)))
+    res = run(SuiteExecutionResult(exit_code=1, report=report), ws_ctx(state(TddPhase.GREEN)))
+    lines = res.content.splitlines()
+    at = lines.index("JUnit report: 3 test(s), 1 failed, 1 errored, 0 skipped")
+    assert lines[at + 1:at + 3] == ["Failed test: tests/a.test.ts > adds: expected 1 to be 2",
+                                    "Errored test: tests.test_b > test_b (tests/test_b.py)"]
+    assert lines[at + 3] == NOT_MEASURED
+
+
+def test_no_report_names_no_failed_test():
+    assert failed_case_lines(None) == [] and failed_case_lines(ONE) == []
 
 
 def test_the_output_is_rendered_as_upstream_renders_a_command():
