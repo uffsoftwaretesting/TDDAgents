@@ -27,7 +27,8 @@ runner of any language, so no runner's own table applies. Upstream's Bash does t
   REFACTOR from a pass (strict collection, user decision 2026-11-08); RED states it and is not held to it
   (`stated`);
 * fewer tests than the session's test floor (`AppState.test_floor`, 2026-11-08): not a pass in GREEN; in
-  REFACTOR accepted only when the test files' fingerprint differs from the floor run's; stated in RED.
+  REFACTOR accepted only when the test files' fingerprint differs from the floor run's; stated in RED (a
+  RED run that counts re-bases the floor: `next_test_floor`).
 """
 
 from __future__ import annotations

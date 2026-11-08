@@ -42,8 +42,9 @@ Coverage is measured on every run and reported, never gated (user decision, 2026
 **The session's test floor** (2026-11-08, user decision): every evidence run records its test count and the
 test files' fingerprint, and the floor is the latest run with the most tests so far (`next_test_floor`),
 across sub-requirements. A run with fewer tests is not a pass in GREEN, is accepted in REFACTOR only when the
-test files changed since the floor run (which then lowers the floor), and is stated in RED. RunTests is the
-floor's only writer, as it is the ledger's.
+test files changed since the floor run (which then lowers the floor), and is stated in RED, where a run that
+counts re-bases the floor to its count (user decision 2026-11-08). RunTests is the floor's only writer, as it
+is the ledger's.
 
 Any other outcome (not executable, not found, killed, a timeout, exit 0 without a report or without
 tests, no workspace) is not evidence: an error result, the ledger untouched. A background worker's
@@ -341,17 +342,23 @@ def ledger_line(before: PhaseLedger, after: PhaseLedger, judgement: Judgement) -
             f"{stated}")
 
 
-def next_test_floor(floor: TestRunRecord | None, record: TestRunRecord, judgement: Judgement) -> TestRunRecord | None:
+def next_test_floor(floor: TestRunRecord | None, record: TestRunRecord, judgement: Judgement,
+                    red_counted: bool) -> TestRunRecord | None:
     """
     The session's test floor after `record` (`AppState.test_floor`): `record` when its report records as many
-    tests as the floor or more, or fewer in an accepted decrease (a REFACTOR run that met its rule, which it can
-    only with changed test files); else the floor unchanged. A run without a report leaves it as it is.
+    tests as the floor or more, or fewer in an accepted decrease; else the floor unchanged. A decrease is
+    accepted from a REFACTOR run that met its rule (which it can only with changed test files) and from a RED
+    run that counts (`red_counted`: the test files changed and the run met RED's rule), which re-bases the floor
+    to its count (user decision 2026-11-08: a tester re-spawn or a rewind that leaves fewer tests must not keep
+    GREEN from ever passing). A run without a report leaves it as it is.
     """
     if not record.tests:
         return floor
     if floor is None or floor.tests is None or record.tests >= floor.tests:
         return record
     if record.phase == TddPhase.REFACTOR and judgement.meets_phase:
+        return record
+    if record.phase == TddPhase.RED and red_counted:
         return record
     return floor
 
@@ -409,7 +416,7 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         context.set_app_state(
             lambda s: replace(
                 s, phase_ledger=s.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage),
-                last_test_run=record, test_floor=next_test_floor(s.test_floor, record, judgement))
+                last_test_run=record, test_floor=next_test_floor(s.test_floor, record, judgement, changed))
         )
         line = (ledger_line(before.phase_ledger, after, judgement)
                 if before.tdd_plan.current is not None else NO_CURRENT_ITEM_LEDGER)

@@ -93,21 +93,22 @@ MET = judge(0, two(), RAN, REFACTOR)
 NOT_MET = judge(0, two(), RAN, REFACTOR, FLOOR, "before")
 
 
-@pytest.mark.parametrize(("floor", "record", "judgement", "expected"), [
-    (None, _record(2), MET, "record"),                      # the first run with a report sets it
-    (None, _record(None), MET, "floor"),                    # no report: nothing to record
-    (None, _record(0), MET, "floor"),                       # no tests: nothing to record
-    (FLOOR, _record(4), MET, "record"),                     # it rises
-    (FLOOR, _record(3), MET, "record"),                     # as many: the latest floor run, its fingerprint
-    (FLOOR, _record(2), MET, "floor"),                      # GREEN never lowers it
-    (FLOOR, _record(2, RED), MET, "floor"),                 # nor does RED
-    (FLOOR, _record(2, REFACTOR), NOT_MET, "floor"),        # a refused decrease
-    (FLOOR, _record(2, REFACTOR), MET, "record"),           # an accepted decrease lowers it
-    (TestRunRecord(command="t", exit_code=1), _record(1), MET, "record"),
+@pytest.mark.parametrize(("floor", "record", "judgement", "counted", "expected"), [
+    (None, _record(2), MET, False, "record"),                  # the first run with a report sets it
+    (None, _record(None), MET, True, "floor"),                 # no report: nothing to record
+    (None, _record(0), MET, True, "floor"),                    # no tests: nothing to record
+    (FLOOR, _record(4), MET, False, "record"),                 # it rises
+    (FLOOR, _record(3), MET, False, "record"),                 # as many: the latest floor run, its fingerprint
+    (FLOOR, _record(2), MET, True, "floor"),                   # GREEN never lowers it
+    (FLOOR, _record(2, RED), MET, False, "floor"),             # a RED run that does not count leaves it
+    (FLOOR, _record(2, RED), MET, True, "record"),             # a RED run that counts re-bases it
+    (FLOOR, _record(2, REFACTOR), NOT_MET, True, "floor"),     # a refused decrease
+    (FLOOR, _record(2, REFACTOR), MET, False, "record"),       # an accepted decrease lowers it
+    (TestRunRecord(command="t", exit_code=1), _record(1), MET, False, "record"),
 ])
 def test_the_floor_rises_and_drops_only_on_an_accepted_decrease(
-        floor: TestRunRecord | None, record: TestRunRecord, judgement: Any, expected: str):
-    assert next_test_floor(floor, record, judgement) is (record if expected == "record" else floor)
+        floor: TestRunRecord | None, record: TestRunRecord, judgement: Any, counted: bool, expected: str):
+    assert next_test_floor(floor, record, judgement, counted) is (record if expected == "record" else floor)
 
 
 # ── RunTests writes it ───────────────────────────────────────────────────────
@@ -172,14 +173,49 @@ def test_refactor_with_fewer_tests_and_the_same_test_files_is_refused():
     assert not store.get().phase_ledger.refactor_passed
 
 
-def test_red_states_fewer_tests_and_still_counts_the_changed_test_files():
-    floor = _record(3)
-    store = _store(RED, floor)
+def test_a_red_run_that_counts_states_fewer_tests_and_re_bases_the_floor():
+    store = _store(RED, _record(3))
     res = _run(store, two())
     assert res.content.split("\n\n", 1)[0].splitlines()[-1] == (
         f"TDD ledger: RED → GREEN. {PHASE_RULES[RED]}: they changed, and this run counts. Also observed: the run "
         "records 2 tests, fewer than the 3 an earlier run recorded.")
-    assert store.get().phase_ledger.phase == GREEN and store.get().test_floor is floor
+    assert store.get().phase_ledger.phase == GREEN
+    floor = store.get().test_floor
+    assert floor is store.get().last_test_run and floor is not None
+    assert (floor.tests, floor.test_fingerprint) == (2, _fingerprint(FILES))
+
+
+def test_a_red_run_that_does_not_count_leaves_the_floor():
+    floor = _record(3)
+    # The test files have not changed since the item started.
+    store = AppStateStore(dataclasses.replace(_store(RED, floor).get(), tdd_item_test_baseline=_fingerprint(FILES)))
+    res = _run(store, two())
+    assert "TDD ledger: still RED." in res.content
+    assert store.get().test_floor is floor
+    # Nor does one whose declared test file did not run, though the test files changed.
+    store = _store(RED, floor)
+    _run(store, two(), {**FILES, "tests/test_b.py": "def test_b():\n    pass\n"})
+    assert store.get().phase_ledger.phase == RED and store.get().test_floor is floor
+
+
+def test_a_tester_respawn_that_leaves_fewer_tests_no_longer_keeps_green_from_passing():
+    """The item went back to RED (a tester re-spawn, or a rewind) and a wrong test was removed."""
+    store = _store(RED)
+    three = {**FILES, "tests/test_b.py": "def test_b():\n    pass\n"}
+    _run(store, JUnitReport(tests=3, files=frozenset(three)), three)
+    first = store.get().test_floor
+    assert store.get().phase_ledger.phase == GREEN and first is not None and first.tests == 3
+    # GREEN with a test gone: refused, as long as the tests are locked.
+    _run(store, two())
+    assert store.get().phase_ledger.phase == GREEN and store.get().test_floor is first
+    # Back to RED: the tester rewrote the tests (one wrong test removed), and that RED run counts.
+    baseline = _fingerprint(three)
+    store.update(lambda s: dataclasses.replace(s, phase_ledger=PhaseLedger(), tdd_item_test_baseline=baseline))
+    _run(store, two())
+    rebased = store.get().test_floor
+    assert store.get().phase_ledger.phase == GREEN and rebased is not None and rebased.tests == 2
+    _run(store, two())
+    assert store.get().phase_ledger.phase == REFACTOR
 
 
 def test_a_background_run_writes_no_floor():

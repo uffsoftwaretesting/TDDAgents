@@ -110,7 +110,8 @@ class AppState:
     #: most tests so far (`TestRunRecord.tests`, with its test files' fingerprint). It carries across
     #: sub-requirements (a change of the current item never resets it) and is never restored on resume.
     #: `RunTests` is its only writer: it rises with every run whose report records as many tests or more,
-    #: and drops only on an accepted decrease (a REFACTOR run met with changed test files).
+    #: and drops only on an accepted decrease (a REFACTOR run met with changed test files, or a RED run that
+    #: counts, which re-bases it to its count).
     test_floor: TestRunRecord | None = None
     #: Upstream `appState.tasks` (`Record<string, TaskState>`): the run's background tasks by
     #: id (`app/tasks/`). Written through the root setter even by a background worker,

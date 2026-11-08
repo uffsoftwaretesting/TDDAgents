@@ -231,7 +231,7 @@ def test_run_tests_is_the_only_test_floor_writer():
     )
     assert mentions == ["app/tdd/run_tests_tool/run_tests_tool.py"]
     writes = [w for w in calls_to(original_nodes(REPO / mentions[0]), "set_app_state") if "test_floor" in w]
-    assert len(writes) == 1 and "test_floor=next_test_floor(s.test_floor, record, judgement)" in writes[0]
+    assert len(writes) == 1 and "test_floor=next_test_floor(s.test_floor, record, judgement, changed)" in writes[0]
 
 
 def test_initial_state_reads_the_store_and_never_writes_it():
