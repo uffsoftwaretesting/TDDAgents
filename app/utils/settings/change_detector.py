@@ -81,7 +81,8 @@ CONFIG_CHANGE_SOURCE: dict[PermissionRuleSource, str] = {
     PermissionRuleSource.POLICY_SETTINGS: "policy_settings",
 }
 
-_Stat = tuple[int, int, int]
+#: A regular file's identity for change detection: its mtime, size and inode.
+FileIdentity = tuple[int, int, int]
 
 
 def setting_source_to_config_change_source(source: PermissionRuleSource) -> str:
@@ -89,7 +90,7 @@ def setting_source_to_config_change_source(source: PermissionRuleSource) -> str:
     return CONFIG_CHANGE_SOURCE[source]
 
 
-def _stat(path: str) -> _Stat | None:
+def file_identity(path: str) -> FileIdentity | None:
     """A regular file's identity for change detection (`None`: absent or not a file)."""
     try:
         st = os.stat(path)
@@ -129,8 +130,8 @@ class SettingsChangeDetector:
         self.settings_files: set[str] = set()
         self.drop_in_dir: str | None = None
         self._listeners: list[SettingsListener] = []
-        self._confirmed: dict[str, _Stat | None] = {}
-        self._pending: dict[str, tuple[_Stat | None, float]] = {}
+        self._confirmed: dict[str, FileIdentity | None] = {}
+        self._pending: dict[str, tuple[FileIdentity | None, float]] = {}
         self._pending_deletions: dict[str, asyncio.TimerHandle] = {}
         self._poll_task: asyncio.Task[None] | None = None
         self._work: set[asyncio.Task[None]] = set()
@@ -147,7 +148,7 @@ class SettingsChangeDetector:
             return
         drop_in = f" and drop-in directory {self.drop_in_dir}" if self.drop_in_dir else ""
         log_for_debugging(f"Watching for changes in setting files {', '.join(sorted(self.settings_files))}...{drop_in}")
-        self._confirmed = {path: _stat(path) for path in self._watched_paths()}
+        self._confirmed = {path: file_identity(path) for path in self._watched_paths()}
         self._poll_task = asyncio.ensure_future(self._poll_loop())
 
     async def dispose(self) -> None:
@@ -249,7 +250,7 @@ class SettingsChangeDetector:
         now = time.monotonic() if now is None else now
         paths = self._watched_paths() | set(self._confirmed) | set(self._pending)
         for path in sorted(paths):
-            current = _stat(path)
+            current = file_identity(path)
             confirmed = self._confirmed.get(path)
             if current == confirmed:
                 self._pending.pop(path, None)
@@ -346,6 +347,8 @@ __all__ = [
     "FILE_STABILITY_THRESHOLD_MS",
     "INTERNAL_WRITE_WINDOW_MS",
     "SettingsChangeDetector",
+    "FileIdentity",
     "SettingsListener",
+    "file_identity",
     "setting_source_to_config_change_source",
 ]

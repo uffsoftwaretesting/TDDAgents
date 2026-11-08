@@ -220,6 +220,24 @@ def test_approval_restores_the_mode_and_installs_the_sub_requirements(tmp_path: 
     assert ctx.workspace.files[".tddagents/project.json"] == TEST_PROJECT_CONFIG.to_json()
 
 
+def test_a_reapproved_configuration_takes_reds_baseline_again_and_clears_old_issues(tmp_path: Path):
+    """Re-declaring the configuration mid-development (2026-11-08): new patterns, a new RED baseline."""
+    from dataclasses import replace as dc_replace
+
+    from app.tdd.suite_fingerprint import fingerprint_test_files
+
+    ctx = planning_context(tmp_path)
+    ctx.workspace.files["tests/test_a.py"] = "def test_a():\n    pass\n"
+    ctx.set_app_state(lambda s: dc_replace(
+        s, project_config=dc_replace(TEST_PROJECT_CONFIG, test_files=("elsewhere/",)),
+        project_config_issues=("old",), tdd_item_test_baseline="stale"))
+    call_directly(build_exit_plan_mode_tool(), {}, ctx)
+    state = ctx.get_app_state()
+    assert state.project_config == TEST_PROJECT_CONFIG and state.project_config_issues == ()
+    assert state.tdd_item_test_baseline == fingerprint_test_files(ctx.workspace, TEST_PROJECT_CONFIG)
+    assert state.tdd_item_test_baseline != "stale"
+
+
 def test_the_approved_text_is_upstreams(tmp_path: Path):
     assert approved_plan_text(PLAN, "/p.md", is_agent=False, edited=False) == (
         "User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\n"

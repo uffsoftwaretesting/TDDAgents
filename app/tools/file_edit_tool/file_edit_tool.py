@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app.tdd.validate_project_config_edit import validate_input_for_project_config_edit
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
 from app.tools.file_edit_tool import ui
 from app.tools.file_edit_tool.constants import FILE_UNEXPECTEDLY_MODIFIED_ERROR
@@ -91,6 +92,12 @@ def build_edit_tool() -> BuiltTool:
             lambda: content.replace(actual, new_string, -1 if replace_all else 1))
         if settings_check is not None:
             return settings_check
+        # The same check for the project's declared configuration (2026-11-08).
+        config_check = validate_input_for_project_config_edit(
+            file_path, permission_cwd(context), content,
+            lambda: content.replace(actual, new_string, -1 if replace_all else 1))
+        if config_check is not None:
+            return config_check
         return VALID
 
     async def call_edit(input_args: dict[str, Any], context: ToolContext) -> ToolResult:

@@ -407,6 +407,19 @@ class TestTierOnlyWhileAnItemIsCurrent:
         assert res is not None and res.behavior == DENY
         assert res.decision_reason["type"] == "phase_rule"
 
+    def test_an_invalid_declaration_is_named_in_the_tiers_refusal(self):
+        from app.tools.file_write_tool.file_write_tool import build_write_file_tool
+        from app.utils.permissions.permissions import tdd_phase_denial
+
+        state = AppState(phase_ledger=PhaseLedger(phase=TddPhase.RED), tdd_plan=CURRENT_ITEM_PLAN,
+                         project_config_issues=("`testFiles` is required",))
+        res = tdd_phase_denial(build_write_file_tool(), {"file_path": "a.py", "content": "x"},
+                               tool_context_for(AppStateStore(state)))
+        assert res is not None and res.message.endswith(
+            "(ExitPlanMode). .tddagents/project.json is invalid, so it declares nothing: `testFiles` is required.")
+        # Without issues the reason is the plain fail-closed one.
+        assert not str(self._denial(CURRENT_ITEM_PLAN, "a.py").message).endswith("required.")
+
     def test_an_empty_plan_has_no_tier(self):
         from app.tdd.plan import TddPlan
 

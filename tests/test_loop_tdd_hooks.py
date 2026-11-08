@@ -267,6 +267,13 @@ def test_every_phase_states_the_tiers_reason_when_no_configuration_is_declared(l
                        f"TDD cycle incomplete: {phase}. {rule}: {NO_CONFIG_REASON}")
 
 
+def test_an_invalid_declaration_is_named_in_the_stop_hooks_refusal():
+    from tests.plan_helpers import CURRENT_ITEM_PLAN
+
+    refusal = _refusal(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config_issues=("a", "b")))
+    assert refusal.endswith(f"{NO_CONFIG_REASON} .tddagents/project.json is invalid, so it declares nothing: a; b.")
+
+
 def test_without_a_current_item_a_missing_declaration_keeps_the_observed_fact():
     """The tier fails closed only while an item is current; otherwise the refusal is unchanged."""
     assert _refusal(AppState()) == RED_MSG

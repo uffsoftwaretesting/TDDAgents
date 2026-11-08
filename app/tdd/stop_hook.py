@@ -27,6 +27,7 @@ from app.query.stop_hooks import StopHookResult
 from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_permissions import BACK_TO_RED, NO_PROJECT_CONFIG
+from app.tdd.project_config import invalid_project_config_note
 from app.tdd.tdd_plan_tool.tdd_plan_tool import UPDATE_PLAN_TOOL_NAME
 from app.tools.ask_user_question_tool.ask_user_question_tool import (
     ASK_USER_QUESTION_TOOL_NAME,
@@ -107,7 +108,8 @@ def incomplete_cycle_message(ledger: PhaseLedger, state: LoopState) -> str:
 
     phase = _open_phase(ledger)
     if _fails_closed(state):
-        return f"TDD cycle incomplete: {phase.value}. {PHASE_RULES[phase]}: {NO_PROJECT_CONFIG}"
+        note = invalid_project_config_note(state.tool_context.get_app_state().project_config_issues)
+        return f"TDD cycle incomplete: {phase.value}. {PHASE_RULES[phase]}: {NO_PROJECT_CONFIG}{note}"
     tools = {getattr(tool, "name", None) for tool in state.tool_context.tools}
     if phase == TddPhase.RED:
         open_work = RED_WAYS_FORWARD

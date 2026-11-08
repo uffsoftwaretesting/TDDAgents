@@ -466,6 +466,10 @@ def tdd_phase_denial(tool: Tool, input_args: dict[str, Any], context: ToolContex
         )
     if permitted:
         return None
+    if config is None:
+        from app.tdd.project_config import invalid_project_config_note
+
+        reason += invalid_project_config_note(getattr(app_state, "project_config_issues", ()))
     return PermissionResult(
         behavior=PermissionBehavior.DENY,
         message=reason,

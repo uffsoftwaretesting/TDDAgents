@@ -813,6 +813,11 @@ async def open_session_run(
             return result
 
         detector = await start_settings_change_detector(locations, store, hook_dispatcher)
+        # An approved edit of `.tddagents/project.json` is read at once (2026-11-08), as upstream's
+        # cron scheduler reads `.claude/scheduled_tasks.json`.
+        from app.tdd.project_config_watcher import start_project_config_watcher
+
+        config_watcher = await start_project_config_watcher(workspace, store.get, store.update)
         run = DevelopmentRun(run_id=run_id, config=config, store=store, ctx=ctx, engine=engine,
                              add_agent_definitions=add_agent_definitions, extra_agents=extra_agents,
                              mcp_tools=session_mcp.all_tools(), mcp=session_mcp,
@@ -829,6 +834,8 @@ async def open_session_run(
             from app.utils.hooks.hooks import execute_session_end_hooks
 
             await detector.dispose()
+            if config_watcher is not None:
+                await config_watcher.dispose()
             unsubscribe()
             # Upstream's `registerCleanup` per shell task: nothing the session started outlives it.
             kill_all_shell_tasks(store.get, store.update)

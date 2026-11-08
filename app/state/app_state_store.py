@@ -125,6 +125,9 @@ class AppState:
     #: from `.tddagents/project.json` when a session opens. `None` while undeclared: RunTests and the
     #: phase tier then fail closed whenever a sub-requirement is current.
     project_config: ProjectConfig | None = None
+    #: Why `.tddagents/project.json` gave no configuration when it was edited into an invalid one during
+    #: the session (`app/tdd/project_config_watcher.py`, 2026-11-08): the refusals name these.
+    project_config_issues: tuple[str, ...] = ()
     #: Upstream `STATE.hasExitedPlanMode` (`bootstrap/state.ts`), per run here: plan mode was left
     #: this session, so re-entering it attaches `plan_mode_reentry`.
     has_exited_plan_mode: bool = False

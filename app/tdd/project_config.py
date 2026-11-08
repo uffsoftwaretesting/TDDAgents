@@ -18,7 +18,9 @@ barriers still need to know three things about a project, and the project declar
 The Analyst proposes the configuration in the plan file's `## Project Configuration` section
 (`app/tdd/plan.py::parse_project_configuration`), the user approves it with the plan, and
 `ExitPlanMode` writes it here (`app/tools/exit_plan_mode_tool/`). `.tddagents/` is a protected
-directory, so the model cannot change it in any mode.
+directory: a write there asks the user first, in every mode, as upstream's `.claude/`. An approved edit
+is read at once (`app/tdd/project_config_watcher.py`), and the Edit tool refuses an edit that would
+make a valid file invalid (`app/tdd/validate_project_config_edit.py`, 2026-11-08).
 
 The schema is strict (version 1, camelCase keys): an unknown key, a wrong type or a missing
 required key is an issue, and `parse_project_config` returns every issue at once, so one refusal
@@ -313,6 +315,16 @@ def load_project_config(workspace: Any) -> ProjectConfig | None:
     return config
 
 
+def invalid_project_config_note(issues: tuple[str, ...]) -> str:
+    """
+    What a fail-closed refusal adds when `project.json` exists but is invalid (2026-11-08): the file and
+    its issues, so the model knows why there is no configuration. Empty when there are none.
+    """
+    if not issues:
+        return ""
+    return f" {PROJECT_CONFIG_FILE} is invalid, so it declares nothing: {'; '.join(issues)}."
+
+
 def save_project_config(workspace: Any, config: ProjectConfig) -> None:
     """Write the configuration to `.tddagents/project.json` through the workspace."""
     workspace.write_file(PROJECT_CONFIG_FILE, config.to_json())
@@ -331,6 +343,7 @@ __all__ = [
     "CoverageReportConfig",
     "ProjectConfig",
     "TestFileRules",
+    "invalid_project_config_note",
     "load_project_config",
     "parse_project_config",
     "parse_project_config_text",

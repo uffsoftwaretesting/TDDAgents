@@ -33,7 +33,6 @@ TeamCreate hint.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -192,7 +191,11 @@ def build_exit_plan_mode_tool() -> BuiltTool:
             approved_config = config
             if context.workspace is not None:
                 save_project_config(context.workspace, approved_config)
-            context.set_app_state(lambda state: replace(state, project_config=approved_config))
+            # One place applies a configuration (2026-11-08): new test patterns while a sub-requirement
+            # is current take RED's baseline again, and the watcher's echo of this write changes nothing.
+            from app.tdd.project_config_watcher import apply_project_config
+
+            apply_project_config(context.get_app_state, context.set_app_state, context.workspace, approved_config)
         if items:
             from app.session.prompts import development_approved_prompt
 

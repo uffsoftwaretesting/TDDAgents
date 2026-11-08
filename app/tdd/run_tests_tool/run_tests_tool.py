@@ -62,7 +62,12 @@ from app.tdd.coverage_gate import (
 )
 from app.tdd.junit_report import JUnitReport, parse_junit_report
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
-from app.tdd.project_config import COVERAGE_REPORT_ENV, JUNIT_REPORT_ENV, ProjectConfig
+from app.tdd.project_config import (
+    COVERAGE_REPORT_ENV,
+    JUNIT_REPORT_ENV,
+    ProjectConfig,
+    invalid_project_config_note,
+)
 from app.tdd.run_judgement import Judgement, Outcome, judge
 from app.tdd.suite_fingerprint import fingerprint_test_files, have_tests_changed
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
@@ -304,8 +309,11 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         before = context.get_app_state()
         config = before.project_config
         if config is None and before.tdd_plan.current is not None:
-            return ToolResult(content=f"RunTests could not run the tests: {NO_TEST_COMMAND}\nTDD ledger: unchanged.",
-                              is_error=True)
+            note = invalid_project_config_note(before.project_config_issues)
+            reason = f"{NO_TEST_COMMAND}.{note}" if note else NO_TEST_COMMAND
+            return ToolResult(
+                content=f"RunTests could not run the tests: {reason}\nTDD ledger: unchanged.",
+                is_error=True)
         try:
             res = runner_fn(context)
             exec_result: SuiteExecutionResult = await res if inspect.isawaitable(res) else res

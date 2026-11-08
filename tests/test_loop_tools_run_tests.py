@@ -219,6 +219,15 @@ def test_non_evidence_runs_never_move_the_ledger(result, report_text, phase):
     assert store.get().last_test_run is None
 
 
+def test_an_invalid_declaration_is_named_in_the_refusal():
+    """An edit left `project.json` invalid (2026-11-08): the refusal says why there is no configuration."""
+    store = state(project_config=None, project_config_issues=("`test` is required",))
+    res = asyncio.run(build_run_tests_tool(lambda c: SuiteExecutionResult(exit_code=0)).call({}, ws_ctx(store)))
+    assert res.is_error and res.content == (
+        f"RunTests could not run the tests: {NO_TEST_COMMAND}. .tddagents/project.json is invalid, so it declares "
+        "nothing: `test` is required.\nTDD ledger: unchanged.")
+
+
 def test_without_a_declaration_runtests_fails_closed_while_an_item_is_current():
     """User decision 2026-11-03: no project configuration while an item is current is a refusal."""
     store = state(project_config=None)
