@@ -299,7 +299,8 @@ def test_an_observed_run_is_recorded_beside_the_ledger_with_its_command_and_mean
                              command="go test ./..."), ws_ctx(store))
     assert store.get().last_test_run == TestRunRecord(
         command="go test ./...", exit_code=1, stdout="E   assert 1 == 2", stderr="warn",
-        meaning="the test command failed", phase=TddPhase.RED)
+        meaning="the test command failed", phase=TddPhase.RED, tests=1,
+        test_fingerprint=fingerprint_test_files(FakeWorkspace(files=dict(TESTED)), TEST_PROJECT_CONFIG))
 
 
 def test_a_later_run_replaces_the_record():
@@ -311,7 +312,7 @@ def test_a_later_run_replaces_the_record():
     asyncio.run(tool.call({}, ctx))
     asyncio.run(tool.call({}, ctx))
     assert store.get().last_test_run == TestRunRecord(command="b", exit_code=0, stdout="ok",
-                                                      meaning="the test command completed", phase=TddPhase.RED)
+                                                      meaning="the test command completed", phase=TddPhase.RED, tests=1)
 
 
 # ── the tool and its runner seam ────────────────────────────────────────────

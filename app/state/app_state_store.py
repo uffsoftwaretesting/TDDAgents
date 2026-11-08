@@ -106,6 +106,12 @@ class AppState:
     #: The last test run the ledger observed (`ledger.TestRunRecord`), written by `RunTests`
     #: together with the ledger; the TDD state is re-attached from it after a compaction.
     last_test_run: TestRunRecord | None = None
+    #: The session's test floor (2026-11-08, user decision): the latest `RunTests` run that recorded the
+    #: most tests so far (`TestRunRecord.tests`, with its test files' fingerprint). It carries across
+    #: sub-requirements (a change of the current item never resets it) and is never restored on resume.
+    #: `RunTests` is its only writer: it rises with every run whose report records as many tests or more,
+    #: and drops only on an accepted decrease (a REFACTOR run met with changed test files).
+    test_floor: TestRunRecord | None = None
     #: Upstream `appState.tasks` (`Record<string, TaskState>`): the run's background tasks by
     #: id (`app/tasks/`). Written through the root setter even by a background worker,
     #: as upstream's `setAppStateForTasks` is (Phase 8).

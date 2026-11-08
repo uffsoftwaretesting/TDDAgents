@@ -219,6 +219,21 @@ def test_run_tests_is_the_only_ledger_writer():
         assert assigns and all(a.startswith("spawn_ledger = phase_on_spawn(") for a in assigns), path
 
 
+def test_run_tests_is_the_only_test_floor_writer():
+    """
+    The session's test floor (2026-11-08) is an observation like the ledger's: only `RunTests` writes it,
+    through `next_test_floor`. No plan change, spawn or rewind touches it, and nothing restores it.
+    """
+    mentions = sorted(
+        path.relative_to(REPO).as_posix()
+        for path in (REPO / "app").rglob("*.py")
+        if any("test_floor=" in ast.unparse(node) for node in original_nodes(path) if isinstance(node, ast.Call))
+    )
+    assert mentions == ["app/tdd/run_tests_tool/run_tests_tool.py"]
+    writes = [w for w in calls_to(original_nodes(REPO / mentions[0]), "set_app_state") if "test_floor" in w]
+    assert len(writes) == 1 and "test_floor=next_test_floor(s.test_floor, record, judgement)" in writes[0]
+
+
 def test_initial_state_reads_the_store_and_never_writes_it():
     writes: list[Any] = []
     store = AppStateStore(AppState(phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))

@@ -39,6 +39,12 @@ file run that the declaration does not cover (strict collection, 2026-11-08: fil
 not a pass).
 Coverage is measured on every run and reported, never gated (user decision, 2026-10-28).
 
+**The session's test floor** (2026-11-08, user decision): every evidence run records its test count and the
+test files' fingerprint, and the floor is the latest run with the most tests so far (`next_test_floor`),
+across sub-requirements. A run with fewer tests is not a pass in GREEN, is accepted in REFACTOR only when the
+test files changed since the floor run (which then lowers the floor), and is stated in RED. RunTests is the
+floor's only writer, as it is the ledger's.
+
 Any other outcome (not executable, not found, killed, a timeout, exit 0 without a report or without
 tests, no workspace) is not evidence: an error result, the ledger untouched. A background worker's
 run (`ToolContext.shares_app_state` is `False`, upstream's `shareSetAppState: !isAsync`) reports the
@@ -335,6 +341,21 @@ def ledger_line(before: PhaseLedger, after: PhaseLedger, judgement: Judgement) -
             f"{stated}")
 
 
+def next_test_floor(floor: TestRunRecord | None, record: TestRunRecord, judgement: Judgement) -> TestRunRecord | None:
+    """
+    The session's test floor after `record` (`AppState.test_floor`): `record` when its report records as many
+    tests as the floor or more, or fewer in an accepted decrease (a REFACTOR run that met its rule, which it can
+    only with changed test files); else the floor unchanged. A run without a report leaves it as it is.
+    """
+    if not record.tests:
+        return floor
+    if floor is None or floor.tests is None or record.tests >= floor.tests:
+        return record
+    if record.phase == TddPhase.REFACTOR and judgement.meets_phase:
+        return record
+    return floor
+
+
 def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
     """A RunTests tool, with an optional runner standing in for the declared command (tests)."""
     runner_fn: Any = test_runner if test_runner is not None else _default_test_runner
@@ -359,8 +380,10 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         report = exec_result.report
         code = exec_result.exit_code
         collection = await asyncio.to_thread(observe_collection, workspace, rules, report, exec_result.listing)
-        phase = TddPhase(context.get_app_state().phase_ledger.phase)
-        judgement = judge(code, report, collection, phase)
+        current = await asyncio.to_thread(fingerprint_test_files, workspace, config)
+        state_now = context.get_app_state()
+        phase = TddPhase(state_now.phase_ledger.phase)
+        judgement = judge(code, report, collection, phase, state_now.test_floor, current)
         if judgement.outcome is None:
             return ToolResult(content=render_result(exec_result, judgement, NOT_EVIDENCE, collection), is_error=True,
                               exit_code=code)
@@ -371,7 +394,6 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         before = context.get_app_state()
         changed = False
         if phase == TddPhase.RED:
-            current = await asyncio.to_thread(fingerprint_test_files, workspace, config)
             # A declared test file that did not run, or an undeclared one that did, gives RED no evidence.
             changed = have_tests_changed(current, before.tdd_item_test_baseline) and judgement.meets_phase
         # The ledger's input: 0 a pass, 1 a non-pass. In GREEN and REFACTOR a skipped test or a
@@ -382,11 +404,12 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
 
         # Update the authoritative AppState phase_ledger: the only writer (Part D2)
         record = TestRunRecord(command=exec_result.command, exit_code=code, stdout=exec_result.stdout,
-                               stderr=exec_result.stderr, meaning=judgement.meaning, phase=phase)
+                               stderr=exec_result.stderr, meaning=judgement.meaning, phase=phase,
+                               tests=report.tests if report is not None else None, test_fingerprint=current)
         context.set_app_state(
             lambda s: replace(
                 s, phase_ledger=s.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage),
-                last_test_run=record)
+                last_test_run=record, test_floor=next_test_floor(s.test_floor, record, judgement))
         )
         line = (ledger_line(before.phase_ledger, after, judgement)
                 if before.tdd_plan.current is not None else NO_CURRENT_ITEM_LEDGER)
