@@ -566,8 +566,8 @@ def test_run_tests_carries_workspace_stderr(make_fake_workspace):
     from tests.plan_helpers import TEST_PROJECT_CONFIG
 
     ws = make_fake_workspace()
-    ws.execute = lambda cmd, timeout=None, env=None: CommandResult(exit_code=1, stdout="out", stderr="err",
-                                                                   duration=0.0, workspace="local")
+    ws.execute = lambda cmd, timeout=None, env=None, sandbox=False: CommandResult(
+        exit_code=1, stdout="out", stderr="err", duration=0.0, workspace="local")
     ctx = tool_context_for(AppStateStore(AppState(project_config=TEST_PROJECT_CONFIG)), workspace=ws)
     res = asyncio.run(_default_test_runner(ctx))
     assert (res.exit_code, res.stdout, res.stderr, res.command) == (1, "out", "err", TEST_PROJECT_CONFIG.test)

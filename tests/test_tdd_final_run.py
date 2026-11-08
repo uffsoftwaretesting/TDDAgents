@@ -185,9 +185,10 @@ def test_the_copy_leaves_out_the_environment_git_tddagents_and_what_gitignore_ig
         ws.write_file(path, "x")
     ws.write_file(".gitignore", "build/\n*.log\n")
     copy_project(source, tmp_path / "copy", SCRIPT_PROJECT_CONFIG.rules)
+    # The project's settings cross with `project.json` (2026-11-08): the copy is sandboxed as the session was.
     assert copied_files(tmp_path / "copy") == [
-        ".gitignore", ".tddagents/project.json", "deps.txt", "lib/greet.sh", "run-tests.sh", "setup.sh",
-        "tests/test_greet.sh", "vendor/strings/lib.sh"]
+        ".gitignore", ".tddagents/project.json", ".tddagents/settings.json", "deps.txt", "lib/greet.sh",
+        "run-tests.sh", "setup.sh", "tests/test_greet.sh", "vendor/strings/lib.sh"]
     assert (tmp_path / "copy/.tddagents/project.json").read_text() == ws.read_file(".tddagents/project.json")
 
 

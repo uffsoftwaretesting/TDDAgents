@@ -162,12 +162,13 @@ def report_environment(ws: Any, config: ProjectConfig) -> dict[str, str]:
 
 
 def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
-              env: Mapping[str, str] | None = None) -> SuiteExecutionResult:
+              env: Mapping[str, str] | None = None, sandbox: bool = False) -> SuiteExecutionResult:
     """
     The whole suite in the workspace, exactly as RunTests runs it: the reports discarded, the declared
-    test command run with the report variables, the reports read back and discarded. The session's
-    final run uses it too, in a clean copy of the project (`app/tdd/final_run.py`). When the report records
-    tests but names no files, the declared `listTests` command runs next, with the same environment.
+    test command run with the report variables (in the workspace's sandbox with `sandbox`), the reports
+    read back and discarded. The session's final run uses it too, in a clean copy of the project
+    (`app/tdd/final_run.py`). When the report records tests but names no files, the declared `listTests`
+    command runs next, with the same environment and the same sandbox flag.
     """
     if ws is None or not hasattr(ws, "execute"):
         raise RunTestsUnavailable("no workspace is available to run the tests in")
@@ -178,7 +179,7 @@ def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
     environment = {**(env or {}), **report_environment(ws, config)}
     limit = timeout if timeout is not None else run_tests_timeout_seconds()
     try:
-        res = ws.execute(config.test, timeout=limit, env=environment)
+        res = ws.execute(config.test, timeout=limit, env=environment, sandbox=sandbox)
     except Exception as exc:
         raise RunTestsUnavailable(f"the test command could not be executed in the workspace: {exc}") from exc
     root = getattr(ws, "root", None)
@@ -190,7 +191,7 @@ def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
         coverage = read_coverage(_read_and_discard(ws, coverage_path), config.coverage_report.format, include)
     listing = None
     if config.list_tests is not None and report is not None and report.tests and _names_no_files(ws, config, report):
-        listing = run_test_listing(ws, config, timeout=limit, env=environment)
+        listing = run_test_listing(ws, config, timeout=limit, env=environment, sandbox=sandbox)
     return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr, coverage=coverage,
                                 report=report, command=config.test, listing=listing)
 
@@ -219,7 +220,18 @@ async def _default_test_runner(context: ToolContext) -> SuiteExecutionResult:
     config = context.get_app_state().project_config
     if config is None:
         raise RunTestsUnavailable(NO_TEST_COMMAND)
-    return await asyncio.to_thread(run_suite, getattr(context, "workspace", None), config)
+    return await asyncio.to_thread(run_suite, getattr(context, "workspace", None), config,
+                                   sandbox=sandbox_for_tests(context))
+
+
+def sandbox_for_tests(context: Any) -> bool:
+    """
+    Whether the suite runs sandboxed: whenever the run's sandbox is on. Unlike Bash's `shouldUseSandbox`,
+    neither `sandbox.excludedCommands` nor `dangerouslyDisableSandbox` applies, so a test run never escapes
+    the sandbox (TDDAgents; user decision 2026-11-08).
+    """
+    sandbox = getattr(context, "sandbox_manager", None)
+    return sandbox is not None and bool(sandbox.is_sandboxing_enabled())
 
 
 #: Each phase's rule, stated as a rule in every result (2026-10-28, reworded 2026-11-03).

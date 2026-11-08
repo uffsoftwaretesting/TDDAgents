@@ -597,7 +597,7 @@ def session_dir(workspace: Any, thread_id: str) -> str:
     return str(run_dir) if run_dir is not None else str(workspaces_root() / thread_id)
 
 
-def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
+def write_final_test_run(artifacts_dir: str, workspace: Any, settings_path: str | None = None) -> str:
     """
     Run the project's declared setup and test commands once more, in a clean copy of the project built
     from its manifests alone (`app/tdd/final_run.py`, 2026-11-03), and record it in `final_test_run.txt`.
@@ -607,7 +607,7 @@ def write_final_test_run(artifacts_dir: str, workspace: Any) -> str:
     from app.tdd.final_run import run_final
 
     run_dir = getattr(workspace, "run_dir", None) or os.path.dirname(os.path.abspath(artifacts_dir))
-    final = run_final(workspace, run_dir)
+    final = run_final(workspace, run_dir, settings_path=settings_path)
     lines = [f"Project: {getattr(workspace, 'root', '?')}", f"Result: {final.summary}"]
     if final.lines:
         lines += ["-" * 80, *final.lines]
@@ -624,7 +624,8 @@ def waiting_text(thread_id: str, question: Sequence[dict[str, Any]], headless: b
     ])
 
 
-def report(thread_id: str, workspace: Any, request: str | None, outcome: DevelopmentOutcome) -> None:
+def report(thread_id: str, workspace: Any, request: str | None, outcome: DevelopmentOutcome,
+           settings_path: str | None = None) -> None:
     """Write the reports beside the project, run its suite once more, then print the outcome."""
     target = session_dir(workspace, thread_id)
     os.makedirs(target, exist_ok=True)
@@ -634,7 +635,7 @@ def report(thread_id: str, workspace: Any, request: str | None, outcome: Develop
     print(f"\n📁 Project: {getattr(workspace, 'root', '?')}")
     print(f"📝 Reports: {artifacts_dir}/")
     if outcome.planned:
-        print(f"🧪 Final test run: {write_final_test_run(artifacts_dir, workspace)}")
+        print(f"🧪 Final test run: {write_final_test_run(artifacts_dir, workspace, settings_path)}")
 
     plan = outcome.plan
     if not outcome.planned:
@@ -969,7 +970,7 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
             # `print.ts` / `REPL.tsx`: the sandbox is required and cannot run, or failed to start (exit 1).
             sys.stderr.write(str(unavailable))
             return 1
-        report(thread_id, workspace, request, outcome)
+        report(thread_id, workspace, request, outcome, getattr(args, "settings", None))
         if outcome.question:
             print(waiting_text(thread_id, outcome.question, args.print))
         if args.print:

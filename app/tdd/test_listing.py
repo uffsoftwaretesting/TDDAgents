@@ -12,7 +12,7 @@ declares a command that prints the test files its runner collects (`listTests` i
 * its stdout lists them, one path per line, relative to the project root; an absolute path inside the
   project is made relative to it, and a line outside the project is ignored;
 * `run_suite` runs it only when the JUnit report names no files, after the test command, in the same
-  workspace and with the same environment;
+  workspace, with the same environment and in the sandbox whenever the test command ran in it;
 * a non-zero exit, or a command that could not run, is stated as a fact, and the files stay unknown.
 """
 
@@ -62,13 +62,13 @@ def parse_test_listing(stdout: str, root: str | os.PathLike[str] | None) -> froz
 
 
 def run_test_listing(ws: Any, config: ProjectConfig, *, timeout: float,
-                     env: Mapping[str, str] | None = None) -> TestListing | None:
-    """Run the declared `listTests` command in `ws`; `None` when the project declares none."""
+                     env: Mapping[str, str] | None = None, sandbox: bool = False) -> TestListing | None:
+    """Run the declared `listTests` command in `ws` (sandboxed with `sandbox`); `None` when none is declared."""
     command = config.list_tests
     if command is None:
         return None
     try:
-        res = ws.execute(command, timeout=timeout, env=dict(env or {}))
+        res = ws.execute(command, timeout=timeout, env=dict(env or {}), sandbox=sandbox)
     except Exception as exc:  # noqa: BLE001 - a listing that cannot run is stated as such, the files unknown
         return TestListing(command=command, exit_code=None, error=str(exc) or type(exc).__name__)
     files = parse_test_listing(res.stdout, getattr(ws, "root", None)) if res.exit_code == 0 else None

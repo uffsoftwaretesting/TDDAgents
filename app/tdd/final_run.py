@@ -27,6 +27,13 @@ installed. The final run now does what a fresh checkout does:
    are unknown (which is not a pass: strict collection, 2026-11-08), the coverage, and the raw output;
 6. the copy is deleted.
 
+The sandbox (2026-11-08, user decision): `setup` and `test` run in the sandbox whenever the project's
+settings enable it, as every RunTests run does. The session has closed by then, so the final run builds its
+own sandbox (`SandboxAdapter`) over the copy: the project's `.tddagents/settings.json` and
+`settings.local.json` are copied in, the session's `--settings` file still applies, and no one is asked
+about a host the allowlist does not settle (it is denied). A required sandbox that cannot run means the
+final run does not run ("NOT passing"); the sandbox is reset afterwards.
+
 An E2B workspace has no host folder to copy, so its final run is reported as unsupported, and so is
 one where ripgrep cannot run (`app/utils/ripgrep.py` has no fallback lister).
 
@@ -73,7 +80,9 @@ from app.tdd.run_tests_tool.run_tests_tool import (
     run_suite,
 )
 from app.utils.ripgrep import RipgrepTimeoutError, RipgrepUnavailableError, rip_grep, to_relative_path
+from app.utils.sandbox.sandbox_adapter import SandboxUnavailableError
 from app.utils.session_environment import ENV_FILE_VAR
+from app.utils.settings.settings import LOCAL_SETTINGS_FILENAME, SETTINGS_DIR, SETTINGS_FILENAME
 
 FINAL_RUN_DIRNAME = "final-run"
 UNSUPPORTED = "clean final run unsupported: the workspace is not a local folder"
@@ -143,7 +152,7 @@ def link_prefix(source: Path, path: str, seen: dict[str, bool]) -> str | None:
 def copy_project(source: Path, target: Path, rules: TestFileRules) -> None:
     """
     Copy `project_files(source)` to `target`, each symbolic link recreated as a link (see the module
-    docstring), then the approved `project.json` into `.tddagents/`.
+    docstring), then the approved `project.json` and the project's settings files into `.tddagents/`.
     """
     target.mkdir(parents=True, exist_ok=True)
     seen: dict[str, bool] = {}
@@ -162,6 +171,12 @@ def copy_project(source: Path, target: Path, rules: TestFileRules) -> None:
     if config_file.is_file():
         (target / PROJECT_CONFIG_FILE).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(config_file, target / PROJECT_CONFIG_FILE)
+    # The project's settings, so the copy is sandboxed as the session was.
+    for name in (SETTINGS_FILENAME, LOCAL_SETTINGS_FILENAME):
+        settings_file = source / SETTINGS_DIR / name
+        if settings_file.is_file():
+            (target / SETTINGS_DIR).mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(settings_file, target / SETTINGS_DIR / name)
 
 
 def _setup_lines(config: ProjectConfig, exit_code: int | None, output: str) -> list[str]:
@@ -181,8 +196,26 @@ def _summary_facts(judgement: Judgement) -> list[str]:
     return [f"{fact}: {', '.join(files[fact])}" if files.get(fact) else fact for fact in judgement.unmet]
 
 
-def run_final(workspace: Any, run_dir: str | os.PathLike[str]) -> FinalRun:
-    """The clean final run of `workspace`'s project (see the module docstring)."""
+def final_run_sandbox(target: Path, settings_path: str | None) -> Any:
+    """
+    The final run's own sandbox over the copy at `target` (see the module docstring): returns the started
+    adapter (enabled or not), or raises `SandboxUnavailableError` when it is required and cannot run.
+    """
+    from app.utils.sandbox.sandbox_adapter import SandboxAdapter, SandboxUnavailableError
+    from app.utils.settings.settings import SettingsLocations
+
+    locations = SettingsLocations(project_root=target,
+                                  flag_settings_path=Path(settings_path) if settings_path else None)
+    sandbox = SandboxAdapter(locations, cwd_state=lambda: str(target))
+    reason = sandbox.get_sandbox_unavailable_reason()
+    if reason and sandbox.is_sandbox_required():
+        raise SandboxUnavailableError(f"sandbox required but unavailable: {reason}")
+    sandbox.initialize()
+    return sandbox
+
+
+def run_final(workspace: Any, run_dir: str | os.PathLike[str], *, settings_path: str | None = None) -> FinalRun:
+    """The clean final run of `workspace`'s project (see the module docstring); `settings_path` is `--settings`."""
     root = getattr(workspace, "root", None)
     if getattr(workspace, "kind", None) != "local" or root is None:
         return FinalRun(UNSUPPORTED, ())
@@ -200,36 +233,50 @@ def run_final(workspace: Any, run_dir: str | os.PathLike[str]) -> FinalRun:
         except (OSError, RipgrepTimeoutError) as exc:
             return FinalRun(f"could not copy the project: {exc}", ())
         clean = _scrubbed(target, base)
-        timeout = max_command_timeout_seconds()
-        setup_exit: int | None = None
-        setup_output = ""
-        if config.setup is not None:
-            try:
-                setup = clean.execute(config.setup, timeout=timeout)
-            except Exception as exc:  # noqa: BLE001 - a setup that cannot run is the run's result
-                return FinalRun(f"NOT passing (setup could not run: {exc})", tuple(_setup_lines(config, None, "")))
-            setup_exit = setup.exit_code
-            setup_output = "\n".join(text for text in (setup.stdout, setup.stderr) if text.strip()).rstrip()
-            if setup_exit != 0:
-                return FinalRun(f"NOT passing (setup exited {setup_exit})",
-                                tuple(_setup_lines(config, setup_exit, setup_output)))
         try:
-            result = run_suite(clean, config, timeout=timeout)
-        except RunTestsUnavailable as exc:
-            return FinalRun(f"NOT passing (could not run the tests: {exc})",
-                            tuple(_setup_lines(config, setup_exit, setup_output)))
-        collection = observe_collection(clean, config.rules, result.report, result.listing)
-        judgement = judge(result.exit_code, result.report, collection, TddPhase.GREEN)
-        verdict = "passed" if judgement.passed else "NOT passing"
-        summary = f"{verdict} (exit {result.exit_code}: {judgement.meaning}, {result.coverage.describe()})"
-        if judgement.unmet:
-            summary += f"; {'; '.join(_summary_facts(judgement))}"
-        lines = [*_setup_lines(config, setup_exit, setup_output), "-" * 80,
-                 *_test_lines(result, collection, judgement.meaning), "-" * 80, raw_output(result)]
-        return FinalRun(summary, tuple(lines))
+            sandbox = final_run_sandbox(target, settings_path)
+        except SandboxUnavailableError as exc:
+            return FinalRun(f"NOT passing ({exc})", ())
+        clean.sandbox_manager = sandbox
+        sandboxed = sandbox.is_sandboxing_enabled()
+        try:
+            return _run_in(clean, config, sandboxed)
+        finally:
+            sandbox.reset()
     finally:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def _run_in(clean: Any, config: ProjectConfig, sandboxed: bool) -> FinalRun:
+    """The declared `setup`, then the suite, in the clean copy (sandboxed when `sandboxed`)."""
+    timeout = max_command_timeout_seconds()
+    setup_exit: int | None = None
+    setup_output = ""
+    if config.setup is not None:
+        try:
+            setup = clean.execute(config.setup, timeout=timeout, sandbox=sandboxed)
+        except Exception as exc:  # noqa: BLE001 - a setup that cannot run is the run's result
+            return FinalRun(f"NOT passing (setup could not run: {exc})", tuple(_setup_lines(config, None, "")))
+        setup_exit = setup.exit_code
+        setup_output = "\n".join(text for text in (setup.stdout, setup.stderr) if text.strip()).rstrip()
+        if setup_exit != 0:
+            return FinalRun(f"NOT passing (setup exited {setup_exit})",
+                            tuple(_setup_lines(config, setup_exit, setup_output)))
+    try:
+        result = run_suite(clean, config, timeout=timeout, sandbox=sandboxed)
+    except RunTestsUnavailable as exc:
+        return FinalRun(f"NOT passing (could not run the tests: {exc})",
+                        tuple(_setup_lines(config, setup_exit, setup_output)))
+    collection = observe_collection(clean, config.rules, result.report, result.listing)
+    judgement = judge(result.exit_code, result.report, collection, TddPhase.GREEN)
+    verdict = "passed" if judgement.passed else "NOT passing"
+    summary = f"{verdict} (exit {result.exit_code}: {judgement.meaning}, {result.coverage.describe()})"
+    if judgement.unmet:
+        summary += f"; {'; '.join(_summary_facts(judgement))}"
+    lines = [*_setup_lines(config, setup_exit, setup_output), "-" * 80,
+             *_test_lines(result, collection, judgement.meaning), "-" * 80, raw_output(result)]
+    return FinalRun(summary, tuple(lines))
+
+
 __all__ = ["FINAL_RUN_DIRNAME", "LISTING_ARGS", "NO_CONFIG", "NO_RIPGREP", "UNSUPPORTED", "VCS_DIRECTORIES",
-           "FinalRun", "copy_project", "link_prefix", "project_files", "run_final"]
+           "FinalRun", "copy_project", "final_run_sandbox", "link_prefix", "project_files", "run_final"]

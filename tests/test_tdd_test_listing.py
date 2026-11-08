@@ -39,9 +39,12 @@ class _Project(FakeWorkspace):
         self.junit = junit
         self.listing = listing
         self.envs: list[tuple[str, dict[str, str] | None]] = []
+        self.sandboxed: list[tuple[str, bool]] = []
 
-    def execute(self, cmd: str, timeout: float | None = None, env: dict | None = None) -> CommandResult:
+    def execute(self, cmd: str, timeout: float | None = None, env: dict | None = None,
+                sandbox: bool = False) -> CommandResult:
         self.envs.append((cmd, env))
+        self.sandboxed.append((cmd, sandbox))
         if cmd == LIST:
             if isinstance(self.listing, Exception):
                 raise self.listing
@@ -119,6 +122,14 @@ def _green(ws: Any, config: ProjectConfig) -> tuple[Any, AppStateStore]:
                                    phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     res = asyncio.run(build_run_tests_tool(None).call({}, tool_context_for(store, workspace=ws)))
     return res, store
+
+
+def test_the_listing_runs_in_the_sandbox_whenever_the_test_command_does():
+    """2026-11-08: `listTests` runs with the test command's sandbox flag (`run_suite`'s `sandbox`)."""
+    for sandbox in (False, True):
+        ws = _Project(SUREFIRE, _listed("src/test/CalcTest.java\n"))
+        run_suite(ws, CONFIG, sandbox=sandbox)
+        assert ws.sandboxed == [(TEST, sandbox), (LIST, sandbox)]
 
 
 def test_run_tests_judges_a_surefire_run_by_its_listing():
