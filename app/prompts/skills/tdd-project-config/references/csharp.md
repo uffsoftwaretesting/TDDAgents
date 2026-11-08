@@ -26,7 +26,7 @@ A solution with `src/Calculator/Calculator.csproj` and one test project, `tests/
 - `--logger "junit;LogFilePath=<path>"` writes the report where TDDAgents reads it. With several test projects each writes its own report, and they would overwrite one another: check the logger's docs for its path tokens, or keep one test project.
 - `CoverletOutput` is relative to the test project unless absolute; ending it with `/` names a directory, where the Cobertura report is `coverage.cobertura.xml`. Check coverlet's docs for your version.
 - `dotnet test` exits non-zero when a test fails or the build fails.
-- The logger names each test's class and method, not its file, so the uncollected-file check is unknown for .NET.
+- The logger names each test's class and method, not its file, so declare `listTests` as the test project's source files: `find tests -name '*.cs' -not -path '*/bin/*' -not -path '*/obj/*'`. Without it, no run passes in GREEN or REFACTOR.
 - A test project's `.csproj` is both test code and a manifest: as a manifest it stays writable in every phase, so a package the tests need can be added in any phase.
 
 ## Pitfalls

@@ -33,7 +33,7 @@ nextest writes it under the profile's directory, `target/nextest/ci/junit.xml`, 
 
 - `cargo llvm-cov nextest` runs the suite through nextest with coverage instrumentation; `--lcov --output-path <file>` writes LCOV. `NEXTEST_PROFILE` selects the nextest profile with the JUnit report.
 - Replace `<version>` with the versions you choose, so the final run installs the same tools.
-- nextest's report names each test's binary (`classname`), not its file, so the uncollected-file check is unknown for Rust. A compile error fails the run.
+- nextest's report names each test's binary (`classname`), not its file, so declare `listTests` as the integration-test targets cargo builds: `cargo metadata --no-deps --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] == "test") | .src_path'` (one `tests/*.rs` file per binary; `jq` must be installed). Without it, no run passes in GREEN or REFACTOR. A compile error fails the run.
 - Branch coverage needs a nightly toolchain; the LCOV report carries line coverage.
 
 ## Pitfalls

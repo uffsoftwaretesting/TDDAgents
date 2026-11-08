@@ -10,6 +10,7 @@
   "setup": "go mod download",
   "test": "go tool gotestsum --junitfile \"${{JUNIT_REPORT_ENV}}\" -- -coverprofile=\"${{COVERAGE_REPORT_ENV}}.out\" -covermode=atomic ./...; status=$?; go tool gocover-cobertura < \"${{COVERAGE_REPORT_ENV}}.out\" > \"${{COVERAGE_REPORT_ENV}}\"; exit $status",
   "coverageReport": {"format": "cobertura"},
+  "listTests": "find . -name '*_test.go' -not -path '*/vendor/*' -not -path '*/testdata/*' -not -path '*/.*' -not -path '*/_*'",
   "testFiles": ["*_test.go", "testdata/"],
   "testSupportFiles": ["testdata/"],
   "manifestFiles": ["go.mod", "go.sum"],
@@ -20,7 +21,7 @@
 - `./...` runs every package's tests. Arguments after `--` go to `go test`.
 - The command keeps `go test`'s exit status (`status=$?` … `exit $status`), so the conversion step never hides a failure.
 - Go's coverage is statement coverage: the converted report carries line coverage, with no branch data.
-- `gotestsum`'s JUnit report names each test's package (`classname`), not its file, so the uncollected-file check is unknown for Go. A package that fails to build is reported as a failed run.
+- `gotestsum`'s JUnit report names each test's package (`classname`), not its file, so `listTests` declares the test files `./...` collects: every `_test.go` file outside `vendor/`, `testdata/` and the directories whose names start with `.` or `_`, as `go` skips them. A file behind a build tag the test command does not set is listed but never runs: avoid build tags on test files. Without it, no run passes in GREEN or REFACTOR. A package that fails to build is reported as a failed run.
 - Before Go 1.24 (no `tool` directive), install pinned versions in `setup` (`go install gotest.tools/gotestsum@<version>`) and call them by path, or use `go-junit-report` (`go test -v ./... 2>&1 | go-junit-report -set-exit-code > report.xml`); check the tool's docs.
 
 ## Pitfalls

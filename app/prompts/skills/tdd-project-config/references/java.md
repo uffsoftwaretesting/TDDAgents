@@ -34,7 +34,7 @@ Both Maven Surefire and Gradle write one JUnit XML file per test class (`TEST-<c
 ```
 
 - Maven and Gradle exit non-zero when a test fails or the code does not compile.
-- Surefire and Gradle name each test's **class** (`classname`), not its file, so the uncollected-file check is unknown for Java. Keep one top-level test class per file, named after the file.
+- Surefire and Gradle name each test's **class** (`classname`), not its file, so declare `listTests` as the test classes' files the build collects, by its include rules. For Surefire's defaults: `find src/test/java \( -name 'Test*.java' -o -name '*Test.java' -o -name '*Tests.java' -o -name '*TestCase.java' \)`. Without it, no run passes in GREEN or REFACTOR. Keep one top-level test class per file, named after the file.
 
 ## Coverage
 
