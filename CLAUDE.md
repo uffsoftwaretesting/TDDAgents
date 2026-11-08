@@ -128,8 +128,10 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
    against it.
 3. **The stop hook** (`app/tdd/stop_hook.py`) refuses to end an incomplete cycle, in any
    phase, with **no latch**. A turn ends early only on `/pause`, Esc, a configured hook's
-   `continue: false`, a model/API error, or a denied `AskUserQuestion` headless. In mode
-   `plan` the plan advance and the TDD hook are skipped.
+   `continue: false`, a model/API error, a denied `AskUserQuestion` headless, or the user's own
+   input waiting in the queue (it becomes the next turn, as upstream's queue processor runs it).
+   Its refusal is a meta `Stop hook feedback:` message, yielded like upstream's. In mode `plan`
+   the plan advance and the TDD hook are skipped.
 
 **What each phase needs:**
 - **RED**: a RunTests run (pass or fail) after the test files changed. The fingerprint is
@@ -224,7 +226,9 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
 - **The declared project** (`app/tdd/project_config.py`): `.tddagents/project.json`, written by
   `ExitPlanMode` on approval into the protected `.tddagents/` and loaded at session open: `setup`,
   `test`, `junitReport`, `coverageReport` (`format` cobertura | lcov, optional `path`), `testFiles`,
-  `testSupportFiles`, `manifestFiles`, `exclude`. The contract tells the model to declare every
+  `testSupportFiles` (the subset never expected in a report), `manifestFiles`, `exclude`. An approved
+  edit is read at once (`project_config_watcher.py`, cron's watch); an invalid file is no
+  configuration (fail closed, its issues named), and the Edit tool refuses to break a valid one. The contract tells the model to declare every
   dependency it installs in the project's own manifest. The `tdd-project-config` skill (claude-api
   pattern) injects the reference for the project's ecosystem.
 - **The final run** (`app/tdd/final_run.py`) copies the project into a clean folder (upstream's

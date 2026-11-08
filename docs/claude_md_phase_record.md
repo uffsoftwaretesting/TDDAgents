@@ -2324,6 +2324,39 @@ user, the recommended option every time):*
   because the Chrome the agent had installed lives in the user cache, outside the project.
 - The "uncollected test files" check read "unknown" in both runs again (no reporter named files).
 
+*The second md→pdf run and its three fixes (2026-11-08, user decisions):*
+
+- **Both runs passed the clean final run** (TypeScript `tdd-964ff74bd964444f`: 11 items, 365 tests, 99.8%;
+  Python `tdd-a3337ae051744609`: 15 items, 322 tests, 100%). The TypeScript run stuck once, on three
+  TDDAgents faults, fixed the way claude-code resolves each:
+- **Test support is never expected in a report** (`TestFileRules.is_test_file`): a file both
+  `testFiles` and `testSupportFiles` match is support. The skill's own contract says so
+  (`references/shared.md`: "the subset of `testFiles` that never appears in a report") and its
+  TypeScript reference declares `vitest.config.ts` in both lists, yet the gate expected it in the JUnit
+  report, so GREEN (23/23) never counted. The suite's `TEST_PROJECT_CONFIG` now follows the contract.
+- **An approved edit of `project.json` is read at once** (`app/tdd/project_config_watcher.py`):
+  - the port of `utils/cronScheduler.ts`'s file watch: one tool-written, user-editable file, an
+    idempotent reload, `FILE_STABILITY_MS = 300`;
+  - an invalid or deleted file is no configuration, as an invalid settings file contributes nothing, so
+    the tier and RunTests fail closed, their refusals naming the file's issues
+    (`invalid_project_config_note`, `AppState.project_config_issues`);
+  - new test patterns while a sub-requirement is current take RED's baseline again, the ledger kept
+    (`apply_project_config`, also used by ExitPlanMode);
+  - the Edit tool refuses an edit that makes a valid file invalid (`app/tdd/validate_project_config_edit.py`,
+    the port of `validateInputForSettingsFileEdit`, error code 10); Write has no check, as upstream.
+  - Divergences: no internal-write marking (cron's idempotent reload instead); an E2B workspace is not
+    watched (no host file).
+- **The user's queued input ends a blocked TDD turn** (`user_input_waiting` in `app/tdd/stop_hook.py`):
+  upstream never drains the queue on `stop_hook_blocking` (`query.ts`); it ends the turn when its hook
+  lets it, and `useQueueProcessor` runs the input next (`wait_for_background_work` here). So the TDD hook
+  keeps blocking with no latch, except while the user's own input (not a `task-notification`, a worker's
+  or a meta prompt) waits for the main thread. The first exception to "no latch", recorded as such.
+  - Fidelity: the TDD block is a meta `Stop hook feedback:` user message, and `query.py` yields every
+    blocking error before the summary, as `handleStopHooks` does (`stopHooks.ts`). A `-p` run that ends
+    right after a block therefore reports that message as its last, as upstream's `findLast`.
+  - TDDAgents text: the refusal adds that a plain-text question gets no answer while the cycle is
+    incomplete (`PLAIN_TEXT_QUESTION`); the run's model had written "reply 1 or 2" four times.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven
