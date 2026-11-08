@@ -48,7 +48,7 @@ class Shell(FakeWorkspace):
         self.answers = answers or {}
         self.raise_on = set(raise_on)
 
-    def execute(self, cmd, timeout=None, env=None):
+    def execute(self, cmd, timeout=None, env=None, sandbox=False):
         self.command_log.append(cmd)
         if cmd in self.raise_on:
             raise RuntimeError("sandbox down")

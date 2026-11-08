@@ -464,6 +464,7 @@ class _RecordingWorkspace:
     def __init__(self, exit_code: int = 0, exc: Exception | None = None,
                  reports: dict[str, str] | None = None, root: str | None = "/proj") -> None:
         self.calls: list[tuple[str, float | None, dict[str, str] | None]] = []
+        self.sandboxed: list[bool] = []
         self.exit_code, self.exc = exit_code, exc
         self.reports = dict(reports or {})
         self.ops: list[tuple[str, str]] = []
@@ -485,8 +486,10 @@ class _RecordingWorkspace:
     def list_files(self, path: str = ".", depth: int = 1) -> list[Any]:
         return []
 
-    def execute(self, cmd: str, timeout: float | None = None, env: dict[str, str] | None = None) -> CommandResult:
+    def execute(self, cmd: str, timeout: float | None = None, env: dict[str, str] | None = None,
+                sandbox: bool = False) -> CommandResult:
         self.calls.append((cmd, timeout, env))
+        self.sandboxed.append(sandbox)
         if self.exc:
             raise self.exc
         return CommandResult(stdout="runner output", stderr="", exit_code=self.exit_code, duration=0.1,

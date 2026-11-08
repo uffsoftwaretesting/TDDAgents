@@ -216,7 +216,8 @@ def test_metadata(monkeypatch):
     assert tool.description({"command": "ls", "description": "List files"}) == "List files"
     schema = tool.input_schema
     assert schema["required"] == ["command"]
-    assert set(schema["properties"]) == {"command", "timeout", "description", "run_in_background"}
+    assert set(schema["properties"]) == {"command", "timeout", "description", "run_in_background",
+                                         "dangerouslyDisableSandbox"}
     assert schema["properties"]["command"]["type"] == "string"
     assert schema["properties"]["timeout"]["type"] == "number"
     assert schema["properties"]["description"]["type"] == "string"
@@ -359,6 +360,12 @@ def test_input_schema_is_exact():
             "run_in_background": {
                 "type": "boolean",
                 "description": "Set to true to run this command in the background. Use Read to read the output later.",
+            },
+            # `BashTool.tsx:242`.
+            "dangerouslyDisableSandbox": {
+                "type": "boolean",
+                "description": "Set this to true to dangerously override sandbox mode and run commands without "
+                               "sandboxing.",
             },
         },
         "required": ["command"],

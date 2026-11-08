@@ -111,16 +111,20 @@ class E2BWorkspace:
         cmd: str,
         timeout: float | None = None,
         env: dict[str, str] | None = None,
+        sandbox: bool = False,
     ) -> CommandResult:
+        """The E2B sandbox runs every command; the host sandbox's `sandbox` flag does not apply."""
         return self._adapter.execute(cmd, timeout=timeout, env=env)
 
     async def spawn(
-        self, cmd: str, *, output_fd: int, cwd: str | None = None, cwd_file: str | None = None
+        self, cmd: str, *, output_fd: int, cwd: str | None = None, cwd_file: str | None = None,
+        sandbox: bool = False,
     ) -> E2BShellProcess:
         """
         A background sandbox command (`E2BAdapter.start_background`) whose output is copied into
         `output_fd` as it arrives. The sandbox's paths are not host paths, so the working
         directory is not tracked here: `cwd_file` is ignored and the command runs from `cwd`.
+        `sandbox` is ignored: the E2B sandbox already holds every command.
         """
         background = await asyncio.to_thread(self._adapter.start_background, cmd, cwd)
         return E2BShellProcess(self._adapter, background, os.dup(output_fd))

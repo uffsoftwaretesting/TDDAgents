@@ -39,7 +39,7 @@ While the Bash tool can do similar things, it’s better to use the built-in too
   - If you must poll an external process, use a check command (e.g. `gh run view`) rather than sleeping first.
   - If you must sleep, keep the duration short (1-5 seconds) to avoid blocking the user.
  - Every command passes a deterministic command-injection check before it runs. Command substitution (`$()`, backticks), obfuscated flags, brace expansion, unquoted redirections, and similar constructs are refused with the reason; rewrite the command without them.
-
+{{SANDBOX_SECTION}}
 # Committing changes with git
 
 Only create commits when requested by the user. If unclear, ask first. When the user asks you to create a new git commit, follow these steps carefully:

@@ -1044,7 +1044,7 @@ class StatWorkspace(FakeWorkspace):
         super().__init__()
         self.reply, self.raise_exc = reply, raise_exc
 
-    def execute(self, cmd, timeout=None, env=None):
+    def execute(self, cmd, timeout=None, env=None, sandbox=False):
         self.command_log.append(cmd)
         if self.raise_exc:
             raise RuntimeError("no python")

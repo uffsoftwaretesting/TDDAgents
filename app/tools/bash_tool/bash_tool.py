@@ -17,6 +17,12 @@ Ported from `reference/claude-code/src/tools/BashTool/BashTool.tsx` -> `BashTool
 
 The working directory for path checks is the workspace's `root` when it has one (the
 local workspace); otherwise the process working directory, upstream's `getCwd()`.
+
+The sandbox (`app/utils/sandbox/`): `dangerouslyDisableSandbox` is in the schema (`BashTool.tsx`), each call
+runs sandboxed when `shouldUseSandbox` says so (`should_use_sandbox.py`), its output is annotated with the
+sandbox's violations (`annotateStderrWithSandboxFailures`), and the prompt carries upstream's "Command
+sandbox" section (`prompt.ts` -> `getSimpleSandboxSection`) for the run's sandbox, computed when the run's
+tools are built (upstream computes it per request).
 """
 
 from __future__ import annotations
@@ -46,8 +52,9 @@ from app.tool import (
     build_tool,
 )
 from app.tools.bash_tool import ui
-from app.tools.bash_tool.bash_permissions import bash_tool_has_permission
+from app.tools.bash_tool.bash_permissions import bash_tool_has_permission_in_sandbox
 from app.tools.bash_tool.read_only_validation import is_bash_read_only
+from app.tools.bash_tool.should_use_sandbox import should_use_sandbox
 from app.tools.bash_tool.utils import (
     reset_cwd_if_outside_project,
     std_err_append_shell_reset_message,
@@ -93,6 +100,9 @@ BACKGROUND_USAGE_NOTE = (
     "need to check the output right away - you'll be notified when it finishes. You do not need to use '&' at "
     "the end of the command when using this parameter."
 )
+#: `BashTool.tsx` -> the `dangerouslyDisableSandbox` field's description.
+DANGEROUSLY_DISABLE_SANDBOX_DESCRIPTION = (
+    "Set this to true to dangerously override sandbox mode and run commands without sandboxing.")
 #: `BashTool.tsx` -> the `run_in_background` field's description.
 RUN_IN_BACKGROUND_DESCRIPTION = (
     "Set to true to run this command in the background. Use Read to read the output later."
@@ -188,20 +198,135 @@ def get_max_bash_timeout_ms(env: Mapping[str, str] | None = None) -> int:
     return max(MAX_TIMEOUT_MS, default)
 
 
-def get_bash_prompt() -> str:
+def _dedup(items: list[str] | None) -> list[str] | None:
+    """`dedup`: first occurrences, in order; an empty or missing list as it is."""
+    if not items:
+        return items
+    return list(dict.fromkeys(items))
+
+
+def _prepend_bullets(items: list[str | list[str]]) -> list[str]:
+    """`prependBullets`: ` - item`, a nested list as `  - item`."""
+    lines: list[str] = []
+    for item in items:
+        if isinstance(item, list):
+            lines.extend(f"  - {sub}" for sub in item)
+        else:
+            lines.append(f" - {item}")
+    return lines
+
+
+def _json(value: Any) -> str:
+    """`jsonStringify`: compact JSON, as `JSON.stringify` writes it."""
+    import json
+
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+#: `getSimpleSandboxSection`'s override items, when unsandboxed commands are allowed.
+SANDBOX_OVERRIDE_ALLOWED: list[str | list[str]] = [
+    "You should always default to running commands within the sandbox. Do NOT attempt to set "
+    "`dangerouslyDisableSandbox: true` unless:",
+    [
+        "The user *explicitly* asks you to bypass sandbox",
+        "A specific command just failed and you see evidence of sandbox restrictions causing the failure. Note "
+        "that commands can fail for many reasons unrelated to the sandbox (missing files, wrong arguments, network "
+        "issues, etc.).",
+    ],
+    "Evidence of sandbox-caused failures includes:",
+    [
+        '"Operation not permitted" errors for file/network operations',
+        "Access denied to specific paths outside allowed directories",
+        "Network connection failures to non-whitelisted hosts",
+        "Unix socket connection errors",
+    ],
+    "When you see evidence of sandbox-caused failure:",
+    [
+        "Immediately retry with `dangerouslyDisableSandbox: true` (don't ask, just do it)",
+        "Briefly explain what sandbox restriction likely caused the failure. Be sure to mention that the user can "
+        "use the `/sandbox` command to manage restrictions.",
+        "This will prompt the user for permission",
+    ],
+    "Treat each command you execute with `dangerouslyDisableSandbox: true` individually. Even if you have "
+    "recently run a command with this setting, you should default to running future commands within the sandbox.",
+    "Do not suggest adding sensitive paths like ~/.bashrc, ~/.zshrc, ~/.ssh/*, or credential files to the sandbox "
+    "allowlist.",
+]
+#: ... and when the policy forbids them.
+SANDBOX_OVERRIDE_FORBIDDEN: list[str | list[str]] = [
+    "All commands MUST run in sandbox mode - the `dangerouslyDisableSandbox` parameter is disabled by policy.",
+    "Commands cannot run outside the sandbox under any circumstances.",
+    "If a command fails due to sandbox restrictions, work with the user to adjust sandbox settings instead.",
+]
+SANDBOX_TMPDIR_ITEM = (
+    "For temporary files, always use the `$TMPDIR` environment variable. TMPDIR is automatically set to the correct "
+    "sandbox-writable directory in sandbox mode. Do NOT use `/tmp` directly - use `$TMPDIR` instead.")
+
+
+def get_simple_sandbox_section(sandbox: Any) -> str:
+    """
+    `prompt.ts` -> `getSimpleSandboxSection`: nothing without an enabled sandbox; otherwise the
+    "Command sandbox" section with its filesystem and network restrictions as JSON (the per-user temp
+    directory shown as `$TMPDIR`), the ignored violations, and the override rules.
+    """
+    if sandbox is None or not sandbox.is_sandboxing_enabled():
+        return ""
+    read = sandbox.get_fs_read_config()
+    write = sandbox.get_fs_write_config()
+    network = sandbox.get_network_restriction_config()
+    allow_unix_sockets = sandbox.get_allow_unix_sockets()
+    ignore_violations = sandbox.get_ignore_violations()
+    temp_dir = str(sandbox.temp_dir)
+    filesystem: dict[str, Any] = {
+        "read": {"denyOnly": _dedup(read.deny_only),
+                 **({"allowWithinDeny": _dedup(read.allow_within_deny)} if read.allow_within_deny is not None
+                    else {})},
+        "write": {"allowOnly": ["$TMPDIR" if p == temp_dir else p for p in dict.fromkeys(write.allow_only)],
+                  "denyWithinAllow": _dedup(write.deny_within_allow)},
+    }
+    network_config: dict[str, Any] = {}
+    if network.allowed_hosts:
+        network_config["allowedHosts"] = _dedup(network.allowed_hosts)
+    if network.denied_hosts:
+        network_config["deniedHosts"] = _dedup(network.denied_hosts)
+    if allow_unix_sockets is not None:
+        network_config["allowUnixSockets"] = _dedup(allow_unix_sockets)
+    restrictions = [f"Filesystem: {_json(filesystem)}"]
+    if network_config:
+        restrictions.append(f"Network: {_json(network_config)}")
+    if ignore_violations:
+        restrictions.append(f"Ignored violations: {_json(ignore_violations)}")
+    overrides = SANDBOX_OVERRIDE_ALLOWED if sandbox.are_unsandboxed_commands_allowed() else SANDBOX_OVERRIDE_FORBIDDEN
+    return "\n".join([
+        "",
+        "## Command sandbox",
+        "By default, your command will be run in a sandbox. This sandbox controls which directories and network "
+        "hosts commands may access or modify without an explicit override.",
+        "",
+        "The sandbox has the following restrictions:",
+        "\n".join(restrictions),
+        "",
+        *_prepend_bullets([*overrides, SANDBOX_TMPDIR_ITEM]),
+    ])
+
+
+def get_bash_prompt(sandbox: Any = None) -> str:
     """
     `BashTool/prompt.ts` -> `getSimplePrompt` (external build): `prompt.md`, with the timeouts
-    filled in from `src/utils/timeouts.ts`, as upstream interpolates them.
+    filled in from `src/utils/timeouts.ts`, as upstream interpolates them, and the run's sandbox
+    section (`get_simple_sandbox_section`; its own line, empty without a sandbox).
     """
     text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
     note = get_background_usage_note()
     if note is None:
         text = text.replace(" - {{BACKGROUND_NOTE}}\n", "")
     max_ms, default_ms = get_max_bash_timeout_ms(), get_default_bash_timeout_ms()
+    section = get_simple_sandbox_section(sandbox)
     return render_prompt(text, {
         "MAX_TIMEOUT_MS": max_ms, "MAX_TIMEOUT_MIN": f"{max_ms / 60000:g}",
         "DEFAULT_TIMEOUT_MS": default_ms, "DEFAULT_TIMEOUT_MIN": f"{default_ms / 60000:g}",
         "BACKGROUND_NOTE": note or "",
+        "SANDBOX_SECTION": f"{section}\n" if section else "",
     }, strip_comments=False)
 
 
@@ -245,6 +370,9 @@ def validate_bash_input(args: dict[str, Any], context: ToolContext) -> Validatio
     background = args.get("run_in_background")
     if background is not None and not isinstance(background, bool):
         return ValidationResult(valid=False, message="run_in_background must be a boolean.")
+    override = args.get("dangerouslyDisableSandbox")
+    if override is not None and not isinstance(override, bool):
+        return ValidationResult(valid=False, message="dangerouslyDisableSandbox must be a boolean.")
     return ValidationResult(valid=True)
 
 
@@ -263,9 +391,11 @@ def bash_permission_inputs(context: ToolContext) -> tuple[ToolPermissionContext,
 
 
 async def check_bash_permissions(args: dict[str, Any], context: ToolContext) -> PermissionResult:
-    """`BashTool.checkPermissions` -> `bashToolHasPermission`."""
+    """`BashTool.checkPermissions` -> `bashToolHasPermission`, with the run's sandbox."""
     permission_context, cwd = bash_permission_inputs(context)
-    return bash_tool_has_permission(str(args.get("command") or ""), permission_context, cwd)
+    return bash_tool_has_permission_in_sandbox(args, permission_context, cwd,
+                                               sandbox=getattr(context, "sandbox_manager", None),
+                                               original_cwd=permission_cwd(context))
 
 
 def bash_permission_matcher(args: Mapping[str, Any]) -> Callable[[str], bool]:
@@ -315,11 +445,14 @@ async def _wait_for_result(
         await asyncio.wait({shell.result}, timeout=CANCEL_POLL_SECONDS)
 
 
-def bash_output(stdout: str, stderr: str, interrupted: bool, background_task_id: str | None) -> dict[str, Any]:
+def bash_output(stdout: str, stderr: str, interrupted: bool, background_task_id: str | None,
+                dangerously_disable_sandbox: bool | None = None) -> dict[str, Any]:
     """Upstream's Bash `Out`: what the result rendering and the SDK's `tool_use_result` read."""
     data: dict[str, Any] = {"stdout": stdout, "stderr": stderr, "interrupted": interrupted}
     if background_task_id:
         data["backgroundTaskId"] = background_task_id
+    if dangerously_disable_sandbox is not None:
+        data["dangerouslyDisableSandbox"] = dangerously_disable_sandbox
     return data
 
 
@@ -358,7 +491,9 @@ def bash_result_content(stdout: str, stderr: str, interrupted: bool, background_
     return "\n".join(part for part in (stdout, error, background_info) if part)
 
 
-def build_bash_tool() -> BuiltTool:
+def build_bash_tool(sandbox: Any = None) -> BuiltTool:
+    """The Bash tool; `sandbox` (the run's, when it has one) only shapes the prompt's sandbox section."""
+
     async def call_bash(input_args: dict[str, Any], context: ToolContext) -> ToolResult:
         """
         `BashTool.call` / `runShellCommand`: start the command (`exec_shell`), then either hand it
@@ -373,8 +508,11 @@ def build_bash_tool() -> BuiltTool:
         disabled = is_background_tasks_disabled()
         timeout_ms = min(input_args.get("timeout") or get_default_bash_timeout_ms(), get_max_bash_timeout_ms())
         should_auto_background = not disabled and is_autobackgrounding_allowed(command)
+        run_sandbox = getattr(context, "sandbox_manager", None)
         shell = await exec_shell(context, command, timeout_ms=timeout_ms,
-                                 should_auto_background=should_auto_background)
+                                 should_auto_background=should_auto_background,
+                                 should_use_sandbox=should_use_sandbox(input_args, run_sandbox))
+        override = input_args.get("dangerouslyDisableSandbox") if "dangerouslyDisableSandbox" in input_args else None
         tool_use_id = getattr(context, "tool_use_id", None)
         agent_id = getattr(context, "agent_id", None)
         state: dict[str, str | None] = {"background": None, "foreground": None}
@@ -417,7 +555,11 @@ def build_bash_tool() -> BuiltTool:
         stderr = result.stderr
         if reset_cwd_if_outside_project(context):
             stderr = std_err_append_shell_reset_message(stderr, context)
-        stdout = strip_leading_blank_lines(result.stdout)
+        # `annotateStderrWithSandboxFailures` (stderr is merged into the output file).
+        output = result.stdout
+        if run_sandbox is not None:
+            output = run_sandbox.annotate_stderr_with_sandbox_failures(command, output)
+        stdout = strip_leading_blank_lines(output)
         persisted = persist_large_output(result, context)
         if persisted is not None:
             preview, has_more = generate_preview(stdout)
@@ -428,11 +570,11 @@ def build_bash_tool() -> BuiltTool:
             # `ShellError` through `formatError`: `Exit code N`, then stderr, then the output.
             content = "\n".join(part for part in (f"Exit code {result.code}", stderr.strip(), stdout) if part)
             return ToolResult(content=content, exit_code=result.code, is_error=True,
-                              metadata=bash_output(stdout, stderr, result.interrupted, None))
+                              metadata=bash_output(stdout, stderr, result.interrupted, None, override))
         content = bash_result_content(stdout, stderr, result.interrupted, "")
         return ToolResult(content=content or "Command executed successfully (no output).", exit_code=result.code,
                           is_error=result.interrupted,
-                          metadata=bash_output(stdout, stderr, result.interrupted, None))
+                          metadata=bash_output(stdout, stderr, result.interrupted, None, override))
 
     return build_tool(
         user_facing_name=ui.user_facing_name,
@@ -442,7 +584,7 @@ def build_bash_tool() -> BuiltTool:
         render_tool_result_message=ui.render_tool_result_message,
         is_search_or_read_command=bash_search_or_read,
         name="Bash",
-        prompt=get_bash_prompt(),
+        prompt=get_bash_prompt(sandbox),
         input_schema={
             "type": "object",
             "properties": {
@@ -458,6 +600,8 @@ def build_bash_tool() -> BuiltTool:
                 **({} if is_background_tasks_disabled() else {
                     "run_in_background": {"type": "boolean", "description": RUN_IN_BACKGROUND_DESCRIPTION},
                 }),
+                "dangerouslyDisableSandbox": {"type": "boolean",
+                                              "description": DANGEROUSLY_DISABLE_SANDBOX_DESCRIPTION},
             },
             "required": ["command"],
         },

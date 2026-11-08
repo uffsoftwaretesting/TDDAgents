@@ -11,8 +11,11 @@ Ported from claude-code v2.1.88 `src/tools/BashTool/readOnlyValidation.ts`, lega
 
 This replaces the Part C4 classifier (`capability.py`) for the Bash tool.
 
-Divergences: no sandbox manager exists here, so the "git outside the original cwd while
-sandboxed" gate never fires (upstream's `SandboxManager.isSandboxingEnabled()` false); the
+Divergences: the "git outside the original cwd while sandboxed" gate reads
+`SANDBOXED_OUTSIDE_ORIGINAL_CWD`, which Bash's permission check sets for the call
+(`app/tools/bash_tool/bash_permissions.py::bash_tool_has_permission_in_sandbox`) where upstream reads
+`SandboxManager.isSandboxingEnabled() && getCwd() !== getOriginalCwd()`; outside that check (the tool's
+`isReadOnly`, which receives no context) it is unset and the gate does not fire. The
 tool-level predicate (`is_bash_read_only`) receives no context, so its bare-repo check
 uses the process working directory where upstream uses `getCwd()` — the permission
 check passes the workspace root instead. Regexes keep JavaScript semantics (`\\s` is the
@@ -23,6 +26,7 @@ from __future__ import annotations
 
 import os
 import re
+from contextvars import ContextVar
 from typing import Any
 
 from app.tools.bash_tool.bash_security import (
@@ -300,6 +304,9 @@ def _passthrough(message: str) -> PermissionResult:
 
 
 NOT_READ_ONLY = "Command is not read-only, requires further permission checks"
+#: `SandboxManager.isSandboxingEnabled() && getCwd() !== getOriginalCwd()` for the permission check in
+#: progress: git outside the original directory may meet bare-repo files a sandboxed command planted there.
+SANDBOXED_OUTSIDE_ORIGINAL_CWD: ContextVar[bool] = ContextVar("sandboxed_outside_original_cwd", default=False)
 
 
 def check_read_only_constraints(
@@ -328,6 +335,10 @@ def check_read_only_constraints(
             "Compound commands that create git internal files and run git require permission checks for enhanced "
             "security"
         )
+    if has_git and SANDBOXED_OUTSIDE_ORIGINAL_CWD.get():
+        return _passthrough(
+            "Git commands outside the original working directory require permission checks when sandbox is enabled"
+        )
     all_read_only = all(
         bash_command_is_safe(sub).behavior == PermissionBehavior.PASSTHROUGH and is_command_read_only(sub)
         for sub in split_command(command)
@@ -347,6 +358,7 @@ def is_bash_read_only(args: dict[str, Any], cwd: str | None = None) -> bool:
 
 __all__ = [
     "READONLY_COMMANDS",
+    "SANDBOXED_OUTSIDE_ORIGINAL_CWD",
     "READONLY_COMMAND_REGEXES",
     "check_read_only_constraints",
     "command_has_any_git",

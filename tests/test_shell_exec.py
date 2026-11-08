@@ -270,7 +270,8 @@ def test_prevent_cwd_changes_passes_no_cwd_file(tmp_path):
     seen: list[Any] = []
 
     class Recording(FakeWorkspace):
-        async def spawn(self, cmd: str, *, output_fd: int, cwd: Any = None, cwd_file: Any = None) -> Any:
+        async def spawn(self, cmd: str, *, output_fd: int, cwd: Any = None, cwd_file: Any = None,
+                        sandbox: bool = False) -> Any:
             seen.append(cwd_file)
             return FakeShellProcess(0)
 

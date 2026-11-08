@@ -171,6 +171,9 @@ class FakeWorkspace:
         self.spawn_log: list[tuple[str, str | None]] = []
         self.spawn_hold: dict[str, asyncio.Event] = {}
         self.spawn_cwd: dict[str, str] = {}
+        #: The `sandbox` flag of each `execute` and `spawn`, in order (nothing runs here: it is only recorded).
+        self.sandboxed_log: list[bool] = []
+        self.sandbox_manager: Any = None
 
     # ── Workspace protocol ───────────────────────────────────────────────────
 
@@ -207,20 +210,23 @@ class FakeWorkspace:
         self.files[normalize_path(new)] = self.read_file(old)
         del self.files[normalize_path(old)]
 
-    def execute(self, cmd: str, timeout: float | None = None, env: dict | None = None) -> CommandResult:
+    def execute(self, cmd: str, timeout: float | None = None, env: dict | None = None,
+                sandbox: bool = False) -> CommandResult:
         self.command_log.append(cmd)
+        self.sandboxed_log.append(sandbox)
         if cmd in self.command_results:
             return self.command_results[cmd]
         return CommandResult(stdout="", stderr="", exit_code=0, duration=0.0, workspace=self.kind)
 
     async def spawn(self, cmd: str, *, output_fd: int, cwd: str | None = None,
-                    cwd_file: str | None = None) -> FakeShellProcess:
+                    cwd_file: str | None = None, sandbox: bool = False) -> FakeShellProcess:
         """
         A scripted `spawn`: the command's `command_results` entry is its output (stdout, then
         stderr, into the one file) and exit code; a `spawn_hold` event keeps it running until
         set; a `spawn_cwd` entry is the directory it leaves the shell in (written to `cwd_file`).
         """
         self.command_log.append(cmd)
+        self.sandboxed_log.append(sandbox)
         self.spawn_log.append((cmd, cwd))
         empty = CommandResult(stdout="", stderr="", exit_code=0, duration=0.0, workspace=self.kind)
         result = self.command_results.get(cmd) or empty

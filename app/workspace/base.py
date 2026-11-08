@@ -234,22 +234,26 @@ class Workspace(Protocol):
         cmd: str,
         timeout: float | None = None,
         env: dict[str, str] | None = None,
+        sandbox: bool = False,
     ) -> CommandResult:
         """
         Runs a shell command from the workspace root.
 
         A non-zero exit code is returned in the CommandResult, not raised. Only
-        infrastructure failures raise a WorkspaceError.
+        infrastructure failures raise a WorkspaceError. With `sandbox` the command runs in the
+        run's sandbox (`Shell.ts`' `shouldUseSandbox`): the caller opts in, TDDAgents' own internals
+        never do. A workspace without a host sandbox (E2B, the fakes) ignores it.
         """
         ...
 
     async def spawn(
-        self, cmd: str, *, output_fd: int, cwd: str | None = None, cwd_file: str | None = None
+        self, cmd: str, *, output_fd: int, cwd: str | None = None, cwd_file: str | None = None,
+        sandbox: bool = False,
     ) -> ShellProcess:
         """
         Starts a shell command without waiting for it (the Bash tool's `exec`): stdout and stderr
         go to `output_fd`, it runs from `cwd` (the workspace root when `None`), and with
         `cwd_file` the shell writes its final directory there (`pwd -P >|`), where the
-        workspace can read it back.
+        workspace can read it back. `sandbox` as for `execute`.
         """
         ...

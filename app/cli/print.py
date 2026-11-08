@@ -118,13 +118,14 @@ WAITING_FOR_AGENTS_POLL_SECONDS = 0.1
 RUN_ID_NAMESPACE = uuid.UUID("7d1f9c52-5b0e-4f4e-9a59-2f3c0a8f6b11")
 
 
-def build_builtin_tools() -> list[Tool]:
+def build_builtin_tools(sandbox: Any = None) -> list[Tool]:
     """
     The Phase 0 roster: the file primitives, Bash and RunTests, TodoWrite, and WebFetch (2026-10-28,
     upstream's base tool, which its verification agent relies on).
 
     No per-run template vars, as in claude-code: a tool's prompt is static, and what varies per
-    run (the workspace, the phase) reaches the tool through `ToolContext` at call time.
+    run (the workspace, the phase) reaches the tool through `ToolContext` at call time. The one
+    exception is upstream's: Bash's prompt carries the run's `sandbox` section (`prompt.ts`).
     """
     from app.tdd.run_tests_tool.run_tests_tool import build_run_tests_tool
     from app.tools.bash_tool.bash_tool import build_bash_tool
@@ -142,7 +143,7 @@ def build_builtin_tools() -> list[Tool]:
         build_edit_tool(),
         build_glob_tool(),
         build_grep_tool(),
-        build_bash_tool(),
+        build_bash_tool(sandbox),
         build_run_tests_tool(),
         build_todo_write_tool(),
         build_web_fetch_tool(),
@@ -160,6 +161,7 @@ def main_thread_tools(
     coordinator_filter: bool = True,
     extra_agents: Mapping[str, Any] | None = None,
     plugin_agents: Sequence[Any] = (),
+    sandbox: Any = None,
 ) -> list[Tool]:
     """
     The main thread's roster: the built-ins plus the Agent tool, as upstream's main thread
@@ -197,7 +199,7 @@ def main_thread_tools(
     from app.tools.task_output_tool.task_output_tool import build_task_output_tool
     from app.tools.task_stop_tool.task_stop_tool import build_task_stop_tool
 
-    built_ins = build_builtin_tools()
+    built_ins = build_builtin_tools(sandbox)
     coordinator = is_coordinator_mode(config)
     definitions = get_agent_definitions_with_overrides(project_dir=project_root, user_home=home,
                                                        plugin_agents=plugin_agents)
@@ -696,10 +698,11 @@ async def open_session_run(
             mcp_tools = session_mcp.all_tools()
             built_ins = main_thread_tools(
                 config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp_tools,
-                extra_agents=extra_agents, plugin_agents=plugin_agents)
+                extra_agents=extra_agents, plugin_agents=plugin_agents, sandbox=sandbox)
             planning_tools = (
                 main_thread_tools(config, deps, root_dir, home, skill_registry=skill_registry, mcp_tools=mcp_tools,
-                                  coordinator_filter=False, extra_agents=extra_agents, plugin_agents=plugin_agents)
+                                  coordinator_filter=False, extra_agents=extra_agents, plugin_agents=plugin_agents,
+                                  sandbox=sandbox)
                 if coordinator else built_ins
             )
 
@@ -870,6 +873,11 @@ async def open_session_run(
         ctx.sandbox_manager = sandbox
         if workspace is not None and hasattr(workspace, "sandbox_manager"):
             workspace.sandbox_manager = sandbox
+        if sandbox.is_sandboxing_enabled():
+            # Bash's prompt now describes the started sandbox (`getSimpleSandboxSection`).
+            build_rosters()
+            pool_cache["key"] = None
+            ctx.tools = refresh_tools()
         # An approved edit of `.tddagents/project.json` is read at once (2026-11-08), as upstream's
         # cron scheduler reads `.claude/scheduled_tasks.json`.
         from app.tdd.project_config_watcher import start_project_config_watcher

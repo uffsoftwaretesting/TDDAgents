@@ -22,7 +22,12 @@ The per-command path validators (`validateSinglePathCommand`) live in
 read-only classifier (`readOnlyValidation.ts`, which `BashTool.isReadOnly` calls) in
 `tools/bash_tool/read_only_validation.py`; each is wired here where upstream calls it.
 
-Not ported: sandbox auto-allow, the Haiku prompt-rule classifiers, the `BASH_CLASSIFIER`
+The sandbox (`checkSandboxAutoAllow`): a command the run's sandbox will hold is allowed unless a deny or
+ask rule matches it or one of its subcommands, when `autoAllowBashIfSandboxed` is on
+(`bash_tool_has_permission_in_sandbox` carries the run's sandbox and the call's input into the recursive
+checks, as upstream spreads `input` into each segment's).
+
+Not ported: the Haiku prompt-rule classifiers, the `BASH_CLASSIFIER`
 pending checks, prefix suggestions from the model (`getCommandSubcommandPrefix`: every
 suggestion is the exact command, as when upstream's injected prefix function is the default), and the
 `MAX_SUBCOMMANDS_FOR_SECURITY_CHECK` fan-out cap — every subcommand is checked, which is
@@ -34,7 +39,8 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import replace
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from app.tools.bash_tool.bash_security import (
@@ -49,7 +55,7 @@ from app.tools.bash_tool.path_validation import (
     validate_path,
     validate_single_path_command,
 )
-from app.tools.bash_tool.read_only_validation import is_bash_read_only
+from app.tools.bash_tool.read_only_validation import SANDBOXED_OUTSIDE_ORIGINAL_CWD, is_bash_read_only
 from app.tools.bash_tool.sed_validation import check_sed_constraints
 from app.types.permissions import (
     PermissionBehavior,
@@ -190,6 +196,11 @@ def strip_safe_wrappers(command: str) -> str:
         for pattern in _SAFE_WRAPPER_PATTERNS:
             stripped = pattern.sub("", stripped, count=1) if pattern.match(stripped) else stripped
     return _js_trim(stripped)
+
+
+#: `BINARY_HIJACK_VARS`: variables that can make any binary run something else; never stripped as a
+#: harmless prefix (`stripAllLeadingEnvVars`' blocklist, `shouldUseSandbox`'s excluded-command matching).
+BINARY_HIJACK_VARS = re.compile(r"^(LD_|DYLD_|PATH$)")
 
 
 def strip_all_leading_env_vars(command: str, blocklist: re.Pattern[str] | None = None) -> str:
@@ -653,6 +664,86 @@ def check_command_operator_permissions(command: str, context: ToolPermissionCont
     return _segmented_command_permission_result(command, stripped_segments, context, cwd)
 
 
+# ── the sandbox auto-allow ───────────────────────────────────────────────────
+
+#: `AUTO_ALLOWED_WITH_SANDBOX`: `checkSandboxAutoAllow`'s reason.
+AUTO_ALLOWED_WITH_SANDBOX = "Auto-allowed with sandbox (autoAllowBashIfSandboxed enabled)"
+
+
+@dataclass(frozen=True)
+class BashSandboxCheck:
+    """The run's sandbox and the call's input, for the permission check in progress."""
+
+    sandbox: Any
+    input_args: Mapping[str, Any]
+
+
+_SANDBOX_CHECK: ContextVar[BashSandboxCheck | None] = ContextVar("bash_sandbox_check", default=None)
+
+
+def check_sandbox_auto_allow(command: str, context: ToolPermissionContext) -> PermissionResult:
+    """
+    `checkSandboxAutoAllow`: a deny rule on the command, then on any of its subcommands, denies; then an ask
+    rule on a subcommand, then on the command, asks; anything else is allowed with the sandbox.
+    """
+    trimmed = _js_trim(command)
+    deny, ask, _allow = matching_rules_for_input(command, context, "prefix")
+    if deny:
+        return _deny_for_rule(trimmed, deny[0])
+    subcommands = split_command(trimmed)
+    if len(subcommands) > 1:
+        first_ask: PermissionRule | None = None
+        for sub in subcommands:
+            sub_deny, sub_ask, _sub_allow = matching_rules_for_input(sub, context, "prefix")
+            if sub_deny:
+                return _deny_for_rule(trimmed, sub_deny[0])
+            if first_ask is None and sub_ask:
+                first_ask = sub_ask[0]
+        if first_ask is not None:
+            return _ask_for_rule(first_ask)
+    if ask:
+        return _ask_for_rule(ask[0])
+    return PermissionResult(
+        behavior=PermissionBehavior.ALLOW,
+        updated_input={"command": command},
+        decision_reason={"type": "other", "reason": AUTO_ALLOWED_WITH_SANDBOX},
+    )
+
+
+def _sandbox_auto_allow(command: str, context: ToolPermissionContext) -> PermissionResult | None:
+    """`bashToolHasPermission`'s auto-allow step, for the run's sandbox (`None`: it does not apply)."""
+    # Imported here: `should_use_sandbox` imports this module's stripping helpers.
+    from app.tools.bash_tool.should_use_sandbox import should_use_sandbox
+
+    check = _SANDBOX_CHECK.get()
+    if check is None or check.sandbox is None:
+        return None
+    sandbox = check.sandbox
+    if not (sandbox.is_sandboxing_enabled() and sandbox.is_auto_allow_bash_if_sandboxed_enabled()
+            and should_use_sandbox({**check.input_args, "command": command}, sandbox)):
+        return None
+    result = check_sandbox_auto_allow(command, context)
+    return result if result.behavior != PermissionBehavior.PASSTHROUGH else None
+
+
+def bash_tool_has_permission_in_sandbox(
+    input_args: Mapping[str, Any], context: ToolPermissionContext, cwd: str, *, sandbox: Any, original_cwd: str,
+) -> PermissionResult:
+    """
+    `bashToolHasPermission(input, context)` with the run's sandbox: its auto-allow applies to the command
+    and to each segment checked on the way, and git outside the original directory is never read-only
+    while sandboxing is on.
+    """
+    gate = sandbox is not None and sandbox.is_sandboxing_enabled() and cwd != original_cwd
+    check_token = _SANDBOX_CHECK.set(BashSandboxCheck(sandbox=sandbox, input_args=dict(input_args)))
+    gate_token = SANDBOXED_OUTSIDE_ORIGINAL_CWD.set(gate)
+    try:
+        return bash_tool_has_permission(str(input_args.get("command") or ""), context, cwd)
+    finally:
+        SANDBOXED_OUTSIDE_ORIGINAL_CWD.reset(gate_token)
+        _SANDBOX_CHECK.reset(check_token)
+
+
 # ── bashToolHasPermission ────────────────────────────────────────────────────
 
 def bash_tool_has_permission(command: str, context: ToolPermissionContext, cwd: str) -> PermissionResult:
@@ -664,6 +755,10 @@ def bash_tool_has_permission(command: str, context: ToolPermissionContext, cwd: 
     parsed = try_parse_shell_command(command)
     if not parsed.success:
         return _ask(f"Command contains malformed syntax that cannot be parsed: {parsed.error}")
+
+    sandbox_result = _sandbox_auto_allow(command, context)
+    if sandbox_result is not None:
+        return sandbox_result
 
     exact = bash_tool_check_exact_match_permission(command, context)
     if exact.behavior == PermissionBehavior.DENY:
@@ -782,13 +877,17 @@ def compound_suggestions(results: Mapping[str, PermissionResult]) -> tuple[Any, 
 
 __all__ = [
     "ACCEPT_EDITS_ALLOWED_COMMANDS",
+    "AUTO_ALLOWED_WITH_SANDBOX",
     "ANT_ONLY_SAFE_ENV_VARS",
     "BASH_TOOL_NAME",
+    "BINARY_HIJACK_VARS",
     "MAX_DIRS_TO_LIST",
     "SAFE_ENV_VARS",
     "bash_tool_check_exact_match_permission",
     "bash_tool_check_permission",
     "bash_tool_has_permission",
+    "bash_tool_has_permission_in_sandbox",
+    "check_sandbox_auto_allow",
     "check_command_and_suggest_rules",
     "check_command_operator_permissions",
     "check_path_constraints",

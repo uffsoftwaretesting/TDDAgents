@@ -7,7 +7,10 @@ through the workspace from the tracked working directory, the parent's copy of t
 descriptor closed, and a `ShellCommand` whose result arrives when the shell exits. A
 foreground command that finishes leaves its final directory (`pwd -P`) in a temp file, which
 becomes the tracked cwd (`setCwd`) when it is still a directory; the file is then removed.
-Not ported: the sandbox wrapper, PowerShell, the shell snapshot (the login shell stands in) and
+`should_use_sandbox` (the caller's `shouldUseSandbox`) runs the command in the run's sandbox: the
+workspace wraps it (`LocalWorkspace._argv`) and cleans up after it, and the cwd file lives in the
+sandbox's writable temp directory (`cwd-<id>`, `bashProvider.ts`).
+Not ported: PowerShell, the shell snapshot (the login shell stands in, unsandboxed) and
 `CLAUDE_CODE_SHELL_PREFIX`.
 """
 
@@ -34,8 +37,13 @@ from app.utils.task.task_output import TaskOutput
 from app.workspace.base import WorkspaceError
 
 
-def cwd_file_path(task_id: str) -> str:
-    """Where the shell writes its final directory (`<tmpdir>/claude-<id>-cwd` upstream)."""
+def cwd_file_path(task_id: str, sandbox_tmp_dir: str | None = None) -> str:
+    """
+    Where the shell writes its final directory: `<tmpdir>/tddagents-<id>-cwd` (upstream
+    `claude-<id>-cwd`), or `<sandbox tmp dir>/cwd-<id>` for a sandboxed command, which can write only there.
+    """
+    if sandbox_tmp_dir is not None:
+        return os.path.join(sandbox_tmp_dir, f"cwd-{task_id}")
     return os.path.join(tempfile.gettempdir(), f"tddagents-{task_id}-cwd")
 
 
@@ -59,6 +67,7 @@ async def exec_shell(
     timeout_ms: float,
     should_auto_background: bool = False,
     prevent_cwd_changes: bool = False,
+    should_use_sandbox: bool = False,
 ) -> ShellCommand | FinishedShellCommand:
     """`exec`: start `command` and return its `ShellCommand` (or a finished one if it never ran)."""
     task_id = generate_task_id("local_bash")
@@ -69,10 +78,13 @@ async def exec_shell(
     workspace = getattr(context, "workspace", None)
     if workspace is None:
         return create_failed_command("No workspace available", task_output)
-    cwd_file = None if prevent_cwd_changes else cwd_file_path(task_id)
+    sandbox = getattr(context, "sandbox_manager", None) if should_use_sandbox else None
+    sandbox_tmp_dir = str(sandbox.temp_dir) if sandbox is not None else None
+    cwd_file = None if prevent_cwd_changes else cwd_file_path(task_id, sandbox_tmp_dir)
     fd = open_task_output_for_append(task_output.path)
     try:
-        process = await workspace.spawn(command, output_fd=fd, cwd=get_cwd(context), cwd_file=cwd_file)
+        process = await workspace.spawn(command, output_fd=fd, cwd=get_cwd(context), cwd_file=cwd_file,
+                                        sandbox=should_use_sandbox)
     except WorkspaceError as exc:
         return create_failed_command(str(exc), task_output)
     finally:

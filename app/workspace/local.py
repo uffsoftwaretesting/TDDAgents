@@ -45,6 +45,8 @@ logger = logging.getLogger("TDDOrchestrator.LocalWorkspace")
 
 #: git stops its upward search for a repository at these directories.
 GIT_CEILING_ENV = "GIT_CEILING_DIRECTORIES"
+#: Upstream's `CLAUDE_CODE_TMPDIR`, set for a sandboxed command to its temp directory (`bashProvider.ts`).
+SANDBOX_TMPDIR_ENV = "TDDAGENTS_TMPDIR"
 
 #: Where the session projects live, unless overridden (Phase 13, user decision).
 WORKSPACES_DIR_ENV = "TDDAGENTS_WORKSPACES_DIR"
@@ -91,17 +93,22 @@ def kill_process_group(pid: int) -> None:
 
 
 class LocalShellProcess:
-    """A host shell command spawned by `LocalWorkspace.spawn`."""
+    """A host shell command spawned by `LocalWorkspace.spawn`; `on_exit` runs once it has exited."""
 
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, on_exit: Callable[[], None] | None = None) -> None:
         self._process = process
+        self._on_exit = on_exit
 
     @property
     def pid(self) -> int | None:
         return self._process.pid
 
     async def wait(self) -> int:
-        return await self._process.wait()
+        code = await self._process.wait()
+        on_exit, self._on_exit = self._on_exit, None
+        if on_exit is not None:
+            on_exit()
+        return code
 
     def kill_tree(self) -> None:
         kill_process_group(self._process.pid)
@@ -273,11 +280,52 @@ class LocalWorkspace:
         base = orchestrator_free_environment(os.environ)
         return {**base, **self._env, **(env or {}), GIT_CEILING_ENV: str(self._root.parent)}
 
+    def _sandbox(self) -> Any:
+        if self.sandbox_manager is None:
+            raise WorkspaceProviderError("A sandboxed command was requested, but no sandbox is attached")
+        return self.sandbox_manager
+
+    def _sandbox_environment(self, environment: dict[str, str]) -> dict[str, str]:
+        """
+        `bashProvider.ts`' `getEnvironmentOverrides` for a sandboxed command: `TMPDIR` (and upstream's
+        `CLAUDE_CODE_TMPDIR`, here `TDDAGENTS_TMPDIR`) at the sandbox's writable temp directory, created
+        with mode 0700 as `Shell.ts` creates it; zsh's `TMPPREFIX` inside it.
+        """
+        tmpdir = str(self._sandbox().temp_dir)
+        try:
+            os.makedirs(tmpdir, mode=0o700, exist_ok=True)
+        except OSError as exc:
+            logger.debug("Failed to create %s directory: %s", tmpdir, exc)
+        return {**environment, "TMPDIR": tmpdir, SANDBOX_TMPDIR_ENV: tmpdir, "TMPPREFIX": f"{tmpdir}/zsh"}
+
+    def _argv(self, script: str, sandbox: bool) -> list[str]:
+        """
+        The one wrap point (`Shell.ts` -> `exec`): unsandboxed, `bash -l -c <script>` as before;
+        sandboxed, the script wrapped by the run's sandbox (`wrapWithSandbox(script, '/bin/bash')`, the
+        bwrap command line) and run by a plain `bash -c`: the host's login profile never runs, and the
+        command's environment is TDDAgents' (TDDAgents has no shell snapshot to source inside).
+        """
+        if not sandbox:
+            return ["/bin/bash", "-l", "-c", script]
+        manager = self._sandbox()
+        try:
+            wrapped = manager.wrap_with_sandbox(script, "/bin/bash")
+        except Exception as exc:  # noqa: BLE001 - a wrap that fails runs nothing (fail closed)
+            raise WorkspaceProviderError(f"Could not sandbox the command: {exc}") from exc
+        return ["/bin/bash", "-c", str(wrapped)]
+
+    def _cleanup_after_command(self) -> None:
+        """`SandboxManager.cleanupAfterCommand()`: the mount points bwrap left, the planted bare-repo files."""
+        manager = self.sandbox_manager
+        if manager is not None:
+            manager.cleanup_after_command()
+
     def execute(
         self,
         cmd: str,
         timeout: float | None = None,
         env: dict[str, str] | None = None,
+        sandbox: bool = False,
     ) -> CommandResult:
         """
         Runs a shell command from the workspace root.
@@ -294,15 +342,18 @@ class LocalWorkspace:
         """
         limit = timeout if timeout is not None else Config.COMMAND_TIMEOUT
         environment = self._environment(env)
+        if sandbox:
+            environment = self._sandbox_environment(environment)
         started = time.monotonic()
         # `bashProvider.ts`: the session environment script (the project's venv activation, upstream's
         # `CLAUDE_ENV_FILE`) runs after the login profile and before the command (Phase 13).
         script = build_command(cmd, environment)
+        argv = self._argv(script, sandbox)
 
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
             try:
                 process = subprocess.Popen(
-                    ["/bin/bash", "-l", "-c", script],
+                    argv,
                     cwd=str(self._root),
                     env=environment,
                     stdin=subprocess.DEVNULL,
@@ -311,6 +362,8 @@ class LocalWorkspace:
                     start_new_session=True,
                 )
             except OSError as exc:
+                if sandbox:
+                    self._cleanup_after_command()
                 raise WorkspaceProviderError(f"Could not run local command '{cmd}': {exc}") from exc
             try:
                 code = process.wait(timeout=limit)
@@ -318,6 +371,9 @@ class LocalWorkspace:
                 kill_process_group(process.pid)
                 process.wait()
                 raise WorkspaceTimeout(f"Local command exceeded {limit}s: {cmd}") from exc
+            finally:
+                if sandbox:
+                    self._cleanup_after_command()
             out.seek(0)
             err.seek(0)
             stdout = out.read().decode("utf-8", errors="replace")
@@ -332,17 +388,22 @@ class LocalWorkspace:
         )
 
     async def spawn(
-        self, cmd: str, *, output_fd: int, cwd: str | None = None, cwd_file: str | None = None
+        self, cmd: str, *, output_fd: int, cwd: str | None = None, cwd_file: str | None = None,
+        sandbox: bool = False,
     ) -> LocalShellProcess:
         """
-        `Shell.ts` -> `exec` on the host: `bash -l -c` with the session environment, output to
-        `output_fd`, stdin on `/dev/null`, its own process group (upstream's `detached`).
+        `Shell.ts` -> `exec` on the host: `bash -l -c` with the session environment (or, `sandbox`,
+        the wrapped command, see `_argv`), output to `output_fd`, stdin on `/dev/null`, its own process
+        group (upstream's `detached`). A sandboxed command's mount points are cleaned up once it exits.
         """
         environment = self._environment()
+        if sandbox:
+            environment = self._sandbox_environment(environment)
         script = build_command(cmd, environment, cwd_file)
+        argv = self._argv(script, sandbox)
         try:
             process = await asyncio.create_subprocess_exec(
-                "/bin/bash", "-l", "-c", script,
+                *argv,
                 cwd=cwd or str(self._root),
                 env=environment,
                 stdin=subprocess.DEVNULL,
@@ -351,5 +412,7 @@ class LocalWorkspace:
                 start_new_session=True,
             )
         except OSError as exc:
+            if sandbox:
+                self._cleanup_after_command()
             raise WorkspaceProviderError(f"Could not run local command '{cmd}': {exc}") from exc
-        return LocalShellProcess(process)
+        return LocalShellProcess(process, self._cleanup_after_command if sandbox else None)

@@ -10,9 +10,10 @@ settings file — not a project `allow`, not `bypassPermissions` — can reach p
 the equivalent of upstream's managed-rules-only option, built into code. It **fails
 closed**: if the check itself raises, the call is denied.
 
-Upstream steps not ported, each because the mechanism is absent here: the sandbox
-auto-allow exception at 1b, the auto-mode classifier and denial tracking in the outer gate,
-and the PowerShell guard.
+Upstream steps not ported, each because the mechanism is absent here: the auto-mode classifier
+and denial tracking in the outer gate, and the PowerShell guard. Step 1b's sandbox exception is
+ported (`can_sandbox_auto_allow`): a tool-wide Bash ask rule lets a command the run's sandbox holds
+through to Bash's own check when `autoAllowBashIfSandboxed` is on.
 
 Rule-based permission evaluation (Part C2).
 
@@ -211,6 +212,22 @@ def _updated_input_or_fallback(result: PermissionResult, input_args: dict[str, A
     return result.updated_input if result.updated_input is not None else input_args
 
 
+def can_sandbox_auto_allow(tool: Tool, input_args: Mapping[str, Any], context: Any) -> bool:
+    """
+    Step 1b's `canSandboxAutoAllow`: Bash, the run's sandbox enabled with `autoAllowBashIfSandboxed`, and
+    this command sandboxed (`shouldUseSandbox`): its tool-wide ask rule then gives way to Bash's own check.
+    """
+    if tool.name != "Bash":
+        return False
+    sandbox = getattr(context, "sandbox_manager", None)
+    if sandbox is None or not sandbox.is_sandboxing_enabled() or not sandbox.is_auto_allow_bash_if_sandboxed_enabled():
+        return False
+    # Imported here: the Bash tool's modules import this one.
+    from app.tools.bash_tool.should_use_sandbox import should_use_sandbox
+
+    return should_use_sandbox(input_args, sandbox)
+
+
 async def _has_permissions_to_use_tool_inner(
     tool: Tool,
     input_args: dict[str, Any],
@@ -250,7 +267,7 @@ async def _has_permissions_to_use_tool_inner(
         )
 
     ask_rule = get_ask_rule_for_tool(perm_ctx, tool.name)
-    if ask_rule is not None:
+    if ask_rule is not None and not can_sandbox_auto_allow(tool, input_args, context):
         return PermissionResult(
             behavior=PermissionBehavior.ASK,
             message=create_permission_request_message(tool.name),
@@ -560,7 +577,7 @@ async def check_rule_based_permissions(
         )
 
     ask_rule = get_ask_rule_for_tool(perm_ctx, tool.name)
-    if ask_rule is not None:
+    if ask_rule is not None and not can_sandbox_auto_allow(tool, input_args, context):
         return PermissionResult(
             behavior=PermissionBehavior.ASK,
             message=create_permission_request_message(tool.name),
