@@ -30,12 +30,13 @@ PYTEST_COMMAND = (
 
 #: A declared configuration whose test patterns are the ones TDDAgents used to hard-code
 #: (`tests/` and `test/` directories, `test_*.py`, `*_test.py`): the phase tier, the fingerprint and
-#: RunTests read which files are tests from the project's configuration (2026-11-03). Test modules
-#: are `test_*.py` / `*_test.py`; everything else under `tests/` or `test/` is test support.
+#: RunTests read which files are tests from the project's configuration (2026-11-03). As the
+#: `tdd-project-config` skill's contract says (`references/shared.md`), `testFiles` matches every file
+#: of test code and `testSupportFiles` is the subset that never appears in a report (2026-11-08).
 TEST_PROJECT_CONFIG = ProjectConfig(
     test=PYTEST_COMMAND,
-    test_files=("test_*.py", "*_test.py"),
-    test_support_files=("tests/", "test/", "conftest.py"),
+    test_files=("tests/", "test/", "test_*.py", "*_test.py", "conftest.py"),
+    test_support_files=("conftest.py", "__init__.py", "fixtures/", "helpers/"),
     manifest_files=("requirements.txt",),
     exclude=("__pycache__/", ".venv/", ".pytest_cache/", ".coverage"),
     coverage_report=CoverageReportConfig(format="cobertura"),

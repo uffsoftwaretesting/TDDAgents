@@ -24,7 +24,8 @@ from app.tdd.suite_fingerprint import project_files
 def project_test_files(workspace: Any, rules: TestFileRules) -> frozenset[str] | None:
     """
     The project's test files: the files its `testFiles` patterns match, outside the excluded paths.
-    Test support (`testSupportFiles`: fixtures, helpers, test configuration) is not expected in a report.
+    Test support (`testSupportFiles`: fixtures, helpers, test configuration) is not expected in a report,
+    even when a `testFiles` pattern also matches it (`TestFileRules.is_test_file`).
     `None` when the workspace cannot be listed.
     """
     files = project_files(workspace, rules)

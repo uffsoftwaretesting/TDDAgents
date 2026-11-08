@@ -155,8 +155,13 @@ class TestFileRules:
         return bool(self.excluded.match_file(path))
 
     def is_test_file(self, path: str) -> bool:
-        """A test file: one the declared `testFiles` patterns match, outside the excluded paths."""
-        return not self.is_excluded(path) and bool(self.test_files.match_file(path))
+        """
+        A test file: one the declared `testFiles` patterns match, outside the excluded paths and not
+        declared as test support. Support wins (user decision 2026-11-08): a file declared in both lists
+        (`vitest.config.ts` beside `tests/`) is test configuration, and no runner names it in a report.
+        """
+        return (not self.is_excluded(path) and bool(self.test_files.match_file(path))
+                and not self.test_support_files.match_file(path))
 
     def is_support_file(self, path: str) -> bool:
         """Test support (fixtures, helpers, test configuration): `testSupportFiles`, outside the excluded paths."""

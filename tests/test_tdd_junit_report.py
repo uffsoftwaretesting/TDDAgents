@@ -149,8 +149,8 @@ CONFIG = ProjectConfig(test="t", test_files=("*_test.go", "tests/**/test_*.py"),
 def test_the_projects_test_files_are_the_declared_ones_outside_the_excluded_paths():
     ws = FakeWorkspace(files={"calc_test.go": "", "pkg/a_test.go": "", "vendor/x/y_test.go": "", "calc.go": "",
                               "tests/test_a.py": "", "tests/data/test_fixture.py": "", "tests/helper.py": ""})
-    assert project_test_files(ws, CONFIG.rules) == frozenset(
-        {"calc_test.go", "pkg/a_test.go", "tests/test_a.py", "tests/data/test_fixture.py"})
+    # `tests/data/test_fixture.py` matches `testFiles` but is declared support: never expected in a report.
+    assert project_test_files(ws, CONFIG.rules) == frozenset({"calc_test.go", "pkg/a_test.go", "tests/test_a.py"})
     assert project_test_files(object(), CONFIG.rules) is None
 
 
@@ -162,6 +162,23 @@ def test_uncollected_files_are_the_declared_test_files_the_report_lacks():
     assert uncollected_test_files(ws, CONFIG.rules, None) is None
     assert uncollected_test_files(ws, None, frozenset()) is None
     assert uncollected_test_files(object(), CONFIG.rules, frozenset()) is None
+
+
+def test_test_support_is_never_expected_in_a_report_even_when_test_files_match_it():
+    """The md→pdf rerun (2026-11-08): `vitest.config.ts` in both lists kept GREEN from counting."""
+    config = ProjectConfig(test="npx vitest run", test_files=("tests/", "vitest.config.ts"),
+                           test_support_files=("tests/helpers/", "vitest.config.ts"))
+    ws = FakeWorkspace(files={"tests/a.test.ts": "", "tests/helpers/fake.ts": "", "vitest.config.ts": "",
+                              "src/a.ts": ""})
+    rules = config.rules
+    assert project_test_files(ws, rules) == frozenset({"tests/a.test.ts"})
+    assert uncollected_test_files(ws, rules, frozenset({"tests/a.test.ts"})) == ()
+    # A test file only `testFiles` matches is still expected.
+    assert uncollected_test_files(ws, rules, frozenset()) == ("tests/a.test.ts",)
+    # The phase tier and the fingerprint still treat both as tests.
+    assert rules.is_test_code("vitest.config.ts") and rules.is_test_code("tests/helpers/fake.ts")
+    assert not rules.is_test_file("vitest.config.ts") and rules.is_support_file("vitest.config.ts")
+    assert not rules.is_test_code("src/a.ts")
 
 
 def test_the_failed_cases_are_listed_in_document_order_with_their_first_message_line():
