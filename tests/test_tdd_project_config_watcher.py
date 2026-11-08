@@ -224,6 +224,26 @@ def test_an_edit_that_would_break_a_valid_file_is_refused_with_its_issues():
     assert "\n- `test` is required" in result.message
 
 
+def test_an_edit_that_excludes_the_tests_is_refused():
+    """Gap (d): the Edit check uses `parse_project_config`, so it refuses an `exclude` that hides tests."""
+    data = json.loads(VALID)
+    edited = json.dumps({**data, "exclude": [*data.get("exclude", []), "tests/", "*.log"]})
+    result = validate_input_for_project_config_edit("/proj/.tddagents/project.json", "/proj", VALID, lambda: edited)
+    assert result is not None and not result.valid
+    assert result.message.endswith(
+        "\n- `exclude` accepts generated directories only (patterns ending in `/` that cover no `testFiles` "
+        "pattern): tests/, *.log")
+
+
+def test_a_watched_file_that_excludes_the_tests_is_no_configuration():
+    s, ws = store(), FakeWorkspace(files=dict(FILES))
+    assert apply_text(s, ws, replace(CONFIG, exclude=("tests/",)).to_json()) is True
+    assert s.get().project_config is None
+    assert s.get().project_config_issues == (
+        "`exclude` accepts generated directories only (patterns ending in `/` that cover no `testFiles` pattern): "
+        "tests/",)
+
+
 def test_a_valid_edit_an_invalid_file_and_another_file_pass():
     good = VALID.replace("npx vitest run", "npm test")
     assert validate_input_for_project_config_edit("/proj/.tddagents/project.json", "/proj", VALID,

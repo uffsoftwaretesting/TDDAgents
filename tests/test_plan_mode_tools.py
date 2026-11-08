@@ -302,6 +302,10 @@ def test_the_call_refuses_a_plan_without_items_and_a_session_without_plans(tmp_p
       "testSupportFiles, manifestFiles, exclude)",
       "`test` is required: the shell command that runs the whole test suite",
       "`testFiles` must name at least one pattern"]),
+    ('\n## Project Configuration\n```json\n{"version": 1, "test": "t", "testFiles": ["tests/"], '
+     '"exclude": ["tests/", ".env"]}\n```\n',
+     ["`exclude` accepts generated directories only (patterns ending in `/` that cover no `testFiles` pattern): "
+      "tests/, .env"]),
 ])
 def test_a_plan_without_a_usable_project_configuration_is_refused(tmp_path: Path, section: str, issues: list[str]):
     plan = "# Plan\n\n## Implementation Plan\n1. add two numbers\n" + section

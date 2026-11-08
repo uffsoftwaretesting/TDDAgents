@@ -16,6 +16,9 @@ barriers still need to know three things about a project, and the project declar
   own sources (`exclude`: dependencies, build output, caches). Each is a list of gitignore patterns
   relative to the project root, matched with the `pathspec` gitignore matcher the permission rules
   use (`app/utils/permissions/filesystem.py`). `.git/` and `.tddagents/` are always excluded.
+  `exclude` accepts generated directories only (user decision 2026-11-08, `_check_exclude`): every
+  pattern ends in `/`, and none may cover a declared test file, judged from the patterns alone (no
+  disk check: a dependency tree such as `node_modules/` ships `*.test.*` files of its own).
 
 The Analyst proposes the configuration in the plan file's `## Project Configuration` section
 (`app/tdd/plan.py::parse_project_configuration`), the user approves it with the plan, and
@@ -238,6 +241,58 @@ def _check_patterns(data: dict[str, Any], key: str, issues: list[str], *, requir
     return patterns
 
 
+#: The characters that make a gitignore path component a glob rather than a literal name.
+_GLOB_CHARACTERS = frozenset("*?[\\")
+
+
+def literal_prefix(pattern: str) -> str:
+    """
+    The leading components of a gitignore pattern that are literal names, as a root-relative path: `src/test/`
+    is `src/test`, `tests/test_*.py` is `tests`, `**/dist/` and `*_test.go` are empty (no literal prefix).
+    """
+    components = pattern.strip().strip("/").split("/")
+    literal: list[str] = []
+    for component in components:
+        if not component or _GLOB_CHARACTERS & set(component):
+            break
+        literal.append(component)
+    return "/".join(literal)
+
+
+def _overlaps(prefix: str, other: str) -> bool:
+    """Whether one root-relative literal path is the other or lies inside it."""
+    return bool(prefix and other) and (prefix == other or other.startswith(f"{prefix}/")
+                                       or prefix.startswith(f"{other}/"))
+
+
+def _check_exclude(exclude: tuple[str, ...], test_files: tuple[str, ...], issues: list[str]) -> None:
+    """
+    `exclude` accepts generated directories only: a pattern that does not end in `/`, or one whose literal
+    prefix is, contains or lies inside a `testFiles` pattern's literal prefix, or that matches a `testFiles`
+    pattern that is a literal path, is refused. Negated `testFiles` patterns name no test file.
+    """
+    declared = [pattern for pattern in test_files if not pattern.startswith("!")]
+    offending: list[str] = []
+    for pattern in exclude:
+        if not pattern.endswith("/"):
+            offending.append(pattern)
+            continue
+        if pattern.startswith("!"):
+            continue  # a negation hides nothing
+        prefix = literal_prefix(pattern)
+        spec = _spec((pattern,))
+        for test in declared:
+            literal = literal_prefix(test)
+            whole = literal == test.strip().strip("/")
+            if _overlaps(prefix, literal) or (whole and literal and spec.match_file(
+                    f"{literal}/" if test.strip().endswith("/") else literal)):
+                offending.append(pattern)
+                break
+    if offending:
+        issues.append("`exclude` accepts generated directories only (patterns ending in `/` that cover no "
+                      f"`testFiles` pattern): {', '.join(offending)}")
+
+
 def _check_command(data: dict[str, Any], key: str, issues: list[str], *, required: bool) -> str | None:
     if key not in data:
         if required:
@@ -286,6 +341,7 @@ def parse_project_config(data: Any) -> tuple[ProjectConfig | None, tuple[str, ..
     junit = _check_report_path(data["junitReport"], "junitReport", issues) if "junitReport" in data else None
     coverage = _check_coverage(data["coverageReport"], issues) if "coverageReport" in data else None
     patterns = {key: _check_patterns(data, key, issues, required=key == "testFiles") for key in _PATTERN_KEYS}
+    _check_exclude(patterns["exclude"], patterns["testFiles"], issues)
     if issues or test is None:
         return None, tuple(issues)
     return ProjectConfig(
@@ -351,6 +407,7 @@ __all__ = [
     "ProjectConfig",
     "TestFileRules",
     "invalid_project_config_note",
+    "literal_prefix",
     "load_project_config",
     "parse_project_config",
     "parse_project_config_text",
