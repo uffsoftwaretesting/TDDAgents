@@ -2301,6 +2301,29 @@ verbatim):*
 - Both Analysts left out the reporter option that names files (vitest `addFileAttribute`, pytest
   `junit_family=xunit1`), so the "uncollected test files" check read "unknown" — stated, as decided.
 
+*Live md→pdf runs (2026-11-08, the same request in TypeScript and Python; Claude Code answered for the
+user, the recommended option every time):*
+
+- **Python** (`tdd-d3113aede6344616`, FastAPI + markdown + WeasyPrint): 8 items, 271 tests, 100%
+  coverage; the agent's own end-to-end check (clean copy, server, `curl`, a real PDF read back with
+  `pdftotext`) passed, and so did the clean final run. The Analyst planned no `.env`, only `.env.example`
+  (the `.env` is gitignored), although the request asked for both.
+- **TypeScript** (`tdd-fc1d1e6f87654344`, Fastify + markdown-it + Puppeteer): 12 items, 411 tests, 96.5%
+  coverage, a real PDF served; the clean final run read **NOT passing, 1 test failed**: a scaffold test
+  asserts that `.env` exists, and the project's own `.gitignore` (and its declared `exclude`) leave
+  `.env` out of the copy, as of any fresh clone. The final run did its job. Both outcomes come from the
+  same tension in the request (a `.env` file that good practice keeps out of version control); user
+  decision: record it, change nothing in the generated projects.
+- The final-run report gave only "1 failed": vitest's `--reporter=junit` replaces its console output, so
+  the raw output named no test. **RunTests and the final run now name each failed or errored test**
+  from the JUnit report, below its counts (`FailedCase`, `failed_case_lines`; user decision
+  2026-11-08): `Failed test: <classname> > <name> (<file>): <first message line>`, verbatim, in document
+  order, with no cap (the tool-result budget already bounds the output).
+- npm 11 skips dependencies' install scripts it hasn't been told to allow (`allowScripts`), so
+  Puppeteer's postinstall (the Chrome download) did not run in the clean copy; the tests still passed
+  because the Chrome the agent had installed lives in the user cache, outside the project.
+- The "uncollected test files" check read "unknown" in both runs again (no reporter named files).
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

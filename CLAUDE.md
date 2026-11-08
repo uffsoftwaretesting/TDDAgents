@@ -146,8 +146,9 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 project's declared `test` command (always the whole suite) with `TDDAGENTS_JUNIT_REPORT` /
 `TDDAGENTS_COVERAGE_REPORT` pointing into `.tddagents/reports/`, then reports the exit code with
 its shell meaning (`SHELL_EXIT_SEMANTICS`), what the JUnit report records (tests, failures, errors,
-skips, the files it names), the coverage the declared cobertura/lcov report records, a
-`TDD ledger:` line with the phase rule (`PHASE_RULES`), then the raw output. `judge` decides:
+skips, the files it names, each failed or errored test with its message), the coverage the declared
+cobertura/lcov report records, a `TDD ledger:` line with the phase rule (`PHASE_RULES`), then the raw
+output. `judge` decides:
 exit 0 is a pass only if the report records tests and no failures, errors or skips; any other
 non-zero exit is a failed run; 126/127, signals, timeouts and a missing configuration are errors
 and leave the ledger untouched. A test file the report does not name did not run ("unknown" when
