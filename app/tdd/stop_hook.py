@@ -19,7 +19,7 @@ PostToolUse hooks that used to live here:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage
 
@@ -32,6 +32,9 @@ from app.tdd.tdd_plan_tool.tdd_plan_tool import UPDATE_PLAN_TOOL_NAME
 from app.tools.ask_user_question_tool.ask_user_question_tool import (
     ASK_USER_QUESTION_TOOL_NAME,
 )
+from app.types.hooks import get_stop_hook_message
+from app.utils.debug import log_for_debugging
+from app.utils.messages import HookBlockingError
 
 if TYPE_CHECKING:
     from app.query.config import RunConfig
@@ -44,6 +47,13 @@ if TYPE_CHECKING:
 #: question at every refusal: a live CPF run asked the same thing three times and never acted.
 ASK_THE_USER = ("Escalate to the user with AskUserQuestion only when you're genuinely stuck after investigation, "
                 "not as a first response to friction.")
+#: A fact the refusal adds beside `ASK_THE_USER` (TDDAgents' text, 2026-11-08): this hook blocks every
+#: stop, so a question asked in the reply's text is never answered. The md→pdf rerun's model wrote
+#: "reply 1 or 2" four times in a row before it called AskUserQuestion.
+PLAIN_TEXT_QUESTION = ("A question asked in plain text gets no answer while the cycle is incomplete: the turn "
+                       "goes on.")
+#: The `command` this hook's blocking error carries (`HookBlockingError`), as a configured hook's names it.
+TDD_STOP_HOOK_COMMAND = "tdd_phase_incomplete_hook"
 
 #: RED's two ways forward (user decision 2026-10-28). A plan can hold a sub-requirement whose
 #: behaviour an earlier one already built; RED still needs tests new or changed for it.
@@ -127,6 +137,19 @@ def incomplete_cycle_message(ledger: PhaseLedger, state: LoopState) -> str:
             f"{COVERAGE_RULE_OF_THUMB:.0f}%; last measured: {figure}), then run RunTests until every test passes.")
 
 
+def user_input_waiting(context: Any) -> bool:
+    """
+    Whether the user has typed something the main thread has not read yet (2026-11-08): a command in
+    the session's queue for the main thread that is the user's own (not a background task's
+    `task-notification`, not a system-generated meta prompt).
+    """
+    queue = getattr(context, "command_queue", None)
+    if queue is None or getattr(context, "agent_id", None):
+        return False
+    return any(command.agent_id is None and command.mode != "task-notification" and not command.is_meta
+               for command in queue.snapshot())
+
+
 async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> StopHookResult:
     """
     Stop hook that blocks turn completion if the TDD cycle is incomplete (Part D5).
@@ -144,6 +167,12 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
 
     if ledger.is_cycle_complete:
         return StopHookResult()
+    if user_input_waiting(state.tool_context):
+        # Upstream ends a turn when its hook lets it, and the REPL then runs the queued input as the
+        # next turn (`useQueueProcessor`); it never reads the queue on the blocking path. So the user's
+        # waiting message lets this one stop through, and the next turn's end is judged again.
+        log_for_debugging("TDD stop hook: the user's queued input ends the turn; the cycle stays incomplete")
+        return StopHookResult()
 
     current = app_state.tdd_plan.current
     msg = incomplete_cycle_message(ledger, state)
@@ -151,5 +180,7 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
         msg = f"Current sub-requirement {current.id}: {current.text}\n\n{msg}"
 
     if any(getattr(tool, "name", None) == ASK_USER_QUESTION_TOOL_NAME for tool in state.tool_context.tools):
-        msg = f"{msg} {ASK_THE_USER}"
-    return StopHookResult(blocking_errors=(HumanMessage(content=msg),))
+        msg = f"{msg} {ASK_THE_USER} {PLAIN_TEXT_QUESTION}"
+    # `handleStopHooks`: a blocking error is a meta user message, `Stop hook feedback:\n…`.
+    feedback = get_stop_hook_message(HookBlockingError(blocking_error=msg, command=TDD_STOP_HOOK_COMMAND))
+    return StopHookResult(blocking_errors=(HumanMessage(content=feedback, additional_kwargs={"is_meta": True}),))

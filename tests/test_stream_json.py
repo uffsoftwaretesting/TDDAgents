@@ -515,7 +515,10 @@ def test_the_host_answers_a_question(python_workspace: Any, tmp_path: Path) -> N
     assert (request["tool_name"], request["tool_use_id"]) == ("AskUserQuestion", "q1")
     (answer,) = [m for m in model.seen[1].messages if isinstance(m, ToolMessage)]
     assert "Large" in str(answer.content)
-    assert lines_of(written)[-1]["result"] == "Large it is."
+    # The answer was streamed. The run then ends on the scripted model running out after the TDD stop
+    # hook's block, so the result is the block's meta user message, as upstream's `findLast`.
+    streamed = [json.dumps(m.get("message")) for m in lines_of(written) if m.get("type") == "assistant"]
+    assert any("Large it is." in text for text in streamed)
 
 
 def test_initialize_registers_the_hosts_hook_callbacks(python_workspace: Any, tmp_path: Path) -> None:

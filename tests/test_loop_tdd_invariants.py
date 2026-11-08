@@ -83,7 +83,7 @@ class ScriptedModel:
 
     async def __call__(self, state, config) -> AsyncIterator[AIMessage]:
         if state.messages and isinstance(state.messages[-1], HumanMessage) and \
-                str(state.messages[-1].content).startswith("TDD cycle incomplete"):
+                str(state.messages[-1].content).startswith("Stop hook feedback:\nTDD cycle incomplete"):
             self.stops_blocked += 1
         if self.turns:
             messages = self.turns.pop(0)
@@ -333,3 +333,56 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
         assert terminated.reason == Terminal.COMPLETED
         assert store.get().phase_ledger == PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True,
                                                        refactor_passed=True, coverage=95.0)
+
+
+class TestTheUsersQueuedInputEndsABlockedTurn(TestInvariant2NoCompletionWithoutTheWholeCycle):
+    """
+    The md→pdf rerun (2026-11-08): a model blocked by the TDD stop hook answered in text four times
+    while the user's message waited in the queue. Upstream ends the turn when its hook lets it and the
+    queue processor runs the input next (`useQueueProcessor`): the hook lets a stop through only then.
+    """
+
+    async def _queued_run(self, model: ScriptedModel, *commands: Any) -> tuple[Terminated, list[Any], Any]:
+        from app.utils.message_queue_manager import CommandQueue
+
+        queue = CommandQueue()
+        for command in commands:
+            queue.enqueue(command)
+        store = AppStateStore(AppState(project_config=TEST_PROJECT_CONFIG))
+        ctx = tool_context_for(store, workspace=FakeWorkspace(), command_queue=queue)
+        events: list[Any] = []
+        terminated: Terminated | None = None
+        async for ev in run_loop(initial_loop_state((HumanMessage(content="task"),), ctx), build_run_config("q"),
+                                 self._build_test_deps(model, [], [])):
+            events.append(ev)
+            if isinstance(ev, Terminated):
+                terminated = ev
+        assert terminated is not None
+        return terminated, events, queue
+
+    def test_a_queued_user_prompt_lets_the_stop_through_and_stays_queued_for_the_next_turn(self):
+        from app.utils.message_queue_manager import QueuedCommand
+
+        prompt = QueuedCommand(value="fix the configuration through the plan", mode="prompt", priority="next")
+        model = ScriptedModel([[AIMessage(content="I am blocked: reply 1 or 2.")], [AIMessage(content="again")]])
+        terminated, _, queue = asyncio.run(self._queued_run(model, prompt))
+        assert terminated.reason == Terminal.COMPLETED
+        assert model.stops_blocked == 0
+        # Not drained on the stop: the queue processor runs it as the next turn, as upstream's.
+        assert queue.snapshot() == (prompt,)
+
+    @pytest.mark.parametrize("command", [
+        {"value": "<task-notification/>", "mode": "task-notification"},
+        {"value": "for a worker", "mode": "prompt", "agent_id": "w1"},
+        {"value": "system prompt", "mode": "prompt", "is_meta": True},
+    ], ids=["task-notification", "a-workers", "meta"])
+    def test_other_queued_input_does_not_and_the_block_is_yielded_as_meta_feedback(self, command):
+        from app.utils.message_queue_manager import QueuedCommand
+
+        model = ScriptedModel([[AIMessage(content="done")], [AIMessage(content="really done")]])
+        terminated, events, _ = asyncio.run(self._queued_run(model, QueuedCommand(**command)))
+        assert terminated.reason == Terminal.ABORTED_STREAMING
+        assert model.stops_blocked == 2
+        feedback = [ev for ev in events if isinstance(ev, HumanMessage) and ev.additional_kwargs.get("is_meta")]
+        assert len(feedback) == 2 and all(
+            str(ev.content).startswith("Stop hook feedback:\nTDD cycle incomplete: RED.") for ev in feedback)

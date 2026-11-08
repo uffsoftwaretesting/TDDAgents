@@ -30,7 +30,7 @@ from app.services.tools.tool_execution import run_tool_use
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger
 from app.tdd.plan import ItemStatus, TddPlan, plan_path, save_plan
-from app.tdd.stop_hook import ASK_THE_USER, tdd_phase_incomplete_hook
+from app.tdd.stop_hook import ASK_THE_USER, PLAIN_TEXT_QUESTION, tdd_phase_incomplete_hook
 from app.tool import tool_context_for
 from app.tools.ask_user_question_tool.ask_user_question_tool import (
     ASK_USER_QUESTION_INPUT_SCHEMA,
@@ -299,7 +299,8 @@ def test_the_tdd_refusal_names_the_tool_only_when_the_pool_has_it():
     assert ASK_THE_USER not in str(plain.blocking_errors[0].content)
     state = stop_state([HumanMessage(content="go")], tools=(build_ask_user_question_tool(),))
     hinted = asyncio.run(tdd_phase_incomplete_hook(state, CONFIG))
-    assert str(hinted.blocking_errors[0].content) == f"{plain.blocking_errors[0].content} {ASK_THE_USER}"
+    assert str(hinted.blocking_errors[0].content) == (
+        f"{plain.blocking_errors[0].content} {ASK_THE_USER} {PLAIN_TEXT_QUESTION}")
     # Upstream's own escalation rule (`constants/prompts.ts`, Doing tasks), not an invitation to ask at every
     # refusal: a live run asked the same question three times with the old hint (2026-10-28).
     assert ASK_THE_USER == ("Escalate to the user with AskUserQuestion only when you're genuinely stuck after "

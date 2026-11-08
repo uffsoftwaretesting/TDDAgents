@@ -139,7 +139,8 @@ def test_tdd_hook_blocks_first_and_configured_blocks_are_added():
     d = stop([AggregatedHookResult(blocking_error=BLOCK)])
     result = run_stop(make_state(d))
     assert result.prevent_continuation is False
-    assert [m.content for m in result.blocking_errors] == [TDD_RED_MESSAGE, "Stop hook feedback:\nlint first"]
+    assert [m.content for m in result.blocking_errors] == [f"Stop hook feedback:\n{TDD_RED_MESSAGE}",
+                                                           "Stop hook feedback:\nlint first"]
 
 
 def test_the_tdd_hook_keeps_blocking_when_stop_hook_active_and_configured_hooks_still_run():
@@ -147,7 +148,8 @@ def test_the_tdd_hook_keeps_blocking_when_stop_hook_active_and_configured_hooks_
     d = stop([AggregatedHookResult(blocking_error=BLOCK)])
     result = run_stop(make_state(d, stop_hook_active=True))
     assert result.prevent_continuation is False
-    assert [m.content for m in result.blocking_errors] == [TDD_RED_MESSAGE, "Stop hook feedback:\nlint first"]
+    assert [m.content for m in result.blocking_errors] == [f"Stop hook feedback:\n{TDD_RED_MESSAGE}",
+                                                           "Stop hook feedback:\nlint first"]
     assert [event for event, _ in d.seen] == ["Stop"]
 
 

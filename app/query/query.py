@@ -551,7 +551,11 @@ async def run_loop(
             stop_hook_res = await deps.stop_hooks(
                 replace(state, messages=(*messages_for_query, *assistant_messages)), config
             )
-            # `handleStopHooks` yields its summary for the UI before the loop acts on the result.
+            # `handleStopHooks` yields each blocking error as the meta user message it is, then its
+            # summary for the UI (`stopHooks.ts`), before the loop acts on the result: the transcript and
+            # the engine's history keep the feedback the model was given.
+            for blocking_message in stop_hook_res.blocking_errors:
+                yield blocking_message
             for summary_message in stop_hook_res.messages:
                 yield summary_message
             if stop_hook_res.prevent_continuation:

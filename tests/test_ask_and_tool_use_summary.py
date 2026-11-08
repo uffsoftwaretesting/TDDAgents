@@ -158,6 +158,62 @@ def test_a_queued_notification_goes_through_process_user_input(monkeypatch):
     assert run.engine is not engine and isinstance(shown[-1], ResultMessage)
 
 
+def test_input_typed_during_a_blocked_tdd_turn_ends_it_and_is_the_next_turn():
+    """
+    The md→pdf rerun (2026-11-08): the TDD stop hook blocked a text-only model while the user's message
+    waited. The hook now lets the stop through when the user's input is queued, and the session's queue
+    processor (`wait_for_background_work`, upstream's `useQueueProcessor`) runs it as the next turn.
+    """
+    from types import SimpleNamespace
+
+    from app.cli.print import ask_turn, wait_for_background_work
+    from app.state.app_state_store import AppState
+    from app.tdd.stop_hook import tdd_phase_incomplete_hook
+    from app.utils.message_queue_manager import CommandQueue, QueuedCommand
+    from tests.conftest import FakeWorkspace
+    from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
+
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG))
+    ctx = tool_context_for(store, workspace=FakeWorkspace(), skill_registry=SkillRegistry([]),
+                           hook_dispatcher=ScriptedDispatcher(),
+                           permission_context=ToolPermissionContext(should_avoid_permission_prompts=True),
+                           command_queue=CommandQueue())
+    typed = "fix the configuration through the plan"
+    model = FakeModel([[AIMessage(content="I am blocked: reply 1 or 2.")], [AIMessage(content="On it.")]])
+
+    async def typing_model(state: Any, config: Any) -> AsyncIterator[Any]:
+        # The user types while the model's first answer streams.
+        if len(model.seen) == 0:
+            ctx.command_queue.enqueue(QueuedCommand(value=typed, mode="prompt", priority="next"))
+        async for message in model(state, config):
+            yield message
+
+    engine = QueryEngine(CONFIG, make_fake_deps(typing_model, stop_hooks=tdd_phase_incomplete_hook),
+                         transcript=FakeTranscript(), session_id="s", context=ctx)
+    run = SimpleNamespace(ctx=ctx, store=store, engine=engine, config=CONFIG, deps=engine.deps,
+                          transcript=engine.transcript, run_id="s", messages=[], user_specified_model=None,
+                          on_message=None, max_turns=None, max_budget_usd=None, json_schema=None)
+
+    async def scenario() -> list[Any]:
+        events = []
+        async for event in ask_turn(run, "start"):  # type: ignore[arg-type]
+            events.append(event)
+        # Model out of script after the next turn's block: a loud failure ends that turn.
+        try:
+            await wait_for_background_work(run)  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001 - the scripted model ran out, as expected
+            pass
+        return events
+
+    first_turn = asyncio.run(scenario())
+    # The first turn ended at its first stop: no block, no feedback message.
+    assert not [e for e in first_turn if isinstance(e, HumanMessage) and e.additional_kwargs.get("is_meta")]
+    # The typed message is the next turn's prompt, right after the model's text-only answer.
+    second = model.seen[1].messages
+    assert [m.content for m in second[-2:]] == ["I am blocked: reply 1 or 2.", typed]
+    assert ctx.command_queue.snapshot() == ()
+
+
 # ── extractReadFilesFromMessages ─────────────────────────────────────────────
 
 def test_strip_line_number_prefix():

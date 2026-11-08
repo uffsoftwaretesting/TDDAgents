@@ -93,7 +93,8 @@ def test_the_hook_names_what_the_cycle_still_needs(ledger, message):
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
         result = await tdd_phase_incomplete_hook(state, build_run_config("test-run"))
         assert result.prevent_continuation is False
-        assert [m.content for m in result.blocking_errors] == [message]
+        assert [m.content for m in result.blocking_errors] == [f"Stop hook feedback:\n{message}"]
+        assert all(m.additional_kwargs == {"is_meta": True} for m in result.blocking_errors)
 
     asyncio.run(go())
 
@@ -108,7 +109,7 @@ def test_the_hook_never_gives_up_even_when_stop_hook_active():
         for active in (None, True, True):
             result = await tdd_phase_incomplete_hook(dataclasses.replace(state, stop_hook_active=active), config)
             assert result.prevent_continuation is False
-            assert [m.content for m in result.blocking_errors] == [RED_MSG]
+            assert [m.content for m in result.blocking_errors] == [f"Stop hook feedback:\n{RED_MSG}"]
 
     asyncio.run(go())
 
@@ -163,7 +164,11 @@ def _refusal(app_state: AppState, workspace: Any = None, tools: tuple[Any, ...] 
         ctx = tool_context_for(AppStateStore(app_state), workspace=workspace, tools=tools)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
         result = await tdd_phase_incomplete_hook(state, build_run_config("test-run"))
-        return str(result.blocking_errors[0].content)
+        content = str(result.blocking_errors[0].content)
+        # `handleStopHooks`' shape (2026-11-08): the feedback prefix on a meta user message.
+        assert content.startswith("Stop hook feedback:\n") and result.blocking_errors[0].additional_kwargs == {
+            "is_meta": True}
+        return content.removeprefix("Stop hook feedback:\n")
 
     return asyncio.run(go())
 

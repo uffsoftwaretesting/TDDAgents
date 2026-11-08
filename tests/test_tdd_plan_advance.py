@@ -151,7 +151,7 @@ def test_the_block_names_the_current_sub_requirement():
     store = store_with(TddPlan.from_texts(["Add numbers"]))
     result = hook(store, None)
     content = str(result.blocking_errors[0].content)
-    assert content.startswith("Current sub-requirement 1: Add numbers\n\nTDD cycle incomplete:")
+    assert content.startswith("Stop hook feedback:\nCurrent sub-requirement 1: Add numbers\n\nTDD cycle incomplete:")
 
 
 def test_a_complete_cycle_never_blocks():
