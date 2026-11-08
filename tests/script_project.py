@@ -6,7 +6,9 @@ language-generic core and the clean final run with no Python and no network.
 * `vendor/<name>/` is the local "registry" `setup.sh` installs from, into `env/` (excluded, like
   `node_modules/` or `.venv/`);
 * `run-tests.sh` runs every `tests/test_*.sh` and writes a JUnit report naming each case's file to
-  `$TDDAGENTS_JUNIT_REPORT`. A test script exiting 77 is a skip (automake's convention).
+  `$TDDAGENTS_JUNIT_REPORT`. A test script exiting 77 is a skip (automake's convention). With `NO_FILES`
+  set the report names no file; with `CLASSNAME_FILES` set it names each file in the case's `classname`
+  only, as vitest's reporter does.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ for t in tests/test_*.sh; do
   code=$?
   file=" file=\\"$t\\""
   [ -n "$NO_FILES" ] && file=""
+  [ -n "$CLASSNAME_FILES" ] && file=" classname=\\"$t\\""
   if [ "$code" -eq 0 ]; then
     cases="$cases<testcase name=\\"$t\\"$file/>"
   elif [ "$code" -eq 77 ]; then

@@ -298,7 +298,7 @@ def test_the_call_refuses_a_plan_without_items_and_a_session_without_plans(tmp_p
     ("\n## Project Configuration\nnone yet\n",
      ['the "Project Configuration" section must hold exactly one fenced json block (found none)']),
     ('\n## Project Configuration\n```json\n{"version": 1, "testFiles": [], "shell": "x"}\n```\n',
-     ["unknown keys: shell (the keys are version, setup, test, junitReport, coverageReport, testFiles, "
+     ["unknown keys: shell (the keys are version, setup, test, listTests, junitReport, coverageReport, testFiles, "
       "testSupportFiles, manifestFiles, exclude)",
       "`test` is required: the shell command that runs the whole test suite",
       "`testFiles` must name at least one pattern"]),

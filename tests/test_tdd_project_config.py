@@ -33,6 +33,7 @@ FULL: dict[str, Any] = {
     "version": 1,
     "setup": "npm ci",
     "test": "npx vitest run",
+    "listTests": "npx vitest list --filesOnly",
     "junitReport": "reports/junit.xml",
     "coverageReport": {"path": "coverage/lcov.info", "format": "lcov"},
     "testFiles": ["**/*.test.ts"],
@@ -53,7 +54,8 @@ def test_a_full_configuration_parses_and_round_trips():
     config, issues = parse_project_config(FULL)
     assert issues == ()
     assert config == ProjectConfig(
-        test="npx vitest run", test_files=("**/*.test.ts",), setup="npm ci", junit_report="reports/junit.xml",
+        test="npx vitest run", list_tests="npx vitest list --filesOnly", test_files=("**/*.test.ts",), setup="npm ci",
+        junit_report="reports/junit.xml",
         coverage_report=CoverageReportConfig(format="lcov", path="coverage/lcov.info"),
         test_support_files=("test/helpers/",), manifest_files=("package.json", "package-lock.json"),
         exclude=("node_modules/", "dist/"))
@@ -66,8 +68,8 @@ def test_a_full_configuration_parses_and_round_trips():
 def test_a_minimal_configuration_takes_the_defaults():
     config, issues = parse_project_config({"version": 1, "test": "  go test ./...  ", "testFiles": ["*_test.go"]})
     assert issues == () and config is not None
-    assert (config.test, config.setup, config.junit_report, config.coverage_report) == (
-        "go test ./...", None, None, None)
+    assert (config.test, config.setup, config.junit_report, config.coverage_report, config.list_tests) == (
+        "go test ./...", None, None, None, None)
     assert config.junit_report_path == DEFAULT_JUNIT_REPORT
     assert config.to_dict() == {"version": 1, "test": "go test ./...", "testFiles": ["*_test.go"],
                                 "testSupportFiles": [], "manifestFiles": [], "exclude": []}
@@ -82,10 +84,12 @@ def test_a_minimal_configuration_takes_the_defaults():
     ({**FULL, "version": True}, ("`version` must be 1",)),
     ({**FULL, "version": 2}, ("`version` must be 1",)),
     ({**FULL, "extra": 1, "Test": 2}, (
-        "unknown keys: Test, extra (the keys are version, setup, test, junitReport, coverageReport, testFiles, "
-        "testSupportFiles, manifestFiles, exclude)",)),
+        "unknown keys: Test, extra (the keys are version, setup, test, listTests, junitReport, coverageReport, "
+        "testFiles, testSupportFiles, manifestFiles, exclude)",)),
     ({**FULL, "test": " "}, ("`test` must be a non-empty shell command",)),
     ({**FULL, "setup": 3}, ("`setup` must be a non-empty shell command",)),
+    ({**FULL, "listTests": "  "}, ("`listTests` must be a non-empty shell command",)),
+    ({**FULL, "listTests": ["go", "list"]}, ("`listTests` must be a non-empty shell command",)),
     ({**FULL, "junitReport": "../out.xml"}, (
         "`junitReport` must be a path inside the project, relative to its root (got '../out.xml')",)),
     ({**FULL, "junitReport": "/tmp/out.xml"}, (

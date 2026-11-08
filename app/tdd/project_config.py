@@ -9,6 +9,8 @@ barriers still need to know three things about a project, and the project declar
 * how to set it up from its manifests (`setup`) and run its whole suite (`test`). The test command
   writes a JUnit XML report to `$TDDAGENTS_JUNIT_REPORT` (or to the declared `junitReport`) and, when
   `coverageReport` is declared, a cobertura or lcov report to `$TDDAGENTS_COVERAGE_REPORT`;
+* when its JUnit report names no files (surefire, `go-junit-report`, nextest), how to list the test files
+  its runner collects (`listTests`, optional, 2026-11-08: `app/tdd/test_listing.py`);
 * which files are tests (`testFiles`), test support (`testSupportFiles`: fixtures, helpers, test
   configuration), manifests and lockfiles (`manifestFiles`), and what is never part of the project's
   own sources (`exclude`: dependencies, build output, caches). Each is a list of gitignore patterns
@@ -60,7 +62,7 @@ PROJECT_CONFIG_SKILL = "tdd-project-config"
 #: Directories that are never the project's own files, whatever the configuration says.
 ALWAYS_EXCLUDED_DIRS = (".git", ".tddagents")
 
-_KEYS = ("version", "setup", "test", "junitReport", "coverageReport", "testFiles", "testSupportFiles",
+_KEYS = ("version", "setup", "test", "listTests", "junitReport", "coverageReport", "testFiles", "testSupportFiles",
          "manifestFiles", "exclude")
 _COVERAGE_KEYS = ("path", "format")
 _PATTERN_KEYS = ("testFiles", "testSupportFiles", "manifestFiles", "exclude")
@@ -92,6 +94,8 @@ class ProjectConfig:
     test_support_files: tuple[str, ...] = ()
     manifest_files: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
+    #: The command whose stdout lists the collected test files, one per line (`app/tdd/test_listing.py`).
+    list_tests: str | None = None
     #: The matchers built from the patterns, once per configuration.
     _rules: list[TestFileRules] = field(default_factory=list, init=False, compare=False, repr=False)
 
@@ -111,6 +115,8 @@ class ProjectConfig:
         if self.setup is not None:
             data["setup"] = self.setup
         data["test"] = self.test
+        if self.list_tests is not None:
+            data["listTests"] = self.list_tests
         if self.junit_report is not None:
             data["junitReport"] = self.junit_report
         if self.coverage_report is not None:
@@ -276,6 +282,7 @@ def parse_project_config(data: Any) -> tuple[ProjectConfig | None, tuple[str, ..
         issues.append(f"`version` must be {PROJECT_CONFIG_VERSION}")
     test = _check_command(data, "test", issues, required=True)
     setup = _check_command(data, "setup", issues, required=False)
+    list_tests = _check_command(data, "listTests", issues, required=False)
     junit = _check_report_path(data["junitReport"], "junitReport", issues) if "junitReport" in data else None
     coverage = _check_coverage(data["coverageReport"], issues) if "coverageReport" in data else None
     patterns = {key: _check_patterns(data, key, issues, required=key == "testFiles") for key in _PATTERN_KEYS}
@@ -284,7 +291,7 @@ def parse_project_config(data: Any) -> tuple[ProjectConfig | None, tuple[str, ..
     return ProjectConfig(
         test=test, test_files=patterns["testFiles"], setup=setup, junit_report=junit, coverage_report=coverage,
         test_support_files=patterns["testSupportFiles"], manifest_files=patterns["manifestFiles"],
-        exclude=patterns["exclude"],
+        exclude=patterns["exclude"], list_tests=list_tests,
     ), ()
 
 

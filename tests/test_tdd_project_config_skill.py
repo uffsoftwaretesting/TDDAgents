@@ -36,6 +36,7 @@ from app.tdd.project_config import (
     JUNIT_REPORT_ENV,
     PROJECT_CONFIG_FILE,
     PROJECT_CONFIG_VERSION,
+    parse_project_config,
 )
 from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
 from app.tdd.prompt_vars import PROJECT_CONFIG_PROMPT_VARS, TDD_PROMPT_VARS
@@ -200,8 +201,8 @@ class TestShippedPrompt:
         assert configs, f"{language} has no example configuration"
         for config in configs:
             assert config["version"] == PROJECT_CONFIG_VERSION
-            assert set(config) <= {"version", "setup", "test", "junitReport", "coverageReport", "testFiles",
-                                   "testSupportFiles", "manifestFiles", "exclude"}
+            # Every example is a configuration `parse_project_config` accepts as it stands.
+            assert parse_project_config(config)[1] == (), config
             assert config["testFiles"]
             for support in config.get("testSupportFiles", []):
                 assert support in config["testFiles"] or any(

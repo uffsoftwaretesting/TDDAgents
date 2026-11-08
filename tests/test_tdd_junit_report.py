@@ -1,15 +1,17 @@
 """
 The JUnit report RunTests reads (`app/tdd/junit_report.py`, 2026-11-03), in the shapes the main
-ecosystems' runners write, and the declared test files a report does not name (`collection_gate.py`).
+ecosystems' runners write, what a report names and the declared test files a run did not run
+(`collection_gate.py`, strict since 2026-11-08).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from app.tdd.collection_gate import project_test_files, uncollected_test_files
+from app.tdd.collection_gate import Collection, observe_collection, project_test_files, resolve_ran
 from app.tdd.junit_report import FailedCase, JUnitReport, parse_junit_report
 from app.tdd.project_config import ProjectConfig
+from app.tdd.test_listing import TestListing
 from tests.conftest import FakeWorkspace
 
 #: pytest `-o junit_family=xunit1 --junitxml=…`: a `file` on every case.
@@ -154,14 +156,111 @@ def test_the_projects_test_files_are_the_declared_ones_outside_the_excluded_path
     assert project_test_files(object(), CONFIG.rules) is None
 
 
-def test_uncollected_files_are_the_declared_test_files_the_report_lacks():
+def _report(**kwargs: object) -> JUnitReport:
+    return JUnitReport(tests=1, **kwargs)  # type: ignore[arg-type]
+
+
+def test_the_collection_is_the_declared_test_files_the_run_did_not_run():
     ws = FakeWorkspace(files={"a_test.go": "", "b_test.go": ""})
-    assert uncollected_test_files(ws, CONFIG.rules, frozenset({"a_test.go"})) == ("b_test.go",)
-    assert uncollected_test_files(ws, CONFIG.rules, frozenset({"a_test.go", "b_test.go", "other"})) == ()
-    # Unknown on either side: nothing to say.
-    assert uncollected_test_files(ws, CONFIG.rules, None) is None
-    assert uncollected_test_files(ws, None, frozenset()) is None
-    assert uncollected_test_files(object(), CONFIG.rules, frozenset()) is None
+    assert observe_collection(ws, CONFIG.rules, _report(files=frozenset({"a_test.go"}))) == Collection(
+        frozenset({"a_test.go"}), ("b_test.go",))
+    both = frozenset({"a_test.go", "b_test.go"})
+    assert observe_collection(ws, CONFIG.rules, _report(files=both)) == Collection(both, ())
+    # Nothing to observe it from: no declaration, no report, a report without tests.
+    assert observe_collection(ws, None, _report(files=both)) is None
+    assert observe_collection(ws, CONFIG.rules, None) is None
+    assert observe_collection(ws, CONFIG.rules, JUnitReport(tests=0)) is None
+
+
+def test_files_the_report_names_outside_the_declaration_are_undeclared():
+    """Gap (b): inside the project and not test code; outside the project it is not the declaration's."""
+    ws = FakeWorkspace(files={"a_test.go": "", "tests/data/x.py": "", "calc.go": ""})
+    ran = frozenset({"a_test.go", "calc.go", "tests/data/x.py", "/elsewhere/z_test.go", "../up_test.go"})
+    collection = observe_collection(ws, CONFIG.rules, _report(files=ran))
+    assert collection == Collection(ran, (), ("calc.go",))
+
+
+def test_unknown_files_and_an_unlistable_project_are_stated_apart():
+    ws = FakeWorkspace(files={"a_test.go": ""})
+    unknown = observe_collection(ws, CONFIG.rules, _report())
+    assert unknown == Collection(None, None)
+    assert unknown is not None and unknown.unknown == ("the JUnit report names no test files",)
+    unlistable = observe_collection(object(), CONFIG.rules, _report(files=frozenset({"a_test.go"})))
+    assert unlistable == Collection(frozenset({"a_test.go"}), None)
+    assert unlistable is not None and unlistable.unknown == ("the project's files could not be listed",)
+    assert Collection(frozenset(), ()).unknown == ()
+
+
+def test_a_listing_names_the_files_when_the_report_names_none():
+    ws = FakeWorkspace(files={"a_test.go": "", "b_test.go": ""})
+    listed = TestListing(command="go list", exit_code=0, files=frozenset({"a_test.go"}))
+    assert observe_collection(ws, CONFIG.rules, _report(), listed) == Collection(
+        frozenset({"a_test.go"}), ("b_test.go",), (), listed)
+    failed = TestListing(command="go list", exit_code=2)
+    collection = observe_collection(ws, CONFIG.rules, _report(), failed)
+    assert collection == Collection(None, None, (), failed)
+    assert collection is not None and collection.unknown == (
+        "the JUnit report names no test files", "the listTests command exited 2")
+    # A report that names its files wins over a listing.
+    named = observe_collection(ws, CONFIG.rules, _report(files=frozenset({"a_test.go", "b_test.go"})), listed)
+    assert named is not None and named.uncollected == ()
+
+
+# ── what a report names (`resolve_ran`) ──────────────────────────────────────
+
+LISTED = frozenset({"src/math.test.ts", "src/other.test.ts", "vendor/v.test.ts", "README.md"})
+
+
+@pytest.mark.parametrize(("text", "ran"), [
+    # The case's own `file` attribute.
+    ('<testsuite><testcase classname="x" name="a" file="src/math.test.ts"/></testsuite>',
+     {"src/math.test.ts"}),
+    # The enclosing suite's `file` attribute.
+    ('<testsuites><testsuite name="s" file="src/math.test.ts"><testcase name="a"/></testsuite></testsuites>',
+     {"src/math.test.ts"}),
+    # vitest: the classname is the project-relative path.
+    ('<testsuite name="x"><testcase classname="src/math.test.ts" name="adds"/></testsuite>',
+     {"src/math.test.ts"}),
+    # The enclosing suite's name is the path (nested: an outer suite names it).
+    ('<testsuites><testsuite name="src/other.test.ts"><testsuite name="adds"><testcase classname="Calc" name="a"/>'
+     '</testsuite></testsuite></testsuites>', {"src/other.test.ts"}),
+    # Mixed: one case by attribute, one by an absolute classname inside the project.
+    ('<testsuite><testcase name="a" file="src/math.test.ts"/><testcase classname="/proj/src/other.test.ts" '
+     'name="b"/></testsuite>', {"src/math.test.ts", "src/other.test.ts"}),
+    # One unresolved case: the report names no files.
+    ('<testsuite name="calc"><testcase name="a" file="src/math.test.ts"/><testcase classname="com.x.CalcTest" '
+     'name="b"/></testsuite>', None),
+    # A classname that is a file only under an excluded path names nothing.
+    ('<testsuite><testcase classname="vendor/v.test.ts" name="a"/></testsuite>', None),
+    # surefire, go-junit-report, nextest name no file of the project.
+    (SUREFIRE, None), (GO_JUNIT_REPORT, None), (NEXTEST, None),
+], ids=["case-file", "suite-file", "classname", "suite-name", "mixed", "one-unresolved", "excluded", "surefire",
+        "go", "nextest"])
+def test_what_a_report_names(text: str, ran: set[str] | None):
+    rules = ProjectConfig(test="t", test_files=("src/",), exclude=("vendor/",)).rules
+    report = parse_junit_report(text, "/proj")
+    assert report is not None
+    assert resolve_ran(report, LISTED, rules) == (frozenset(ran) if ran is not None else None)
+
+
+def test_without_a_listing_only_file_attributes_name_files():
+    rules = ProjectConfig(test="t", test_files=("src/",)).rules
+    vitest = parse_junit_report('<testsuite><testcase classname="src/math.test.ts" name="a"/></testsuite>')
+    assert vitest is not None and resolve_ran(vitest, None, rules) is None
+    named = parse_junit_report('<testsuite><testcase name="a" file="src/math.test.ts"/></testsuite>')
+    assert named is not None and resolve_ran(named, None, rules) == frozenset({"src/math.test.ts"})
+    # A report built by hand, with no case left unnamed, names its `files`.
+    assert resolve_ran(JUnitReport(tests=1), LISTED, rules) is None
+
+
+def test_a_case_without_a_file_keeps_its_classname_then_its_suites_innermost_first():
+    text = ('<testsuites name="root"><testsuite name="./outer.ts"><testsuite name="inner">'
+            '<testcase classname="C" name="a"/><testcase classname="inner" name="b"/><testcase name="d"/>'
+            '</testsuite><testcase name="c" file="f.ts"/></testsuite></testsuites>')
+    report = parse_junit_report(text)
+    assert report is not None
+    assert report.unnamed == (("C", "inner", "outer.ts"), ("inner", "outer.ts"), ("inner", "outer.ts"))
+    assert report.named == frozenset({"f.ts"}) and report.files is None
 
 
 def test_test_support_is_never_expected_in_a_report_even_when_test_files_match_it():
@@ -172,9 +271,11 @@ def test_test_support_is_never_expected_in_a_report_even_when_test_files_match_i
                               "src/a.ts": ""})
     rules = config.rules
     assert project_test_files(ws, rules) == frozenset({"tests/a.test.ts"})
-    assert uncollected_test_files(ws, rules, frozenset({"tests/a.test.ts"})) == ()
+    collection = observe_collection(ws, rules, _report(files=frozenset({"tests/a.test.ts"})))
+    assert collection is not None and collection.uncollected == ()
     # A test file only `testFiles` matches is still expected.
-    assert uncollected_test_files(ws, rules, frozenset()) == ("tests/a.test.ts",)
+    collection = observe_collection(ws, rules, _report(files=frozenset({"vitest.config.ts"})))
+    assert collection is not None and collection.uncollected == ("tests/a.test.ts",)
     # The phase tier and the fingerprint still treat both as tests.
     assert rules.is_test_code("vitest.config.ts") and rules.is_test_code("tests/helpers/fake.ts")
     assert not rules.is_test_file("vitest.config.ts") and rules.is_support_file("vitest.config.ts")

@@ -48,7 +48,8 @@ DONE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=Tru
 BLOCK = HookBlockingError(blocking_error="lint first", command="lint.sh")
 #: The refusal with no workspace to read the test files from (`app/tdd/stop_hook.py`).
 TDD_RED_MESSAGE = (
-    "TDD cycle incomplete: RED. RED ends with a completed run of the test command (its tests pass or fail) after "
+    "TDD cycle incomplete: RED. RED ends with a completed run of the test command (its tests pass or fail), in "
+    "which no declared test file is named as not run and no file the declaration does not cover ran, after "
     "the sub-requirement's test files changed: they could not be read. Write or extend the tests "
     "for this sub-requirement, covering every relevant scenario and edge case, then run RunTests."
 )

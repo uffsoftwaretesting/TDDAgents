@@ -86,7 +86,7 @@ def test_an_invalid_file_is_no_configuration_with_its_issues():
     state = s.get()
     assert state.project_config is None
     assert state.project_config_issues == (
-        "unknown keys: surprise (the keys are version, setup, test, junitReport, coverageReport, testFiles, "
+        "unknown keys: surprise (the keys are version, setup, test, listTests, junitReport, coverageReport, testFiles, "
         "testSupportFiles, manifestFiles, exclude)",
         "`test` is required: the shell command that runs the whole test suite")
     # The patterns went away with the configuration: the baseline follows them.

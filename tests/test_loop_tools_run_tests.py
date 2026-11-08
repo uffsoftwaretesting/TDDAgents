@@ -121,7 +121,7 @@ def test_red_gets_no_evidence_from_a_declared_test_file_that_did_not_run():
     store = state()
     res = run(SuiteExecutionResult(exit_code=0, report=ONE), ws_ctx(store, files))
     assert res.content.split("\n\n", 1)[0].splitlines()[2:] == [
-        "Declared test files the JUnit report does not name: tests/test_bar.py", NOT_MEASURED,
+        "Declared test files the run did not run: tests/test_bar.py", NOT_MEASURED,
         f"TDD ledger: still RED. {RED_RULE}: a declared test file did not run."]
     assert store.get().phase_ledger == PhaseLedger()
 
@@ -256,12 +256,14 @@ def test_without_a_current_item_the_run_is_reported_without_a_phase_rule():
             f"{exit_line(0)}\n{ONE_LINE}\n{NOT_MEASURED}\n{NO_CURRENT_ITEM_LEDGER}\n\nout")
 
 
-def test_a_report_that_names_no_files_says_which_files_ran_is_unknown():
+def test_a_report_that_names_no_files_is_not_a_pass_in_green():
+    """Strict collection (2026-11-08): which files ran must be known in GREEN and REFACTOR."""
     store = state(TddPhase.GREEN)
     res = run(SuiteExecutionResult(exit_code=0, report=JUnitReport(tests=1)), ws_ctx(store))
-    assert ("Declared test files the JUnit report does not name: unknown (the report names no files)\n"
-            in res.content)
-    assert store.get().phase_ledger.phase == TddPhase.REFACTOR
+    assert res.content.split("\n\n", 1)[0].splitlines()[2:] == [
+        "Declared test files the run did not run: unknown (the JUnit report names no test files)", NOT_MEASURED,
+        f"TDD ledger: still GREEN. {GREEN_RULE}: the JUnit report names no test files."]
+    assert store.get().phase_ledger.phase == TddPhase.GREEN
 
 
 # ── background workers and the record ───────────────────────────────────────
@@ -339,12 +341,16 @@ def test_default_instance_and_properties():
 
 def test_the_phase_rules_and_the_non_evidence_line_read_exactly_this():
     assert PHASE_RULES == {
-        TddPhase.RED: ("RED ends with a completed run of the test command (its tests pass or fail) after the "
-                       "sub-requirement's test files changed"),
-        TddPhase.GREEN: ("GREEN ends with a run that exits 0 and whose JUnit report records tests, none failed, "
-                         "errored or skipped, and every declared test file run"),
-        TddPhase.REFACTOR: ("REFACTOR ends with a run that exits 0 and whose JUnit report records tests, none "
-                            "failed, errored or skipped, and every declared test file run"),
+        TddPhase.RED: ("RED ends with a completed run of the test command (its tests pass or fail), in which no "
+                       "declared test file is named as not run and no file the declaration does not cover ran, "
+                       "after the sub-requirement's test files changed"),
+        TddPhase.GREEN: ("GREEN ends with a run that exits 0, whose JUnit report records tests, none failed, "
+                         "errored or skipped, and in which every declared test file is named as run (by the JUnit "
+                         "report, else by the listTests command) and no file the declaration does not cover ran"),
+        TddPhase.REFACTOR: ("REFACTOR ends with a run that exits 0, whose JUnit report records tests, none "
+                            "failed, errored or skipped, and in which every declared test file is named as run (by "
+                            "the JUnit report, else by the listTests command) and no file the declaration does not "
+                            "cover ran"),
     }
     assert NOT_EVIDENCE == ("TDD ledger: unchanged. A run is evidence only when the test command completes: it "
                             "fails, or it exits 0 with a JUnit report that records tests; this one did not.")
@@ -353,8 +359,10 @@ def test_the_phase_rules_and_the_non_evidence_line_read_exactly_this():
 def test_each_failed_or_errored_test_is_named_below_the_counts():
     report = JUnitReport(tests=3, failures=1, errors=1, failed_cases=(
         FailedCase("failure", "tests/a.test.ts", "adds", "tests/a.test.ts", "expected 1 to be 2"),
-        FailedCase("error", "tests.test_b", "test_b", "tests/test_b.py", None)))
-    res = run(SuiteExecutionResult(exit_code=1, report=report), ws_ctx(state(TddPhase.GREEN)))
+        FailedCase("error", "tests.test_b", "test_b", "tests/test_b.py", None)),
+        files=frozenset({"tests/a.test.ts", "tests/test_b.py"}))
+    files = {"tests/test_b.py": "", "tests/a.test.ts": ""}
+    res = run(SuiteExecutionResult(exit_code=1, report=report), ws_ctx(state(TddPhase.GREEN), files))
     lines = res.content.splitlines()
     at = lines.index("JUnit report: 3 test(s), 1 failed, 1 errored, 0 skipped")
     assert lines[at + 1:at + 3] == ["Failed test: tests/a.test.ts > adds: expected 1 to be 2",
@@ -643,7 +651,7 @@ def test_real_pytest_a_declared_test_file_its_config_never_collects(python_works
     ctx = tool_context_for(store, workspace=ws)
     res = asyncio.run(build_run_tests_tool(None).call({}, ctx))
     assert res.exit_code == 0, res.content
-    assert "Declared test files the JUnit report does not name: tests/test_trivial.py" in res.content
+    assert "Declared test files the run did not run: tests/test_trivial.py" in res.content
     assert store.get().phase_ledger.phase == TddPhase.GREEN
     ws.write_file("pytest.ini", "[pytest]\n")
     res = asyncio.run(build_run_tests_tool(None).call({}, ctx))

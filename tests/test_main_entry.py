@@ -621,14 +621,15 @@ def test_main_messages_are_exact(fake_session: dict[str, Any], monkeypatch: pyte
     assert "🚀  TDDAGENTS SESSION (INTERACTIVE)\n" in capsys.readouterr().out
 
 
-def test_the_final_run_never_reports_files_as_uncollected_when_pytest_stopped(python_workspace, tmp_path):
+def test_the_final_run_names_the_files_that_did_not_run_when_pytest_stopped(python_workspace, tmp_path):
+    """Collection is judged on every run with a report (2026-11-08): a stopped run ran no other file."""
     import app.main as entry
 
     python_workspace.write_file("tests/test_ok.py", "def test_ok():\n    assert True\n")
     python_workspace.write_file("tests/test_web.py", "import not_installed_anywhere\n\ndef test_w():\n    pass\n")
     summary = entry.write_final_test_run(str(tmp_path), python_workspace)
     assert summary == ("NOT passing (exit 2: the test command failed, coverage could not be measured); the test "
-                       "command exited 2, 1 test(s) errored")
+                       "command exited 2; 1 test(s) errored; a declared test file did not run: tests/test_ok.py")
 
 
 # ── the session's reports ────────────────────────────────────────────────────
