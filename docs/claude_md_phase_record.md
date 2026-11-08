@@ -2356,6 +2356,21 @@ user, the recommended option every time):*
     right after a block therefore reports that message as its last, as upstream's `findLast`.
   - TDDAgents text: the refusal adds that a plain-text question gets no answer while the cycle is
     incomplete (`PLAIN_TEXT_QUESTION`); the run's model had written "reply 1 or 2" four times.
+- **Live check of the three fixes** (2026-11-08):
+  - **TypeScript md→pdf** (`tdd-be39091580f049cd`): `vitest.config.ts` was declared in both lists again,
+    and GREEN counted; 10 items, 283 tests, 98.2%, the clean final run passed.
+  - **CPF validator, Python** (`tdd-81a286e96c044713`, `--debug`), 15 items, 419 tests, 100%, the clean
+    final run passed without `.env`:
+    - the declared bare `pytest` was missing, so the user asked for a project venv. The agent changed
+      `setup`/`test` in `project.json` with an approved Edit; the debug log reads "changed during the
+      session: applied", and the next RunTests ran `.venv/bin/pytest`;
+    - an Edit adding an unknown key was refused ("validation failed after edit") and the file left as it
+      was;
+    - asked to stop and answer only "aguardando", the model was blocked once. A message typed during the
+      second "aguardando" ended the turn ("the user's queued input ends the turn; the cycle stays
+      incomplete") and became the next turn: one block where the second md→pdf run had four;
+    - `.env` was created as its own sub-requirement, with tests that load the settings from a
+      temporary copy of `.env.example`, none of them skipped.
 
 ### The three things that changed most
 
