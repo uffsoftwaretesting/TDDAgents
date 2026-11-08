@@ -49,12 +49,15 @@ def test_hook_allows_exit_when_cycle_complete():
     asyncio.run(go())
 
 
-RED_RULE = ("RED ends with a completed run of the test command (its tests pass or fail) after the "
-            "sub-requirement's test files changed")
-GREEN_RULE = ("GREEN ends with a run that exits 0 and whose JUnit report records tests, none failed, errored or "
-              "skipped, and every declared test file run")
-REFACTOR_RULE = ("REFACTOR ends with a run that exits 0 and whose JUnit report records tests, none failed, errored "
-                 "or skipped, and every declared test file run")
+RED_RULE = ("RED ends with a completed run of the test command (its tests pass or fail), in which no declared test "
+            "file is named as not run and no file the declaration does not cover ran, after the sub-requirement's "
+            "test files changed")
+GREEN_RULE = ("GREEN ends with a run that exits 0, whose JUnit report records tests, none failed, errored or "
+              "skipped, and in which every declared test file is named as run (by the JUnit report, else by the "
+              "listTests command) and no file the declaration does not cover ran")
+REFACTOR_RULE = ("REFACTOR ends with a run that exits 0, whose JUnit report records tests, none failed, errored "
+                 "or skipped, and in which every declared test file is named as run (by the JUnit report, else by "
+                 "the listTests command) and no file the declaration does not cover ran")
 WRITE_TESTS = ("Write or extend the tests for this sub-requirement, covering every relevant scenario and edge case, "
                "then run RunTests.")
 #: A context with no workspace cannot read the test files.

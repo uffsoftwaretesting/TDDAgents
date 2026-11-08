@@ -13,14 +13,22 @@ runner of any language, so no runner's own table applies. Upstream's Bash does t
 * any other non-zero code — a failed run, which is evidence. A load or compile error counts as a
   failure, whatever the runner reports.
 
-**`judge` decides from the facts alone** (`exit`, the JUnit report, the declared test files the
-report does not name, the phase):
+**`judge` decides from the facts alone** (`exit`, the JUnit report, what the run collected
+(`app/tdd/collection_gate.py::Collection`), the phase):
 
-* a pass = exit 0 ∧ a report ∧ tests > 0 ∧ no failure, error or skip ∧ no declared test file left out;
+* a pass = exit 0 ∧ a report ∧ tests > 0 ∧ no failure, error or skip ∧ every declared test file run ∧ no
+  file run that the declaration does not cover;
 * exit 0 with no report, or a report with no tests, is not evidence (an error): nothing shows a test ran;
 * RED needs a completed run (the caller adds "after the test files changed");
-* which declared test files did not run is judged only on exit-0 runs, and is unknown when the report
-  names no files (`uncollected` is `None`), which is stated, not held against the run.
+* the collection is judged on every run that has a report, whatever its exit code (2026-11-08): a
+  declared test file that did not run, or an undeclared file that ran, keeps every phase from its rule,
+  RED included;
+* files that stay unknown (the report names none and no `listTests` listing named them) keep GREEN and
+  REFACTOR from a pass (strict collection, user decision 2026-11-08); RED states it and is not held to it
+  (`stated`);
+* fewer tests than the session's test floor (`AppState.test_floor`, 2026-11-08): not a pass in GREEN; in
+  REFACTOR accepted only when the test files' fingerprint differs from the floor run's; stated in RED (a
+  RED run that counts re-bases the floor: `next_test_floor`).
 """
 
 from __future__ import annotations
@@ -28,8 +36,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from app.tdd.collection_gate import Collection
 from app.tdd.junit_report import JUnitReport
-from app.tdd.ledger import TddPhase
+from app.tdd.ledger import TddPhase, TestRunRecord
 
 
 class Outcome(Enum):
@@ -74,6 +83,9 @@ def exit_semantic(exit_code: int) -> ExitSemantic:
 #: Why an exit-0 run is not evidence.
 NO_REPORT = "the test command wrote no JUnit report"
 NO_TESTS = "the JUnit report records no tests"
+#: The collection facts that keep every phase from its rule, RED included.
+NOT_RUN = "a declared test file did not run"
+UNDECLARED = "a file the run ran is not a declared test file"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,19 +101,36 @@ class Judgement:
     not_evidence: str | None
     #: The facts that keep the run from a pass, in order; empty for a pass.
     unmet: tuple[str, ...]
-    #: Declared test files the report does not name; `None` when that is not observable.
+    #: Declared test files the run did not run; `None` when that is not observable.
     uncollected: tuple[str, ...] | None
     #: Whether the run meets the phase's rule (for RED: before "the test files changed").
     meets_phase: bool
+    #: Files the run ran inside the project that the declaration does not cover.
+    undeclared: tuple[str, ...] = ()
+    #: Facts stated without holding this phase to them (RED: the files are unknown).
+    stated: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
         return self.outcome == Outcome.PASSED and not self.unmet
 
 
-def judge(exit_code: int, report: JUnitReport | None, uncollected: tuple[str, ...] | None,
-          phase: TddPhase) -> Judgement:
-    """The judgement of one run (see the module docstring). Pure: it reads nothing but its arguments."""
+def floor_fact(tests: int, floor: TestRunRecord) -> str:
+    """A run that records fewer tests than the floor run, stated as a fact."""
+    return f"the run records {tests} tests, fewer than the {floor.tests} an earlier run recorded"
+
+
+#: What a REFACTOR run's accepted decrease adds to `floor_fact`.
+FLOOR_ACCEPTED = "and the test files changed since that run"
+
+
+def judge(exit_code: int, report: JUnitReport | None, collection: Collection | None,
+          phase: TddPhase, floor: TestRunRecord | None = None, test_fingerprint: str | None = None) -> Judgement:
+    """
+    The judgement of one run (see the module docstring). Pure: it reads nothing but its arguments.
+    `collection` is `None` when there is nothing to observe it from (no declaration, or no report);
+    `floor` is the session's test floor run, and `test_fingerprint` the test files' fingerprint now.
+    """
     semantic = exit_semantic(exit_code)
     if semantic.is_error:
         return Judgement(exit_code, semantic.meaning, None, True, None, (semantic.meaning,), None, False)
@@ -118,26 +147,43 @@ def judge(exit_code: int, report: JUnitReport | None, uncollected: tuple[str, ..
             unmet.append(f"{report.errors} test(s) errored")
         if report.skipped:
             unmet.append(f"{report.skipped} test(s) were skipped")
-    left_out = uncollected if exit_code == 0 else None
-    if left_out:
-        unmet.append("a declared test file did not run")
+    left_out = collection.uncollected if collection is not None else None
+    undeclared = collection.undeclared if collection is not None else ()
+    unknown = collection.unknown if collection is not None else ()
+    unmet.extend(unknown)
+    blocking = [fact for fact, held in ((NOT_RUN, bool(left_out)), (UNDECLARED, bool(undeclared))) if held]
+    unmet.extend(blocking)
     failed = exit_code != 0 or (report is not None and (report.failures or report.errors))
     outcome = Outcome.FAILED if failed else Outcome.PASSED
-    if phase == TddPhase.RED:
-        meets = not left_out
-    else:
-        meets = not unmet
-    return Judgement(exit_code, semantic.meaning, outcome, False, None, tuple(unmet), left_out, meets)
+    stated = list(unknown) if phase == TddPhase.RED else []
+    below = report is not None and floor is not None and floor.tests is not None and report.tests < floor.tests
+    if below and report is not None and floor is not None:
+        fact = floor_fact(report.tests, floor)
+        if phase == TddPhase.GREEN:
+            unmet.append(fact)
+        elif phase == TddPhase.RED:
+            stated.append(fact)
+        elif test_fingerprint is not None and test_fingerprint != floor.test_fingerprint:
+            stated.append(f"{fact}, {FLOOR_ACCEPTED}")
+        else:
+            unmet.append(fact)
+    meets = not blocking if phase == TddPhase.RED else not unmet
+    return Judgement(exit_code, semantic.meaning, outcome, False, None, tuple(unmet), left_out, meets, undeclared,
+                     tuple(stated))
 
 
 __all__ = [
+    "FLOOR_ACCEPTED",
     "NO_REPORT",
     "NO_TESTS",
+    "NOT_RUN",
+    "UNDECLARED",
     "SHELL_EXIT_SEMANTICS",
     "SIGNAL_EXIT_BASE",
     "ExitSemantic",
     "Judgement",
     "Outcome",
     "exit_semantic",
+    "floor_fact",
     "judge",
 ]

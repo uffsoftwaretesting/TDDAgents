@@ -16,7 +16,7 @@ from app.query.config import build_run_config
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.junit_report import JUnitReport
-from app.tdd.run_tests_tool.run_tests_tool import SuiteExecutionResult, build_run_tests_tool
+from app.tdd.run_tests_tool.run_tests_tool import PHASE_RULES, SuiteExecutionResult, build_run_tests_tool
 from app.tool import tool_context_for
 from app.types.permissions import PermissionMode
 from app.workspace.local import LocalWorkspace, workspaces_root
@@ -103,9 +103,10 @@ def skip_lines(phase: TddPhase) -> list[str]:
     from app.tdd.run_tests_tool.run_tests_tool import PHASE_RULES
 
     return ["Exit code 0 (the test command completed)", "JUnit report: 4 test(s), 0 failed, 0 errored, 1 skipped",
-            "Declared test files the JUnit report does not name: unknown (the report names no files)",
+            "Declared test files the run did not run: unknown (the JUnit report names no test files)",
             "Coverage: not measured",
-            f"TDD ledger: still {phase.value}. {PHASE_RULES[phase]}: 1 test(s) were skipped."]
+            f"TDD ledger: still {phase.value}. {PHASE_RULES[phase]}: 1 test(s) were skipped, the JUnit report names "
+            "no test files."]
 
 
 @pytest.mark.parametrize("phase", [TddPhase.GREEN, TddPhase.REFACTOR])
@@ -137,8 +138,7 @@ def test_real_pytest_skips_keep_green_until_the_tool_is_there(python_workspace):
                                    phase_ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True)))
     res = asyncio.run(build_run_tests_tool(None).call({}, tool_context_for(store, workspace=ws)))
     assert res.exit_code == 0 and "JUnit report: 2 test(s), 0 failed, 0 errored, 1 skipped\n" in res.content
-    assert ("TDD ledger: still GREEN. GREEN ends with a run that exits 0 and whose JUnit report records tests, none "
-            "failed, errored or skipped, and every declared test file run: 1 test(s) were skipped.") in res.content
+    assert (f"TDD ledger: still GREEN. {PHASE_RULES[TddPhase.GREEN]}: 1 test(s) were skipped.") in res.content
     assert store.get().phase_ledger.phase == TddPhase.GREEN
 
 

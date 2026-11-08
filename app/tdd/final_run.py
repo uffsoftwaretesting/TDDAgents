@@ -22,8 +22,9 @@ installed. The final run now does what a fresh checkout does:
 4. the declared `test` runs exactly as RunTests runs it (`run_suite`), and the run is judged as a
    GREEN run (`app/tdd/run_judgement.py::judge`): a dependency installed but never declared fails here;
 5. `final_test_run.txt` records the setup command, exit and output, the test exit and its meaning, the
-   JUnit counts and each failed or errored test it names, the coverage, the declared test files that did
-   not run, and the raw output;
+   JUnit counts and each failed or errored test it names, the project's `listTests` run when one ran, the
+   declared test files that did not run, the files that ran outside the declaration, or that the files
+   are unknown (which is not a pass: strict collection, 2026-11-08), the coverage, and the raw output;
 6. the copy is deleted.
 
 An E2B workspace has no host folder to copy, so its final run is reported as unsupported, and so is
@@ -57,13 +58,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.tdd.collection_gate import uncollected_test_files
+from app.tdd.collection_gate import Collection, observe_collection
 from app.tdd.ledger import TddPhase
 from app.tdd.project_config import PROJECT_CONFIG_FILE, ProjectConfig, TestFileRules, load_project_config
-from app.tdd.run_judgement import judge
+from app.tdd.run_judgement import NOT_RUN, UNDECLARED, Judgement, judge
 from app.tdd.run_tests_tool.run_tests_tool import (
     RunTestsUnavailable,
     SuiteExecutionResult,
+    collection_lines,
     coverage_line,
     failed_case_lines,
     raw_output,
@@ -168,15 +170,15 @@ def _setup_lines(config: ProjectConfig, exit_code: int | None, output: str) -> l
     return [f"Setup: {config.setup}", f"Setup exit code: {exit_code}", "Setup output:", output or "(no output)"]
 
 
-def _test_lines(result: SuiteExecutionResult, uncollected: tuple[str, ...] | None, meaning: str) -> list[str]:
-    lines = [f"Test: {result.command}", f"Test exit code: {result.exit_code} ({meaning})", report_line(result.report),
-             *failed_case_lines(result.report)]
-    if uncollected:
-        lines.append(f"Declared test files the JUnit report does not name: {', '.join(uncollected)}")
-    elif result.exit_code == 0 and result.report is not None and result.report.files is None:
-        lines.append("Declared test files the JUnit report does not name: unknown (the report names no files)")
-    lines.append(coverage_line(result.coverage))
-    return lines
+def _test_lines(result: SuiteExecutionResult, collection: Collection | None, meaning: str) -> list[str]:
+    return [f"Test: {result.command}", f"Test exit code: {result.exit_code} ({meaning})", report_line(result.report),
+            *failed_case_lines(result.report), *collection_lines(collection), coverage_line(result.coverage)]
+
+
+def _summary_facts(judgement: Judgement) -> list[str]:
+    """The unmet facts, the files named beside the collection facts."""
+    files = {NOT_RUN: judgement.uncollected or (), UNDECLARED: judgement.undeclared}
+    return [f"{fact}: {', '.join(files[fact])}" if files.get(fact) else fact for fact in judgement.unmet]
 
 
 def run_final(workspace: Any, run_dir: str | os.PathLike[str]) -> FinalRun:
@@ -216,17 +218,14 @@ def run_final(workspace: Any, run_dir: str | os.PathLike[str]) -> FinalRun:
         except RunTestsUnavailable as exc:
             return FinalRun(f"NOT passing (could not run the tests: {exc})",
                             tuple(_setup_lines(config, setup_exit, setup_output)))
-        ran = result.report.files if result.report is not None and result.exit_code == 0 else None
-        uncollected = uncollected_test_files(clean, config.rules, ran)
-        judgement = judge(result.exit_code, result.report, uncollected, TddPhase.GREEN)
+        collection = observe_collection(clean, config.rules, result.report, result.listing)
+        judgement = judge(result.exit_code, result.report, collection, TddPhase.GREEN)
         verdict = "passed" if judgement.passed else "NOT passing"
         summary = f"{verdict} (exit {result.exit_code}: {judgement.meaning}, {result.coverage.describe()})"
         if judgement.unmet:
-            summary += f"; {', '.join(judgement.unmet)}"
-        if judgement.uncollected:
-            summary += f": {', '.join(judgement.uncollected)}"
+            summary += f"; {'; '.join(_summary_facts(judgement))}"
         lines = [*_setup_lines(config, setup_exit, setup_output), "-" * 80,
-                 *_test_lines(result, judgement.uncollected, judgement.meaning), "-" * 80, raw_output(result)]
+                 *_test_lines(result, collection, judgement.meaning), "-" * 80, raw_output(result)]
         return FinalRun(summary, tuple(lines))
     finally:
         shutil.rmtree(base, ignore_errors=True)

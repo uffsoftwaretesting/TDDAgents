@@ -9,11 +9,16 @@ barriers still need to know three things about a project, and the project declar
 * how to set it up from its manifests (`setup`) and run its whole suite (`test`). The test command
   writes a JUnit XML report to `$TDDAGENTS_JUNIT_REPORT` (or to the declared `junitReport`) and, when
   `coverageReport` is declared, a cobertura or lcov report to `$TDDAGENTS_COVERAGE_REPORT`;
+* when its JUnit report names no files (surefire, `go-junit-report`, nextest), how to list the test files
+  its runner collects (`listTests`, optional, 2026-11-08: `app/tdd/test_listing.py`);
 * which files are tests (`testFiles`), test support (`testSupportFiles`: fixtures, helpers, test
   configuration), manifests and lockfiles (`manifestFiles`), and what is never part of the project's
   own sources (`exclude`: dependencies, build output, caches). Each is a list of gitignore patterns
   relative to the project root, matched with the `pathspec` gitignore matcher the permission rules
   use (`app/utils/permissions/filesystem.py`). `.git/` and `.tddagents/` are always excluded.
+  `exclude` accepts generated directories only (user decision 2026-11-08, `_check_exclude`): every
+  pattern ends in `/`, and none may cover a declared test file, judged from the patterns alone (no
+  disk check: a dependency tree such as `node_modules/` ships `*.test.*` files of its own).
 
 The Analyst proposes the configuration in the plan file's `## Project Configuration` section
 (`app/tdd/plan.py::parse_project_configuration`), the user approves it with the plan, and
@@ -60,7 +65,7 @@ PROJECT_CONFIG_SKILL = "tdd-project-config"
 #: Directories that are never the project's own files, whatever the configuration says.
 ALWAYS_EXCLUDED_DIRS = (".git", ".tddagents")
 
-_KEYS = ("version", "setup", "test", "junitReport", "coverageReport", "testFiles", "testSupportFiles",
+_KEYS = ("version", "setup", "test", "listTests", "junitReport", "coverageReport", "testFiles", "testSupportFiles",
          "manifestFiles", "exclude")
 _COVERAGE_KEYS = ("path", "format")
 _PATTERN_KEYS = ("testFiles", "testSupportFiles", "manifestFiles", "exclude")
@@ -92,6 +97,8 @@ class ProjectConfig:
     test_support_files: tuple[str, ...] = ()
     manifest_files: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
+    #: The command whose stdout lists the collected test files, one per line (`app/tdd/test_listing.py`).
+    list_tests: str | None = None
     #: The matchers built from the patterns, once per configuration.
     _rules: list[TestFileRules] = field(default_factory=list, init=False, compare=False, repr=False)
 
@@ -111,6 +118,8 @@ class ProjectConfig:
         if self.setup is not None:
             data["setup"] = self.setup
         data["test"] = self.test
+        if self.list_tests is not None:
+            data["listTests"] = self.list_tests
         if self.junit_report is not None:
             data["junitReport"] = self.junit_report
         if self.coverage_report is not None:
@@ -232,6 +241,58 @@ def _check_patterns(data: dict[str, Any], key: str, issues: list[str], *, requir
     return patterns
 
 
+#: The characters that make a gitignore path component a glob rather than a literal name.
+_GLOB_CHARACTERS = frozenset("*?[\\")
+
+
+def literal_prefix(pattern: str) -> str:
+    """
+    The leading components of a gitignore pattern that are literal names, as a root-relative path: `src/test/`
+    is `src/test`, `tests/test_*.py` is `tests`, `**/dist/` and `*_test.go` are empty (no literal prefix).
+    """
+    components = pattern.strip().strip("/").split("/")
+    literal: list[str] = []
+    for component in components:
+        if not component or _GLOB_CHARACTERS & set(component):
+            break
+        literal.append(component)
+    return "/".join(literal)
+
+
+def _overlaps(prefix: str, other: str) -> bool:
+    """Whether one root-relative literal path is the other or lies inside it."""
+    return bool(prefix and other) and (prefix == other or other.startswith(f"{prefix}/")
+                                       or prefix.startswith(f"{other}/"))
+
+
+def _check_exclude(exclude: tuple[str, ...], test_files: tuple[str, ...], issues: list[str]) -> None:
+    """
+    `exclude` accepts generated directories only: a pattern that does not end in `/`, or one whose literal
+    prefix is, contains or lies inside a `testFiles` pattern's literal prefix, or that matches a `testFiles`
+    pattern that is a literal path, is refused. Negated `testFiles` patterns name no test file.
+    """
+    declared = [pattern for pattern in test_files if not pattern.startswith("!")]
+    offending: list[str] = []
+    for pattern in exclude:
+        if not pattern.endswith("/"):
+            offending.append(pattern)
+            continue
+        if pattern.startswith("!"):
+            continue  # a negation hides nothing
+        prefix = literal_prefix(pattern)
+        spec = _spec((pattern,))
+        for test in declared:
+            literal = literal_prefix(test)
+            whole = literal == test.strip().strip("/")
+            if _overlaps(prefix, literal) or (whole and literal and spec.match_file(
+                    f"{literal}/" if test.strip().endswith("/") else literal)):
+                offending.append(pattern)
+                break
+    if offending:
+        issues.append("`exclude` accepts generated directories only (patterns ending in `/` that cover no "
+                      f"`testFiles` pattern): {', '.join(offending)}")
+
+
 def _check_command(data: dict[str, Any], key: str, issues: list[str], *, required: bool) -> str | None:
     if key not in data:
         if required:
@@ -276,15 +337,17 @@ def parse_project_config(data: Any) -> tuple[ProjectConfig | None, tuple[str, ..
         issues.append(f"`version` must be {PROJECT_CONFIG_VERSION}")
     test = _check_command(data, "test", issues, required=True)
     setup = _check_command(data, "setup", issues, required=False)
+    list_tests = _check_command(data, "listTests", issues, required=False)
     junit = _check_report_path(data["junitReport"], "junitReport", issues) if "junitReport" in data else None
     coverage = _check_coverage(data["coverageReport"], issues) if "coverageReport" in data else None
     patterns = {key: _check_patterns(data, key, issues, required=key == "testFiles") for key in _PATTERN_KEYS}
+    _check_exclude(patterns["exclude"], patterns["testFiles"], issues)
     if issues or test is None:
         return None, tuple(issues)
     return ProjectConfig(
         test=test, test_files=patterns["testFiles"], setup=setup, junit_report=junit, coverage_report=coverage,
         test_support_files=patterns["testSupportFiles"], manifest_files=patterns["manifestFiles"],
-        exclude=patterns["exclude"],
+        exclude=patterns["exclude"], list_tests=list_tests,
     ), ()
 
 
@@ -344,6 +407,7 @@ __all__ = [
     "ProjectConfig",
     "TestFileRules",
     "invalid_project_config_note",
+    "literal_prefix",
     "load_project_config",
     "parse_project_config",
     "parse_project_config_text",

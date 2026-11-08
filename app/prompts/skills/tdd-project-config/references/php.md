@@ -30,7 +30,7 @@
   "testFiles": ["tests/", "phpunit.xml"],
   "testSupportFiles": ["tests/fixtures/", "phpunit.xml"],
   "manifestFiles": ["composer.json", "composer.lock"],
-  "exclude": ["vendor/", ".phpunit.cache/", ".phpunit.result.cache"]
+  "exclude": ["vendor/", ".phpunit.cache/"]
 }
 ```
 

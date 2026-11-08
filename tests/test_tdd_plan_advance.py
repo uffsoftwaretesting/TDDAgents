@@ -237,7 +237,8 @@ def drive(store: AppStateStore, model: Scripted, steps: list[Step]) -> tuple[Ter
         code, coverage, new_tests = pending.pop(0)
         if new_tests:
             workspace.files[f"tests/test_{len(workspace.files)}.py"] = "def test_x():\n    pass\n"
-        return SuiteExecutionResult(exit_code=code, coverage=coverage, report=JUnitReport(tests=1, failures=code))
+        return SuiteExecutionResult(exit_code=code, coverage=coverage,
+                                    report=JUnitReport(tests=1, failures=code, files=frozenset(workspace.files)))
 
     tools = [build_run_tests_tool(runner)]
 

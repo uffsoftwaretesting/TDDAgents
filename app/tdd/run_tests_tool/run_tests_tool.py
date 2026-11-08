@@ -23,8 +23,9 @@ label, ignoring stdout/stderr, and the model sees `Exit code N` plus the raw out
 
 * the command, the exit code and its shell meaning (`app/tdd/run_judgement.py::SHELL_EXIT_SEMANTICS`);
 * what the JUnit report records (tests, failures, errors, skips, and each failed or errored test with
-  its message), the declared test files it does not name (or that this is unknown), and the coverage
-  measured;
+  its message), the declared test files the run did not run, the files it ran that the declaration does
+  not cover, or that the files are unknown (the report names none, and the project's `listTests` command,
+  when declared, did not list them: `app/tdd/test_listing.py`), and the coverage measured;
 * the ledger change and the phase's rule, stated as rules;
 * the raw output, last.
 
@@ -33,8 +34,17 @@ Never a cause, never advice.
 What a run proves is one pure judgement (`app/tdd/run_judgement.py::judge`), shared with the session's
 clean final run. RED ends with a completed run after the sub-requirement's test files changed since
 it started (fingerprinted, `app/tdd/suite_fingerprint.py`); GREEN and REFACTOR end with a pass: exit
-0, a report recording tests, none failed, errored or skipped, and every declared test file run.
+0, a report recording tests, none failed, errored or skipped, every declared test file run, and no
+file run that the declaration does not cover (strict collection, 2026-11-08: files that stay unknown are
+not a pass).
 Coverage is measured on every run and reported, never gated (user decision, 2026-10-28).
+
+**The session's test floor** (2026-11-08, user decision): every evidence run records its test count and the
+test files' fingerprint, and the floor is the latest run with the most tests so far (`next_test_floor`),
+across sub-requirements. A run with fewer tests is not a pass in GREEN, is accepted in REFACTOR only when the
+test files changed since the floor run (which then lowers the floor), and is stated in RED, where a run that
+counts re-bases the floor to its count (user decision 2026-11-08). RunTests is the floor's only writer, as it
+is the ledger's.
 
 Any other outcome (not executable, not found, killed, a timeout, exit 0 without a report or without
 tests, no workspace) is not evidence: an error result, the ledger untouched. A background worker's
@@ -52,7 +62,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from app.tdd.collection_gate import uncollected_test_files
+from app.tdd.collection_gate import Collection, observe_collection, resolve_ran
 from app.tdd.coverage_gate import (
     UNAVAILABLE,
     CoverageReading,
@@ -68,8 +78,9 @@ from app.tdd.project_config import (
     ProjectConfig,
     invalid_project_config_note,
 )
-from app.tdd.run_judgement import Judgement, Outcome, judge
-from app.tdd.suite_fingerprint import fingerprint_test_files, have_tests_changed
+from app.tdd.run_judgement import NOT_RUN, UNDECLARED, Judgement, Outcome, judge
+from app.tdd.suite_fingerprint import fingerprint_test_files, have_tests_changed, project_files
+from app.tdd.test_listing import TestListing, run_test_listing
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
@@ -91,6 +102,8 @@ class SuiteExecutionResult:
     report: JUnitReport | None = None
     #: The command that ran.
     command: str = ""
+    #: The project's `listTests` run, when the report named no files and the project declares one.
+    listing: TestListing | None = None
     __test__: bool = False
 
 
@@ -145,7 +158,8 @@ def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
     """
     The whole suite in the workspace, exactly as RunTests runs it: the reports discarded, the declared
     test command run with the report variables, the reports read back and discarded. The session's
-    final run uses it too, in a clean copy of the project (`app/tdd/final_run.py`).
+    final run uses it too, in a clean copy of the project (`app/tdd/final_run.py`). When the report records
+    tests but names no files, the declared `listTests` command runs next, with the same environment.
     """
     if ws is None or not hasattr(ws, "execute"):
         raise RunTestsUnavailable("no workspace is available to run the tests in")
@@ -154,9 +168,9 @@ def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
         if path is not None:
             _discard(ws, path)
     environment = {**(env or {}), **report_environment(ws, config)}
+    limit = timeout if timeout is not None else run_tests_timeout_seconds()
     try:
-        res = ws.execute(config.test, timeout=timeout if timeout is not None else run_tests_timeout_seconds(),
-                         env=environment)
+        res = ws.execute(config.test, timeout=limit, env=environment)
     except Exception as exc:
         raise RunTestsUnavailable(f"the test command could not be executed in the workspace: {exc}") from exc
     root = getattr(ws, "root", None)
@@ -166,8 +180,17 @@ def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
         rules = config.rules
         include = production_filter(lambda path: rules.is_test_code(path) or rules.is_excluded(path), root)
         coverage = read_coverage(_read_and_discard(ws, coverage_path), config.coverage_report.format, include)
+    listing = None
+    if config.list_tests is not None and report is not None and report.tests and _names_no_files(ws, config, report):
+        listing = run_test_listing(ws, config, timeout=limit, env=environment)
     return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr, coverage=coverage,
-                                report=report, command=config.test)
+                                report=report, command=config.test, listing=listing)
+
+
+def _names_no_files(ws: Any, config: ProjectConfig, report: JUnitReport) -> bool:
+    """Whether the report names no files (`resolve_ran`), against the project's listing."""
+    files = project_files(ws, config.rules)
+    return resolve_ran(report, frozenset(files) if files is not None else None, config.rules) is None
 
 
 async def _default_test_runner(context: ToolContext) -> SuiteExecutionResult:
@@ -193,12 +216,15 @@ async def _default_test_runner(context: ToolContext) -> SuiteExecutionResult:
 
 #: Each phase's rule, stated as a rule in every result (2026-10-28, reworded 2026-11-03).
 PHASE_RULES: dict[TddPhase, str] = {
-    TddPhase.RED: ("RED ends with a completed run of the test command (its tests pass or fail) after the "
-                   "sub-requirement's test files changed"),
-    TddPhase.GREEN: ("GREEN ends with a run that exits 0 and whose JUnit report records tests, none failed, errored "
-                     "or skipped, and every declared test file run"),
-    TddPhase.REFACTOR: ("REFACTOR ends with a run that exits 0 and whose JUnit report records tests, none failed, "
-                        "errored or skipped, and every declared test file run"),
+    TddPhase.RED: ("RED ends with a completed run of the test command (its tests pass or fail), in which no "
+                   "declared test file is named as not run and no file the declaration does not cover ran, after "
+                   "the sub-requirement's test files changed"),
+    TddPhase.GREEN: ("GREEN ends with a run that exits 0, whose JUnit report records tests, none failed, errored "
+                     "or skipped, and in which every declared test file is named as run (by the JUnit report, else "
+                     "by the listTests command) and no file the declaration does not cover ran"),
+    TddPhase.REFACTOR: ("REFACTOR ends with a run that exits 0, whose JUnit report records tests, none failed, "
+                        "errored or skipped, and in which every declared test file is named as run (by the JUnit "
+                        "report, else by the listTests command) and no file the declaration does not cover ran"),
 }
 
 #: A run that is not evidence, whatever the phase.
@@ -242,25 +268,35 @@ def failed_case_lines(report: JUnitReport | None) -> list[str]:
     return lines
 
 
-def files_line(judgement: Judgement, report: JUnitReport | None) -> str | None:
-    """Which declared test files did not run: listed, unknown, or nothing to say."""
-    if judgement.uncollected:
-        return f"Declared test files the JUnit report does not name: {', '.join(judgement.uncollected)}"
-    if judgement.exit_code == 0 and report is not None and report.tests and report.files is None:
-        return "Declared test files the JUnit report does not name: unknown (the report names no files)"
-    return None
+def collection_lines(collection: Collection | None) -> list[str]:
+    """What the run collected against the declaration: the files that did not run, undeclared or unknown."""
+    if collection is None:
+        return []
+    lines = []
+    listing = collection.listing
+    if listing is not None:
+        line = f"listTests: {listing.command}"
+        if listing.fact is not None:
+            line += f" ({listing.fact})"
+        lines.append(line)
+    if collection.uncollected:
+        lines.append(f"Declared test files the run did not run: {', '.join(collection.uncollected)}")
+    if collection.undeclared:
+        lines.append(f"Files the run ran that the declaration does not cover: {', '.join(collection.undeclared)}")
+    if collection.unknown:
+        lines.append(f"Declared test files the run did not run: unknown ({'; '.join(collection.unknown)})")
+    return lines
 
 
-def observation_lines(result: SuiteExecutionResult, judgement: Judgement) -> list[str]:
+def observation_lines(result: SuiteExecutionResult, judgement: Judgement,
+                      collection: Collection | None = None) -> list[str]:
     """The command, its exit code with its shell meaning, then what the reports recorded. Nothing is inferred."""
     lines = [f"Exit code {result.exit_code} ({judgement.meaning})"]
     if result.command:
         lines.insert(0, f"Command: {result.command}")
     lines.append(report_line(result.report))
     lines.extend(failed_case_lines(result.report))
-    files = files_line(judgement, result.report)
-    if files is not None:
-        lines.append(files)
+    lines.extend(collection_lines(collection))
     lines.append(coverage_line(result.coverage))
     return lines
 
@@ -273,8 +309,10 @@ def raw_output(result: SuiteExecutionResult) -> str:
     return text or NO_OUTPUT
 
 
-def render_result(result: SuiteExecutionResult, judgement: Judgement, ledger_text: str) -> str:
-    return "\n".join([*observation_lines(result, judgement), ledger_text]) + "\n\n" + raw_output(result)
+def render_result(result: SuiteExecutionResult, judgement: Judgement, ledger_text: str,
+                  collection: Collection | None = None) -> str:
+    lines = [*observation_lines(result, judgement, collection), ledger_text]
+    return "\n".join(lines) + "\n\n" + raw_output(result)
 
 
 #: The ledger line when no sub-requirement is current: the phase rules do not apply then
@@ -289,16 +327,40 @@ def ledger_line(before: PhaseLedger, after: PhaseLedger, judgement: Judgement) -
     """The ledger change, the phase's rule, and the observed facts that met it or did not."""
     phase = TddPhase(before.phase)
     rule = PHASE_RULES[phase]
+    stated = f" Also observed: {'; '.join(judgement.stated)}." if judgement.stated else ""
     if phase == TddPhase.RED:
         if after.phase != TddPhase.RED:
-            return f"TDD ledger: RED → GREEN. {rule}: they changed, and this run counts."
-        why = "a declared test file did not run" if judgement.uncollected else "they have not changed"
-        return f"TDD ledger: still RED. {rule}: {why}."
+            return f"TDD ledger: RED → GREEN. {rule}: they changed, and this run counts.{stated}"
+        blocking = [fact for fact in judgement.unmet if fact in (NOT_RUN, UNDECLARED)]
+        why = ", ".join(blocking) if blocking else "they have not changed"
+        return f"TDD ledger: still RED. {rule}: {why}.{stated}"
     if judgement.unmet:
-        return f"TDD ledger: still {phase.value}. {rule}: {', '.join(judgement.unmet)}."
+        return f"TDD ledger: still {phase.value}. {rule}: {', '.join(judgement.unmet)}.{stated}"
     if phase == TddPhase.GREEN:
-        return f"TDD ledger: GREEN → REFACTOR. {rule}: this run met it."
-    return f"TDD ledger: REFACTOR passed, so this sub-requirement's cycle is complete. {rule}: this run met it."
+        return f"TDD ledger: GREEN → REFACTOR. {rule}: this run met it.{stated}"
+    return (f"TDD ledger: REFACTOR passed, so this sub-requirement's cycle is complete. {rule}: this run met it."
+            f"{stated}")
+
+
+def next_test_floor(floor: TestRunRecord | None, record: TestRunRecord, judgement: Judgement,
+                    red_counted: bool) -> TestRunRecord | None:
+    """
+    The session's test floor after `record` (`AppState.test_floor`): `record` when its report records as many
+    tests as the floor or more, or fewer in an accepted decrease; else the floor unchanged. A decrease is
+    accepted from a REFACTOR run that met its rule (which it can only with changed test files) and from a RED
+    run that counts (`red_counted`: the test files changed and the run met RED's rule), which re-bases the floor
+    to its count (user decision 2026-11-08: a tester re-spawn or a rewind that leaves fewer tests must not keep
+    GREEN from ever passing). A run without a report leaves it as it is.
+    """
+    if not record.tests:
+        return floor
+    if floor is None or floor.tests is None or record.tests >= floor.tests:
+        return record
+    if record.phase == TddPhase.REFACTOR and judgement.meets_phase:
+        return record
+    if record.phase == TddPhase.RED and red_counted:
+        return record
+    return floor
 
 
 def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
@@ -324,22 +386,22 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         rules = config.rules if config is not None else None
         report = exec_result.report
         code = exec_result.exit_code
-        ran = report.files if report is not None and code == 0 else None
-        uncollected = await asyncio.to_thread(uncollected_test_files, workspace, rules, ran)
-        phase = TddPhase(context.get_app_state().phase_ledger.phase)
-        judgement = judge(code, report, uncollected, phase)
+        collection = await asyncio.to_thread(observe_collection, workspace, rules, report, exec_result.listing)
+        current = await asyncio.to_thread(fingerprint_test_files, workspace, config)
+        state_now = context.get_app_state()
+        phase = TddPhase(state_now.phase_ledger.phase)
+        judgement = judge(code, report, collection, phase, state_now.test_floor, current)
         if judgement.outcome is None:
-            return ToolResult(content=render_result(exec_result, judgement, NOT_EVIDENCE), is_error=True,
+            return ToolResult(content=render_result(exec_result, judgement, NOT_EVIDENCE, collection), is_error=True,
                               exit_code=code)
         if not context.shares_app_state:
-            return ToolResult(content=render_result(exec_result, judgement, BACKGROUND_LEDGER),
+            return ToolResult(content=render_result(exec_result, judgement, BACKGROUND_LEDGER, collection),
                               is_error=judgement.is_error, exit_code=code)
 
         before = context.get_app_state()
         changed = False
         if phase == TddPhase.RED:
-            current = await asyncio.to_thread(fingerprint_test_files, workspace, config)
-            # A declared test file the report does not name ran nothing, so RED gets no evidence from the run.
+            # A declared test file that did not run, or an undeclared one that did, gives RED no evidence.
             changed = have_tests_changed(current, before.tdd_item_test_baseline) and judgement.meets_phase
         # The ledger's input: 0 a pass, 1 a non-pass. In GREEN and REFACTOR a skipped test or a
         # declared test file that did not run keeps a run from being a pass (Phase 13, 2026-10-28).
@@ -349,16 +411,17 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
 
         # Update the authoritative AppState phase_ledger: the only writer (Part D2)
         record = TestRunRecord(command=exec_result.command, exit_code=code, stdout=exec_result.stdout,
-                               stderr=exec_result.stderr, meaning=judgement.meaning, phase=phase)
+                               stderr=exec_result.stderr, meaning=judgement.meaning, phase=phase,
+                               tests=report.tests if report is not None else None, test_fingerprint=current)
         context.set_app_state(
             lambda s: replace(
                 s, phase_ledger=s.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage),
-                last_test_run=record)
+                last_test_run=record, test_floor=next_test_floor(s.test_floor, record, judgement, changed))
         )
         line = (ledger_line(before.phase_ledger, after, judgement)
                 if before.tdd_plan.current is not None else NO_CURRENT_ITEM_LEDGER)
-        return ToolResult(content=render_result(exec_result, judgement, line), is_error=judgement.is_error,
-                          exit_code=code)
+        return ToolResult(content=render_result(exec_result, judgement, line, collection),
+                          is_error=judgement.is_error, exit_code=code)
 
     prompt_text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
 

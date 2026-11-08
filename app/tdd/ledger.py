@@ -135,4 +135,8 @@ class TestRunRecord:
     #: The phase the run was observed in (2026-10-28). A refusal says "no run since REFACTOR
     #: started" rather than naming the passing run that ended GREEN, which a model read as met.
     phase: TddPhase | None = None
+    #: The tests its JUnit report records; `None` when it wrote none (2026-11-08, the session's test floor).
+    tests: int | None = None
+    #: The test files' fingerprint when it ran (`app/tdd/suite_fingerprint.py`); `None` when not taken.
+    test_fingerprint: str | None = None
     __test__ = False

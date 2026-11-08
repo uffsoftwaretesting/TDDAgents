@@ -32,6 +32,7 @@ from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
 from tests.plan_helpers import CURRENT_ITEM_PLAN
 from tests.script_project import SCRIPT_PROJECT_CONFIG, make_script_project
+from app.tdd.project_config import save_project_config
 
 SKIP_TEST = "exit 77\n"
 COMMAND = "Test: sh run-tests.sh"
@@ -64,7 +65,7 @@ def test_a_dependency_installed_but_never_declared_fails_in_the_clean_copy(tmp_p
     assert store.get().phase_ledger.phase == TddPhase.REFACTOR  # the workspace has it installed
     result = final(ws)
     assert result.summary == ("NOT passing (exit 1: the test command failed, coverage could not be measured); the "
-                              "test command exited 1, 1 test(s) failed")
+                              "test command exited 1; 1 test(s) failed")
     report_at = result.lines.index("JUnit report: 1 test(s), 1 failed, 0 errored, 0 skipped")
     # The failed test is named from the JUnit report, right below its counts (user decision 2026-11-08).
     assert result.lines[report_at + 1] == "Failed test: tests/test_greet.sh: exit 2"
@@ -86,12 +87,71 @@ def test_a_skipped_test_is_not_passing(script_project: LocalWorkspace):
                               "1 test(s) were skipped")
 
 
-def test_a_report_that_names_no_files_leaves_which_ran_unknown(tmp_path: Path):
+def test_a_report_that_names_no_files_is_not_passing(tmp_path: Path):
+    """Strict collection (2026-11-08): the files that ran must be known in the final run."""
     config = dataclasses.replace(SCRIPT_PROJECT_CONFIG, test="NO_FILES=1 sh run-tests.sh")
     ws = make_script_project(tmp_path / "thread" / "project", config=config)
     result = final(ws)
+    assert result.summary == ("NOT passing (exit 0: the test command completed, coverage could not be measured); "
+                              "the JUnit report names no test files")
+    assert "Declared test files the run did not run: unknown (the JUnit report names no test files)" in result.lines
+
+
+def test_a_classname_that_is_a_file_of_the_project_names_it(tmp_path: Path):
+    """vitest writes the file's path as the case's `classname`: that names the file."""
+    config = dataclasses.replace(SCRIPT_PROJECT_CONFIG, test="CLASSNAME_FILES=1 sh run-tests.sh")
+    ws = make_script_project(tmp_path / "thread" / "project", config=config)
+    result = final(ws)
+    assert result.summary == "passed (exit 0: the test command completed, coverage could not be measured)"
+    assert not any(line.startswith("Declared test files") for line in result.lines)
+
+
+def test_the_list_tests_command_names_the_files_a_report_does_not(tmp_path: Path):
+    config = dataclasses.replace(SCRIPT_PROJECT_CONFIG, test="NO_FILES=1 sh run-tests.sh",
+                                 list_tests='for t in tests/test_*.sh; do echo "$PWD/$t"; done; echo /elsewhere/x.sh')
+    ws = make_script_project(tmp_path / "thread" / "project", config=config)
+    result = final(ws)
+    assert result.summary == "passed (exit 0: the test command completed, coverage could not be measured)"
+    assert f"listTests: {config.list_tests}" in result.lines
+
+
+def test_the_list_tests_command_must_name_every_declared_test_file(tmp_path: Path):
+    config = dataclasses.replace(SCRIPT_PROJECT_CONFIG, test="NO_FILES=1 sh run-tests.sh",
+                                 list_tests="echo tests/test_greet.sh")
+    ws = make_script_project(tmp_path / "thread" / "project", config=config)
+    ws.write_file("tests/test_other.sh", "true\n")
+    result = final(ws)
+    assert result.summary.endswith("; a declared test file did not run: tests/test_other.sh")
+    assert "Declared test files the run did not run: tests/test_other.sh" in result.lines
+
+
+def test_a_list_tests_command_that_fails_is_stated_and_leaves_the_files_unknown(tmp_path: Path):
+    config = dataclasses.replace(SCRIPT_PROJECT_CONFIG, test="NO_FILES=1 sh run-tests.sh",
+                                 list_tests="echo tests/test_greet.sh; exit 4")
+    ws = make_script_project(tmp_path / "thread" / "project", config=config)
+    result = final(ws)
+    assert result.summary == ("NOT passing (exit 0: the test command completed, coverage could not be measured); "
+                              "the JUnit report names no test files; the listTests command exited 4")
+    assert f"listTests: {config.list_tests} (the listTests command exited 4)" in result.lines
+    assert ("Declared test files the run did not run: unknown (the JUnit report names no test files; the "
+            "listTests command exited 4)") in result.lines
+
+
+def test_the_list_tests_command_is_not_run_when_the_report_names_the_files(script_project: LocalWorkspace):
+    config = dataclasses.replace(SCRIPT_PROJECT_CONFIG, list_tests="exit 9")
+    save_project_config(script_project, config)
+    result = final(script_project)
     assert result.summary.startswith("passed (exit 0")
-    assert "Declared test files the JUnit report does not name: unknown (the report names no files)" in result.lines
+    assert not any(line.startswith("listTests") for line in result.lines)
+
+
+def test_a_file_the_report_names_outside_the_declaration_is_not_passing(script_project: LocalWorkspace):
+    script_project.write_file("run-tests.sh", script_project.read_file("run-tests.sh").replace(
+        "for t in tests/test_*.sh", "for t in tests/test_*.sh checks/smoke.sh"))
+    script_project.write_file("checks/smoke.sh", "true\n")
+    result = final(script_project)
+    assert result.summary.endswith("; a file the run ran is not a declared test file: checks/smoke.sh")
+    assert "Files the run ran that the declaration does not cover: checks/smoke.sh" in result.lines
 
 
 def test_a_declared_test_file_the_report_does_not_name_is_not_passing(script_project: LocalWorkspace):
@@ -100,7 +160,7 @@ def test_a_declared_test_file_the_report_does_not_name_is_not_passing(script_pro
         "tests/test_*.sh", "tests/test_greet.sh"))
     result = final(script_project)
     assert result.summary.endswith("; a declared test file did not run: tests/test_other.sh")
-    assert "Declared test files the JUnit report does not name: tests/test_other.sh" in result.lines
+    assert "Declared test files the run did not run: tests/test_other.sh" in result.lines
 
 
 def test_a_command_that_writes_no_report_is_not_passing(tmp_path: Path):

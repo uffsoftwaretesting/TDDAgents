@@ -86,7 +86,7 @@ def test_an_invalid_file_is_no_configuration_with_its_issues():
     state = s.get()
     assert state.project_config is None
     assert state.project_config_issues == (
-        "unknown keys: surprise (the keys are version, setup, test, junitReport, coverageReport, testFiles, "
+        "unknown keys: surprise (the keys are version, setup, test, listTests, junitReport, coverageReport, testFiles, "
         "testSupportFiles, manifestFiles, exclude)",
         "`test` is required: the shell command that runs the whole test suite")
     # The patterns went away with the configuration: the baseline follows them.
@@ -222,6 +222,26 @@ def test_an_edit_that_would_break_a_valid_file_is_refused_with_its_issues():
     assert result.error_code == PROJECT_CONFIG_VALIDATION_ERROR_CODE == 10
     assert result.message.startswith(f"{PROJECT_CONFIG_FILE} validation failed after edit:\n- unknown keys: tests")
     assert "\n- `test` is required" in result.message
+
+
+def test_an_edit_that_excludes_the_tests_is_refused():
+    """Gap (d): the Edit check uses `parse_project_config`, so it refuses an `exclude` that hides tests."""
+    data = json.loads(VALID)
+    edited = json.dumps({**data, "exclude": [*data.get("exclude", []), "tests/", "*.log"]})
+    result = validate_input_for_project_config_edit("/proj/.tddagents/project.json", "/proj", VALID, lambda: edited)
+    assert result is not None and not result.valid
+    assert result.message.endswith(
+        "\n- `exclude` accepts generated directories only (patterns ending in `/` that cover no `testFiles` "
+        "pattern): tests/, *.log")
+
+
+def test_a_watched_file_that_excludes_the_tests_is_no_configuration():
+    s, ws = store(), FakeWorkspace(files=dict(FILES))
+    assert apply_text(s, ws, replace(CONFIG, exclude=("tests/",)).to_json()) is True
+    assert s.get().project_config is None
+    assert s.get().project_config_issues == (
+        "`exclude` accepts generated directories only (patterns ending in `/` that cover no `testFiles` pattern): "
+        "tests/",)
 
 
 def test_a_valid_edit_an_invalid_file_and_another_file_pass():

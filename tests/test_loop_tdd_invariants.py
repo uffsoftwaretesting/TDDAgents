@@ -14,6 +14,7 @@ These two tests represent the thesis's structural claim in executable form
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -215,7 +216,12 @@ class TestInvariant2NoCompletionWithoutTheWholeCycle:
         pending = list(results)
 
         def runner(context: Any) -> SuiteExecutionResult:
-            return pending.pop(0) if pending else SuiteExecutionResult(exit_code=0, report=ONE_TEST)
+            result = pending.pop(0) if pending else SuiteExecutionResult(exit_code=0, report=ONE_TEST)
+            if result.report is None or context.workspace is None:
+                return result
+            # The report names every test file the workspace holds: each one ran.
+            named = dataclasses.replace(result.report, files=frozenset(context.workspace.files))
+            return dataclasses.replace(result, report=named)
 
         run_tests_tool = build_run_tests_tool(runner)
         tools = [

@@ -21,6 +21,7 @@ from app.tdd.project_config import (
     REPORTS_DIR,
     CoverageReportConfig,
     ProjectConfig,
+    literal_prefix,
     load_project_config,
     parse_project_config,
     parse_project_config_text,
@@ -33,6 +34,7 @@ FULL: dict[str, Any] = {
     "version": 1,
     "setup": "npm ci",
     "test": "npx vitest run",
+    "listTests": "npx vitest list --filesOnly",
     "junitReport": "reports/junit.xml",
     "coverageReport": {"path": "coverage/lcov.info", "format": "lcov"},
     "testFiles": ["**/*.test.ts"],
@@ -53,7 +55,8 @@ def test_a_full_configuration_parses_and_round_trips():
     config, issues = parse_project_config(FULL)
     assert issues == ()
     assert config == ProjectConfig(
-        test="npx vitest run", test_files=("**/*.test.ts",), setup="npm ci", junit_report="reports/junit.xml",
+        test="npx vitest run", list_tests="npx vitest list --filesOnly", test_files=("**/*.test.ts",), setup="npm ci",
+        junit_report="reports/junit.xml",
         coverage_report=CoverageReportConfig(format="lcov", path="coverage/lcov.info"),
         test_support_files=("test/helpers/",), manifest_files=("package.json", "package-lock.json"),
         exclude=("node_modules/", "dist/"))
@@ -66,8 +69,8 @@ def test_a_full_configuration_parses_and_round_trips():
 def test_a_minimal_configuration_takes_the_defaults():
     config, issues = parse_project_config({"version": 1, "test": "  go test ./...  ", "testFiles": ["*_test.go"]})
     assert issues == () and config is not None
-    assert (config.test, config.setup, config.junit_report, config.coverage_report) == (
-        "go test ./...", None, None, None)
+    assert (config.test, config.setup, config.junit_report, config.coverage_report, config.list_tests) == (
+        "go test ./...", None, None, None, None)
     assert config.junit_report_path == DEFAULT_JUNIT_REPORT
     assert config.to_dict() == {"version": 1, "test": "go test ./...", "testFiles": ["*_test.go"],
                                 "testSupportFiles": [], "manifestFiles": [], "exclude": []}
@@ -82,10 +85,12 @@ def test_a_minimal_configuration_takes_the_defaults():
     ({**FULL, "version": True}, ("`version` must be 1",)),
     ({**FULL, "version": 2}, ("`version` must be 1",)),
     ({**FULL, "extra": 1, "Test": 2}, (
-        "unknown keys: Test, extra (the keys are version, setup, test, junitReport, coverageReport, testFiles, "
-        "testSupportFiles, manifestFiles, exclude)",)),
+        "unknown keys: Test, extra (the keys are version, setup, test, listTests, junitReport, coverageReport, "
+        "testFiles, testSupportFiles, manifestFiles, exclude)",)),
     ({**FULL, "test": " "}, ("`test` must be a non-empty shell command",)),
     ({**FULL, "setup": 3}, ("`setup` must be a non-empty shell command",)),
+    ({**FULL, "listTests": "  "}, ("`listTests` must be a non-empty shell command",)),
+    ({**FULL, "listTests": ["go", "list"]}, ("`listTests` must be a non-empty shell command",)),
     ({**FULL, "junitReport": "../out.xml"}, (
         "`junitReport` must be a path inside the project, relative to its root (got '../out.xml')",)),
     ({**FULL, "junitReport": "/tmp/out.xml"}, (
@@ -103,6 +108,65 @@ def test_a_minimal_configuration_takes_the_defaults():
 ])
 def test_every_issue_is_reported_and_nothing_is_used(data: Any, issues: tuple[str, ...]):
     assert parse_project_config(data) == (None, issues)
+
+
+# ── `exclude` accepts generated directories only (gap (d), 2026-11-08) ─────────
+
+
+@pytest.mark.parametrize(("pattern", "prefix"), [
+    ("src/test/", "src/test"), ("/build/", "build"), ("tests/test_*.py", "tests"), ("src/**/*.test.ts", "src"),
+    ("**/dist/", ""), ("*_test.go", ""), ("vitest.config.ts", "vitest.config.ts"), ("a[bc]/d", ""),
+    ("x\\*y/z", ""), ("  spec/  ", "spec"), ("a//b", "a"),
+])
+def test_the_literal_prefix_of_a_pattern(pattern: str, prefix: str):
+    assert literal_prefix(pattern) == prefix
+
+
+def _exclude_issue(*patterns: str) -> str:
+    return ("`exclude` accepts generated directories only (patterns ending in `/` that cover no `testFiles` "
+            f"pattern): {', '.join(patterns)}")
+
+
+@pytest.mark.parametrize(("test_files", "exclude", "offending"), [
+    # A pattern that is not a directory.
+    (["tests/"], ["*.pyc", ".coverage", "build/"], ["*.pyc", ".coverage"]),
+    (["tests/"], ["!keep"], ["!keep"]),
+    # The same directory, a parent of the test directory, or one inside it.
+    (["tests/"], ["tests/"], ["tests/"]),
+    (["tests/test_*.py"], ["/tests/"], ["/tests/"]),
+    (["src/**/*.test.ts"], ["src/"], ["src/"]),
+    (["src/test/"], ["src/test/generated/"], ["src/test/generated/"]),
+    # A literal test file an exclude pattern matches, though their literal prefixes do not meet.
+    (["pkg/a_test.go"], ["**/pkg/"], ["**/pkg/"]),
+    (["tests/"], ["**/tests/"], ["**/tests/"]),
+    # Every offending pattern is named at once.
+    (["spec/", "tests/"], ["spec/", "node_modules/", "tests/x/", "*.log"], ["spec/", "tests/x/", "*.log"]),
+])
+def test_an_exclude_pattern_that_is_no_directory_or_covers_a_test_file_is_refused(
+        test_files: list[str], exclude: list[str], offending: list[str]):
+    data = {"version": 1, "test": "t", "testFiles": test_files, "exclude": exclude}
+    assert parse_project_config(data) == (None, (_exclude_issue(*offending),))
+
+
+@pytest.mark.parametrize(("test_files", "exclude"), [
+    # No literal prefix on either side: patterns alone cannot say (node_modules ships *.test.* files).
+    (["**/*.test.ts", "*_test.go"], ["node_modules/", "vendor/", "**/dist/"]),
+    (["tests/", "conftest.py"], [".venv/", "__pycache__/", "*.egg-info/", "build/"]),
+    (["src/test/"], ["target/", "src/main/generated/"]),
+    (["spec/", ".rspec"], ["vendor/bundle/", ".bundle/"]),
+    # A negated test pattern names no test file; a negated directory hides nothing.
+    (["!tests/"], ["tests/"]),
+    (["tests/"], ["build/", "!tests/"]),
+    (["vitest.config.ts"], ["**/"]),
+])
+def test_generated_directories_beside_the_tests_are_accepted(test_files: list[str], exclude: list[str]):
+    config, issues = parse_project_config({"version": 1, "test": "t", "testFiles": test_files, "exclude": exclude})
+    assert issues == () and config is not None and config.exclude == tuple(exclude)
+
+
+def test_the_exclude_check_joins_the_other_issues():
+    data = {"version": 1, "test": "", "testFiles": ["tests/"], "exclude": ["tests/"]}
+    assert parse_project_config(data) == (None, ("`test` must be a non-empty shell command", _exclude_issue("tests/")))
 
 
 def test_optional_lists_may_be_left_out_and_paths_are_normalized():

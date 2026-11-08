@@ -38,7 +38,7 @@ TEST_PROJECT_CONFIG = ProjectConfig(
     test_files=("tests/", "test/", "test_*.py", "*_test.py", "conftest.py"),
     test_support_files=("conftest.py", "__init__.py", "fixtures/", "helpers/"),
     manifest_files=("requirements.txt",),
-    exclude=("__pycache__/", ".venv/", ".pytest_cache/", ".coverage"),
+    exclude=("__pycache__/", ".venv/", ".pytest_cache/"),
     coverage_report=CoverageReportConfig(format="cobertura"),
 )
 
