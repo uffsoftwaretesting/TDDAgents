@@ -20,7 +20,7 @@ import asyncio
 import hashlib
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -165,6 +165,11 @@ async def _develop_interactive(
     async def ask_questions(questions: tuple[dict[str, Any], ...]) -> dict[str, str] | None:
         return await holder["repl"].ask_questions(questions)
 
+    async def ask_sandbox(host_pattern: Mapping[str, Any]) -> bool:
+        """`REPL.tsx`'s `sandboxAskCallback`: the REPL's dialog (no REPL yet: nothing to ask, denied)."""
+        repl = holder.get("repl")
+        return await repl.ask_sandbox_permission(host_pattern) if repl is not None else False
+
     opts = {**development_run_options(options), **run_options}
     escape = asyncio.Event()
 
@@ -194,7 +199,7 @@ async def _develop_interactive(
         await launch_invalid_settings_dialog(io, escape, locations)
         async with open_session_run(run_id=session_run_id(thread_id), plan=TddPlan(), workspace=workspace,
                                     planning=True, can_use_tool=build_interactive_can_use_tool(ask, ask_questions),
-                                    **opts) as run:
+                                    sandbox_ask_callback=ask_sandbox, **opts) as run:
             repl = Repl(run, io, verbose=options.verbose)
             holder["repl"] = repl
             start_plugin_checks(run)

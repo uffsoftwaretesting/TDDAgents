@@ -98,6 +98,15 @@ from app.project_onboarding_state import (
     maybe_mark_project_onboarding_complete,
     should_show_project_onboarding,
 )
+from app.components.permissions.sandbox_permission_request import (
+    DENIED as SANDBOX_DENIED,
+)
+from app.components.permissions.sandbox_permission_request import (
+    SandboxPermissionResponse,
+    parse_sandbox_permission_answer,
+    render_sandbox_permission_request,
+    sandbox_permission_options,
+)
 from app.query.transitions import Terminal
 from app.query_engine import ResultMessage
 from app.session.prompts import development_continue_prompt
@@ -105,12 +114,15 @@ from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
 from app.tools.agent_tool.load_agents_dir import get_agent_definitions_with_overrides
 from app.tools.agent_tool.ui import extract_last_tool_info
 from app.types.hooks import PromptRequest, PromptResponse
-from app.types.permissions import PermissionMode
+from app.types.permissions import PermissionBehavior, PermissionMode, PermissionRuleSource
 from app.utils.collapse_read_search import summarize_recent_activities
 from app.utils.message_queue_manager import QueuedCommand
 from app.utils.model.model import parse_user_specified_model
 from app.utils.permissions.permission_setup import set_permission_mode
+from app.utils.permissions.permission_update import PermissionUpdate
+from app.utils.permissions.permissions import persist_permissions
 from app.utils.process_user_input.process_slash_command import parse_slash_input
+from app.utils.sandbox.sandbox_adapter import should_allow_managed_sandbox_domains_only
 
 logger = logging.getLogger("TDDOrchestrator.REPL")
 
@@ -320,6 +332,9 @@ class Repl:
         self._dialog_tasks: set[asyncio.Future[Any]] = set()
         #: An accepted URL elicitation's completion, by `(server, elicitation id)`.
         self._elicitation_waits: dict[tuple[str, str], asyncio.Event] = {}
+        #: `sandboxPermissionRequestQueue` by host: one dialog per host, its answer shared by every request
+        #: for that host that arrived while it was open.
+        self._sandbox_requests: dict[str, asyncio.Future[bool]] = {}
         #: `queryHaiku` for an elicitation's natural-language dates; built from the run when first needed.
         self.query_haiku: Callable[[str, str], Awaitable[str]] | None = None
         self.open_browser: Callable[[str], Awaitable[bool]] | None = None
@@ -404,6 +419,53 @@ class Repl:
             f"Choose 1-{len(prompt.options)}.", PermissionAnswer("no"),
         )
         return answer
+
+    async def ask_sandbox_permission(self, host_pattern: Mapping[str, Any]) -> bool:
+        """
+        `REPL.tsx`'s `sandboxAskCallback`: a network request the sandbox's allowlist does not settle,
+        asked in `SandboxPermissionRequest`'s dialog. Every request for the same host waits for the one
+        dialog (upstream resolves all of them with its answer). "Don't ask again" adds a
+        `WebFetch(domain:<host>)` rule to the local settings and the run, then refreshes the sandbox's
+        config at once. Esc denies, without aborting the turn.
+        """
+        host = str(host_pattern.get("host", ""))
+        pending = self._sandbox_requests.get(host)
+        if pending is not None:
+            return await asyncio.shield(pending)
+        future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        self._sandbox_requests[host] = future
+        allow = False
+        try:
+            response = await self._ask_sandbox(host)
+            if response.persist_to_settings:
+                self._remember_sandbox_host(host, response.allow)
+            allow = response.allow
+            return allow
+        finally:
+            self._sandbox_requests.pop(host, None)
+            future.set_result(allow)
+
+    async def _ask_sandbox(self, host: str) -> SandboxPermissionResponse:
+        locations = getattr(self.run, "settings_locations", None)
+        managed_only = locations is not None and should_allow_managed_sandbox_domains_only(locations)
+        options = sandbox_permission_options(host, managed_only)
+        async with self._asking:
+            response: SandboxPermissionResponse = await self.prompt(
+                render_sandbox_permission_request(host, options),
+                partial(parse_sandbox_permission_answer, options), f"Choose 1-{len(options)}.", SANDBOX_DENIED,
+                aborts_turn=False)
+        return response
+
+    def _remember_sandbox_host(self, host: str, allow: bool) -> None:
+        """`persistPermissionUpdate` of `WebFetch(domain:<host>)` (local settings), then `refreshConfig`."""
+        update = PermissionUpdate(
+            type="addRules", destination=PermissionRuleSource.LOCAL_SETTINGS, rules=(("WebFetch", f"domain:{host}"),),
+            behavior=PermissionBehavior.ALLOW if allow else PermissionBehavior.DENY)
+        persist_permissions([update], self.run.ctx)
+        sandbox = getattr(self.run, "sandbox", None)
+        if sandbox is not None:
+            # Before the settings watcher notices, so requests already waiting see the new rule.
+            sandbox.refresh_config()
 
     def request_prompt(
         self, title: str, tool_input_summary: str | None
