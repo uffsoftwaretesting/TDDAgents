@@ -58,6 +58,9 @@ do_not_mutate = [
     "app/utils/token_metrics.py",
     "app/config/*",
     "app/screens/terminal_io.py",
+    # The sandbox's process and socket seams (2026-11-08): the subprocess launches, the proxies and the
+    # socat bridge. Each names its exemption and its end-to-end test in its docstring.
+    "app/utils/sandbox/runtime/ripgrep.py",
 ]
 tests_dir = ["tests/"]
 
