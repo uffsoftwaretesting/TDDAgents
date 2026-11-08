@@ -695,3 +695,18 @@ def test_artifacts_of_a_resumed_or_unplanned_session(tmp_path: Path) -> None:
     assert (artifacts / "planning_dialogue.txt").exists()
     text = (artifacts / "initial_user_prompt.txt").read_text(encoding="utf-8")
     assert text.split("\n")[2:6] == ["a", "", "", "b"]
+
+
+def test_a_sandbox_that_refuses_the_session_exits_one_with_its_text(
+    fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from app.utils.sandbox.sandbox_adapter import SandboxUnavailableError
+
+    text = "\nError: sandbox required but unavailable: x\n  sandbox.failIfUnavailable is set\n\n"
+
+    def refused(*args: Any, **kwargs: Any) -> DevelopmentOutcome:
+        raise SandboxUnavailableError(text)
+
+    monkeypatch.setattr(entry, "develop_headless", refused)
+    assert entry.main(["-p", "Build X", "--thread-id", "tdd-sbx"]) == 1
+    assert text in capsys.readouterr().err

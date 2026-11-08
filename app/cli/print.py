@@ -53,6 +53,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -460,6 +461,49 @@ async def start_settings_change_detector(
     return detector
 
 
+#: `print.ts` / `REPL.tsx` (#34044): a required sandbox that cannot run refuses the session.
+SANDBOX_REQUIRED_TEXT = (
+    "\nError: sandbox required but unavailable: {reason}\n"
+    "  sandbox.failIfUnavailable is set \u2014 refusing to start without a working sandbox.\n\n")
+#: `print.ts`: a sandbox the settings enable but that cannot run, when it is not required.
+SANDBOX_DISABLED_TEXT = (
+    "\n\u26a0 Sandbox disabled: {reason}\n"
+    "  Commands will run WITHOUT sandboxing. Network and filesystem restrictions will NOT be enforced.\n\n")
+#: `print.ts` / `REPL.tsx`: `SandboxManager.initialize` failed.
+SANDBOX_ERROR_TEXT = "\n\u274c Sandbox Error: {error}\n"
+
+
+def check_run_sandbox(locations: SettingsLocations, workspace: Any, write_stderr: Callable[[str], Any]) -> Any:
+    """
+    The run's sandbox adapter, after upstream's startup check (`print.ts`, `REPL.tsx`'s mount effect): a
+    sandbox the settings enable but cannot run refuses the session when it is required
+    (`SandboxUnavailableError`, upstream's text, exit 1) and is announced as disabled otherwise.
+    """
+    from app.bootstrap.state import get_cwd_state
+    from app.utils.sandbox.sandbox_adapter import SandboxAdapter, SandboxUnavailableError
+
+    sandbox = SandboxAdapter(locations, cwd_state=lambda: get_cwd_state(workspace))
+    reason = sandbox.get_sandbox_unavailable_reason()
+    if reason:
+        if sandbox.is_sandbox_required():
+            raise SandboxUnavailableError(SANDBOX_REQUIRED_TEXT.format(reason=reason))
+        write_stderr(SANDBOX_DISABLED_TEXT.format(reason=reason))
+    return sandbox
+
+
+def start_run_sandbox(sandbox: Any, ask_callback: Any, detector: Any) -> None:
+    """
+    `SandboxManager.initialize(askCallback)` when sandboxing is enabled: the proxies started, the
+    settings watched. The ask runs on this loop. A failure is upstream's "Sandbox Error" (exit 1).
+    """
+    from app.utils.sandbox.sandbox_adapter import SandboxUnavailableError
+
+    try:
+        sandbox.initialize(ask_callback, ask_loop=asyncio.get_running_loop(), change_detector=detector)
+    except SandboxUnavailableError as error:
+        raise SandboxUnavailableError(SANDBOX_ERROR_TEXT.format(error=error)) from error
+
+
 @dataclass
 class DevelopmentRun:
     """
@@ -511,6 +555,8 @@ class DevelopmentRun:
     housekeeping_started: bool = False
     #: `settingsChangeDetector` for this run's settings files (`app/utils/settings/change_detector.py`).
     settings_change_detector: Any = None
+    #: The run's sandbox (`app/utils/sandbox/sandbox_adapter.py`), also on `ctx` and the workspace.
+    sandbox: Any = None
 
     def start_housekeeping(self) -> None:
         """`startBackgroundHousekeeping`, once: the plugin autoupdate in the background."""
@@ -556,6 +602,7 @@ async def open_session_run(
     max_thinking_tokens: int | None = None,
     agents: Mapping[str, Any] | None = None,
     hidden_tool_names: Sequence[str] = (),
+    sandbox_ask_callback: Any = None,
 ) -> AsyncIterator[DevelopmentRun]:
     """
     Build a run once — config, permissions, skills, MCP, hooks, transcript, cost tracker, the
@@ -612,6 +659,7 @@ async def open_session_run(
     # `COMMANDS()`' prompt commands, after every skill (`loadAllCommands`).
     skill_registry.set_built_in_commands([init_command(root_dir)])
     locations = run_settings_locations(config, root_dir, home, managed_dir)
+    sandbox = check_run_sandbox(locations, workspace, sys.stderr.write)
     await initialize_plugins_at_startup(locations, interactive=is_interactive)
     # `loadAllCommands`' plugin commands and skills, and `loadPluginAgents`, from the plugins on disk.
     await load_plugin_commands_into(skill_registry, locations)
@@ -814,6 +862,14 @@ async def open_session_run(
             return result
 
         detector = await start_settings_change_detector(locations, store, hook_dispatcher)
+        try:
+            start_run_sandbox(sandbox, sandbox_ask_callback, detector)
+        except BaseException:
+            await detector.dispose()
+            raise
+        ctx.sandbox_manager = sandbox
+        if workspace is not None and hasattr(workspace, "sandbox_manager"):
+            workspace.sandbox_manager = sandbox
         # An approved edit of `.tddagents/project.json` is read at once (2026-11-08), as upstream's
         # cron scheduler reads `.claude/scheduled_tasks.json`.
         from app.tdd.project_config_watcher import start_project_config_watcher
@@ -826,7 +882,7 @@ async def open_session_run(
                              transcript=transcript, deps=run_deps, messages=engine.mutable_messages,
                              recorder=recorder, settings_locations=locations,
                              get_agent_definitions=agent_definitions, refresh_plugins=refresh_plugins,
-                             settings_change_detector=detector)
+                             settings_change_detector=detector, sandbox=sandbox)
         unsubscribe = ctx.command_queue.subscribe(lambda: interrupt_on_now_priority(run.engine, ctx.command_queue))
         try:
             yield run
@@ -835,6 +891,10 @@ async def open_session_run(
             from app.utils.hooks.hooks import execute_session_end_hooks
 
             await detector.dispose()
+            # `reset()` at exit: the proxies, the bridge and the mount points go with the session.
+            sandbox.reset()
+            if workspace is not None and getattr(workspace, "sandbox_manager", None) is sandbox:
+                workspace.sandbox_manager = None
             if config_watcher is not None:
                 await config_watcher.dispose()
             unsubscribe()
@@ -1259,8 +1319,11 @@ async def run_headless(
         sio.on_permission_state = on_permission_state
         can_use_tool = sio.create_can_use_tool(on_permission_prompt)
     streaming_ref: list[HeadlessStreaming] = []
+    # `print.ts`: network access the allowlist does not settle is asked of the host (`can_use_tool` for
+    # `SandboxNetworkAccess`); with the input closed (plain `-p`) the request fails, so it is denied.
     async with open_session_run(run_id=session_run_id(session_id), plan=TddPlan(), workspace=workspace,
                                 planning=True, can_use_tool=can_use_tool, interactive=False,
+                                sandbox_ask_callback=sio.create_sandbox_ask_callback(),
                                 **run_options) as run:
         run.max_turns, run.max_budget_usd = options.max_turns, options.max_budget_usd
         if options.json_schema is not None:

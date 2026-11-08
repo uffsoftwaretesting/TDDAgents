@@ -67,6 +67,7 @@ from dotenv import load_dotenv
 from app.cli.print import DevelopmentOutcome, HeadlessOptions
 from app.constants.product import CLI_COMMAND, VERSION
 from app.components.trust_dialog.trust_dialog import TrustDialogExit
+from app.utils.sandbox.sandbox_adapter import SandboxUnavailableError
 from app.query.transitions import Terminal
 from app.session.driver import (
     SessionOptions,
@@ -964,6 +965,10 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
         except TrustDialogExit as refused:
             # The trust dialog's "No, exit" (1) or Esc (0): `gracefulShutdownSync(code)`, no session.
             return refused.exit_code
+        except SandboxUnavailableError as unavailable:
+            # `print.ts` / `REPL.tsx`: the sandbox is required and cannot run, or failed to start (exit 1).
+            sys.stderr.write(str(unavailable))
+            return 1
         report(thread_id, workspace, request, outcome)
         if outcome.question:
             print(waiting_text(thread_id, outcome.question, args.print))

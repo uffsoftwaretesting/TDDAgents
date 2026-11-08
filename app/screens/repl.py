@@ -650,7 +650,8 @@ class Repl:
             active_agents=list(definitions.values()), permission_context=state.tool_permission_context,
             plugin_errors=state.plugins.errors, count_tokens=api_token_counter(model),
             memory_files=lambda: get_memory_files(workspace),
-            failed_agent_files=lambda: get_failed_agent_files(project, home))
+            failed_agent_files=lambda: get_failed_agent_files(project, home),
+            sandbox=getattr(run, "sandbox", None))
 
     async def _doctor(self) -> None:
         """`/doctor`: the diagnostics hold the screen until dismissed; the result is shown."""

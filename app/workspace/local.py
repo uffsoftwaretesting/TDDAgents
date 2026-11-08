@@ -25,6 +25,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from app.config.config import Config
 from app.utils.session_environment import build_command
@@ -120,6 +121,9 @@ class LocalWorkspace:
         # Merged into every command, under the per-call `env`: e.g. the session venv's PATH.
         self._env: dict[str, str] = dict(env or {})
         self._run_dir = Path(run_dir) if run_dir is not None else None
+        #: The run's sandbox (`app/utils/sandbox/sandbox_adapter.py`), attached by `open_session_run` (and by
+        #: the final run over its copy). A caller opts in per command (`sandbox=True`).
+        self.sandbox_manager: Any = None
 
     @property
     def run_dir(self) -> Path:

@@ -712,6 +712,10 @@ class ToolContext:
     #: Upstream's `parentMessage` argument of `tool.call`: the assistant message whose tool call
     #: is running. Set only on the copy the pipeline hands `tool.call` (as `tool_use_id`).
     parent_message: Message | None = None
+    #: The run's sandbox (`app/utils/sandbox/sandbox_adapter.py::SandboxAdapter`), upstream's
+    #: process-global `SandboxManager`: what Bash's `shouldUseSandbox`, its auto-allow and RunTests
+    #: read. `None` is no sandbox (a test context, a remote workspace). A worker shares its parent's.
+    sandbox_manager: Any = None
 
 
 @dataclass

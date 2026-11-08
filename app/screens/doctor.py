@@ -11,6 +11,8 @@ any line or Esc dismisses it, and its result is "TDDAgents diagnostics dismissed
   warnings, then **Invalid Settings**: the settings errors that are not an MCP config's
   (`useSettingsErrors`, `app/utils/settings/all_errors.py`), drawn by `ValidationErrorsList`
   (`app/components/validation_errors_list.py`);
+* **Sandbox**: `app/components/sandbox/sandbox_doctor_section.py` (the run's sandbox adapter, else one over
+  the settings);
 * **MCP Config Diagnostics**: `app/components/mcp/mcp_parsing_warnings.py`;
 * **Environment Variables**: `BASH_MAX_OUTPUT_LENGTH`, `TASK_MAX_OUTPUT_LENGTH` and
   `TDDAGENTS_MAX_OUTPUT_TOKENS` (upstream's `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, checked against the bounds of
@@ -22,8 +24,8 @@ any line or Esc dismisses it, and its result is "TDDAgents diagnostics dismissed
 
 Not ported, having no counterpart here: the package manager line, the multiple-installations warning and
 the auto-updater's recommendation; the config install method; the **Updates** section (auto-updates,
-update permissions, channel, dist-tags: TDDAgents does not update itself); `SandboxDoctorSection` (no Bash
-sandbox); `KeybindingWarnings` (no keybindings file); **Version Locks** (no native installer).
+update permissions, channel, dist-tags: TDDAgents does not update itself); `KeybindingWarnings` (no keybindings
+file); **Version Locks** (no native installer).
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from typing import Any
 
 from app.components.design_system.dialog import CANCELLED, DialogIO
 from app.components.mcp.mcp_parsing_warnings import mcp_parsing_warnings
+from app.components.sandbox.sandbox_doctor_section import sandbox_doctor_section
 from app.components.validation_errors_list import render_validation_errors
 from app.tool import Tool
 from app.types.permissions import ToolPermissionContext
@@ -80,6 +83,8 @@ class DoctorContext:
     #: `agentDefinitions.failedFiles`.
     failed_agent_files: Callable[[], Sequence[tuple[str, str]]] = tuple
     environ: Any = field(default_factory=lambda: os.environ)
+    #: The run's `SandboxAdapter`; `None` builds one over `locations`.
+    sandbox: Any = None
 
 
 def environment_variable_errors(environ: Any) -> list[tuple[str, str, str]]:
@@ -174,8 +179,14 @@ async def doctor_lines(context: DoctorContext) -> list[str]:
     diagnostic = get_doctor_diagnostic(context.locations, context.workspace)
     warnings = await check_context_warnings(context.tools, context.active_agents, context.permission_context,
                                             context.memory_files(), context.count_tokens)
+    sandbox = context.sandbox
+    if sandbox is None and context.locations is not None:
+        from app.utils.sandbox.sandbox_adapter import SandboxAdapter
+
+        sandbox = SandboxAdapter(context.locations)
     return [
         *diagnostics_section(diagnostic, settings_errors),
+        *sandbox_doctor_section(sandbox),
         *(mcp_parsing_warnings(context.locations) if context.locations is not None else []),
         *environment_variables_section(environment_variable_errors(context.environ)),
         *agent_parse_errors_section(context.failed_agent_files()),

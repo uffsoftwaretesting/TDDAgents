@@ -65,6 +65,7 @@ do_not_mutate = [
     "app/utils/sandbox/runtime/socks_proxy.py",
     "app/utils/sandbox/runtime/linux_network_bridge.py",
     "app/utils/sandbox/runtime/network_host.py",
+    "app/utils/sandbox/bwrap_probe.py",
 ]
 tests_dir = ["tests/"]
 

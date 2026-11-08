@@ -1,9 +1,10 @@
-"""Test doubles for the sandbox runtime: an in-memory `SandboxFs` and a recording ripgrep."""
+"""Test doubles for the sandbox: an in-memory `SandboxFs`, a recording ripgrep, fake `bwrap` and `socat`."""
 
 from __future__ import annotations
 
 import posixpath
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.utils.sandbox.runtime.sandbox_config import RipgrepConfig
 
@@ -112,3 +113,67 @@ class RecordingRipgrep:
         if self.error is not None:
             raise self.error
         return list(self.matches)
+
+
+#: A fake `bwrap`: records each argv as a JSON line in `$FAKE_BWRAP_LOG`; answers the probe
+#: (`--ro-bind / / --unshare-net true`) with `$FAKE_BWRAP_PROBE_EXIT` (and a line on stderr when non-zero);
+#: otherwise applies the `--setenv` pairs and runs what follows `--` on the host, so a wrapped command
+#: really runs.
+FAKE_BWRAP = '''#!{python}
+import json, os, sys
+args = sys.argv[1:]
+with open(os.environ["FAKE_BWRAP_LOG"], "a") as log:
+    log.write(json.dumps(args) + "\\n")
+if args == ["--ro-bind", "/", "/", "--unshare-net", "true"]:
+    code = int(os.environ.get("FAKE_BWRAP_PROBE_EXIT", "0"))
+    if code:
+        sys.stderr.write("bwrap: No permissions to create new namespace\\n")
+    sys.exit(code)
+env = dict(os.environ)
+i = 0
+while i < len(args):
+    a = args[i]
+    if a == "--":
+        os.execve(args[i + 1], args[i + 1:], env)
+    if a == "--setenv":
+        env[args[i + 1]] = args[i + 2]
+        i += 3
+    elif a in ("--ro-bind", "--bind", "--dev-bind"):
+        i += 3
+    elif a in ("--tmpfs", "--dev", "--proc"):
+        i += 2
+    else:
+        i += 1
+sys.exit(127)
+'''
+
+#: A fake `socat`: a bridge (`UNIX-LISTEN:<path>,...`) creates its socket path; any socat stays up until killed.
+FAKE_SOCAT = """#!/bin/sh
+case "$1" in UNIX-LISTEN:*) p="${1#UNIX-LISTEN:}"; p="${p%%,*}"; : > "$p";; esac
+exec tail -f /dev/null
+"""
+
+
+def install_fake_sandbox_tools(bin_dir: Path, *, bwrap: bool = True, socat: bool = True) -> Path:
+    """Write the fake `bwrap` / `socat` into `bin_dir`; returns the bwrap log's path (next to `bin_dir`)."""
+    import sys
+
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    if bwrap:
+        script = bin_dir / "bwrap"
+        script.write_text(FAKE_BWRAP.replace("{python}", sys.executable))
+        script.chmod(0o755)
+    if socat:
+        script = bin_dir / "socat"
+        script.write_text(FAKE_SOCAT)
+        script.chmod(0o755)
+    return bin_dir.parent / "bwrap.log"
+
+
+def bwrap_calls(log: Path) -> list[list[str]]:
+    """Every argv the fake bwrap recorded, the probe included."""
+    import json
+
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines() if line]
