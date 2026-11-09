@@ -108,9 +108,11 @@ def test_the_home_is_private(sandboxed_project: dict[str, Any]) -> None:
 
 def test_the_network_goes_through_the_proxy(sandboxed_project: dict[str, Any]) -> None:
     ws, port = sandboxed_project["ws"], sandboxed_project["port"]
-    allowed = run(ws, f'curl -s -x "$HTTP_PROXY" http://127.0.0.1:{port}/')
+    # `NO_PROXY` names the loopback addresses (as upstream's runtime sets it), and curl honours it even with
+    # `-x`: `--noproxy ''` sends the request to the proxy, which the allowlist then decides.
+    allowed = run(ws, f'curl -s --noproxy "" -x "$HTTP_PROXY" http://127.0.0.1:{port}/')
     assert allowed.stdout == "hello from the host", allowed.stderr
-    refused = run(ws, 'curl -s -o /dev/null -w "%{http_code}" -x "$HTTP_PROXY" http://unknown.invalid/')
+    refused = run(ws, 'curl -s --noproxy "" -o /dev/null -w "%{http_code}" -x "$HTTP_PROXY" http://unknown.invalid/')
     assert refused.stdout == "403"
     direct = run(ws, f"curl -s --noproxy '*' --max-time 3 http://127.0.0.1:{port}/ || echo unreachable")
     assert direct.stdout.strip() == "unreachable"
