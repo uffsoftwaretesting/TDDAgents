@@ -21,6 +21,7 @@ The cycle, since Phase 12 (user decision, 2026-10-28):
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
@@ -139,4 +140,33 @@ class TestRunRecord:
     tests: int | None = None
     #: The test files' fingerprint when it ran (`app/tdd/suite_fingerprint.py`); `None` when not taken.
     test_fingerprint: str | None = None
+    #: The tests its report records per file it names, sorted by path; `None` when the report names no files.
+    file_tests: tuple[tuple[str, int], ...] | None = None
     __test__ = False
+
+
+@dataclass(frozen=True, slots=True)
+class TestFloor:
+    """
+    The session's test floor (2026-11-08, user decisions): a test count per test file, from the files the
+    reports name, and the test files' fingerprint when it was last written. Its total is the sum. `RunTests`
+    is its only writer (`app/tdd/run_tests_tool/run_tests_tool.py::next_test_floor`).
+    """
+
+    #: `(path, tests)` pairs, sorted by path, every count above 0.
+    files: tuple[tuple[str, int], ...]
+    test_fingerprint: str | None = None
+    __test__ = False
+
+    @classmethod
+    def of(cls, counts: Mapping[str, int], test_fingerprint: str | None) -> TestFloor | None:
+        """The floor over `counts` (files with no test left go); `None` when no file has one."""
+        files = tuple(sorted((path, count) for path, count in counts.items() if count > 0))
+        return cls(files, test_fingerprint) if files else None
+
+    @property
+    def total(self) -> int:
+        return sum(count for _, count in self.files)
+
+    def count(self, path: str) -> int:
+        return dict(self.files).get(path, 0)

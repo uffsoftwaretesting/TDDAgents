@@ -80,7 +80,7 @@ from app.tasks.local_shell_task.kill_shell_tasks import kill_all_shell_tasks
 from app.tdd.events import TransitionEventRecorder, events_path
 from app.tdd.plan import TddPlan, load_plan, plan_path, save_plan
 from app.tdd.project_config import load_project_config
-from app.tdd.suite_fingerprint import fingerprint_test_files
+from app.tdd.suite_fingerprint import fingerprint_test_files, hash_test_files
 from app.tool import Tool, tool_context_for
 from app.tools.agent_tool.agent_memory import AgentMemoryStore
 from app.tools.tools import assemble_tool_pool
@@ -753,7 +753,8 @@ async def open_session_run(
         # The current sub-requirement starts here (or restarts, on resume: the ledger is never
         # restored), so its tests are fingerprinted as RED's baseline (Phase 12).
         baseline = fingerprint_test_files(workspace, store.get().project_config)
-        store.update(lambda s: replace(s, tdd_item_test_baseline=baseline))
+        hashes = hash_test_files(workspace, store.get().project_config)
+        store.update(lambda s: replace(s, tdd_item_test_baseline=baseline, tdd_item_test_hashes=hashes))
         recorder = TransitionEventRecorder(store, events_path(run_id, cwd), session_id=run_id, plan_index=plan_index)
         run_deps = replace(deps, emit_event=_both(recorder, deps.emit_event))
         engine = QueryEngine(config, run_deps, transcript=transcript, session_id=run_id,

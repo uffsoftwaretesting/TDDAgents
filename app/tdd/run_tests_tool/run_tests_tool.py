@@ -39,12 +39,14 @@ file run that the declaration does not cover (strict collection, 2026-11-08: fil
 not a pass).
 Coverage is measured on every run and reported, never gated (user decision, 2026-10-28).
 
-**The session's test floor** (2026-11-08, user decision): every evidence run records its test count and the
-test files' fingerprint, and the floor is the latest run with the most tests so far (`next_test_floor`),
-across sub-requirements. A run with fewer tests is not a pass in GREEN, is accepted in REFACTOR only when the
-test files changed since the floor run (which then lowers the floor), and is stated in RED, where a run that
-counts re-bases the floor to its count (user decision 2026-11-08). RunTests is the floor's only writer, as it
-is the ledger's.
+**The session's test floor** (2026-11-08, user decisions): every evidence run records its test count, its
+count per file the report names and the test files' fingerprint. The floor is a count per test file
+(`ledger.TestFloor`, `next_test_floor`), across sub-requirements, and its total is the sum. A run with fewer
+tests than the total is not a pass in GREEN (the files that fell short named), is accepted in REFACTOR only
+when the test files changed since the floor was written (which then lowers it), and is stated in RED, where
+a run that counts lowers the floor only for the files the sub-requirement changed (each file's content hash
+when the item started, `AppState.tdd_item_test_hashes`). RunTests is the floor's only writer, as it is the
+ledger's.
 
 Any other outcome (not executable, not found, killed, a timeout, exit 0 without a report or without
 tests, no workspace) is not evidence: an error result, the ledger untouched. A background worker's
@@ -71,7 +73,7 @@ from app.tdd.coverage_gate import (
     read_coverage,
 )
 from app.tdd.junit_report import JUnitReport, parse_junit_report
-from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
+from app.tdd.ledger import PhaseLedger, TddPhase, TestFloor, TestRunRecord
 from app.tdd.project_config import (
     COVERAGE_REPORT_ENV,
     JUNIT_REPORT_ENV,
@@ -79,7 +81,13 @@ from app.tdd.project_config import (
     invalid_project_config_note,
 )
 from app.tdd.run_judgement import NOT_RUN, UNDECLARED, Judgement, Outcome, judge
-from app.tdd.suite_fingerprint import fingerprint_test_files, have_tests_changed, project_files
+from app.tdd.suite_fingerprint import (
+    file_changed,
+    fingerprint_test_files,
+    have_tests_changed,
+    project_files,
+    hash_test_files,
+)
 from app.tdd.test_listing import TestListing, run_test_listing
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
@@ -342,24 +350,34 @@ def ledger_line(before: PhaseLedger, after: PhaseLedger, judgement: Judgement) -
             f"{stated}")
 
 
-def next_test_floor(floor: TestRunRecord | None, record: TestRunRecord, judgement: Judgement,
-                    red_counted: bool) -> TestRunRecord | None:
+def next_test_floor(floor: TestFloor | None, record: TestRunRecord, judgement: Judgement, red_counted: bool,
+                    item_hashes: Mapping[str, str] | None,
+                    hashes: Mapping[str, str] | None) -> TestFloor | None:
     """
-    The session's test floor after `record` (`AppState.test_floor`): `record` when its report records as many
-    tests as the floor or more, or fewer in an accepted decrease; else the floor unchanged. A decrease is
-    accepted from a REFACTOR run that met its rule (which it can only with changed test files) and from a RED
-    run that counts (`red_counted`: the test files changed and the run met RED's rule), which re-bases the floor
-    to its count (user decision 2026-11-08: a tester re-spawn or a rewind that leaves fewer tests must not keep
-    GREEN from ever passing). A run without a report leaves it as it is.
+    The session's test floor after `record` (`AppState.test_floor`, user decisions 2026-11-08). Only a run
+    whose report names its files (`record.file_tests`) moves it:
+
+    * a RED run that counts (`red_counted`: the test files changed and the run met RED's rule) lowers it only
+      for the files this sub-requirement changed: a file whose content changed since the item started
+      (`item_hashes` against `hashes`, `file_changed`) takes the run's count, so a file deleted this item
+      goes; every other file keeps its floor, raised to the run's count when that is higher;
+    * any other run that records as many tests as the floor's total or more replaces it with its counts;
+    * fewer tests replace it only in an accepted decrease: a REFACTOR run that met its rule (which it can only
+      with changed test files);
+    * anything else leaves it as it is.
     """
-    if not record.tests:
+    if not record.tests or record.file_tests is None:
         return floor
-    if floor is None or floor.tests is None or record.tests >= floor.tests:
-        return record
+    ran = dict(record.file_tests)
+    if record.phase == TddPhase.RED and red_counted and floor is not None:
+        merged = {path: ran.get(path, 0) if file_changed(path, hashes, item_hashes)
+                  else max(floor.count(path), ran.get(path, 0))
+                  for path in {*dict(floor.files), *ran}}
+        return TestFloor.of(merged, record.test_fingerprint)
+    if floor is None or record.tests >= floor.total:
+        return TestFloor.of(ran, record.test_fingerprint)
     if record.phase == TddPhase.REFACTOR and judgement.meets_phase:
-        return record
-    if record.phase == TddPhase.RED and red_counted:
-        return record
+        return TestFloor.of(ran, record.test_fingerprint)
     return floor
 
 
@@ -388,6 +406,7 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         code = exec_result.exit_code
         collection = await asyncio.to_thread(observe_collection, workspace, rules, report, exec_result.listing)
         current = await asyncio.to_thread(fingerprint_test_files, workspace, config)
+        hashes = await asyncio.to_thread(hash_test_files, workspace, config)
         state_now = context.get_app_state()
         phase = TddPhase(state_now.phase_ledger.phase)
         judgement = judge(code, report, collection, phase, state_now.test_floor, current)
@@ -412,11 +431,13 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         # Update the authoritative AppState phase_ledger: the only writer (Part D2)
         record = TestRunRecord(command=exec_result.command, exit_code=code, stdout=exec_result.stdout,
                                stderr=exec_result.stderr, meaning=judgement.meaning, phase=phase,
-                               tests=report.tests if report is not None else None, test_fingerprint=current)
+                               tests=report.tests if report is not None else None, test_fingerprint=current,
+                               file_tests=collection.counts if collection is not None else None)
         context.set_app_state(
             lambda s: replace(
                 s, phase_ledger=s.phase_ledger.with_test_result(observed, tests_changed=changed, coverage=coverage),
-                last_test_run=record, test_floor=next_test_floor(s.test_floor, record, judgement, changed))
+                last_test_run=record,
+                test_floor=next_test_floor(s.test_floor, record, judgement, changed, s.tdd_item_test_hashes, hashes))
         )
         line = (ledger_line(before.phase_ledger, after, judgement)
                 if before.tdd_plan.current is not None else NO_CURRENT_ITEM_LEDGER)

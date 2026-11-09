@@ -359,16 +359,22 @@ def test_a_new_current_item_fingerprints_its_tests_as_red_baseline():
                                          project_config=TEST_PROJECT_CONFIG))
     update_tdd_plan(tool_context_for(store, workspace=ws), lambda p: p.remove("1"))
     assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws, TEST_PROJECT_CONFIG) is not None
+    from app.tdd.suite_fingerprint import hash_test_files
+
+    # Each test file's hash with it: the test floor's per-file baseline (2026-11-08).
+    assert store.get().tdd_item_test_hashes == hash_test_files(ws, TEST_PROJECT_CONFIG) is not None
     # Without a workspace no baseline can be taken.
-    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old"))
+    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="old",
+                                         tdd_item_test_hashes={"x": "old"}))
     update_tdd_plan(tool_context_for(store), lambda p: p.remove("1"))
-    assert store.get().tdd_item_test_baseline is None
+    assert (store.get().tdd_item_test_baseline, store.get().tdd_item_test_hashes) == (None, None)
 
 
 def test_a_change_that_keeps_the_current_item_keeps_the_baseline_too():
-    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="kept"))
+    store = AppStateStore(state=AppState(tdd_plan=plan("A", "B"), tdd_item_test_baseline="kept",
+                                         tdd_item_test_hashes={"x": "kept"}))
     update_tdd_plan(tool_context_for(store), lambda p: p.add("C"))
-    assert store.get().tdd_item_test_baseline == "kept"
+    assert (store.get().tdd_item_test_baseline, store.get().tdd_item_test_hashes) == ("kept", {"x": "kept"})
 
 
 def test_a_change_that_keeps_the_current_item_keeps_the_ledger():

@@ -160,3 +160,28 @@ def test_a_spawn_back_to_red_takes_a_new_baseline_and_any_other_keeps_it():
     assert spawn_test_baseline(PhaseLedger(), ctx) == fingerprint_test_files(ws, TEST_PROJECT_CONFIG)
     assert spawn_test_baseline(PhaseLedger(phase=TddPhase.GREEN, tests_written=True), ctx) == "kept"
     assert spawn_test_baseline(PhaseLedger(), tool_context_for(AppStateStore())) is None
+
+
+def test_each_test_files_hash_is_taken_beside_the_fingerprint():
+    import hashlib
+
+    from app.tdd.suite_fingerprint import context_test_file_hashes, file_changed, hash_test_files, spawn_test_hashes
+
+    ws = FakeWorkspace(files={"tests/test_a.py": "A", "tests/helpers/h.py": "H", "src/x.py": "X"})
+    expected = {"tests/helpers/h.py": hashlib.sha256(b"H").hexdigest(),
+                "tests/test_a.py": hashlib.sha256(b"A").hexdigest()}
+    assert hash_test_files(ws, TEST_PROJECT_CONFIG) == expected
+    assert hash_test_files(ws, None) is None and hash_test_files(object(), TEST_PROJECT_CONFIG) is None
+    assert hash_test_files(FakeWorkspace(), TEST_PROJECT_CONFIG) == {}
+    declared = tool_context_for(AppStateStore(AppState(project_config=TEST_PROJECT_CONFIG)), workspace=ws)
+    assert context_test_file_hashes(declared) == expected
+    # A spawn back to RED hashes them afresh; any other spawn keeps the item's.
+    kept = tool_context_for(AppStateStore(AppState(project_config=TEST_PROJECT_CONFIG,
+                                                   tdd_item_test_hashes={"k": "v"})), workspace=ws)
+    assert spawn_test_hashes(PhaseLedger(), kept) == expected
+    assert spawn_test_hashes(PhaseLedger(phase=TddPhase.GREEN, tests_written=True), kept) == {"k": "v"}
+    # A file changed when it was created, edited or deleted since; with no hashes, every file changed.
+    before, after = {"a": "1", "b": "2"}, {"a": "1", "b": "3", "c": "4"}
+    assert [file_changed(path, after, before) for path in ("a", "b", "c", "gone")] == [False, True, True, False]
+    assert file_changed("a", {}, before) is True
+    assert file_changed("a", None, before) is True and file_changed("a", after, None) is True

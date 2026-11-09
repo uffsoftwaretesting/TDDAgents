@@ -956,10 +956,11 @@ async def handle_rewind_files(
     # TDD: what a rewind does to the ledger and the plan is decided in one place. Function-level
     # import: `app.tdd` imports `AppState`, whose module imports this one.
     from app.tdd.file_rewind import tdd_state_after_file_rewind
-    from app.tdd.suite_fingerprint import fingerprint_test_files
+    from app.tdd.suite_fingerprint import fingerprint_test_files, hash_test_files
 
     baseline = fingerprint_test_files(workspace, app_state.project_config)
-    set_app_state(lambda state: tdd_state_after_file_rewind(state, baseline))
+    hashes = hash_test_files(workspace, app_state.project_config)
+    set_app_state(lambda state: tdd_state_after_file_rewind(state, baseline, hashes))
     return RewindFilesResult(can_rewind=True)
 
 

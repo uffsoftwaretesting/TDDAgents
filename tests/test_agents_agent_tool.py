@@ -161,7 +161,7 @@ class TestPhaseOnSpawn:
         assert store.get().phase_ledger.phase == TddPhase.REFACTOR
 
     def test_a_tester_spawned_after_red_restarts_the_items_test_baseline(self):
-        from app.tdd.suite_fingerprint import fingerprint_test_files
+        from app.tdd.suite_fingerprint import fingerprint_test_files, hash_test_files
         from tests.conftest import FakeWorkspace
 
         ws = FakeWorkspace(files={"tests/test_a.py": "A"})
@@ -172,6 +172,7 @@ class TestPhaseOnSpawn:
         _call(_tool(FakeModel([[AIMessage(content="ok")]])), ARGS, ctx)
         assert store.get().phase_ledger == PhaseLedger()
         assert store.get().tdd_item_test_baseline == fingerprint_test_files(ws, TEST_PROJECT_CONFIG)
+        assert store.get().tdd_item_test_hashes == hash_test_files(ws, TEST_PROJECT_CONFIG) is not None
 
     def test_a_refused_spawn_runs_no_worker_and_keeps_the_ledger(self):
         model = FakeModel([])

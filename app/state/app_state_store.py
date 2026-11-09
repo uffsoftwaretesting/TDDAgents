@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from app.bootstrap.state import SessionBootstrap
-from app.tdd.ledger import PhaseLedger, TestRunRecord
+from app.tdd.ledger import PhaseLedger, TestFloor, TestRunRecord
 from app.tdd.plan import TddPlan
 from app.tdd.project_config import ProjectConfig
 from app.types.permissions import ToolPermissionContext
@@ -106,13 +106,13 @@ class AppState:
     #: The last test run the ledger observed (`ledger.TestRunRecord`), written by `RunTests`
     #: together with the ledger; the TDD state is re-attached from it after a compaction.
     last_test_run: TestRunRecord | None = None
-    #: The session's test floor (2026-11-08, user decision): the latest `RunTests` run that recorded the
-    #: most tests so far (`TestRunRecord.tests`, with its test files' fingerprint). It carries across
-    #: sub-requirements (a change of the current item never resets it) and is never restored on resume.
-    #: `RunTests` is its only writer: it rises with every run whose report records as many tests or more,
-    #: and drops only on an accepted decrease (a REFACTOR run met with changed test files, or a RED run that
-    #: counts, which re-bases it to its count).
-    test_floor: TestRunRecord | None = None
+    #: The session's test floor (2026-11-08, user decisions, `ledger.TestFloor`): a test count per test file,
+    #: from the files the reports name. It carries across sub-requirements (a change of the current item
+    #: never resets it) and is never restored on resume. `RunTests` is its only writer
+    #: (`run_tests_tool.next_test_floor`): a run that records as many tests as its total or more replaces
+    #: it; a REFACTOR run met with changed test files lowers it; a RED run that counts lowers it only for
+    #: the files this sub-requirement changed (`tdd_item_test_hashes`).
+    test_floor: TestFloor | None = None
     #: Upstream `appState.tasks` (`Record<string, TaskState>`): the run's background tasks by
     #: id (`app/tasks/`). Written through the root setter even by a background worker,
     #: as upstream's `setAppStateForTasks` is (Phase 8).
@@ -127,6 +127,10 @@ class AppState:
     #: (Phase 12, `app/tdd/suite_fingerprint.py`): RunTests ends RED only once they changed.
     #: `None` when it could not be taken.
     tdd_item_test_baseline: str | None = None
+    #: Each declared test file's content hash when the current sub-requirement started
+    #: (`suite_fingerprint.hash_test_files`, 2026-11-08), taken wherever `tdd_item_test_baseline` is taken
+    #: and never restored on resume: a RED run lowers the test floor only for the files changed since.
+    tdd_item_test_hashes: Mapping[str, str] | None = None
     #: The project's approved configuration (`app/tdd/project_config.py`, 2026-11-03): its setup and
     #: test commands and which files are tests. Written by `ExitPlanMode` with the plan and loaded
     #: from `.tddagents/project.json` when a session opens. `None` while undeclared: RunTests and the

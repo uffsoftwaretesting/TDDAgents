@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.tdd.collection_gate import Collection, observe_collection, project_test_files, resolve_ran
+from app.tdd.collection_gate import Collection, observe_collection, project_test_files, resolve_counts, resolve_ran
 from app.tdd.junit_report import FailedCase, JUnitReport, parse_junit_report
 from app.tdd.project_config import ProjectConfig
 from app.tdd.test_listing import TestListing
@@ -261,6 +261,36 @@ def test_a_case_without_a_file_keeps_its_classname_then_its_suites_innermost_fir
     assert report is not None
     assert report.unnamed == (("C", "inner", "outer.ts"), ("inner", "outer.ts"), ("inner", "outer.ts"))
     assert report.named == frozenset({"f.ts"}) and report.files is None
+    assert report.named_counts == (("f.ts", 1),)
+
+
+def test_the_cases_each_file_names_are_counted():
+    report = parse_junit_report(PYTEST_XUNIT1)
+    assert report is not None and report.named_counts == (("tests/test_calc.py", 3), ("tests/test_other.py", 1))
+    rules = ProjectConfig(test="t", test_files=("src/",), exclude=("vendor/",)).rules
+    text = ('<testsuite><testcase name="a" file="src/math.test.ts"/><testcase classname="src/math.test.ts" name="b"/>'
+            '<testcase classname="src/other.test.ts" name="c"/></testsuite>')
+    mixed = parse_junit_report(text)
+    assert mixed is not None
+    assert resolve_counts(mixed, LISTED, rules) == {"src/math.test.ts": 2, "src/other.test.ts": 1}
+    assert resolve_counts(mixed, None, rules) is None
+    unresolved = parse_junit_report('<testsuite><testcase classname="com.x.T" name="a"/></testsuite>')
+    assert unresolved is not None and resolve_counts(unresolved, LISTED, rules) is None
+    # A report built by hand with `files` only carries no counts.
+    assert resolve_counts(JUnitReport(tests=1, files=frozenset({"a"})), LISTED, rules) is None
+
+
+def test_the_collection_carries_the_counts_only_when_the_report_names_the_files():
+    ws = FakeWorkspace(files={"src/math.test.ts": "", "src/other.test.ts": ""})
+    rules = ProjectConfig(test="t", test_files=("src/",)).rules
+    vitest = parse_junit_report('<testsuite><testcase classname="src/math.test.ts" name="a"/>'
+                                '<testcase classname="src/other.test.ts" name="b"/></testsuite>')
+    collection = observe_collection(ws, rules, vitest)
+    assert collection is not None and collection.counts == (("src/math.test.ts", 1), ("src/other.test.ts", 1))
+    surefire = parse_junit_report('<testsuite><testcase classname="com.x.T" name="a"/></testsuite>')
+    listing = TestListing(command="l", exit_code=0, files=frozenset({"src/math.test.ts", "src/other.test.ts"}))
+    listed = observe_collection(ws, rules, surefire, listing)
+    assert listed is not None and listed.ran is not None and listed.counts is None
 
 
 def test_test_support_is_never_expected_in_a_report_even_when_test_files_match_it():

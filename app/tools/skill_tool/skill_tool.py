@@ -309,7 +309,7 @@ def build_skill_tool(
         # package's light modules (`app.skills`), never this one.
         from app.context import enhance_system_prompt_with_env_details
         from app.tdd.phase_on_spawn import phase_on_spawn
-        from app.tdd.suite_fingerprint import spawn_test_baseline
+        from app.tdd.suite_fingerprint import spawn_test_baseline, spawn_test_hashes
         from app.tools.agent_tool.agent_tool import agent_system_prompt
         from app.tools.agent_tool.run_agent import create_agent_id, run_agent
         from app.utils.model.model import get_agent_model
@@ -322,7 +322,9 @@ def build_skill_tool(
         spawn_ledger = phase_on_spawn(spawn_state, agent)
         if spawn_ledger is not ledger:
             baseline = spawn_test_baseline(spawn_ledger, context)
-            context.set_app_state(lambda s: replace(s, phase_ledger=spawn_ledger, tdd_item_test_baseline=baseline))
+            hashes = spawn_test_hashes(spawn_ledger, context)
+            context.set_app_state(lambda s: replace(s, phase_ledger=spawn_ledger, tdd_item_test_baseline=baseline,
+                                                    tdd_item_test_hashes=hashes))
         forked_context = context_with_allowed_tools(context, allowed)
         model = get_agent_model(agent.model, config.model, command.model)
         additional = forked_context.get_app_state().tool_permission_context.additional_working_directories

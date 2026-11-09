@@ -53,7 +53,7 @@ from app.tasks.local_agent_task.local_agent_task import (
     start_background_lifecycle,
 )
 from app.tdd.phase_on_spawn import phase_on_spawn, refuse_background_phase_agent
-from app.tdd.suite_fingerprint import spawn_test_baseline
+from app.tdd.suite_fingerprint import spawn_test_baseline, spawn_test_hashes
 from app.tool import BuiltTool, CancelToken, Tool, ToolContext, ToolResult, build_tool
 from app.tools.agent_tool.agent_tool_utils import (
     filter_denied_agents,
@@ -269,7 +269,9 @@ def build_agent_tool(
         spawn_ledger = phase_on_spawn(spawn_state, agent)
         if spawn_ledger is not ledger:
             baseline = spawn_test_baseline(spawn_ledger, context)
-            context.set_app_state(lambda s: replace(s, phase_ledger=spawn_ledger, tdd_item_test_baseline=baseline))
+            hashes = spawn_test_hashes(spawn_ledger, context)
+            context.set_app_state(lambda s: replace(s, phase_ledger=spawn_ledger, tdd_item_test_baseline=baseline,
+                                                    tdd_item_test_hashes=hashes))
 
         model_override = args.get("model")
         model = get_agent_model(agent.model, config.model, model_override)

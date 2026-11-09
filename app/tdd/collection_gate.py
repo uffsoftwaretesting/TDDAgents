@@ -54,6 +54,9 @@ class Collection:
     undeclared: tuple[str, ...] = ()
     #: The `listTests` run, when one ran.
     listing: TestListing | None = None
+    #: The cases the report names per file (`resolve_counts`), sorted by path; `None` when it names no
+    #: files, or the files came from the listing.
+    counts: tuple[tuple[str, int], ...] | None = None
 
     @property
     def unknown(self) -> tuple[str, ...]:
@@ -79,6 +82,23 @@ def project_test_files(workspace: Any, rules: TestFileRules) -> frozenset[str] |
     return frozenset(path for path in files if rules.is_test_file(path))
 
 
+def resolve_counts(report: JUnitReport, listed: frozenset[str] | None,
+                   rules: TestFileRules) -> dict[str, int] | None:
+    """
+    The cases the report names per file (see `resolve_ran`), or `None` when one case names none, or when
+    the report carries no per-file counts (one built by hand with `files` only).
+    """
+    counts = dict(report.named_counts)
+    if report.unnamed and listed is None:
+        return None
+    for candidates in report.unnamed:
+        named = next((name for name in candidates if name in (listed or ()) and not rules.is_excluded(name)), None)
+        if named is None:
+            return None
+        counts[named] = counts.get(named, 0) + 1
+    return counts or None
+
+
 def resolve_ran(report: JUnitReport, listed: frozenset[str] | None, rules: TestFileRules) -> frozenset[str] | None:
     """
     The files the report names (see the module docstring), or `None` when one case names none. A case
@@ -87,15 +107,8 @@ def resolve_ran(report: JUnitReport, listed: frozenset[str] | None, rules: TestF
     """
     if not report.unnamed:
         return report.files
-    if listed is None:
-        return None
-    ran = set(report.named)
-    for candidates in report.unnamed:
-        named = next((name for name in candidates if name in listed and not rules.is_excluded(name)), None)
-        if named is None:
-            return None
-        ran.add(named)
-    return frozenset(ran)
+    counts = resolve_counts(report, listed, rules)
+    return frozenset(counts) if counts is not None else None
 
 
 def _inside_project(path: str) -> bool:
@@ -113,15 +126,18 @@ def observe_collection(workspace: Any, rules: TestFileRules | None, report: JUni
     files = project_files(workspace, rules)
     listed = frozenset(files) if files is not None else None
     ran = resolve_ran(report, listed, rules)
+    resolved = resolve_counts(report, listed, rules) if ran is not None else None
+    counts = tuple(sorted(resolved.items())) if resolved is not None else None
     if ran is None and listing is not None and listing.files is not None:
         ran = listing.files
     if ran is None:
         return Collection(None, None, (), listing)
     undeclared = tuple(sorted(path for path in ran if _inside_project(path) and not rules.is_test_code(path)))
     if listed is None:
-        return Collection(ran, None, undeclared, listing)
+        return Collection(ran, None, undeclared, listing, counts)
     expected = {path for path in listed if rules.is_test_file(path)}
-    return Collection(ran, tuple(sorted(expected - ran)), undeclared, listing)
+    return Collection(ran, tuple(sorted(expected - ran)), undeclared, listing, counts)
 
 
-__all__ = ["NO_FILES", "UNLISTABLE", "Collection", "observe_collection", "project_test_files", "resolve_ran"]
+__all__ = ["NO_FILES", "UNLISTABLE", "Collection", "observe_collection", "project_test_files", "resolve_counts",
+           "resolve_ran"]

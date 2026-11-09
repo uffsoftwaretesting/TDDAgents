@@ -154,6 +154,10 @@ def test_a_resumed_session_keeps_its_saved_plan_and_restarts_the_ledger(python_w
             # The resumed item's existing tests are its RED baseline: they must change again.
             state = run.store.get()
             assert state.tdd_item_test_baseline == fingerprint_test_files(python_workspace, state.project_config)
+            from app.tdd.suite_fingerprint import hash_test_files
+
+            assert state.tdd_item_test_hashes == hash_test_files(python_workspace, state.project_config)
+            assert state.tdd_item_test_hashes is not None
             assert run.ctx.tdd_plan_path == str(plan_path(run_id, str(python_workspace.root)))
             return await begin_session(run, "fresh", "resumed")
 

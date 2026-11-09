@@ -31,7 +31,7 @@ from typing import Any
 
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.project_config import ProjectConfig, parse_project_config_text
-from app.tdd.suite_fingerprint import context_test_fingerprint
+from app.tdd.suite_fingerprint import context_test_file_hashes, context_test_fingerprint
 from app.utils.session_storage_portable import get_project_dir
 
 logger = logging.getLogger("TDDOrchestrator.Plan")
@@ -335,8 +335,9 @@ def update_tdd_plan(context: Any, change: Callable[[TddPlan], TddPlan]) -> TddPl
         ledger = app_state.phase_ledger
         reset_ledger = ledger.transition_to(TddPhase.RED)
         baseline = context_test_fingerprint(context)
+        hashes = context_test_file_hashes(context)
         context.set_app_state(lambda s: replace(s, tdd_plan=updated, phase_ledger=reset_ledger, last_test_run=None,
-                                                tdd_item_test_baseline=baseline))
+                                                tdd_item_test_baseline=baseline, tdd_item_test_hashes=hashes))
     else:
         context.set_app_state(lambda state: replace(state, tdd_plan=updated))
     if context.tdd_plan_path:

@@ -570,10 +570,11 @@ def test_handle_rewind_files_rewinds_and_restarts_the_ledger_in_red(h: Harness) 
     assert state.phase_ledger == green.transition_to(TddPhase.RED)
     assert state.phase_ledger.phase == TddPhase.RED and not state.phase_ledger.green_passed
     assert state.last_test_run is None
-    from app.tdd.suite_fingerprint import fingerprint_test_files
+    from app.tdd.suite_fingerprint import fingerprint_test_files, hash_test_files
 
     assert state.tdd_item_test_baseline == fingerprint_test_files(workspace, TEST_PROJECT_CONFIG)
     assert state.tdd_item_test_baseline not in (None, "old")
+    assert state.tdd_item_test_hashes == hash_test_files(workspace, TEST_PROJECT_CONFIG) is not None
 
 
 def test_handle_rewind_files_reports_a_failed_rewind(h: Harness, monkeypatch: Any) -> None:

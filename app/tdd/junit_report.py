@@ -68,6 +68,8 @@ class JUnitReport:
     failed_cases: tuple[FailedCase, ...] = ()
     #: The files the cases' `file` attributes name, even when some case names none (`files` is then `None`).
     named: frozenset[str] = field(default=frozenset(), compare=False)
+    #: The cases each of those files' `file` attributes name: `(path, cases)` pairs, sorted by path.
+    named_counts: tuple[tuple[str, int], ...] = field(default=(), compare=False)
     #: For each case that names no file through a `file` attribute, in document order: the names that may
     #: be its file (its `classname`, then its enclosing suites' names, innermost first), normalised.
     unnamed: tuple[tuple[str, ...], ...] = field(default=(), compare=False)
@@ -133,6 +135,7 @@ def parse_junit_report(text: str | None, root: str | os.PathLike[str] | None = N
         return None
     counts = {"tests": 0, "failure": 0, "error": 0, "skipped": 0}
     files: set[str] = set()
+    per_file: dict[str, int] = {}
     failed: list[FailedCase] = []
     unnamed: list[tuple[str, ...]] = []
     pending: list[tuple[ElementTree.Element, str | None, tuple[str, ...]]] = [(document, None, ())]
@@ -150,6 +153,7 @@ def parse_junit_report(text: str | None, root: str | os.PathLike[str] | None = N
                     failed.append(_failed_case(element, outcome, file))
             if file is not None:
                 files.add(file)
+                per_file[file] = per_file.get(file, 0) + 1
             else:
                 unnamed.append(_candidates(element.get("classname"), suites, root))
             continue
@@ -161,7 +165,7 @@ def parse_junit_report(text: str | None, root: str | os.PathLike[str] | None = N
     return JUnitReport(
         tests=counts["tests"], failures=counts["failure"], errors=counts["error"], skipped=counts["skipped"],
         files=None if unnamed or not files else frozenset(files), failed_cases=tuple(failed),
-        named=frozenset(files), unnamed=tuple(unnamed),
+        named=frozenset(files), named_counts=tuple(sorted(per_file.items())), unnamed=tuple(unnamed),
     )
 
 

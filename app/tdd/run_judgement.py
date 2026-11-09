@@ -26,9 +26,11 @@ runner of any language, so no runner's own table applies. Upstream's Bash does t
 * files that stay unknown (the report names none and no `listTests` listing named them) keep GREEN and
   REFACTOR from a pass (strict collection, user decision 2026-11-08); RED states it and is not held to it
   (`stated`);
-* fewer tests than the session's test floor (`AppState.test_floor`, 2026-11-08): not a pass in GREEN; in
-  REFACTOR accepted only when the test files' fingerprint differs from the floor run's; stated in RED (a
-  RED run that counts re-bases the floor: `next_test_floor`).
+* fewer tests than the session's test floor (`AppState.test_floor`, a count per test file, 2026-11-08):
+  not a pass in GREEN, the files that fell short named when the report names its files; in REFACTOR
+  accepted only when the test files' fingerprint differs from the one the floor was last written with;
+  stated in RED (where a run that counts lowers the floor only for the files the item changed:
+  `next_test_floor`).
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ from enum import Enum
 
 from app.tdd.collection_gate import Collection
 from app.tdd.junit_report import JUnitReport
-from app.tdd.ledger import TddPhase, TestRunRecord
+from app.tdd.ledger import TddPhase, TestFloor
 
 
 class Outcome(Enum):
@@ -115,21 +117,29 @@ class Judgement:
         return self.outcome == Outcome.PASSED and not self.unmet
 
 
-def floor_fact(tests: int, floor: TestRunRecord) -> str:
-    """A run that records fewer tests than the floor run, stated as a fact."""
-    return f"the run records {tests} tests, fewer than the {floor.tests} an earlier run recorded"
+def floor_fact(tests: int, floor: TestFloor, counts: tuple[tuple[str, int], ...] | None = None) -> str:
+    """
+    A run that records fewer tests than the floor, stated as a fact; with the run's per-file `counts`, each
+    file that fell short of its floor, as `path: N of M`.
+    """
+    fact = f"the run records {tests} tests, fewer than the {floor.total} earlier runs recorded"
+    if counts is None:
+        return fact
+    ran = dict(counts)
+    short = [f"{path}: {ran.get(path, 0)} of {count}" for path, count in floor.files if ran.get(path, 0) < count]
+    return f"{fact} ({', '.join(short)})" if short else fact
 
 
 #: What a REFACTOR run's accepted decrease adds to `floor_fact`.
-FLOOR_ACCEPTED = "and the test files changed since that run"
+FLOOR_ACCEPTED = "and the test files changed since the floor was recorded"
 
 
 def judge(exit_code: int, report: JUnitReport | None, collection: Collection | None,
-          phase: TddPhase, floor: TestRunRecord | None = None, test_fingerprint: str | None = None) -> Judgement:
+          phase: TddPhase, floor: TestFloor | None = None, test_fingerprint: str | None = None) -> Judgement:
     """
     The judgement of one run (see the module docstring). Pure: it reads nothing but its arguments.
     `collection` is `None` when there is nothing to observe it from (no declaration, or no report);
-    `floor` is the session's test floor run, and `test_fingerprint` the test files' fingerprint now.
+    `floor` is the session's test floor, and `test_fingerprint` the test files' fingerprint now.
     """
     semantic = exit_semantic(exit_code)
     if semantic.is_error:
@@ -156,9 +166,8 @@ def judge(exit_code: int, report: JUnitReport | None, collection: Collection | N
     failed = exit_code != 0 or (report is not None and (report.failures or report.errors))
     outcome = Outcome.FAILED if failed else Outcome.PASSED
     stated = list(unknown) if phase == TddPhase.RED else []
-    below = report is not None and floor is not None and floor.tests is not None and report.tests < floor.tests
-    if below and report is not None and floor is not None:
-        fact = floor_fact(report.tests, floor)
+    if report is not None and floor is not None and report.tests < floor.total:
+        fact = floor_fact(report.tests, floor, collection.counts if collection is not None else None)
         if phase == TddPhase.GREEN:
             unmet.append(fact)
         elif phase == TddPhase.RED:

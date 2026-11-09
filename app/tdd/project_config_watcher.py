@@ -48,7 +48,7 @@ from app.tdd.project_config import (
     ProjectConfig,
     parse_project_config_text,
 )
-from app.tdd.suite_fingerprint import fingerprint_test_files
+from app.tdd.suite_fingerprint import fingerprint_test_files, hash_test_files
 from app.utils.debug import log_for_debugging
 from app.utils.settings.change_detector import (
     FILE_STABILITY_POLL_INTERVAL_MS,
@@ -85,10 +85,11 @@ def apply_project_config(get_state: GetState, set_state: SetState, workspace: An
     rebaseline = (state.tdd_plan.current is not None
                   and _pattern_key(state.project_config) != _pattern_key(config))
     baseline = fingerprint_test_files(workspace, config) if rebaseline else state.tdd_item_test_baseline
+    hashes = hash_test_files(workspace, config) if rebaseline else state.tdd_item_test_hashes
 
     def update(current: Any) -> Any:
         return replace(current, project_config=config, project_config_issues=issues,
-                       tdd_item_test_baseline=baseline)
+                       tdd_item_test_baseline=baseline, tdd_item_test_hashes=hashes)
 
     set_state(update)
     return True

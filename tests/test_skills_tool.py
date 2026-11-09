@@ -458,6 +458,24 @@ class TestForkPhaseOnSpawn:
         _call(tool, {"skill": "design"}, ctx)
         assert store.get().phase_ledger == PhaseLedger()
 
+    def test_a_spawn_back_to_red_takes_the_items_baseline_and_hashes_again(self):
+        """The test floor's per-file baseline (2026-11-08) is taken where RED's fingerprint is."""
+        from app.tdd.suite_fingerprint import fingerprint_test_files, hash_test_files
+        from tests.conftest import FakeWorkspace
+
+        _, store, tool, _ = self._run(TESTER, PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
+        store.update(lambda s: dataclasses.replace(s, tdd_item_test_baseline="old", tdd_item_test_hashes={"a": "b"}))
+        ws = FakeWorkspace(files={"tests/test_a.py": "A"})
+        _call(tool, {"skill": "design"}, tool_context_for(store, workspace=ws))
+        state = store.get()
+        assert state.tdd_item_test_baseline == fingerprint_test_files(ws, TEST_PROJECT_CONFIG)
+        assert state.tdd_item_test_hashes == hash_test_files(ws, TEST_PROJECT_CONFIG) is not None
+        # A spawn that keeps the phase's evidence keeps the item's hashes too.
+        _, kept, tool, _ = self._run(DEVELOPER, PhaseLedger(tests_written=True))
+        kept.update(lambda s: dataclasses.replace(s, tdd_item_test_hashes={"a": "b"}))
+        _call(tool, {"skill": "design"}, tool_context_for(kept, workspace=ws))
+        assert kept.get().tdd_item_test_hashes == {"a": "b"}
+
     def test_a_no_phase_agent_leaves_the_ledger_untouched(self):
         ledger = PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
         _, store, tool, ctx = self._run(EXPLORE, ledger)

@@ -69,6 +69,9 @@ def test_new_test_patterns_take_reds_baseline_again_and_keep_the_ledger():
     assert apply_text(s, ws, widened.to_json()) is True
     assert s.get().tdd_item_test_baseline == fingerprint_test_files(ws, widened)
     assert s.get().tdd_item_test_baseline != "the item's baseline"
+    from app.tdd.suite_fingerprint import hash_test_files
+
+    assert s.get().tdd_item_test_hashes == hash_test_files(ws, widened) is not None
     assert s.get().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
 
 
@@ -77,6 +80,7 @@ def test_without_a_current_sub_requirement_the_baseline_is_left_alone():
     assert apply_project_config(s.get, s.update, FakeWorkspace(files=dict(FILES)),
                                 replace(CONFIG, exclude=("dist/",))) is True
     assert s.get().tdd_item_test_baseline == "the item's baseline"
+    assert s.get().tdd_item_test_hashes is None
 
 
 def test_an_invalid_file_is_no_configuration_with_its_issues():
