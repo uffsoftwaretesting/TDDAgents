@@ -2434,6 +2434,31 @@ uncollected-files check read "unknown" and passed.
   verbatim.
 - **Host prerequisites:** `sudo apt install bubblewrap socat python3.14-venv`.
 
+*Live check in the sandbox (2026-11-09, the CPF prompt, TDDAgents alone, Claude Code only answering):*
+
+- With `socat` missing, `-p` refused to open ("sandbox required but unavailable … socat not installed",
+  exit 1). With it installed, the real-bwrap tests ran for the first time; the proxy test connected
+  directly because `NO_PROXY` names the loopback addresses (as upstream sets it) and curl honours it even
+  with `-x`, so it now passes `--noproxy ''` (the proxy itself allowed, denied with 403, and blocked
+  unlisted hosts as designed).
+- **Python** (`tdd-d4186a28deb749e8`): the plan declared a venv inside the project (the sandbox hides the
+  user's miniconda); strict collection refused GREEN while pytest's xunit2 report named no files, and the
+  agent declared `listTests` (`pytest --collect-only`) through an approved `project.json` edit, read live.
+  7 items, 288 tests, 100%; the final run passed in the sandbox (a fresh `.venv` in the copy).
+- **RED and load errors (user decision 2026-11-09):** gap (a) blocked the classic RED, a new test that
+  imports code that does not exist yet: pytest stops collecting at the load error, so the files the item
+  did not touch never ran. In RED only the test files the item created or changed must have run
+  (`judge(red_scope=…)`, `item_test_files` from `tdd_item_test_hashes`); GREEN and REFACTOR still hold every
+  declared file; the skill says `listTests` must list a file that fails to load.
+- The Python agent again left out the requested `.env`, citing the contract's own `.gitignore` sentence;
+  the contract now names `.env` explicitly and says version control is never a reason to leave a requested
+  file out.
+- bwrap's mount points (empty read-only `.mcp.json`, `.tddagents/settings.local.json`, `.bashrc`, …) exist
+  in the project while a sandboxed command runs (a backgrounded `npm install` kept them through a
+  RunTests); the cleanup removes them once no sandbox is active, as upstream. Meanwhile the empty `.mcp.json`
+  read as "MCP config is not a valid JSON" ("1 settings issue"), as it would upstream; an empty settings
+  file reads as `{}` in both.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

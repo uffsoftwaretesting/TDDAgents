@@ -135,11 +135,16 @@ FLOOR_ACCEPTED = "and the test files changed since the floor was recorded"
 
 
 def judge(exit_code: int, report: JUnitReport | None, collection: Collection | None,
-          phase: TddPhase, floor: TestFloor | None = None, test_fingerprint: str | None = None) -> Judgement:
+          phase: TddPhase, floor: TestFloor | None = None, test_fingerprint: str | None = None,
+          red_scope: frozenset[str] | None = None) -> Judgement:
     """
     The judgement of one run (see the module docstring). Pure: it reads nothing but its arguments.
     `collection` is `None` when there is nothing to observe it from (no declaration, or no report);
     `floor` is the session's test floor, and `test_fingerprint` the test files' fingerprint now.
+    `red_scope` is the test files the current sub-requirement created or changed: in RED only those must
+    have run (user decision 2026-11-09). A test that fails to load is RED's classic case, and a runner that
+    stops at a load error (pytest's interrupted collection) never runs the files the item did not touch.
+    `None` (no record of the item's files) holds every declared test file, as GREEN and REFACTOR always do.
     """
     semantic = exit_semantic(exit_code)
     if semantic.is_error:
@@ -158,6 +163,8 @@ def judge(exit_code: int, report: JUnitReport | None, collection: Collection | N
         if report.skipped:
             unmet.append(f"{report.skipped} test(s) were skipped")
     left_out = collection.uncollected if collection is not None else None
+    if phase == TddPhase.RED and left_out and red_scope is not None:
+        left_out = tuple(path for path in left_out if path in red_scope)
     undeclared = collection.undeclared if collection is not None else ()
     unknown = collection.unknown if collection is not None else ()
     unmet.extend(unknown)

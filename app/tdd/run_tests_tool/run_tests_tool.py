@@ -362,6 +362,17 @@ def ledger_line(before: PhaseLedger, after: PhaseLedger, judgement: Judgement) -
             f"{stated}")
 
 
+def item_test_files(hashes: Mapping[str, str] | None,
+                    item_hashes: Mapping[str, str] | None) -> frozenset[str] | None:
+    """
+    The test files the current sub-requirement created or changed (`file_changed` against the hashes taken
+    when it started): RED's collection scope. `None` when either side is unknown.
+    """
+    if hashes is None or item_hashes is None:
+        return None
+    return frozenset(path for path in hashes if file_changed(path, hashes, item_hashes))
+
+
 def next_test_floor(floor: TestFloor | None, record: TestRunRecord, judgement: Judgement, red_counted: bool,
                     item_hashes: Mapping[str, str] | None,
                     hashes: Mapping[str, str] | None) -> TestFloor | None:
@@ -421,7 +432,8 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         hashes = await asyncio.to_thread(hash_test_files, workspace, config)
         state_now = context.get_app_state()
         phase = TddPhase(state_now.phase_ledger.phase)
-        judgement = judge(code, report, collection, phase, state_now.test_floor, current)
+        judgement = judge(code, report, collection, phase, state_now.test_floor, current,
+                          red_scope=item_test_files(hashes, state_now.tdd_item_test_hashes))
         if judgement.outcome is None:
             return ToolResult(content=render_result(exec_result, judgement, NOT_EVIDENCE, collection), is_error=True,
                               exit_code=code)

@@ -147,7 +147,8 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
   REFACTOR and the final run, by the JUnit report (a `file` attribute, or a `classname` / suite name
   equal to a project path, `collection_gate.resolve_ran`) or, when the report names no files, by the
   project's declared `listTests` command; a report naming no files is not a pass. RED checks
-  collection on every run with a report. A test the report names that `testFiles` does not cover
+  collection on every run with a report, for the test files the item created or changed only
+  (`red_scope`: a test that cannot load its code yet is RED's classic case, user decision 2026-11-09). A test the report names that `testFiles` does not cover
   blocks every phase. **The test floor** (`AppState.test_floor`, per test file, carried across items):
   fewer tests than the floor is not a pass in GREEN; REFACTOR accepts a decrease only with changed
   test files; RED lowers it only for the files the item changed (`tdd_item_test_hashes`).

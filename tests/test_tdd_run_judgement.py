@@ -168,3 +168,36 @@ def test_a_failed_listing_is_stated_beside_the_unknown_files():
 
 def test_with_no_declaration_there_is_no_collection_to_judge():
     assert judge(0, CLEAN, None, GREEN).passed
+
+
+def test_red_holds_only_the_test_files_the_item_created_or_changed():
+    """
+    User decision 2026-11-09: the classic RED is a new test that cannot load the code it imports yet, and
+    pytest stops collecting there, so files the item did not touch never run. In RED only the item's files
+    must have run; GREEN and REFACTOR still hold every declared test file.
+    """
+    from app.tdd.run_judgement import NOT_RUN
+
+    failed = JUnitReport(tests=1, errors=1)
+    untouched_left_out = Collection(frozenset({"tests/test_new.py"}), ("tests/test_old.py",))
+    red = judge(2, failed, untouched_left_out, TddPhase.RED, red_scope=frozenset({"tests/test_new.py"}))
+    assert red.meets_phase and red.uncollected == ()
+    # A file the item changed that did not run still gives RED no evidence.
+    new_left_out = Collection(frozenset({"tests/test_old.py"}), ("tests/test_new.py",))
+    held = judge(2, failed, new_left_out, TddPhase.RED, red_scope=frozenset({"tests/test_new.py"}))
+    assert not held.meets_phase and held.uncollected == ("tests/test_new.py",) and NOT_RUN in held.unmet
+    # Without a record of the item's files every declared file is held, as before.
+    assert not judge(2, failed, untouched_left_out, TddPhase.RED).meets_phase
+    # GREEN ignores the scope.
+    green = judge(0, JUnitReport(tests=1), untouched_left_out, TddPhase.GREEN,
+                  red_scope=frozenset({"tests/test_new.py"}))
+    assert not green.meets_phase and green.uncollected == ("tests/test_old.py",)
+
+
+def test_the_items_test_files_are_those_whose_content_changed_since_it_started():
+    from app.tdd.run_tests_tool.run_tests_tool import item_test_files
+
+    item = {"tests/test_old.py": "a", "tests/test_edit.py": "b"}
+    now = {"tests/test_old.py": "a", "tests/test_edit.py": "c", "tests/test_new.py": "d"}
+    assert item_test_files(now, item) == frozenset({"tests/test_edit.py", "tests/test_new.py"})
+    assert item_test_files(None, item) is None and item_test_files(now, None) is None
