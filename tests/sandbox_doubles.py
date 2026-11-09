@@ -177,3 +177,23 @@ def bwrap_calls(log: Path) -> list[list[str]]:
     if not log.exists():
         return []
     return [json.loads(line) for line in log.read_text().splitlines() if line]
+
+
+#: The flag settings (`--settings`) the suite opens sessions over a seeded project with: the shipped
+#: `.tddagents/settings.json` enables a required sandbox, and the suite stays unsandboxed (upstream's default
+#: is off). There is no environment switch, which would be a way for a real session to fail open.
+SANDBOX_OFF = {"sandbox": {"enabled": False}}
+_sandbox_off_path: list[str] = []
+
+
+def sandbox_off_settings() -> str:
+    """A `--settings` file holding `SANDBOX_OFF` (written once per test process)."""
+    import json
+    import tempfile
+
+    if not _sandbox_off_path:
+        directory = tempfile.mkdtemp(prefix="tddagents-test-flag-")
+        path = Path(directory) / "sandbox-off.json"
+        path.write_text(json.dumps(SANDBOX_OFF))
+        _sandbox_off_path.append(str(path))
+    return _sandbox_off_path[0]

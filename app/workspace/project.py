@@ -8,7 +8,11 @@ section says which it is (`Is a git repository`). TDDAgents creates the folder f
 session, outside its own repository (`app/workspace/local.py::workspaces_root`), and only:
 * seeds `.tddagents/settings.json` from TDDAgents' shipped defaults (`acceptEdits`, and no allow
   rules since 2026-11-03, as claude-code ships none), only if the project has none, so each
-  project can be adjusted on its own (user decision, 2026-10-28).
+  project can be adjusted on its own (user decision, 2026-10-28). Since 2026-11-08 the defaults turn
+  on upstream's sandbox (`app/utils/sandbox/`): required (`failIfUnavailable`), never bypassed
+  (`allowUnsandboxedCommands: false`), a private home with the project readable, `project.json`
+  read-only to commands, and the package registries allowed. A project seeded earlier keeps the
+  settings it was seeded with.
 """
 
 from __future__ import annotations

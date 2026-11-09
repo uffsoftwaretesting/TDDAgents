@@ -24,6 +24,7 @@ from app.cli.print import (
 )
 from app.query.transitions import Terminal
 from app.tdd.plan import TddPlan
+from tests.sandbox_doubles import sandbox_off_settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +83,8 @@ async def run_item(sub_req: str, idx: int, state: Any, *, workspace: Any = None,
 
         run_options["deps"] = production.get_production_deps()
     run_options["deps"] = with_a_patient_user(run_options["deps"])
+    # The seeded project's shipped settings require a sandbox; the suite runs unsandboxed (flag settings).
+    run_options.setdefault("settings_path", sandbox_off_settings())
     async with open_session_run(run_id=item_run_id(session_id, idx), plan=TddPlan.from_texts([sub_req]),
                                 workspace=ws, plan_index=idx, **run_options) as run:
         reason = await begin_session(run, sub_req)

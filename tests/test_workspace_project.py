@@ -62,9 +62,24 @@ def test_without_shipped_settings_none_are_seeded(tmp_path):
     assert not (project / ".tddagents").exists()
 
 
-def test_the_shipped_settings_hold_no_allow_rules():
-    """As upstream, which ships none (user decision 2026-11-03): only the default mode."""
-    assert json.loads(SHIPPED_SETTINGS.read_text()) == {"permissions": {"defaultMode": "acceptEdits"}}
+def test_the_shipped_settings_hold_no_allow_rules_and_the_sandbox():
+    """
+    As upstream, which ships no allow rules (user decision 2026-11-03): the default mode; and since
+    2026-11-08 the sandbox (plan section 4): on, required, never bypassed, a private HOME with the project
+    readable, `project.json` written only through an approved edit, and the registries' hosts.
+    """
+    assert json.loads(SHIPPED_SETTINGS.read_text()) == {
+        "permissions": {"defaultMode": "acceptEdits"},
+        "sandbox": {
+            "enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+            "filesystem": {"denyRead": ["~"], "allowRead": ["."], "denyWrite": [".tddagents/project.json"]},
+            "network": {"allowedDomains": [
+                "pypi.org", "files.pythonhosted.org", "registry.npmjs.org", "storage.googleapis.com",
+                "proxy.golang.org", "sum.golang.org", "index.crates.io", "static.crates.io",
+                "repo.maven.apache.org", "repo1.maven.org", "services.gradle.org", "plugins.gradle.org",
+                "api.nuget.org", "rubygems.org", "index.rubygems.org", "repo.packagist.org"]},
+        },
+    }
 
 
 def test_an_external_environment_script_runs_after_the_profile(tmp_path):

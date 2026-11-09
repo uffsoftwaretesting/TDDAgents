@@ -16,6 +16,7 @@ from app.query.transitions import Terminal
 from app.session.driver import SessionOptions
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.plan import TddPlan
+from tests.sandbox_doubles import sandbox_off_settings
 
 CYCLE = PhaseLedger(phase=TddPhase.REFACTOR, tests_written=True, green_passed=True, refactor_passed=True)
 PLAN = TddPlan.from_texts(["Item A"])
@@ -524,7 +525,7 @@ def test_the_final_test_run_is_the_declared_suite_in_a_clean_copy(python_workspa
         "def test_lint():\n    pytest.importorskip('not_installed_anywhere')\n"))
     reports = tmp_path / "metrics_and_logging"
     reports.mkdir()
-    summary = entry.write_final_test_run(str(reports), python_workspace)
+    summary = entry.write_final_test_run(str(reports), python_workspace, sandbox_off_settings())
     assert summary == ("NOT passing (exit 0: the test command completed, coverage 100.0% (rule of thumb: 90%)); "
                        "1 test(s) were skipped")
     text = (reports / "final_test_run.txt").read_text()
@@ -533,13 +534,13 @@ def test_the_final_test_run_is_the_declared_suite_in_a_clean_copy(python_workspa
     assert not (tmp_path / "final-run").exists()
     python_workspace.write_file("tests/test_calc.py",
                                 "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n")
-    assert entry.write_final_test_run(str(reports), python_workspace) == (
+    assert entry.write_final_test_run(str(reports), python_workspace, sandbox_off_settings()) == (
         "passed (exit 0: the test command completed, coverage 100.0% (rule of thumb: 90%))")
     # A declared test file pytest does not collect never ran: not passing either.
     python_workspace.write_file("pytest.ini", "[pytest]\npython_files = check_*.py\n")
     python_workspace.write_file("tests/check_calc.py",
                                 "from calc import add\n\ndef test_add():\n    assert add(1, 2)\n")
-    assert entry.write_final_test_run(str(reports), python_workspace) == (
+    assert entry.write_final_test_run(str(reports), python_workspace, sandbox_off_settings()) == (
         "NOT passing (exit 0: the test command completed, coverage 100.0% (rule of thumb: 90%)); "
         "a declared test file did not run: tests/test_calc.py")
 
@@ -627,7 +628,7 @@ def test_the_final_run_names_the_files_that_did_not_run_when_pytest_stopped(pyth
 
     python_workspace.write_file("tests/test_ok.py", "def test_ok():\n    assert True\n")
     python_workspace.write_file("tests/test_web.py", "import not_installed_anywhere\n\ndef test_w():\n    pass\n")
-    summary = entry.write_final_test_run(str(tmp_path), python_workspace)
+    summary = entry.write_final_test_run(str(tmp_path), python_workspace, sandbox_off_settings())
     assert summary == ("NOT passing (exit 2: the test command failed, coverage could not be measured); the test "
                        "command exited 2; 1 test(s) errored; a declared test file did not run: tests/test_ok.py")
 

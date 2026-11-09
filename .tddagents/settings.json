@@ -1,5 +1,35 @@
 {
   "permissions": {
     "defaultMode": "acceptEdits"
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": ["~"],
+      "allowRead": ["."],
+      "denyWrite": [".tddagents/project.json"]
+    },
+    "network": {
+      "allowedDomains": [
+        "pypi.org",
+        "files.pythonhosted.org",
+        "registry.npmjs.org",
+        "storage.googleapis.com",
+        "proxy.golang.org",
+        "sum.golang.org",
+        "index.crates.io",
+        "static.crates.io",
+        "repo.maven.apache.org",
+        "repo1.maven.org",
+        "services.gradle.org",
+        "plugins.gradle.org",
+        "api.nuget.org",
+        "rubygems.org",
+        "index.rubygems.org",
+        "repo.packagist.org"
+      ]
+    }
   }
 }

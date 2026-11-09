@@ -8,6 +8,9 @@
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "sandbox: runs a real bubblewrap sandbox; skipped unless bwrap and socat both work on the host",
+]
 
 [tool.mypy]
 # The repo uses implicit namespace packages (no __init__.py outside graph/nodes), so

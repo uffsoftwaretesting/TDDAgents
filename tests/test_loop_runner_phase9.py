@@ -18,6 +18,7 @@ from app.query.deps import get_production_deps
 from app.utils.conversation_recovery import CONTINUATION_MESSAGE
 from app.utils.session_storage import TranscriptStore
 from app.utils.session_storage_portable import get_project_dir
+from tests.sandbox_doubles import sandbox_off_settings
 from tests.session_run_helpers import item_run_id, run_item
 
 
@@ -76,7 +77,8 @@ def test_flags_default_to_off(make_fake_workspace, tmp_path) -> None:
     _run(make_fake_workspace, _recording_model(seen), tmp_path)
     config = seen[0][1]
     assert config.permission_mode is None
-    assert config.settings_path is None
+    # `run_item` names the suite's sandbox-off flag settings; nothing else sets a `--settings` file.
+    assert config.settings_path == sandbox_off_settings()
     assert config.dangerously_skip_permissions is False
 
 
