@@ -1,7 +1,7 @@
 """
 Platform detection for the sandbox runtime.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/utils/platform.ts` -> `getPlatform`,
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/utils/platform.ts` -> `getPlatform`,
 `getWslVersion`. `/proc/version` and `sys.platform` are parameters, so the WSL rules are testable.
 """
 

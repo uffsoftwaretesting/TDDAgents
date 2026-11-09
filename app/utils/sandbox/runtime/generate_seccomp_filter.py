@@ -1,11 +1,13 @@
 """
 Locating the seccomp filter that blocks Unix-socket creation, and the binary that applies it.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/generate-seccomp-filter.ts` ->
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/generate-seccomp-filter.ts` ->
 `getPreGeneratedBpfPath`, `getApplySeccompBinaryPath`, `generateSeccompFilter`, `cleanupSeccompFilter`,
 `getVendorArchitecture`. The package's `vendor/seccomp/{x64,arm64}/` (`apply-seccomp`,
 `unix-block.bpf`, built from `vendor/seccomp-src/`) is vendored beside this module, as upstream bundles
-it beside its code. An explicit path (`sandbox.seccomp.bpfPath` / `applyPath`) wins when it exists.
+it beside its code; 0.0.46's `apply-seccomp` also runs the command in a nested user + PID + mount
+namespace, as PID 1, so it cannot see or ptrace bwrap, bash or socat. An explicit path
+(`sandbox.seccomp.bpfPath` / `applyPath`) wins when it exists.
 
 Not ported: the global-npm fallback (`getGlobalNpmPaths`, `npm root -g`), which serves upstream's
 native builds without a bundled `vendor/`; TDDAgents always ships its copy. The lookups are memoized

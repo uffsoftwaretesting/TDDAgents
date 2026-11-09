@@ -1,7 +1,7 @@
 """
 The runtime's internal restriction structures.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/sandbox-schemas.ts` ->
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/sandbox-schemas.ts` ->
 `FsReadRestrictionConfig`, `FsWriteRestrictionConfig`, `NetworkRestrictionConfig`,
 `NetworkHostPattern`, `SandboxAskCallback`.
 """

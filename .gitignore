@@ -24,7 +24,7 @@ mutants/
 
 # Reference clones
 reference/claude-code-system-prompts/
-# @anthropic-ai/sandbox-runtime 0.0.44: the npm package (with its node_modules) and the GitHub tag's source
+# @anthropic-ai/sandbox-runtime 0.0.46: the npm package (with its node_modules) and the GitHub tag's source
 reference/sandbox-runtime*/
 reference/sandbox-runtime
 reference/sandbox-runtime-src

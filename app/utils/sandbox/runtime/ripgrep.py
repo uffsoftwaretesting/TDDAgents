@@ -1,7 +1,7 @@
 """
 Running ripgrep for the sandbox's mandatory-deny scan.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/utils/ripgrep.ts` -> `ripGrep`: the configured
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/utils/ripgrep.ts` -> `ripGrep`: the configured
 command with its arguments, then ripgrep's, then the target; exit 0 is the matching lines, exit 1 is no
 match, anything else raises; a 10 s timeout. `argv0` overrides `argv[0]` (a multicall binary).
 

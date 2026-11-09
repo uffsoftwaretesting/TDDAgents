@@ -95,6 +95,7 @@ def test_the_argv_matches_the_packages_own(tree: dict[str, Path], network: bool)
                           capture_output=True, text=True, env=env, timeout=60, check=True)
 
     lsu._bwrap_mount_points.clear()
+    lsu._active_sandbox_count = 0
     ours = lsu.wrap_command_with_sandbox_linux(lsu.LinuxSandboxParams(
         command=str(params["command"]), needs_network_restriction=network, cwd=str(project), home=str(home),
         tmpdir=str(tmpdir), http_socket_path=sockets["httpSocketPath"] if network else None,
@@ -119,5 +120,5 @@ def test_the_argv_matches_the_packages_own(tree: dict[str, Path], network: bool)
     assert actual == expected
     # The comparison covered the interesting parts: home hidden, project re-bound, the nested deny found.
     flat = shlex.split(ours)
-    assert ["--tmpfs", str(home)] == flat[flat.index("--tmpfs"):flat.index("--tmpfs") + 2]
+    assert ["--tmpfs", str(home)] in [flat[i:i + 2] for i in range(len(flat))]
     assert str(project / "sub" / ".vscode") in flat

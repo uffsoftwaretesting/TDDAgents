@@ -1,7 +1,7 @@
 """
 The sandbox's HTTP proxy: every HTTP and HTTPS request a sandboxed command makes, filtered by host.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/http-proxy.ts` -> `createHttpProxyServer`:
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/http-proxy.ts` -> `createHttpProxyServer`:
 * `CONNECT host:port` (HTTPS and any tunnel): a malformed target is `400 Bad Request`; a host the filter
   refuses is `403 Forbidden` with `X-Proxy-Error: blocked-by-allowlist` and the text
   "Connection blocked by network allowlist"; an allowed one is tunnelled

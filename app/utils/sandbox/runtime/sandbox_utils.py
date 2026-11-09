@@ -1,7 +1,7 @@
 """
 Path rules, the protected files, the default write paths and the proxy environment of the sandbox.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/sandbox-utils.ts` -> `DANGEROUS_FILES`,
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/sandbox-utils.ts` -> `DANGEROUS_FILES`,
 `DANGEROUS_DIRECTORIES`, `getDangerousDirectories`, `normalizeCaseForComparison`, `containsGlobChars`,
 `removeTrailingGlobSuffix`, `isSymlinkOutsideBoundary`, `normalizePathForSandbox`,
 `getDefaultWritePaths`, `generateProxyEnvVars`, `encodeSandboxedCommand`, `decodeSandboxedCommand`,

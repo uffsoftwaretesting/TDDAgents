@@ -1,7 +1,7 @@
 """
 The sandbox's SOCKS5 proxy: every non-HTTP connection a sandboxed command makes (git over SSH, raw TCP).
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/socks-proxy.ts` ->
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/socks-proxy.ts` ->
 `createSocksProxyServer`, and the server it builds on (`@pondwader/socks5-server`: the no-auth
 greeting, the request parsing, `setRulesetValidator`, the default connection handler and its status
 codes). A greeting without "no authentication" gets `05 FF`; a command other than CONNECT gets

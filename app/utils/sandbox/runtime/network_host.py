@@ -1,7 +1,7 @@
 """
 Where the sandbox's network infrastructure lives on the host: its own thread and event loop.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/sandbox-manager.ts` -> `HostNetworkManagerContext`,
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/sandbox-manager.ts` -> `HostNetworkManagerContext`,
 `startHttpProxyServer`, `startSocksProxyServer`, the network half of `initialize` (an external proxy port
 is used as given, else a local proxy is started; on Linux the socat bridge follows) and of `reset`.
 

@@ -1,7 +1,7 @@
 """
 The sandbox manager: the session's network filter and proxies, and the command wrapper.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/sandbox-manager.ts` -> `SandboxManager`
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/sandbox-manager.ts` -> `SandboxManager`
 (`initialize`, `isSupportedPlatform`, `isSandboxingEnabled`, `checkDependencies`, `getFsReadConfig`,
 `getFsWriteConfig`, `getNetworkRestrictionConfig`, the getters, `waitForNetworkInitialization`,
 `wrapWithSandbox`, `getConfig`, `updateConfig`, `cleanupAfterCommand`, `reset`,
@@ -192,12 +192,18 @@ class SandboxManager:
         return self._context is not None
 
     def cleanup_after_command(self) -> None:
-        """`cleanupAfterCommand`: the mount points bwrap left on the host are removed."""
+        """
+        `cleanupAfterCommand`: one wrapped command is done; the mount points bwrap left on the host are
+        removed once no other wrapped command is still running.
+        """
         cleanup_bwrap_mount_points()
 
     def reset(self) -> None:
-        """`reset`: the mount points, then the bridge, the proxies and their loop; the manager is uninitialized."""
-        self.cleanup_after_command()
+        """
+        `reset`: the mount points (forced past the active-sandbox count: the session is over), then the
+        bridge, the proxies and their loop; the manager is uninitialized.
+        """
+        cleanup_bwrap_mount_points(force=True)
         context, self._context = self._context, None
         if context is not None:
             context.close()

@@ -1,7 +1,7 @@
 """
 The in-memory tail of sandbox violations.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/sandbox-violation-store.ts` ->
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/sandbox-violation-store.ts` ->
 `SandboxViolationStore`, and `macos-sandbox-utils.ts` -> `SandboxViolationEvent` (the type only).
 Only macOS's log monitor adds violations upstream; on Linux the store stays empty, so
 `annotateStderrWithSandboxFailures` changes nothing there.

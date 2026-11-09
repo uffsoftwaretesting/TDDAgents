@@ -1,7 +1,7 @@
 """
 The configuration the sandbox runtime is initialized with.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/sandbox-config.ts` ->
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/sandbox-config.ts` ->
 `SandboxRuntimeConfigSchema` and its parts (`NetworkConfigSchema`, `FilesystemConfigSchema`,
 `IgnoreViolationsConfigSchema`, `RipgrepConfigSchema`, `SeccompConfigSchema`, `MitmProxyConfigSchema`,
 the `domainPatternSchema` refinement). The zod schema becomes frozen dataclasses (snake_cased fields)

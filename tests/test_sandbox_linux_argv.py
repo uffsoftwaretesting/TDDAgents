@@ -29,6 +29,7 @@ RG = RipgrepConfig(command="/opt/rg", args=["--no-config"])
 @pytest.fixture(autouse=True)
 def _no_mount_points() -> None:
     lsu._bwrap_mount_points.clear()
+    lsu._active_sandbox_count = 0
 
 
 def project_fs(**extra: set[str]) -> FakeFs:
@@ -197,10 +198,28 @@ def test_a_denied_root_becomes_its_children_except_proc_dev_and_sys() -> None:
                                        "--tmpfs", "/usr", "--ro-bind", "/usr", "/usr"]
 
 
-def test_a_denied_file_is_masked_unless_an_allow_covers_it() -> None:
-    fs = project_fs(files={f"{CWD}/.env", "/etc/secret"})
-    read = FsReadRestrictionConfig(deny_only=[".env", "/etc/secret", "/nonexistent"], allow_within_deny=["."])
-    assert fs_args(fs, read, None) == ["--bind", "/", "/", "--ro-bind", "/dev/null", "/etc/secret"]
+def test_a_denied_file_stays_masked_under_a_directory_allow_and_only_an_exact_allow_lifts_it() -> None:
+    fs = project_fs(files={f"{CWD}/.env", f"{CWD}/.npmrc", "/etc/secret"})
+    read = FsReadRestrictionConfig(deny_only=[".env", ".npmrc", "/etc/secret", "/nonexistent"],
+                                   allow_within_deny=[".", ".npmrc"])
+    # 0.0.45: `allowRead: ["."]` no longer drops `denyRead: [".env"]`; the shallower deny comes first.
+    assert fs_args(fs, read, None) == ["--bind", "/", "/", "--ro-bind", "/dev/null", "/etc/secret",
+                                       "--ro-bind", "/dev/null", f"{CWD}/.env"]
+
+
+def test_read_denies_apply_shallow_first_so_a_directory_tmpfs_cannot_wipe_a_file_mask() -> None:
+    fs = project_fs(dirs={f"{HOME}/secrets"}, files={f"{HOME}/secrets/key"})
+    read = FsReadRestrictionConfig(deny_only=[f"{HOME}/secrets/key", f"{HOME}/secrets"])
+    assert fs_args(fs, read, None) == ["--bind", "/", "/", "--tmpfs", f"{HOME}/secrets",
+                                       "--ro-bind", "/dev/null", f"{HOME}/secrets/key"]
+
+
+def test_a_write_deny_never_undoes_a_read_mask_on_the_same_file() -> None:
+    fs = project_fs(files={f"{CWD}/.env"})
+    write = FsWriteRestrictionConfig(allow_only=["."], deny_within_allow=[f"{CWD}/.env"])
+    args = fs_args(fs, FsReadRestrictionConfig(deny_only=[".env"]), write)
+    assert ["--ro-bind", "/dev/null", f"{CWD}/.env"] == args[args.index("/dev/null", args.index("--bind") + 3) - 1:][:3]
+    assert ["--ro-bind", f"{CWD}/.env", f"{CWD}/.env"] not in [args[i:i + 3] for i in range(len(args))]
 
 
 def test_ssh_config_d_is_always_hidden_when_present() -> None:
@@ -269,6 +288,9 @@ def test_without_network_seccomp_runs_the_command_directly() -> None:
                 write_config=FsWriteRestrictionConfig(allow_only=["."], deny_within_allow=[]),
                 enable_weaker_nested_sandbox=True)
     assert "--unshare-net" not in argv and "--proc" not in argv
+    # 0.0.46: the weaker nested sandbox forces the user namespace and keeps /proc writable.
+    tail = argv[argv.index("--unshare-pid"):argv.index("--")]
+    assert tail == ["--unshare-pid", "--unshare-user", "--bind", "/proc", "/proc"]
     assert shlex.split(argv[-1])[1:] == [get_pre_generated_bpf_path(), "/usr/bin/bash", "-c", "ls"]
     plain = wrap(project_fs(), command="ls", needs_network_restriction=True, allow_all_unix_sockets=True,
                  read_config=FsReadRestrictionConfig(deny_only=[HOME]))
@@ -313,6 +335,53 @@ def test_dependencies_need_bwrap_and_socat_and_warn_without_seccomp() -> None:
     status = lsu.get_linux_dependency_status(which=lambda name: "/usr/bin/bwrap" if name == "bwrap" else None)
     assert (status.has_bwrap, status.has_socat, status.has_seccomp_bpf, status.has_seccomp_apply) == (
         True, False, True, True)
+
+
+def test_cleanup_waits_for_every_wrapped_command(tmp_path: Path) -> None:
+    ghost = tmp_path / ".bashrc"
+    ghost.write_text("")
+    lsu._bwrap_mount_points[str(ghost)] = None
+    for _ in range(2):
+        wrap(project_fs(), command="ls", needs_network_restriction=False, allow_all_unix_sockets=True,
+             write_config=FsWriteRestrictionConfig(allow_only=["."], deny_within_allow=[]))
+    assert lsu.active_sandbox_count() == 2
+    lsu.cleanup_bwrap_mount_points()
+    assert ghost.exists() and lsu.active_sandbox_count() == 1, "another sandbox still uses the mount point"
+    lsu.cleanup_bwrap_mount_points()
+    assert not ghost.exists() and lsu.active_sandbox_count() == 0
+    lsu.cleanup_bwrap_mount_points()
+    assert lsu.active_sandbox_count() == 0
+
+
+def test_a_failed_wrap_does_not_count_and_force_cleans_at_once(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError):
+        wrap(project_fs(), command="x", needs_network_restriction=True, http_socket_path="/tmp/h.sock",
+             socks_socket_path="/tmp/s.sock")
+    assert lsu.active_sandbox_count() == 0
+    wrap(project_fs(), command="ls", needs_network_restriction=False, allow_all_unix_sockets=True,
+         write_config=FsWriteRestrictionConfig(allow_only=["."], deny_within_allow=[]))
+    ghost = tmp_path / ".profile"
+    ghost.write_text("")
+    lsu._bwrap_mount_points[str(ghost)] = None
+    lsu.cleanup_bwrap_mount_points(force=True)
+    assert not ghost.exists() and lsu.active_sandbox_count() == 0
+
+
+def test_the_seccomp_helper_is_re_allowed_under_a_read_deny() -> None:
+    apply_path, bpf = get_apply_seccomp_binary_path(), get_pre_generated_bpf_path()
+    assert apply_path and bpf
+    vendor_dir = str(Path(apply_path).parent)
+    fs = FakeFs(dirs={CWD, TMP, vendor_dir, "/home/u/elsewhere"}, files={apply_path, bpf})
+    argv = wrap(fs, command="ls", needs_network_restriction=False,
+                read_config=FsReadRestrictionConfig(deny_only=[str(Path(vendor_dir).parents[3])]),
+                write_config=FsWriteRestrictionConfig(allow_only=["."], deny_within_allow=[]))
+    assert ["--ro-bind", vendor_dir, vendor_dir] in [argv[i:i + 3] for i in range(len(argv))]
+    assert lsu.seccomp_helper_read_config(None, [apply_path]) is None
+    untouched = FsReadRestrictionConfig(deny_only=[])
+    assert lsu.seccomp_helper_read_config(untouched, [apply_path]) is untouched
+    widened = lsu.seccomp_helper_read_config(FsReadRestrictionConfig(deny_only=["~"], allow_within_deny=["."]),
+                                             [apply_path, bpf, ""])
+    assert widened is not None and widened.allow_within_deny == [".", vendor_dir]
 
 
 def test_cleanup_removes_only_what_bwrap_left(tmp_path: Path) -> None:

@@ -245,8 +245,11 @@ def test_cleanup_after_command_removes_tracked_mount_points(tmp_path: Path) -> N
     ghost = tmp_path / ".bashrc"
     ghost.write_text("")
     lsu._bwrap_mount_points[str(ghost)] = None
+    lsu._active_sandbox_count = 2
     manager().cleanup_after_command()
-    assert not ghost.exists()
+    assert ghost.exists(), "deferred while another wrapped command runs"
+    manager().reset()
+    assert not ghost.exists() and lsu.active_sandbox_count() == 0, "reset forces the cleanup"
 
 
 # ── the socat bridge, against a fake socat ──────────────────────────────────────

@@ -1,7 +1,7 @@
 """
 The bubblewrap command line: filesystem binds, mandatory denies, the network namespace and seccomp.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/linux-sandbox-utils.ts` ->
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/linux-sandbox-utils.ts` ->
 `LinuxSandboxParams`, `findSymlinkInPath`, `hasFileAncestor`, `findFirstNonExistentComponent`,
 `linuxGetMandatoryDenyPaths`, `cleanupBwrapMountPoints`, `getLinuxDependencyStatus`,
 `checkLinuxDependencies`, `buildSandboxCommand`, `generateFilesystemArgs`, `wrapCommandWithSandboxLinux`.
@@ -15,6 +15,11 @@ Divergences:
   parameters, so the argv can be built in a test with nothing real behind it.
 * Quoting uses `shlex` where upstream uses `shell-quote`: both produce POSIX shell words with the same
   meaning, not the same characters.
+* **The runtime's own seccomp helper stays readable** (TDDAgents, user decision 2026-11-08): upstream runs
+  `apply-seccomp` and its `.bpf` from inside the sandbox without exposing them, so a `denyRead` covering
+  where they are installed (TDDAgents' vendored copy, under `~` with the shipped `denyRead: ["~"]`) makes
+  every command exit 127. When seccomp is used, the helper's directory is added to the read config's
+  `allowWithinDeny`, so a deny over it binds it back read-only (`seccomp_helper_read_config`).
 """
 
 from __future__ import annotations
@@ -230,6 +235,10 @@ def linux_get_mandatory_deny_paths(
 #: `bwrapMountPoints`: the empty files and directories bwrap created on the host as mount points for
 #: non-existent deny paths; `cleanup_bwrap_mount_points` removes them after each command.
 _bwrap_mount_points: dict[str, None] = {}
+#: `activeSandboxCount`: wrapped commands whose cleanup has not run yet. Deleting a mount point file while
+#: another bwrap is still running detaches that instance's bind mount and its deny stops applying, so the
+#: cleanup is deferred until this is back to zero.
+_active_sandbox_count = 0
 _exit_handler_registered = False
 
 
@@ -237,7 +246,7 @@ def _register_exit_cleanup_handler() -> None:
     """`registerExitCleanupHandler`: the mount points are removed at exit too, as a safety net."""
     global _exit_handler_registered
     if not _exit_handler_registered:
-        atexit.register(cleanup_bwrap_mount_points)
+        atexit.register(cleanup_bwrap_mount_points, force=True)
         _exit_handler_registered = True
 
 
@@ -246,13 +255,29 @@ def bwrap_mount_points() -> list[str]:
     return list(_bwrap_mount_points)
 
 
-def cleanup_bwrap_mount_points() -> None:
+def active_sandbox_count() -> int:
+    """How many wrapped commands have not been cleaned up yet."""
+    return _active_sandbox_count
+
+
+def cleanup_bwrap_mount_points(force: bool = False) -> None:
     """
-    `cleanupBwrapMountPoints`: remove each tracked mount point that is still what bwrap left (an empty
-    file, or an empty directory); anything with content is left alone.
+    `cleanupBwrapMountPoints`: one wrapped command is done; once none is still running (or with `force`,
+    at exit and on `reset`), remove each tracked mount point that is still what bwrap left (an empty file,
+    or an empty directory); anything with content is left alone.
     """
     import os
 
+    global _active_sandbox_count
+    if not force:
+        if _active_sandbox_count > 0:
+            _active_sandbox_count -= 1
+        if _active_sandbox_count > 0:
+            logger.debug("[Sandbox Linux] Deferring mount point cleanup — %s sandbox(es) still active",
+                         _active_sandbox_count)
+            return
+    else:
+        _active_sandbox_count = 0
     for mount_point in list(_bwrap_mount_points):
         try:
             if os.path.isfile(mount_point) and os.path.getsize(mount_point) == 0:
@@ -420,6 +445,8 @@ def generate_filesystem_args(
 
     read_deny_paths: list[str] = []
     read_allow_paths = [normalize(p) for p in (read_config.allow_within_deny if read_config else [])]
+    # Files masked with /dev/null below: a write deny's `--ro-bind <p> <p>` must not undo the mask.
+    masked_files: set[str] = set()
     # A tmpfs over / would wipe every earlier mount: a denied root becomes its children.
     for path in read_config.deny_only if read_config else []:
         if normalize(path) == "/":
@@ -429,8 +456,9 @@ def generate_filesystem_args(
     if fs.exists(SSH_CONFIG_D):
         read_deny_paths.append(SSH_CONFIG_D)
 
-    for path_pattern in read_deny_paths:
-        normalized = normalize(path_pattern)
+    # Shallow first, so a tmpfs over a directory lands before the /dev/null mask of a file inside it.
+    normalized_deny_paths = sorted((normalize(p) for p in read_deny_paths), key=lambda p: len(p.split("/")))
+    for normalized in normalized_deny_paths:
         if not fs.exists(normalized):
             logger.debug("[Sandbox Linux] Skipping non-existent read deny path: %s", normalized)
             continue
@@ -451,14 +479,36 @@ def generate_filesystem_args(
                         continue
                     args += ["--ro-bind", allow_path, allow_path]
         else:
-            if any(_within(normalized, allow_path) for allow_path in read_allow_paths):
+            # Only an exact allow re-allows a denied file: `allowRead: ["."]` keeps `denyRead: [".env"]`.
+            if normalized in read_allow_paths:
                 logger.debug("[Sandbox Linux] Skipping read deny for re-allowed path: %s", normalized)
                 continue
             args += ["--ro-bind", "/dev/null", normalized]
+            masked_files.add(normalized)
 
-    # The write denies go last, on top of anything the read denies just re-bound.
-    args += deny_write_args
+    # The write denies go last, on top of anything the read denies just re-bound, except where a read
+    # deny already masked the file.
+    for index in range(0, len(deny_write_args), 3):
+        source, dest = deny_write_args[index + 1], deny_write_args[index + 2]
+        if dest in masked_files:
+            continue
+        args += [deny_write_args[index], source, dest]
     return args
+
+
+def seccomp_helper_read_config(read_config: FsReadRestrictionConfig | None,
+                               helper_paths: list[str]) -> FsReadRestrictionConfig | None:
+    """
+    TDDAgents (see the module docstring): the read config with the directories of the seccomp helper
+    (`apply-seccomp`, the `.bpf`) re-allowed, so a read deny over where they are installed binds them back.
+    """
+    import posixpath as pp
+
+    if read_config is None or not read_config.deny_only:
+        return read_config
+    extra = [pp.dirname(path) for path in helper_paths if path]
+    allow = list(dict.fromkeys([*read_config.allow_within_deny, *extra]))
+    return FsReadRestrictionConfig(deny_only=list(read_config.deny_only), allow_within_deny=allow)
 
 
 def wrap_command_with_sandbox_linux(params: LinuxSandboxParams) -> str:
@@ -475,6 +525,9 @@ def wrap_command_with_sandbox_linux(params: LinuxSandboxParams) -> str:
     if not params.needs_network_restriction and not has_read_restrictions and not has_write_restrictions:
         return params.command
 
+    # This invocation is active until the caller's cleanup (or the failure below) decrements it.
+    global _active_sandbox_count
+    _active_sandbox_count += 1
     bwrap_args = ["--new-session", "--die-with-parent"]
     seccomp_filter_path: str | None = None
     seccomp = params.seccomp_config
@@ -485,6 +538,8 @@ def wrap_command_with_sandbox_linux(params: LinuxSandboxParams) -> str:
             if not seccomp_filter_path or not apply_seccomp_binary:
                 logger.warning("[Sandbox Linux] Seccomp binaries not available - unix socket blocking disabled.")
                 seccomp_filter_path = None
+            else:
+                read_config = seccomp_helper_read_config(read_config, [apply_seccomp_binary, seccomp_filter_path])
         else:
             logger.debug("[Sandbox Linux] Skipping seccomp filter - allowAllUnixSockets is enabled")
 
@@ -518,6 +573,10 @@ def wrap_command_with_sandbox_linux(params: LinuxSandboxParams) -> str:
         bwrap_args.append("--unshare-pid")
         if not params.enable_weaker_nested_sandbox:
             bwrap_args += ["--proc", "/proc"]
+        else:
+            # An unprivileged container runs bwrap as EUID 0 without CAP_SYS_ADMIN: force the user namespace,
+            # and keep /proc writable for apply-seccomp's nested user namespace (setgroups, uid_map).
+            bwrap_args += ["--unshare-user", "--bind", "/proc", "/proc"]
 
         shell_name = params.bin_shell or "bash"
         shell = params.which(shell_name)
@@ -547,6 +606,9 @@ def wrap_command_with_sandbox_linux(params: LinuxSandboxParams) -> str:
         logger.debug("[Sandbox Linux] Wrapped command with bwrap (%s restrictions)", ", ".join(restrictions))
         return shlex.join(["bwrap", *bwrap_args])
     except Exception:
+        # The caller never cleans up after a wrap that failed.
+        if _active_sandbox_count > 0:
+            _active_sandbox_count -= 1
         if seccomp_filter_path and "/vendor/seccomp/" not in seccomp_filter_path:
             cleanup_seccomp_filter(seccomp_filter_path)
         raise
@@ -562,6 +624,7 @@ __all__ = [
     "LinuxDependencyStatus",
     "LinuxSandboxParams",
     "SandboxDependencyCheck",
+    "active_sandbox_count",
     "build_sandbox_command",
     "bwrap_mount_points",
     "check_linux_dependencies",
@@ -572,5 +635,6 @@ __all__ = [
     "get_linux_dependency_status",
     "has_file_ancestor",
     "linux_get_mandatory_deny_paths",
+    "seccomp_helper_read_config",
     "wrap_command_with_sandbox_linux",
 ]

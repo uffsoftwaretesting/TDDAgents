@@ -648,19 +648,23 @@ is no seatbelt or bubblewrap implementation in this tree.
 - Code: `claude-code/src/tools/BashTool/shouldUseSandbox.ts` → `shouldUseSandbox`; `claude-code/src/utils/sandbox/sandbox-adapter.ts` → `SandboxManager`, `convertToSandboxRuntimeConfig`
 - Consult when: you need to know what sandboxing actually does here (mostly: calls out).
 
-### Sandbox runtime (`@anthropic-ai/sandbox-runtime` 0.0.44)
+### Sandbox runtime (`@anthropic-ai/sandbox-runtime` 0.0.46)
 The package the adapter wraps: the bubblewrap argv, the filesystem binds and mandatory denies, the
 HTTP + SOCKS5 proxies with the domain allowlist, the socat bridge into the network namespace, and the
 vendored seccomp binaries (`vendor/seccomp/{x64,arm64}/apply-seccomp`, `unix-block.bpf`). It is not in
-`claude-code/`: fetch it with `npm pack @anthropic-ai/sandbox-runtime@0.0.44` into
+`claude-code/`: fetch it with `npm pack @anthropic-ai/sandbox-runtime@0.0.46` into
 `reference/sandbox-runtime/` (then `npm install --omit=dev --ignore-scripts` there, for the `node`
-cross-check), and the GitHub tag `v0.0.44` of `anthropics/sandbox-runtime` (its `src/` and `test/`) into
+cross-check), and the GitHub tag `v0.0.46` of `anthropics/sandbox-runtime` (its `src/` and `test/`) into
 `reference/sandbox-runtime-src/`. Both are gitignored.
 
 v2.1.88 itself bundled 0.0.42 (its neighbours 2.1.87 and 2.1.89 carry 0.0.42's `allowWithinDeny`
-re-allow and none of 0.0.43's parent proxy). 0.0.44 is the first release whose `denyRead` tmpfs re-binds
-the write paths under it and emits the `denyWrite` binds last; without that a `denyRead: ["~"]` hides a
-project under `~` read-only and wipes its `.git/hooks` deny.
+re-allow and none of 0.0.43's parent proxy). 0.0.46 is the last release of the snapshot's time
+(2026-03-31, user decision 2026-11-08). Since 0.0.42: 0.0.44's `denyRead` tmpfs re-binds the write paths
+under it and emits the `denyWrite` binds last (without that a `denyRead: ["~"]` hides a project under `~`
+read-only and wipes its `.git/hooks` deny); 0.0.45 defers the mount-point cleanup while other sandboxed
+commands run, keeps a denied file denied under a directory allow, sorts the read denies shallow-first, and
+its `apply-seccomp` runs the command in a nested PID namespace; 0.0.46 forces `--unshare-user` in the
+weaker nested sandbox.
 
 - Source: `sandbox-runtime-src/src/sandbox/sandbox-manager.ts` → `SandboxManager`, `filterNetworkRequest`; `sandbox-runtime-src/src/sandbox/linux-sandbox-utils.ts` → `wrapCommandWithSandboxLinux`, `generateFilesystemArgs`, `initializeLinuxNetworkBridge`; `sandbox-runtime-src/src/sandbox/sandbox-utils.ts` → `normalizePathForSandbox`, `generateProxyEnvVars`; `sandbox-runtime-src/src/sandbox/http-proxy.ts`, `socks-proxy.ts`
 - Consult when: changing `app/utils/sandbox/runtime/` (its modules mirror the package's `src/sandbox/` in snake_case).

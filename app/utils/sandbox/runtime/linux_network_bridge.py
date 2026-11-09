@@ -1,7 +1,7 @@
 """
 The host side of the network bridge into bubblewrap's empty network namespace.
 
-Ported from `@anthropic-ai/sandbox-runtime` 0.0.44 `src/sandbox/linux-sandbox-utils.ts` ->
+Ported from `@anthropic-ai/sandbox-runtime` 0.0.46 `src/sandbox/linux-sandbox-utils.ts` ->
 `LinuxNetworkBridgeContext`, `initializeLinuxNetworkBridge`, and the bridge half of
 `sandbox-manager.ts` -> `reset` (SIGTERM, a 5 s wait, then SIGKILL; the sockets removed). Two socat
 processes listen on Unix sockets in the temp directory (`tddagents-http-<id>.sock`,
