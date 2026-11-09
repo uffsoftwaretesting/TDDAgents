@@ -2372,6 +2372,68 @@ user, the recommended option every time):*
     - `.env` was created as its own sub-requirement, with tests that load the settings from a
       temporary copy of `.env.example`, none of them skipped.
 
+*The sandbox, strict collection and agents that do what was asked (2026-11-08, user decisions):*
+
+The autonomous CPF runs passed a "clean" final run that proved nothing: commands ran as `bash -l`
+(the host's `.bashrc` put conda on `PATH`), `pip install` went into the global miniconda, Puppeteer's
+Chrome came from `~/.cache`; agents dropped a requested `.env` and gitignored or excluded it; the
+uncollected-files check read "unknown" and passed.
+
+- **The sandbox** is upstream's, ported (`app/utils/sandbox/sandbox_adapter.py` ← `sandbox-adapter.ts`;
+  `app/utils/sandbox/runtime/` ← `@anthropic-ai/sandbox-runtime` **0.0.46**, its Linux path: bwrap
+  argv, mandatory denies, the HTTP and SOCKS5 proxies with the domain allowlist and the ask callback,
+  the socat bridge, the vendored seccomp binaries for x64 and arm64). It covers the agent's Bash,
+  every RunTests and the final run, ships on with a private HOME and writes only in the project and
+  `/tmp/tddagents-<uid>`, and fails closed (`failIfUnavailable`). `autoAllowBashIfSandboxed` stays true
+  (below the TDD tier); `/tmp` is as upstream (only TMPDIR writable). The network ask is the REPL's
+  dialog (Yes / Yes for this host, saved as `WebFetch(domain:…)` / No), the SDK host headless, a
+  closed `-p` denies, and the final run (no one to ask) denies. The process and socket modules are
+  mutation seams.
+- **Divergences:**
+  - runtime 0.0.46 rather than the 0.0.42 v2.1.88 bundled: in 0.0.42 the `denyRead ["~"]` tmpfs makes a
+    project under `~` read-only and drops its `.git/hooks` deny; 0.0.46 is the last release of the
+    snapshot's time and adds the deferred mount-point cleanup RunTests and background Bash need;
+  - the runtime re-allows reading its own seccomp helper's directory when a read deny covers it
+    (upstream assumes it readable; TDDAgents' vendored copy lives under `~`);
+  - a one-off bwrap probe at session open: a broken bwrap exits 1, which RunTests would read as a
+    failed run, i.e. RED evidence;
+  - macOS seatbelt and the global-npm seccomp fallback are not ported (Linux and WSL2 only);
+  - one adapter and manager per run (the final run builds its own over the clean copy, with the
+    project's settings copied in) instead of module state; `initialize` / `wrap` / `reset` are
+    synchronous, the proxies have their own thread and loop;
+  - TMPDIR unified on `/tmp/tddagents-<uid>` (upstream's runtime and adapter disagree on it);
+  - the HTTP proxy forwards with `Connection: close`, so each request is filtered;
+  - sandboxed commands run with a plain `bash -c` (no host login profile), unsandboxed keep `bash -l`;
+  - RunTests, `listTests` and the final run ignore `excludedCommands` and `dangerouslyDisableSandbox`;
+  - the Bash prompt's sandbox section is computed when the tools are built; the auto-allow and the
+    git gate read their state through ContextVars; `customConfig` / `abortSignal` of `wrapWithSandbox`
+    are not ported; product renames (`.claude/*` → `.tddagents/*`, `TDDAGENTS_HOST_*` proxy ports).
+  - The suite stays unsandboxed (upstream's default is off): sessions in tests pass flag settings
+    `{"sandbox":{"enabled":false}}`, no environment switch. Projects seeded before this change keep
+    their old settings.
+- **Strict collection** (`collection_gate.resolve_ran`): in GREEN, REFACTOR and the final run every
+  declared test file must be named as run, by the JUnit report (a `file` attribute, or a `classname`
+  or suite name equal to a project path) or by the project's new optional `listTests` command (the
+  test files the runner collects, one per line; the user's "follow claude code": upstream embeds no
+  per-language adapter, it runs the project's own commands). A report naming no files is not a pass;
+  in RED it is stated and not held. The skill references declare `listTests` for Go, Rust, Java and .NET.
+- **Gaps closed:**
+  - (a) RED checks collection on every run with a report;
+  - (b) a file that ran but `testFiles` does not cover blocks every phase;
+  - (c) the test floor, per test file and carried across items: fewer tests than the floor is not a pass
+    in GREEN; REFACTOR accepts a decrease only with changed test files; RED lowers it only for the files
+    the item changed (a run whose report names no files never moves it, so runners without file names
+    have no floor);
+  - (d) `exclude` accepts directories only (`…/`) whose literal prefix matches no test pattern
+    (ExitPlanMode, the Edit check and the watcher).
+- **`.env` and `.gitignore`:** the final run's copy keeps upstream's listing (every `.gitignore`
+  applies). The contract now says to create every file the request names and never to add
+  `.gitignore` or `exclude` entries on the agent's own (the user's decision); the skill defines
+  `exclude` as generated directories only and describes the sandbox (dependencies and tool caches
+  inside the project: `PUPPETEER_CACHE_DIR`, the system Python's `venv` module). Upstream texts stay
+  verbatim.
+- **Host prerequisites:** `sudo apt install bubblewrap socat python3.14-venv`.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

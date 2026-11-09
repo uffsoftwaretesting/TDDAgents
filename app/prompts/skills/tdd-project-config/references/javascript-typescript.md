@@ -65,4 +65,5 @@ export default defineConfig({
 
 - Use the lockfile's installer (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`) and declare the lockfile in `manifestFiles`.
 - Run the locally installed runner (`npx vitest`, `npx jest`), never a global one.
+- A package that downloads a browser or a binary during install (Puppeteer, Playwright) keeps it in the home directory by default, which the sandbox makes new for every command. Point its cache at a directory inside the project, in `setup` and `test` alike (`PUPPETEER_CACHE_DIR=.cache/puppeteer`, `PLAYWRIGHT_BROWSERS_PATH=.cache/ms-playwright`), and list that directory in `exclude`.
 - In a monorepo, run the suite from the root (Vitest projects or Jest projects), so one command collects every test file.

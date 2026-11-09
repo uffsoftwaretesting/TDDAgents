@@ -143,6 +143,14 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
   never only execute code to cover it.
 - **A skipped test is not a pass**, and **an uncollected test file is not a pass**, in GREEN
   and REFACTOR. Every test must run in a plain RunTests run.
+- **Collection is strict** (2026-11-08): every declared test file must be named as run, in GREEN,
+  REFACTOR and the final run, by the JUnit report (a `file` attribute, or a `classname` / suite name
+  equal to a project path, `collection_gate.resolve_ran`) or, when the report names no files, by the
+  project's declared `listTests` command; a report naming no files is not a pass. RED checks
+  collection on every run with a report. A test the report names that `testFiles` does not cover
+  blocks every phase. **The test floor** (`AppState.test_floor`, per test file, carried across items):
+  fewer tests than the floor is not a pass in GREEN; REFACTOR accepts a decrease only with changed
+  test files; RED lowers it only for the files the item changed (`tdd_item_test_hashes`).
 
 **RunTests reports what it observed, never a cause or advice** (as upstream's Bash). It runs the
 project's declared `test` command (always the whole suite) with `TDDAGENTS_JUNIT_REPORT` /
@@ -153,8 +161,9 @@ cobertura/lcov report records, a `TDD ledger:` line with the phase rule (`PHASE_
 output. `judge` decides:
 exit 0 is a pass only if the report records tests and no failures, errors or skips; any other
 non-zero exit is a failed run; 126/127, signals, timeouts and a missing configuration are errors
-and leave the ledger untouched. A test file the report does not name did not run ("unknown" when
-the report names no files). A background worker's RunTests writes nothing.
+and leave the ledger untouched. A test file the report does not name did not run (a report that
+names no files is not a pass in GREEN and REFACTOR). A background worker's RunTests writes nothing.
+RunTests, the agent's Bash and the final run run in the sandbox (below).
 
 **The plan advances only through the ledger.** `TddPlan` lives on `AppState` and in
 `<session dir>/tdd-plan.json`. `plan_advance` runs between tool batches on the main thread and
@@ -181,6 +190,20 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   **Dangerous allows such as `Bash(python:*)` are stripped** from editable sources on every
   run (they survive in policy and flag settings). An MCP call needs an allow rule.
   `auto` mode (the classifier) is opt-in and fails closed.
+- **The sandbox** (`app/utils/sandbox/`, the port of `utils/sandbox/sandbox-adapter.ts` and of
+  `@anthropic-ai/sandbox-runtime` 0.0.46's Linux path under `runtime/`; reference in
+  `reference/sandbox-runtime/`): bubblewrap with upstream's HTTP + SOCKS network proxy (domain
+  allowlist; an unknown host asks: the REPL's dialog, the SDK host headless, a closed `-p` denies),
+  the socat bridge and the vendored seccomp binaries. New projects ship it on
+  (`.tddagents/settings.json`): writes only in the project and `/tmp/tddagents-<uid>`, a private HOME
+  (`denyRead ["~"]`, the project re-allowed), the package registries allowed, `failIfUnavailable`
+  (the session does not open without bwrap and socat; a one-off bwrap probe). The agent's Bash (opt-in
+  through `should_use_sandbox`, `dangerouslyDisableSandbox` asks), every RunTests and the final run
+  (its own sandbox over the clean copy) go through one wrap point, `LocalWorkspace._argv`; TDDAgents'
+  internals (ripgrep, git, Grep) are never wrapped. Sandboxed commands run with plain `bash -c`.
+  `autoAllowBashIfSandboxed` is upstream's true, below the TDD tier. The suite stays unsandboxed:
+  tests open sessions with flag settings `{"sandbox":{"enabled":false}}`; real-bwrap tests are
+  `@pytest.mark.sandbox`, skipped without bwrap and socat.
 - **Interactive asks** go through `ToolContext.can_use_tool`; the TDD tier and deny rules are
   decided before any question. Workers and the agent-hook verifier have `can_use_tool=None`
   (headless deny), except a built-in `bubble` agent.
@@ -228,7 +251,11 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   `test`, `junitReport`, `coverageReport` (`format` cobertura | lcov, optional `path`), `testFiles`,
   `testSupportFiles` (the subset never expected in a report), `manifestFiles`, `exclude`. An approved
   edit is read at once (`project_config_watcher.py`, cron's watch); an invalid file is no
-  configuration (fail closed, its issues named), and the Edit tool refuses to break a valid one. The contract tells the model to declare every
+  configuration (fail closed, its issues named), and the Edit tool refuses to break a valid one.
+  `listTests` (optional) lists the collected test files for runners whose report names none.
+  `exclude` accepts generated directories only (each ending in `/`, none matching a test file). The
+  contract tells the model to create every file the request names, never to add `.gitignore` /
+  `exclude` entries on its own, and to declare every
   dependency it installs in the project's own manifest. The `tdd-project-config` skill (claude-api
   pattern) injects the reference for the project's ecosystem.
 - **The final run** (`app/tdd/final_run.py`) copies the project into a clean folder (upstream's
@@ -305,6 +332,7 @@ $P/python scripts/mutmut_score.py --timeouts-reverified  # the gate score, and t
 | `app/sandbox/adapter.py` | the E2B SDK |
 | `app/utils/chat_model_factory.py` | the LLM provider |
 | `app/screens/terminal_io.py` | the terminal (`prompt_toolkit` on a real TTY) |
+| `app/utils/sandbox/runtime/{http_proxy,socks_proxy,linux_network_bridge,network_host,ripgrep}.py`, `app/utils/sandbox/bwrap_probe.py` | the sandbox's processes and sockets |
 
 `app/utils/token_metrics.py` and `app/config/` are also outside the mutation set. All are in
 `[tool.mutmut] do_not_mutate`; everything else under `app/` is mutated
@@ -358,6 +386,7 @@ package) **and an end-to-end pipeline run**. Code layered above them is not exem
 ```bash
 # Setup
 cp .env.example .env          # then fill ANTHROPIC_API_KEY, OPENAI_API_KEY (E2B_API_KEY optional)
+sudo apt install bubblewrap socat python3.14-venv   # the sandbox (fail closed without them); the venv module for Python projects
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # also vendors rg, types-PyYAML
 
 # Interactive (from the repo root: the spec menu reads app/prompts/specs relatively)

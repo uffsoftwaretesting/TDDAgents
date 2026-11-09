@@ -23,6 +23,7 @@ A flat layout: the package `calculator/` at the project root, tests in `tests/`,
 - `python -m pytest` puts the project root on `sys.path`, so `import calculator` works without installing the package.
 - `--cov=<package>` measures the production package only (not the tests); `--cov-branch` adds branch coverage; `--cov-report=xml:<path>` writes Cobertura XML.
 - Run everything through the virtual environment's interpreter (`.venv/bin/python`), never a bare `python` or `pytest` that might resolve to another installation.
+- In the sandbox only the system's Python is visible: interpreters and tools installed in the home directory (conda, pyenv, `uv tool`, `pip install --user`) are not. `python3 -m venv` needs the system's `venv` module; create the environment inside the project and install everything into it.
 
 ## Other layouts and tools
 
