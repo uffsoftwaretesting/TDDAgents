@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from app.tdd.ledger import PhaseLedger, TddPhase
-from app.tdd.project_config import TestFileRules, project_relative_path
+from app.tdd.project_config import PROJECT_CONFIG_FILE, TestFileRules, project_relative_path
 from app.types.permissions import (
     PermissionBehavior,
     PermissionRule,
@@ -170,6 +170,13 @@ def check_tdd_phase_permission(
         return check_bash_tdd_phase(str(input_args.get("command") or ""), ledger, cwd_offset, rules=rules, root=root)
 
     raw_path = input_args.get("path") or input_args.get("file_path")
+    if raw_path and tool.name in GENERIC_WRITER_TOOL_NAMES \
+            and project_relative_path(str(raw_path), root) == PROJECT_CONFIG_FILE:
+        # The project's declared configuration is judged by no phase (user decision 2026-11-10), as a
+        # manifest: a broken declaration must be fixable in RED and with no valid declaration at all.
+        # The protected folder still asks the user, the Edit check refuses an invalid result, and the
+        # session reads an approved edit at once.
+        return True, ""
     if rules is None:
         if (raw_path and tool.name in GENERIC_WRITER_TOOL_NAMES) or is_implementation_writing_tool(tool) \
                 or is_test_writing_tool(tool):

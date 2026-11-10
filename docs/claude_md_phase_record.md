@@ -2453,6 +2453,19 @@ uncollected-files check read "unknown" and passed.
 - The Python agent again left out the requested `.env`, citing the contract's own `.gitignore` sentence;
   the contract now names `.env` explicitly and says version control is never a reason to leave a requested
   file out.
+- **Eight autonomous runs (2026-11-10: CPF and MD→PDF, TypeScript and Python, outside and inside the
+  sandbox):** seven passed the final run, every one with the requested `.env`. MD→PDF TypeScript in the
+  sandbox read NOT passing, correctly: its `setup` did not install the Chrome its e2e tests need (outside
+  the sandbox the user's `~/.cache` hid that). Two TDDAgents faults, fixed by user decision 2026-11-10:
+  - a model that could only wait answered the stop hook's block with text 273 times (39.9 M tokens). The
+    hook now ends the turn as `stop_hook_prevented` once the model has answered
+    `TEXT_ONLY_STOPS_BEFORE_YIELD` (2) blocks in a row with text and no tool call
+    (`blocked_text_only_stops`); the cycle stays incomplete and no evidence is created. The second
+    exception to "no latch", and a TDDAgents ceiling upstream does not have;
+  - the cause was a declared command that could not run, in RED, where the tier treated
+    `.tddagents/project.json` as production. The file tools' writes to it are now judged by no phase,
+    with or without a valid declaration; the protected folder still asks, the Edit check and the live
+    reload apply.
 - bwrap's mount points (empty read-only `.mcp.json`, `.tddagents/settings.local.json`, `.bashrc`, …) exist
   in the project while a sandboxed command runs (a backgrounded `npm install` kept them through a
   RunTests); the cleanup removes them once no sandbox is active, as upstream. Meanwhile the empty `.mcp.json`

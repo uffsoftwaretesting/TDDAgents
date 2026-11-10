@@ -19,9 +19,10 @@ PostToolUse hooks that used to live here:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.query.stop_hooks import StopHookResult
 from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
@@ -150,6 +151,37 @@ def user_input_waiting(context: Any) -> bool:
                for command in queue.snapshot())
 
 
+#: How many text-only stops in a row, each answered by this hook's block, end the turn (user decision
+#: 2026-11-10). A model that can only wait for the user answers every block with text and no tool call:
+#: a live MD->PDF run repeated "I'm waiting for…" 273 times (39.9 M tokens) until a message arrived.
+TEXT_ONLY_STOPS_BEFORE_YIELD = 2
+STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:"
+
+
+def blocked_text_only_stops(messages: Sequence[Any]) -> int:
+    """
+    How many times in a row, at the end of `messages`, a stop was blocked and the model then answered
+    with text alone: trailing groups of stop-hook feedback followed by assistant messages with no tool
+    call. Anything else (a tool call, a tool result, the user's message) ends the run of groups.
+    """
+    count = 0
+    index = len(messages) - 1
+    while index >= 0:
+        answered = False
+        while index >= 0 and isinstance(messages[index], AIMessage) and not messages[index].tool_calls:
+            answered = True
+            index -= 1
+        blocked = False
+        while index >= 0 and isinstance(messages[index], HumanMessage) \
+                and str(messages[index].content).startswith(STOP_HOOK_FEEDBACK_PREFIX):
+            blocked = True
+            index -= 1
+        if not (answered and blocked):
+            break
+        count += 1
+    return count
+
+
 async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> StopHookResult:
     """
     Stop hook that blocks turn completion if the TDD cycle is incomplete (Part D5).
@@ -158,7 +190,9 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
     block every stop): while the cycle is incomplete, every stop is blocked with what is still
     missing, naming the current sub-requirement when there is a plan. `stop_hook_active` is
     no latch here; a turn ends early only on `/pause`, a configured hook's `continue: false`,
-    an abort or an error. A complete cycle allows termination (COMPLETED). The message states the
+    an abort or an error, the user's queued input (`user_input_waiting`), or the model answering
+    `TEXT_ONLY_STOPS_BEFORE_YIELD` blocks in a row with text alone (`blocked_text_only_stops`). A
+    complete cycle allows termination (COMPLETED). The message states the
     phase's rule and what was observed (`incomplete_cycle_message`); when the run's pool holds
     `AskUserQuestion`, it ends with upstream's own escalation rule (`ASK_THE_USER`).
     """
@@ -173,6 +207,12 @@ async def tdd_phase_incomplete_hook(state: LoopState, config: RunConfig) -> Stop
         # waiting message lets this one stop through, and the next turn's end is judged again.
         log_for_debugging("TDD stop hook: the user's queued input ends the turn; the cycle stays incomplete")
         return StopHookResult()
+    if blocked_text_only_stops(state.messages) >= TEXT_ONLY_STOPS_BEFORE_YIELD:
+        # The model keeps answering the block with text and no tool: it is waiting for the user. The
+        # turn ends as not completed (`stop_hook_prevented`), no evidence is created, and the next
+        # turn's end is judged again.
+        log_for_debugging("TDD stop hook: repeated text-only stops end the turn; the cycle stays incomplete")
+        return StopHookResult(prevent_continuation=True)
 
     current = app_state.tdd_plan.current
     msg = incomplete_cycle_message(ledger, state)

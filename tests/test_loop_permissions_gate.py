@@ -420,6 +420,23 @@ class TestTierOnlyWhileAnItemIsCurrent:
         # Without issues the reason is the plain fail-closed one.
         assert not str(self._denial(CURRENT_ITEM_PLAN, "a.py").message).endswith("required.")
 
+    def test_the_projects_declared_configuration_is_judged_by_no_phase(self):
+        """User decision 2026-11-10: a broken declaration must be fixable in RED, and with none valid."""
+        from app.tools.file_edit_tool.file_edit_tool import build_edit_tool
+        from app.utils.permissions.permissions import tdd_phase_denial
+        from tests.plan_helpers import TEST_PROJECT_CONFIG
+
+        edit = {"file_path": ".tddagents/project.json", "old_string": "a", "new_string": "b"}
+        for phase in list(TddPhase):
+            for config in (TEST_PROJECT_CONFIG, None):
+                state = AppState(phase_ledger=PhaseLedger(phase=phase), tdd_plan=CURRENT_ITEM_PLAN,
+                                 project_config=config)
+                ctx = tool_context_for(AppStateStore(state))
+                assert tdd_phase_denial(build_edit_tool(), edit, ctx) is None
+                # Its neighbours in the protected folder are still judged.
+                other = tdd_phase_denial(build_edit_tool(), {**edit, "file_path": ".tddagents/settings.json"}, ctx)
+                assert (other is None) == (config is not None and phase != TddPhase.RED)
+
     def test_an_empty_plan_has_no_tier(self):
         from app.tdd.plan import TddPlan
 

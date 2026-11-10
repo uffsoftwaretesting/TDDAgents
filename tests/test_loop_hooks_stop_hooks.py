@@ -210,9 +210,10 @@ def loop_deps(model: Model) -> LoopDeps:
 
 
 @pytest.mark.parametrize("script, terminal_reason, model_calls", [
-    # "approves": the TDD hook sends every claim back, until the user aborts
-    ([AggregatedHookResult(permission_behavior="allow")], Terminal.ABORTED_STREAMING, 4),
-    ([], Terminal.ABORTED_STREAMING, 4),  # says nothing: the same
+    # "approves": the TDD hook sends the claims back, then ends the turn as not completed once the model
+    # has answered two blocks in a row with text alone (user decision 2026-11-10)
+    ([AggregatedHookResult(permission_behavior="allow")], Terminal.STOP_HOOK_PREVENTED, 3),
+    ([], Terminal.STOP_HOOK_PREVENTED, 3),  # says nothing: the same
     # continue: false stops at once, and never as `completed`
     ([AggregatedHookResult(prevent_continuation=True, stop_reason="ship it")], Terminal.STOP_HOOK_PREVENTED, 1),
 ])

@@ -121,15 +121,18 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
    the plan has a current item** (an empty or finished plan leaves the normal rules in charge):
    RED writes tests only, GREEN production only (tests locked), REFACTOR both. Test files are
    what the project's declared `testFiles` / `testSupportFiles` globs match. It covers the file
-   tools, Bash redirect targets and the pool's deny rules. Agent memory, the session plan file and
-   the declared manifests (`manifestFiles`) are exempt in every phase. With no declared
+   tools, Bash redirect targets and the pool's deny rules. Agent memory, the session plan file,
+   the declared manifests (`manifestFiles`) and `.tddagents/project.json` itself (file tools; the
+   protected folder still asks) are exempt in every phase. With no declared
    configuration while an item is current, every write is denied (fail closed). A PreToolUse hook's `allow`, a hook `ask`, an
    auto-mode classifier allow and a PermissionRequest hook's `updatedInput` are all re-checked
    against it.
 3. **The stop hook** (`app/tdd/stop_hook.py`) refuses to end an incomplete cycle, in any
    phase, with **no latch**. A turn ends early only on `/pause`, Esc, a configured hook's
-   `continue: false`, a model/API error, a denied `AskUserQuestion` headless, or the user's own
-   input waiting in the queue (it becomes the next turn, as upstream's queue processor runs it).
+   `continue: false`, a model/API error, a denied `AskUserQuestion` headless, the user's own
+   input waiting in the queue (it becomes the next turn, as upstream's queue processor runs it),
+   or the model answering two blocks in a row with text and no tool call (`stop_hook_prevented`:
+   it is waiting for the user; no evidence is created, user decision 2026-11-10).
    Its refusal is a meta `Stop hook feedback:` message, yielded like upstream's. In mode `plan`
    the plan advance and the TDD hook are skipped.
 

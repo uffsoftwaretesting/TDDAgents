@@ -15,7 +15,7 @@ from app.query.config import build_run_config
 from app.query.deps import LoopDeps
 from app.query.query import drain, run_loop
 from app.query.state import initial_loop_state
-from app.query.transitions import Continue, Terminal
+from app.query.transitions import Continue, Terminal, Terminated
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.stop_hook import tdd_phase_incomplete_hook
@@ -123,7 +123,7 @@ def test_every_early_stop_in_the_loop_is_sent_back():
         ctx = tool_context_for(store)
         state = initial_loop_state((HumanMessage(content="task"),), ctx)
         config = build_run_config("test-run")
-        claims = 4
+        claims = 2  # a third text-only stop in a row would end the turn (2026-11-10)
 
         class ClaimsDone:
             calls = 0
@@ -297,3 +297,59 @@ def test_with_a_declaration_and_a_current_item_the_refusal_states_the_observed_f
     assert refusal.endswith(f"TDD cycle incomplete: RED. {RED_RULE}: they changed, and no RunTests run has counted "
                             f"since. {WRITE_TESTS}")
     assert NO_CONFIG_REASON not in refusal
+
+
+# ── repeated text-only stops end the turn (user decision 2026-11-10) ─────────
+
+def _fb(text: str = "TDD cycle incomplete: RED.") -> HumanMessage:
+    return HumanMessage(content=f"Stop hook feedback:\n{text}", additional_kwargs={"is_meta": True})
+
+
+def test_blocked_text_only_stops_counts_the_trailing_groups():
+    from langchain_core.messages import ToolMessage
+
+    from app.tdd.stop_hook import blocked_text_only_stops
+
+    task, wait = HumanMessage(content="task"), AIMessage(content="waiting")
+    call = AIMessage(content="", tool_calls=[{"name": "RunTests", "id": "c1", "args": {}}])
+    assert blocked_text_only_stops([task, wait]) == 0
+    assert blocked_text_only_stops([task, wait, _fb(), wait]) == 1
+    assert blocked_text_only_stops([task, wait, _fb(), wait, _fb(), wait]) == 2
+    # One response split in two text blocks, and two hooks' feedback, are one group each.
+    assert blocked_text_only_stops([task, wait, _fb(), _fb("lint"), wait, wait, _fb(), wait]) == 2
+    # A tool call, a tool result or the user's own message ends the run.
+    assert blocked_text_only_stops([task, wait, _fb(), call, ToolMessage(content="x", tool_call_id="c1"),
+                                    wait, _fb(), wait]) == 1
+    assert blocked_text_only_stops([task, wait, _fb(), wait, HumanMessage(content="go on"), wait, _fb(), wait]) == 1
+    assert blocked_text_only_stops([task, wait, _fb(), call]) == 0
+    assert blocked_text_only_stops([]) == 0
+
+
+def test_the_third_text_only_stop_in_a_row_ends_the_turn_as_not_completed():
+    """A model that can only wait repeated itself 273 times in a live run; the cycle stays incomplete."""
+    model = FakeModel([[AIMessage(content="waiting")], [AIMessage(content="waiting")],
+                       [AIMessage(content="waiting")]])
+
+    async def go():
+        store = AppStateStore(AppState(phase_ledger=PhaseLedger()))
+        state = initial_loop_state((HumanMessage(content="task"),), tool_context_for(store))
+
+        async def no_tools(calls, assistant_msgs, state, config):
+            if False:
+                yield
+
+        async def no_compact(s, c):
+            from app.query.state import CompactionResult
+            return CompactionResult(compacted=False, messages=s.messages)
+
+        deps = LoopDeps(call_model=model, compact=no_compact, uuid=lambda: "u1", now=lambda: 1000.0,
+                        run_tools=no_tools, stop_hooks=tdd_phase_incomplete_hook, emit_event=lambda e: None)
+        events = [ev async for ev in run_loop(state, build_run_config("t"), deps)]
+        return events, store
+
+    events, store = asyncio.run(go())
+    terminated = events[-1]
+    assert isinstance(terminated, Terminated) and terminated.reason == Terminal.STOP_HOOK_PREVENTED
+    assert model.turns == []  # three model calls: two blocks, then the turn ended
+    assert len([e for e in events if isinstance(e, HumanMessage) and e.additional_kwargs.get("is_meta")]) == 2
+    assert store.get().phase_ledger == PhaseLedger()  # no evidence was created
