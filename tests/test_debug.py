@@ -6,10 +6,12 @@ options): the category filter, the debug log file, the flags, and what the hooks
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -379,3 +381,73 @@ def test_disable_all_hooks_is_logged(tmp_path):
         "Skipping hooks for SessionEnd:x due to 'disableAllHooks' managed setting",
         "Skipping hooks for Stop due to 'disableAllHooks' managed setting",
     ]
+
+
+# ── TDDAgents' own warnings stay off the terminal (2026-11-10) ───────────────
+
+def _terminal(root: logging.Logger) -> tuple[logging.StreamHandler, io.StringIO]:
+    from app.utils.debug import install_terminal_log_filter
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    root.addHandler(handler)
+    # The terminal handler is the one writing to the process's stderr; stand the test's stream in for it.
+    real = sys.stderr
+    sys.stderr = stream
+    try:
+        install_terminal_log_filter(root)
+        install_terminal_log_filter(root)  # once only
+    finally:
+        sys.stderr = real
+    # A handler writing elsewhere (a file, a capture) is left alone.
+    elsewhere = logging.StreamHandler(io.StringIO())
+    root.addHandler(elsewhere)
+    install_terminal_log_filter(root)
+    assert elsewhere.filters == []
+    root.removeHandler(elsewhere)
+    return handler, stream
+
+
+def test_the_terminal_filter_keeps_app_warnings_off_and_lets_the_rest_through():
+    from app.utils.debug import TERMINAL, TerminalLogFilter
+
+    root = logging.getLogger("tdd-filter-test-root")
+    root.propagate = False
+    handler, stream = _terminal(root)
+    try:
+        assert [type(f) for f in handler.filters] == [TerminalLogFilter]
+        mine = logging.makeLogRecord
+        for record, shown in [
+            (mine({"name": "app.services.mcp.config", "levelno": logging.ERROR, "msg": "diag"}), False),
+            (mine({"name": "TDDOrchestrator.Loop", "levelno": logging.WARNING, "msg": "diag"}), False),
+            (mine({"name": "app.x", "levelno": logging.WARNING, "msg": "shown", **TERMINAL}), True),
+            (mine({"name": "TDDMain", "levelno": logging.INFO, "msg": "report"}), True),
+            (mine({"name": "httpx", "levelno": logging.ERROR, "msg": "library"}), True),
+            (mine({"name": "application", "levelno": logging.ERROR, "msg": "not ours"}), True),
+        ]:
+            assert bool(handler.filter(record)) is shown, record.name
+    finally:
+        root.removeHandler(handler)
+
+
+def test_an_empty_mcp_json_reaches_the_debug_log_and_not_the_terminal(tmp_path):
+    """The live sandboxed run: bwrap's empty `.mcp.json` mount point printed an error over the prompt."""
+    from app.services.mcp.config import _file_scope
+    from app.utils.debug import DebugLogHandler
+
+    target = tmp_path / "debug.txt"
+    configure_debug(True, debug_file=str(target))
+    root = logging.getLogger()
+    handler, stream = _terminal(root)
+    debug_handler = DebugLogHandler()
+    root.addHandler(debug_handler)
+    try:
+        (tmp_path / ".mcp.json").write_text("", encoding="utf-8")
+        servers, errors = _file_scope(tmp_path / ".mcp.json", "project")
+        assert servers == {} and [e.message for e in errors] == ["MCP config is not a valid JSON"]
+        assert stream.getvalue() == ""
+        assert f'[ERROR] MCP config errors for {tmp_path / ".mcp.json"}: ["MCP config is not a valid JSON"]' in (
+            target.read_text(encoding="utf-8"))
+    finally:
+        root.removeHandler(handler)
+        root.removeHandler(debug_handler)

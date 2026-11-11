@@ -232,7 +232,7 @@ class DebugLogHandler(logging.Handler):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return any(record.name == p or record.name.startswith(p + ".") for p in APP_LOGGER_PREFIXES)
+        return _is_app_record(record)
 
     def emit(self, record: logging.LogRecord) -> None:
         level: DebugLogLevel = "verbose"
@@ -245,6 +245,43 @@ class DebugLogHandler(logging.Handler):
         except Exception:  # noqa: BLE001 - a malformed record never breaks the caller's logging
             return
         log_for_debugging(message, level=level)
+
+
+#: `extra=` for one of TDDAgents' own warnings that upstream shows the user on purpose (2026-11-10): a
+#: `process.stderr.write` / `console.error` at startup or exit, a UI notification, `-p`'s error.
+TERMINAL: dict[str, bool] = {"terminal": True}
+
+
+def _is_app_record(record: logging.LogRecord) -> bool:
+    return any(record.name == p or record.name.startswith(p + ".") for p in APP_LOGGER_PREFIXES)
+
+
+class TerminalLogFilter(logging.Filter):
+    """
+    Keeps TDDAgents' own warnings and errors off the terminal's log handler (2026-11-10). Upstream writes
+    its diagnostics with `logForDebugging(…, {level})` or `logError`, neither of which reaches the
+    terminal; here they reach the debug log through `DebugLogHandler`. A live sandboxed run printed "MCP
+    config errors for …/.mcp.json" over the REPL's permission prompts. Records below WARNING (the
+    session's own report lines) and records marked `TERMINAL` still print.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno < logging.WARNING or not _is_app_record(record):
+            return True
+        return bool(getattr(record, "terminal", False))
+
+
+def install_terminal_log_filter(root: logging.Logger | None = None) -> None:
+    """
+    Add `TerminalLogFilter`, once, to the root logger's terminal handlers: plain `StreamHandler`s (what
+    `logging.basicConfig` installs) writing to the process's stdout or stderr. Subclasses (file handlers,
+    a test runner's capture handlers) are left alone.
+    """
+    for handler in (root or logging.getLogger()).handlers:
+        if type(handler) is logging.StreamHandler \
+                and getattr(handler, "stream", None) in (sys.stderr, sys.stdout, sys.__stderr__, sys.__stdout__) \
+                and not any(isinstance(f, TerminalLogFilter) for f in handler.filters):
+            handler.addFilter(TerminalLogFilter())
 
 
 def install_debug_log_handler() -> DebugLogHandler | None:
@@ -261,6 +298,8 @@ __all__ = [
     "DEBUG_LOGS_DIR_ENV",
     "DEBUG_LOG_LEVEL_ENV",
     "DebugLogHandler",
+    "TERMINAL",
+    "TerminalLogFilter",
     "DebugLogLevel",
     "LEVEL_ORDER",
     "configure_debug",
@@ -270,6 +309,7 @@ __all__ = [
     "get_debug_log_path",
     "get_has_formatted_output",
     "get_min_debug_log_level",
+    "install_terminal_log_filter",
     "install_debug_log_handler",
     "is_debug_mode",
     "is_debug_to_stderr",

@@ -46,6 +46,7 @@ from e2b import (
 from e2b.exceptions import RateLimitException
 from e2b_code_interpreter import Sandbox
 
+from app.utils.debug import TERMINAL
 from app.config.config import Config
 from app.workspace.base import (
     CommandResult,
@@ -222,15 +223,18 @@ class E2BAdapter:
             if adapter.is_running():
                 logger.info("♻️  Reusing live sandbox %s.", sandbox_id)
                 return adapter
-            logger.warning("⚠️ Sandbox %s exists but is not running. Provisioning a new one.", sandbox_id)
+            logger.warning("⚠️ Sandbox %s exists but is not running. Provisioning a new one.", sandbox_id,
+                           extra=TERMINAL)
         except WorkspaceError as exc:
-            logger.warning("⚠️ Could not reuse sandbox %s (%s). Provisioning a new one.", sandbox_id, exc)
+            logger.warning("⚠️ Could not reuse sandbox %s (%s). Provisioning a new one.", sandbox_id, exc,
+                           extra=TERMINAL)
 
         adapter = cls.create()
         logger.warning(
             "⚠️ The new sandbox %s is empty. Files from the previous run are not "
             "restored — sandbox rehydration lands with the sync engine.",
             adapter.sandbox_id,
+            extra=TERMINAL,
         )
         return adapter
 

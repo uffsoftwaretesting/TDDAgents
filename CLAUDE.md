@@ -165,7 +165,9 @@ cobertura/lcov report records, a `TDD ledger:` line with the phase rule (`PHASE_
 output. `judge` decides:
 exit 0 is a pass only if the report records tests and no failures, errors or skips; any other
 non-zero exit is a failed run; 126/127, signals, timeouts and a missing configuration are errors
-and leave the ledger untouched. A test file the report does not name did not run (a report that
+and leave the ledger untouched. A written report that does not parse is stated apart from a missing
+one ("written, but not readable as a JUnit report (…)", `junit_report_problem`); neither is evidence.
+A test file the report does not name did not run (a report that
 names no files is not a pass in GREEN and REFACTOR). A background worker's RunTests writes nothing.
 RunTests, the agent's Bash and the final run run in the sandbox (below).
 
@@ -224,7 +226,9 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   ported `SettingsSchema` like upstream: an invalid file is ignored whole, its errors shown in the
   "Settings Error" dialog / "Found N settings issue(s)" notice, and the Edit tool refuses an edit
   that would break a valid settings file. `--debug [filter]` writes upstream's debug log to
-  `<config home>/debug/<thread id>.txt`.
+  `<config home>/debug/<thread id>.txt`. TDDAgents' own warnings and errors stay off the terminal
+  (`TerminalLogFilter` on `main.py`'s stream handler), as upstream's `logForDebugging` / `logError`; they
+  reach the debug log. The few upstream shows on purpose are marked `extra=TERMINAL`.
 - **`-p` is the SDK protocol** (`app/cli/structured_io.py`, `run_headless`): a text prompt is the
   one user message of a closed input; `--output-format text|json|stream-json` (stream-json needs
   `--verbose`), `--input-format stream-json` (user messages and every control request on stdin;

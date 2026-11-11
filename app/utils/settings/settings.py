@@ -70,7 +70,7 @@ from app.types.permissions import (
     PermissionRuleSource,
     ToolPermissionContext,
 )
-from app.utils.debug import log_for_debugging
+from app.utils.debug import TERMINAL, log_for_debugging
 from app.utils.permissions.permission_rule_parser import escape_rule_content
 from app.utils.settings.settings_cache import get_plugin_settings_base
 from app.utils.settings.validation import ValidationError
@@ -720,7 +720,7 @@ def build_tool_permission_context(
         settings=load_settings(locations),
     )
     if notification:
-        logger.warning(notification)
+        logger.warning(notification, extra=TERMINAL)
     context, warnings = initialize_tool_permission_context(
         locations,
         permission_mode=mode,
@@ -732,7 +732,7 @@ def build_tool_permission_context(
         should_avoid_permission_prompts=should_avoid_permission_prompts,
     )
     for warning in warnings:
-        logger.warning(warning)
+        logger.warning(warning, extra=TERMINAL)
     return strip_dangerous_permissions(context)
 
 

@@ -43,6 +43,8 @@ from typing import Any
 
 import pathspec
 
+from app.utils.debug import TERMINAL
+
 logger = logging.getLogger("TDDOrchestrator.ProjectConfig")
 
 #: Where the approved configuration lives, inside the project's protected `.tddagents/` directory.
@@ -374,7 +376,7 @@ def load_project_config(workspace: Any) -> ProjectConfig | None:
         return None
     config, issues = parse_project_config_text(text)
     if config is None:
-        logger.warning("Ignoring invalid %s: %s", PROJECT_CONFIG_FILE, "; ".join(issues))
+        logger.warning("Ignoring invalid %s: %s", PROJECT_CONFIG_FILE, "; ".join(issues), extra=TERMINAL)
     return config
 
 

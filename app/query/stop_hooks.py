@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 from langchain_core.messages import HumanMessage
 
 from app.types.hooks import AggregatedHookResult, get_stop_hook_message
+from app.utils.debug import TERMINAL
 from app.utils.hooks.hooks import execute_stop_hooks
 from app.utils.messages import (
     Message,
@@ -124,7 +125,7 @@ async def handle_stop_hooks(
             if is_aborted(cancel):
                 return StopHookResult(prevent_continuation=True)
     except Exception:
-        logger.exception("Stop hooks failed")
+        logger.exception("Stop hooks failed", extra=TERMINAL)
         return StopHookResult()
     shown = summary.message()
     if prevented:

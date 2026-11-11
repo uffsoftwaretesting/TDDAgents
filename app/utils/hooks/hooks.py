@@ -137,7 +137,7 @@ from app.utils.hooks.hook_events import (
     match_query_for,
 )
 from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
-from app.utils.debug import log_for_debugging
+from app.utils.debug import TERMINAL, log_for_debugging
 from app.utils.messages import HookAttachment, HookBlockingError, Message
 from app.utils.settings.settings import (
     LEGACY_TOOL_NAME_ALIASES,
@@ -1213,7 +1213,7 @@ async def execute_session_end_hooks(
     )
     for result in results:
         if not result.succeeded and result.output:
-            logger.warning("SessionEnd hook [%s] failed: %s", result.command, result.output)
+            logger.warning("SessionEnd hook [%s] failed: %s", result.command, result.output, extra=TERMINAL)
     return results
 
 

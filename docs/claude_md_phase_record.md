@@ -2466,6 +2466,28 @@ uncollected-files check read "unknown" and passed.
     `.tddagents/project.json` as production. The file tools' writes to it are now judged by no phase,
     with or without a valid declaration; the protected folder still asks, the Edit check and the live
     reload apply.
+- **Six CPF runs (2026-11-10: TypeScript, Python and Java/Spring Boot, inside then outside the sandbox),
+  TDDAgents alone:** all six final runs passed, every one with `.env`. The Java agent fetched a JDK and
+  Maven itself (none on the host). Two findings, fixed by user decision 2026-11-10:
+  - **Java's "JUnit report: none was written" was TDDAgents' own recipe.** The skill's Maven/Gradle join
+    (`cat …/TEST-*.xml | sed '/<?xml/d'`) deleted a class's closing tag with the next file's declaration,
+    because the per-class reports end without a newline: any suite with two or more classes became
+    invalid XML, read as no report. The recipes now strip only each declaration and end each file with a
+    newline (a test runs them against a fake build); `junit_report_problem` makes RunTests, `judge` and the
+    final run say "written, but not readable as a JUnit report (not valid XML: …)" instead of "none was
+    written". The sandbox's write rules were not involved and match upstream.
+  - **"MCP config errors for …/.mcp.json" printed over the REPL's prompts.** bwrap's empty mount points
+    (as upstream's) made the settings-errors reader parse an empty `.mcp.json`; the port logged it with a
+    stdlib `logger.error`, which `main.py`'s `basicConfig` handler printed. Upstream logs it with
+    `logForDebugging(…, {level: 'error'})`. An audit of `app/`'s 283 stdlib warning/error calls found
+    upstream sends almost all of them to the debug log (`logForDebugging`, or `logError`, which does not
+    reach the terminal either), so `TerminalLogFilter` keeps TDDAgents' own warnings and errors off the
+    terminal handler and `DebugLogHandler` carries them to the debug log; the MCP config line uses
+    `log_for_debugging` with upstream's text. Kept visible (`extra=TERMINAL`), as upstream shows them: the
+    SessionEnd hook failure at exit, startup settings warnings and notifications, `-p`'s "no messages"
+    error, a Stop hook failure, and TDDAgents' own invalid `project.json` and E2B re-provisioning notices.
+    The transient "Found 1 settings issue" notice during a sandboxed command stays, as upstream's (same
+    race).
 - bwrap's mount points (empty read-only `.mcp.json`, `.tddagents/settings.local.json`, `.bashrc`, …) exist
   in the project while a sandboxed command runs (a backgrounded `npm install` kept them through a
   RunTests); the cleanup removes them once no sandbox is active, as upstream. Meanwhile the empty `.mcp.json`

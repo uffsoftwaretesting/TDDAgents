@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
+from app.utils.debug import log_for_debugging
 from app.services.mcp.env_expansion import expand_env_vars_in_string
 from app.services.mcp.normalization import normalize_name_for_mcp
 from app.services.mcp.types import (
@@ -187,8 +188,11 @@ def _file_scope(path: Path, scope: str) -> tuple[dict[str, McpServerConfig], lis
     config, errors = parse_mcp_config_from_file_path(path, expand_vars=True, scope=scope)
     if config is None:
         real = [e for e in errors if not e.message.startswith("MCP config file not found")]
-        for error in real:
-            logger.error("MCP config errors for %s: %s", path, error.message)
+        if real:
+            # `config.ts`: `logForDebugging(`MCP config errors for ${path}: …`, { level: 'error' })`, the
+            # messages JSON-encoded: the debug log, never the terminal (2026-11-10).
+            messages = json.dumps([e.message for e in real])
+            log_for_debugging(f"MCP config errors for {path}: {messages}", level="error")
         return {}, real
     return config, errors
 

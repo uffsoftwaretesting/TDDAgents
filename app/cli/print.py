@@ -64,6 +64,7 @@ from typing import Any, NoReturn
 
 from langchain_core.messages import HumanMessage
 
+from app.utils.debug import TERMINAL
 from app.bootstrap.state import SessionBootstrap
 from app.coordinator.coordinator_mode import (
     apply_coordinator_tool_filter,
@@ -1358,7 +1359,7 @@ async def run_headless(
             text = final_output(options, last, messages, max_turns=options.max_turns,
                                 max_budget_usd=options.max_budget_usd)
         except NoMessagesReturned as error:
-            logger.error("%s", error)
+            logger.error("%s", error, extra=TERMINAL)
             text = None
         if text is not None:
             (write_stdout or _stdout_write)(text)
