@@ -335,3 +335,50 @@ def test_the_failed_cases_are_listed_in_document_order_with_their_first_message_
         FailedCase("failure", "", "last", None, None),
     )
     assert [case.label for case in report.failed_cases] == ["tests/a.test.ts > first", "C", "last"]
+
+
+# ── a written file that is no report is told apart from no file (2026-11-10) ──
+
+def test_the_problem_with_a_written_file_is_stated():
+    from app.tdd.junit_report import junit_report_problem
+
+    assert junit_report_problem(None) is None
+    assert junit_report_problem(PYTEST_XUNIT1) is None
+    assert junit_report_problem("  \n") == "the file is empty"
+    # The live Java run's join: a class's closing tag deleted with the next file's declaration.
+    joined = ('<testsuites>\n<testsuite name="A"><testcase name="a"/>\n'
+              '<testsuite name="B"><testcase name="b"/>\n</testsuite>\n</testsuites>\n')
+    assert junit_report_problem(joined) == "not valid XML: mismatched tag: line 5, column 2"
+    assert junit_report_problem("<html><body/></html>") == (
+        "its root element is <html>, not <testsuites>, <testsuite> or <testcase>")
+
+
+def test_runtests_and_judge_word_an_unreadable_report_apart_from_a_missing_one():
+    from app.tdd.ledger import TddPhase
+    from app.tdd.run_judgement import NO_REPORT, UNREADABLE_REPORT, judge
+    from app.tdd.run_tests_tool.run_tests_tool import report_line
+
+    assert report_line(None) == "JUnit report: none was written"
+    assert report_line(None, "the file is empty") == (
+        "JUnit report: written, but not readable as a JUnit report (the file is empty)")
+    missing = judge(0, None, None, TddPhase.GREEN)
+    unreadable = judge(0, None, None, TddPhase.GREEN, report_problem="the file is empty")
+    assert missing.not_evidence == NO_REPORT
+    assert unreadable.not_evidence == f"{UNREADABLE_REPORT} (the file is empty)"
+    # The decision does not change: neither is evidence.
+    assert missing.is_error and unreadable.is_error and unreadable.outcome is None
+
+
+def test_run_suite_reports_why_the_written_file_is_no_report(tmp_path):
+    from app.tdd.run_tests_tool.run_tests_tool import report_line, run_suite
+    from app.workspace.local import LocalWorkspace
+
+    ws = LocalWorkspace(str(tmp_path))
+    broken = ProjectConfig(test='printf "<testsuites><testsuite>" > "$TDDAGENTS_JUNIT_REPORT"', test_files=("t/",))
+    result = run_suite(ws, broken)
+    assert result.report is None and result.report_problem is not None
+    assert result.report_problem.startswith("not valid XML: no element found")
+    assert report_line(result.report, result.report_problem).startswith("JUnit report: written, but not readable")
+    silent = ProjectConfig(test="true", test_files=("t/",))
+    nothing = run_suite(ws, silent)
+    assert (nothing.report, nothing.report_problem) == (None, None)

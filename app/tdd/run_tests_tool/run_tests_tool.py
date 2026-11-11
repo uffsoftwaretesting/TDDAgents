@@ -72,7 +72,7 @@ from app.tdd.coverage_gate import (
     production_filter,
     read_coverage,
 )
-from app.tdd.junit_report import JUnitReport, parse_junit_report
+from app.tdd.junit_report import JUnitReport, junit_report_problem, parse_junit_report
 from app.tdd.ledger import PhaseLedger, TddPhase, TestFloor, TestRunRecord
 from app.tdd.project_config import (
     COVERAGE_REPORT_ENV,
@@ -108,6 +108,8 @@ class SuiteExecutionResult:
     coverage: CoverageReading = UNAVAILABLE
     #: The JUnit report the command wrote; `None` when it wrote none (or an unreadable one).
     report: JUnitReport | None = None
+    #: Why the file the command wrote is not a readable JUnit report (`junit_report_problem`), else `None`.
+    report_problem: str | None = None
     #: The command that ran.
     command: str = ""
     #: The project's `listTests` run, when the report named no files and the project declares one.
@@ -183,7 +185,9 @@ def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
     except Exception as exc:
         raise RunTestsUnavailable(f"the test command could not be executed in the workspace: {exc}") from exc
     root = getattr(ws, "root", None)
-    report = parse_junit_report(_read_and_discard(ws, config.junit_report_path), root)
+    report_text = _read_and_discard(ws, config.junit_report_path)
+    report = parse_junit_report(report_text, root)
+    report_problem = junit_report_problem(report_text) if report is None else None
     coverage = UNAVAILABLE
     if config.coverage_report is not None and coverage_path is not None:
         rules = config.rules
@@ -193,7 +197,7 @@ def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
     if config.list_tests is not None and report is not None and report.tests and _names_no_files(ws, config, report):
         listing = run_test_listing(ws, config, timeout=limit, env=environment, sandbox=sandbox)
     return SuiteExecutionResult(exit_code=res.exit_code, stdout=res.stdout, stderr=res.stderr, coverage=coverage,
-                                report=report, command=config.test, listing=listing)
+                                report=report, report_problem=report_problem, command=config.test, listing=listing)
 
 
 def _names_no_files(ws: Any, config: ProjectConfig, report: JUnitReport) -> bool:
@@ -265,8 +269,10 @@ def coverage_line(coverage: CoverageReading) -> str:
     return "Coverage: not measured"
 
 
-def report_line(report: JUnitReport | None) -> str:
+def report_line(report: JUnitReport | None, problem: str | None = None) -> str:
     if report is None:
+        if problem is not None:
+            return f"JUnit report: written, but not readable as a JUnit report ({problem})"
         return "JUnit report: none was written"
     return (f"JUnit report: {report.tests} test(s), {report.failures} failed, {report.errors} errored, "
             f"{report.skipped} skipped")
@@ -314,7 +320,7 @@ def observation_lines(result: SuiteExecutionResult, judgement: Judgement,
     lines = [f"Exit code {result.exit_code} ({judgement.meaning})"]
     if result.command:
         lines.insert(0, f"Command: {result.command}")
-    lines.append(report_line(result.report))
+    lines.append(report_line(result.report, result.report_problem))
     lines.extend(failed_case_lines(result.report))
     lines.extend(collection_lines(collection))
     lines.append(coverage_line(result.coverage))
@@ -433,6 +439,7 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         state_now = context.get_app_state()
         phase = TddPhase(state_now.phase_ledger.phase)
         judgement = judge(code, report, collection, phase, state_now.test_floor, current,
+                          report_problem=exec_result.report_problem,
                           red_scope=item_test_files(hashes, state_now.tdd_item_test_hashes))
         if judgement.outcome is None:
             return ToolResult(content=render_result(exec_result, judgement, NOT_EVIDENCE, collection), is_error=True,

@@ -123,6 +123,25 @@ def _candidates(classname: str | None, suites: tuple[str, ...],
     return tuple(names)
 
 
+def junit_report_problem(text: str | None) -> str | None:
+    """
+    Why written text is not a readable JUnit report, as a fact (2026-11-10), or `None` when it is readable
+    or nothing was written. A live Java run's joined report was invalid XML, and "none was written" sent the
+    agent looking for a file that was there.
+    """
+    if text is None:
+        return None
+    if not text.strip():
+        return "the file is empty"
+    try:
+        document = ElementTree.fromstring(text)
+    except ElementTree.ParseError as exc:
+        return f"not valid XML: {exc}"
+    if _tag(document) not in ("testsuites", "testsuite", "testcase"):
+        return f"its root element is <{_tag(document)}>, not <testsuites>, <testsuite> or <testcase>"
+    return None
+
+
 def parse_junit_report(text: str | None, root: str | os.PathLike[str] | None = None) -> JUnitReport | None:
     """The report's cases (see the module docstring), or `None` when there is no readable JUnit report."""
     if not text or not text.strip():
@@ -169,4 +188,4 @@ def parse_junit_report(text: str | None, root: str | os.PathLike[str] | None = N
     )
 
 
-__all__ = ["FailedCase", "JUnitReport", "parse_junit_report"]
+__all__ = ["FailedCase", "JUnitReport", "junit_report_problem", "parse_junit_report"]

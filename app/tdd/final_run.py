@@ -186,7 +186,8 @@ def _setup_lines(config: ProjectConfig, exit_code: int | None, output: str) -> l
 
 
 def _test_lines(result: SuiteExecutionResult, collection: Collection | None, meaning: str) -> list[str]:
-    return [f"Test: {result.command}", f"Test exit code: {result.exit_code} ({meaning})", report_line(result.report),
+    return [f"Test: {result.command}", f"Test exit code: {result.exit_code} ({meaning})",
+            report_line(result.report, result.report_problem),
             *failed_case_lines(result.report), *collection_lines(collection), coverage_line(result.coverage)]
 
 
@@ -268,7 +269,8 @@ def _run_in(clean: Any, config: ProjectConfig, sandboxed: bool) -> FinalRun:
         return FinalRun(f"NOT passing (could not run the tests: {exc})",
                         tuple(_setup_lines(config, setup_exit, setup_output)))
     collection = observe_collection(clean, config.rules, result.report, result.listing)
-    judgement = judge(result.exit_code, result.report, collection, TddPhase.GREEN)
+    judgement = judge(result.exit_code, result.report, collection, TddPhase.GREEN,
+                      report_problem=result.report_problem)
     verdict = "passed" if judgement.passed else "NOT passing"
     summary = f"{verdict} (exit {result.exit_code}: {judgement.meaning}, {result.coverage.describe()})"
     if judgement.unmet:

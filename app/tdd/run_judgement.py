@@ -84,6 +84,8 @@ def exit_semantic(exit_code: int) -> ExitSemantic:
 
 #: Why an exit-0 run is not evidence.
 NO_REPORT = "the test command wrote no JUnit report"
+#: The file the test command wrote is not a readable JUnit report (2026-11-10): a fact apart from `NO_REPORT`.
+UNREADABLE_REPORT = "the JUnit report the test command wrote is not readable"
 NO_TESTS = "the JUnit report records no tests"
 #: The collection facts that keep every phase from its rule, RED included.
 NOT_RUN = "a declared test file did not run"
@@ -136,7 +138,7 @@ FLOOR_ACCEPTED = "and the test files changed since the floor was recorded"
 
 def judge(exit_code: int, report: JUnitReport | None, collection: Collection | None,
           phase: TddPhase, floor: TestFloor | None = None, test_fingerprint: str | None = None,
-          red_scope: frozenset[str] | None = None) -> Judgement:
+          red_scope: frozenset[str] | None = None, report_problem: str | None = None) -> Judgement:
     """
     The judgement of one run (see the module docstring). Pure: it reads nothing but its arguments.
     `collection` is `None` when there is nothing to observe it from (no declaration, or no report);
@@ -145,12 +147,14 @@ def judge(exit_code: int, report: JUnitReport | None, collection: Collection | N
     have run (user decision 2026-11-09). A test that fails to load is RED's classic case, and a runner that
     stops at a load error (pytest's interrupted collection) never runs the files the item did not touch.
     `None` (no record of the item's files) holds every declared test file, as GREEN and REFACTOR always do.
+    `report_problem` (`junit_report_problem`) names why a written file is no report; it changes the wording only.
     """
     semantic = exit_semantic(exit_code)
     if semantic.is_error:
         return Judgement(exit_code, semantic.meaning, None, True, None, (semantic.meaning,), None, False)
     if exit_code == 0 and (report is None or report.tests == 0):
-        reason = NO_REPORT if report is None else NO_TESTS
+        reason = NO_TESTS if report is not None else (
+            f"{UNREADABLE_REPORT} ({report_problem})" if report_problem is not None else NO_REPORT)
         return Judgement(exit_code, semantic.meaning, None, True, reason, (reason,), None, False)
     unmet: list[str] = []
     if exit_code != 0:
@@ -191,6 +195,7 @@ def judge(exit_code: int, report: JUnitReport | None, collection: Collection | N
 __all__ = [
     "FLOOR_ACCEPTED",
     "NO_REPORT",
+    "UNREADABLE_REPORT",
     "NO_TESTS",
     "NOT_RUN",
     "UNDECLARED",
