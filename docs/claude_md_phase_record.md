@@ -1595,6 +1595,22 @@ direction**: follow claude-code, and redesign RunTests so a misinterpretation ca
 - the Doing-tasks items are not in upstream's external build;
 - the session guidance has no `! <command>` item (no `!` prefix here) and no DiscoverSkills item.
 
+### Claude Sonnet 5.5 is the default model (2026-11-10)
+
+At the user's direction `Config.MODEL` is now **`claude-sonnet-5-5`** (Haiku 5.5 before, below); the
+small fast model stays Haiku 4.5. Nothing else in the request changes:
+
+- **Thinking.** Thinking off sends no `thinking` parameter (`anthropic_thinking_param`), and an omitted
+  parameter runs adaptive on Sonnet 5.5, as it did on Haiku 5.5. The `{"type": "disabled"}` that Sonnet 5.5
+  rejects is never sent.
+- **Temperature.** The `temperature` sent while thinking is off is `Config.TEMPERATURE = 1.0`, the API
+  default, which Sonnet 5.5 accepts.
+- **Output tokens.** `max_tokens` falls to upstream's default branch of `get_model_max_output_tokens`,
+  as Haiku 5.5's did.
+- **Price.** `COST_SONNET_55` prices it at $2 / $10 per Mtok with Anthropic's own cache-read price of
+  $0.10 (not upstream's 0.1x) and upstream's 1.25x cache write. It is canonicalised before `claude-sonnet-5`
+  so it is not priced as Sonnet 5.
+
 ### Claude Haiku 5.5 is the default model (2026-10-29)
 
 At the user's direction the run's model is **Claude Haiku 5.5** (`Config.CHAT_MODEL = "anthropic"`,
@@ -3048,7 +3064,7 @@ loop moves through the plan without a new turn.
 ### State and config
 
 `app/config/config.py` holds `Config`: the provider and model (`CHAT_MODEL = "anthropic"`,
-`MODEL = "claude-haiku-5-5"` since 2026-10-29; `gpt-5-mini` before) and the E2B sandbox constants. It **raises at import
+`MODEL = "claude-sonnet-5-5"` since 2026-11-10; `claude-haiku-5-5` from 2026-10-29, `gpt-5-mini` before) and the E2B sandbox constants. It **raises at import
 time** if `OPENAI_API_KEY` is unset (`E2B_API_KEY` is optional), so
 importing anything under `app/` without a `.env` fails immediately. A run's own settings are
 snapshotted once into `RunConfig` (`app/query/config.py`).

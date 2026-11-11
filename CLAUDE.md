@@ -272,7 +272,7 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   declared `setup` then `test` there, judges it with the same `judge`, writes
   `metrics_and_logging/final_test_run.txt` and deletes the copy: a dependency installed but not
   declared reads "NOT passing".
-- **Models**: `Config.CHAT_MODEL = "anthropic"`, `Config.MODEL = "claude-haiku-5-5"`; the
+- **Models**: `Config.CHAT_MODEL = "anthropic"`, `Config.MODEL = "claude-sonnet-5-5"` (2026-11-10; Haiku 5.5 before); the
   small fast model is Claude Haiku 4.5 on a Claude run (`TDDAGENTS_SMALL_FAST_MODEL` wins).
   Anthropic clients get `get_max_output_tokens_for_model` unless a caller passes one.
   Unknown-model cost is 0 with `has_unknown_model_cost`.

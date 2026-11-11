@@ -16,10 +16,11 @@ class Config:
     TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
     E2B_API_KEY = os.getenv("E2B_API_KEY")
 
-    # Claude Haiku 5.5 (user decision, 2026-10-29; gpt-5-mini before). The small fast model
-    # is upstream's default Haiku 4.5 (`app/utils/model/model.py::get_default_haiku_model`).
+    # Claude Sonnet 5.5 (user decision, 2026-11-10; Claude Haiku 5.5 from 2026-10-29, gpt-5-mini
+    # before). The small fast model is upstream's default Haiku 4.5
+    # (`app/utils/model/model.py::get_default_haiku_model`).
     CHAT_MODEL = "anthropic"
-    MODEL = "claude-haiku-5-5"
+    MODEL = "claude-sonnet-5-5"
     TEMPERATURE = 1.0
 
     # ── Sandbox lifecycle ────────────────────────────────────────────────────
