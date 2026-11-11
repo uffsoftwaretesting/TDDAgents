@@ -40,7 +40,7 @@ end
 
 ## Minitest
 
-`minitest-reporters`' JUnit reporter writes one file per test class into a directory, not one report. TDDAgents reads a single JUnit file, so a Minitest test command must join those files into one report at `${{JUNIT_REPORT_ENV}}`: remove the previous run's files, run the tests, wrap every file's `<testsuite>` (without its `<?xml` line) in one `<testsuites>` root, and exit with the tests' status. Check the reporter's docs for its output directory. The SimpleCov setup above, at the top of `test/test_helper.rb`, works for Minitest too (TDDAgents reads Cobertura or LCOV coverage only).
+`minitest-reporters`' JUnit reporter writes one file per test class into a directory, not one report. TDDAgents reads a single JUnit file, so a Minitest test command must join those files into one report at `${{JUNIT_REPORT_ENV}}`: remove the previous run's files, run the tests, wrap every file's `<testsuite>` in one `<testsuites>` root, removing only each file's `<?xml …?>` declaration and ending each file with a newline (a file may end without one, and deleting a whole `<?xml` line can then take the previous file's closing tag with it), and exit with the tests' status. Check the reporter's docs for its output directory. The SimpleCov setup above, at the top of `test/test_helper.rb`, works for Minitest too (TDDAgents reads Cobertura or LCOV coverage only).
 
 ## Pitfalls
 

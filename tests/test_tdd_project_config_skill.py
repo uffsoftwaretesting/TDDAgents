@@ -266,6 +266,52 @@ class TestCoverageAndReports:
         assert "TDDAgents reads a single report file, so the test command must join them into one." in prompt
 
 
+class TestTheJoinRecipesProduceOneValidReport:
+    """
+    The live Java run (2026-11-10): Surefire's per-class reports end without a newline, so the old recipe
+    (`cat … | sed '/<?xml/d'`) deleted a class's closing tag with the next file's declaration, and every
+    run with two or more test classes read as no report. The documented commands, run against a fake build
+    tool that writes two such files, must produce one report with both suites.
+    """
+
+    @staticmethod
+    def _suite(name: str, cases: int) -> str:
+        body = "".join(f'<testcase classname="{name}" name="t{i}"/>' for i in range(cases))
+        # As Surefire writes them: a declaration line, then the suite, and no trailing newline.
+        return f'<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="{name}" tests="{cases}">{body}\n</testsuite>'
+
+    @pytest.mark.parametrize(("tool", "reports_dir"), [
+        ("mvn", "target/surefire-reports"), ("./gradlew", "build/test-results/test")])
+    def test_two_classes_join_into_one_valid_report(self, tmp_path, tool, reports_dir):
+        import os
+        import stat
+        import subprocess
+
+        from app.tdd.junit_report import parse_junit_report
+
+        doc = _prompt("java")
+        doc = doc[doc.index('<doc path="references/java.md">'):]
+        command = next(c["test"] for c in (json.loads(b) for b in _JSON_BLOCK.findall(doc))
+                       if "test" in c and tool in c["test"])
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        fake = tmp_path / tool.removeprefix("./") if tool.startswith("./") else bin_dir / tool
+        staged = tmp_path / "staged"
+        staged.mkdir()
+        for name, n in (("a.ATest", 2), ("b.BTest", 3)):
+            (staged / f"TEST-{name}.xml").write_text(self._suite(name, n), encoding="utf-8")
+        # The build writes its reports after the recipe's `rm -rf` of the reports directory.
+        fake.write_text(f"#!/bin/sh\nmkdir -p {reports_dir}\ncp {staged}/*.xml {reports_dir}/\n", encoding="utf-8")
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        report = tmp_path / "junit.xml"
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", JUNIT_REPORT_ENV: str(report)}
+        done = subprocess.run(["/bin/sh", "-c", command], cwd=tmp_path, env=env, capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+        assert not (tmp_path / reports_dir / "TEST-a.ATest.xml").read_text().endswith("\n")
+        parsed = parse_junit_report(report.read_text(encoding="utf-8"))
+        assert parsed is not None and parsed.tests == 5
+
+
 class TestDefinition:
     def test_upstreams_trigger_form_and_flags(self):
         definition = tdd_project_config_skill()

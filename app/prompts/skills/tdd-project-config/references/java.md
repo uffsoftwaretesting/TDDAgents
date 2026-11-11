@@ -1,6 +1,6 @@
 # Java: Maven Surefire or Gradle, JUnit 5
 
-Both Maven Surefire and Gradle write one JUnit XML file per test class (`TEST-<class>.xml`), never one file for the run. TDDAgents reads a single JUnit file, so the test command removes the previous run's reports, runs the build, and joins the per-class files into that one report, keeping the build's exit status. The joined file wraps each class's `<testsuite>` in a `<testsuites>` root.
+Both Maven Surefire and Gradle write one JUnit XML file per test class (`TEST-<class>.xml`), never one file for the run. TDDAgents reads a single JUnit file, so the test command removes the previous run's reports, runs the build, and joins the per-class files into that one report, keeping the build's exit status. The joined file wraps each class's `<testsuite>` in a `<testsuites>` root, with only each file's `<?xml …?>` declaration removed and a newline after each file: the reports end without one, so deleting a whole `<?xml` line would take the previous class's closing tag with it.
 
 ## Example: Maven
 
@@ -10,7 +10,7 @@ Both Maven Surefire and Gradle write one JUnit XML file per test class (`TEST-<c
 {
   "version": {{PROJECT_CONFIG_VERSION}},
   "setup": "mvn -B -q dependency:go-offline",
-  "test": "rm -rf target/surefire-reports; mvn -B test; status=$?; { echo '<testsuites>'; cat target/surefire-reports/TEST-*.xml 2>/dev/null | sed '/<?xml/d'; echo '</testsuites>'; } > \"${{JUNIT_REPORT_ENV}}\"; exit $status",
+  "test": "rm -rf target/surefire-reports; mvn -B test; status=$?; { echo '<testsuites>'; for f in target/surefire-reports/TEST-*.xml; do [ -e \"$f\" ] || continue; sed '1s/<?xml[^>]*?>//' \"$f\"; echo; done; echo '</testsuites>'; } > \"${{JUNIT_REPORT_ENV}}\"; exit $status",
   "testFiles": ["src/test/"],
   "testSupportFiles": ["src/test/resources/"],
   "manifestFiles": ["pom.xml", "mvnw", ".mvn/wrapper/maven-wrapper.properties"],
@@ -25,7 +25,7 @@ Both Maven Surefire and Gradle write one JUnit XML file per test class (`TEST-<c
 ```json
 {
   "version": {{PROJECT_CONFIG_VERSION}},
-  "test": "rm -rf build/test-results/test; ./gradlew test --no-daemon; status=$?; { echo '<testsuites>'; cat build/test-results/test/TEST-*.xml 2>/dev/null | sed '/<?xml/d'; echo '</testsuites>'; } > \"${{JUNIT_REPORT_ENV}}\"; exit $status",
+  "test": "rm -rf build/test-results/test; ./gradlew test --no-daemon; status=$?; { echo '<testsuites>'; for f in build/test-results/test/TEST-*.xml; do [ -e \"$f\" ] || continue; sed '1s/<?xml[^>]*?>//' \"$f\"; echo; done; echo '</testsuites>'; } > \"${{JUNIT_REPORT_ENV}}\"; exit $status",
   "testFiles": ["src/test/"],
   "testSupportFiles": ["src/test/resources/"],
   "manifestFiles": ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties", "gradle/libs.versions.toml", "gradle/wrapper/gradle-wrapper.properties", "gradlew"],
