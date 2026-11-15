@@ -255,6 +255,22 @@ def bwrap_mount_points() -> list[str]:
     return list(_bwrap_mount_points)
 
 
+def is_bwrap_mount_point(path: str) -> bool:
+    """
+    `path` is a mount point bwrap created for a missing deny path and is still empty: the sandbox's own
+    placeholder, not a file the project wrote. TDDAgents' addition (2026-11-14): the project's MCP config
+    reader skips it (`app/services/mcp/config.py::_file_scope`), so an empty `.mcp.json` placeholder is not
+    reported as a broken config while a wrapped command runs.
+    """
+    import os
+
+    real = os.path.realpath(path)
+    for mount_point in _bwrap_mount_points:
+        if os.path.realpath(mount_point) == real:
+            return os.path.isfile(real) and os.path.getsize(real) == 0
+    return False
+
+
 def active_sandbox_count() -> int:
     """How many wrapped commands have not been cleaned up yet."""
     return _active_sandbox_count

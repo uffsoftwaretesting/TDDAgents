@@ -22,7 +22,12 @@ from app.components.validation_errors_list import build_nested_tree, render_vali
 from app.interactive_helpers import launch_invalid_settings_dialog
 from app.types.permissions import PermissionRuleSource
 from app.utils.hooks.hooks_config_snapshot import capture_hooks_config_snapshot
-from app.hooks.notifs.use_settings_errors import settings_errors_notification_text, use_settings_errors
+from app.utils.settings.all_errors import get_settings_with_all_errors
+from app.hooks.notifs.use_settings_errors import (
+    SETTINGS_ERRORS_TIMEOUT_MS,
+    settings_errors_notification_text,
+    use_settings_errors,
+)
 from app.utils.permissions.filesystem import get_settings_paths, is_tddagents_settings_path
 from app.utils.permissions.permission_update import update_settings_for_source
 from app.utils.settings.permission_validation import permission_rule_issue_message, validate_permission_rule
@@ -649,18 +654,46 @@ def test_the_settings_errors_notice(tmp_path: Path) -> None:
     assert use_settings_errors(out.append, None)() is None and out == []
     _write(loc.user_config_dir / "settings.json", {"disableAllHooks": 1, "permissions": {"allow": ["bash"]}})
     detector = _Detector()
-    unsubscribe = use_settings_errors(out.append, loc, detector)
+    now = [100.0]
+    unsubscribe = use_settings_errors(out.append, loc, detector, clock=lambda: now[0])
     assert out == ["Found 2 settings issues · /doctor for details"]  # the dropped rule's warning counts, as upstream's
     _write(loc.project_root / ".mcp.json", {"mcpServers": {"bad": {"type": "http"}}})
+    now[0] += SETTINGS_ERRORS_TIMEOUT_MS / 1000 - 0.001
     detector.listeners[0]("userSettings")
-    assert out[-1] == "Found 3 settings issues · /doctor for details"
+    assert len(out) == 1  # the notice is still on screen: `addNotification` skips its key
+    now[0] += 0.001
+    detector.listeners[0]("userSettings")
+    assert out[-1] == "Found 3 settings issues · /doctor for details"  # timed out: shown again
     _write(loc.user_config_dir / "settings.json", {})
     (loc.project_root / ".mcp.json").unlink()
     detector.listeners[0]("userSettings")
-    assert len(out) == 2  # no errors: nothing is written
+    assert len(out) == 2  # no errors: nothing is written, and the notice is removed
+    _write(loc.project_root / ".mcp.json", {"mcpServers": {"bad": {"type": "http"}}})
+    detector.listeners[0]("userSettings")
+    assert out[-1] == "Found 1 settings issue · /doctor for details" and len(out) == 3  # removed, so shown at once
     unsubscribe()
     assert detector.listeners == []
     use_settings_errors(out.append, loc)  # without a detector: the start only
+
+
+def test_the_sandbox_placeholder_for_a_missing_mcp_json_is_no_config(tmp_path: Path) -> None:
+    from app.utils.sandbox.runtime import linux_sandbox_utils as sandbox
+
+    loc = _loc(tmp_path)
+    placeholder = loc.project_root / ".mcp.json"
+    placeholder.parent.mkdir(parents=True, exist_ok=True)
+    placeholder.write_text("")  # what bwrap leaves on the host for a missing deny path
+    assert get_settings_with_all_errors(loc)  # an empty file the project wrote is a broken config
+    sandbox._bwrap_mount_points[str(placeholder)] = None
+    try:
+        assert sandbox.is_bwrap_mount_point(str(placeholder))
+        assert get_settings_with_all_errors(loc) == []
+        placeholder.write_text("{")  # written into since: no longer bwrap's placeholder
+        assert not sandbox.is_bwrap_mount_point(str(placeholder))
+        assert get_settings_with_all_errors(loc)
+    finally:
+        sandbox._bwrap_mount_points.pop(str(placeholder), None)
+    assert not sandbox.is_bwrap_mount_point(str(tmp_path / "elsewhere"))
     assert settings_errors_notification_text([ValidationError(path="", message="m")]) == (
         "Found 1 settings issue · /doctor for details")
 

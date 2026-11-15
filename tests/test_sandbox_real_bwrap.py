@@ -116,3 +116,36 @@ def test_the_network_goes_through_the_proxy(sandboxed_project: dict[str, Any]) -
     assert refused.stdout == "403"
     direct = run(ws, f"curl -s --noproxy '*' --max-time 3 http://127.0.0.1:{port}/ || echo unreachable")
     assert direct.stdout.strip() == "unreachable"
+
+
+def test_the_empty_mcp_json_placeholder_is_no_settings_issue(sandboxed_project: dict[str, Any]) -> None:
+    """
+    While a wrapped command runs, bwrap leaves an empty `.mcp.json` on the host for the missing deny path
+    (as upstream's runtime does); the settings errors must not read it as a broken config (2026-11-14).
+    """
+    import time
+
+    from app.utils.sandbox.runtime.linux_sandbox_utils import is_bwrap_mount_point
+    from app.utils.settings.all_errors import get_settings_with_all_errors
+
+    ws, project = sandboxed_project["ws"], sandboxed_project["project"]
+    placeholder = project / ".mcp.json"
+    assert not placeholder.exists()
+    locations = SettingsLocations(project_root=project, home=project.parent / "user-home")
+    seen: dict[str, Any] = {}
+    worker = threading.Thread(target=lambda: seen.update(result=run(ws, "sleep 2")))
+    worker.start()
+    deadline = time.monotonic() + 15
+    while not placeholder.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    try:
+        assert placeholder.exists() and placeholder.stat().st_size == 0  # bwrap's mount point, on the host
+        assert is_bwrap_mount_point(str(placeholder))
+        assert [e.message for e in get_settings_with_all_errors(locations)] == []
+    finally:
+        worker.join(30)
+    assert seen["result"].exit_code == 0
+    assert not placeholder.exists()  # cleaned up once no sandbox is active
+    placeholder.write_text("")  # the project's own empty file is a broken config
+    assert not is_bwrap_mount_point(str(placeholder))
+    assert any("not a valid JSON" in e.message for e in get_settings_with_all_errors(locations))

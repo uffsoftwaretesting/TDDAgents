@@ -185,6 +185,11 @@ def parse_mcp_config_from_file_path(
 
 
 def _file_scope(path: Path, scope: str) -> tuple[dict[str, McpServerConfig], list[ValidationError]]:
+    # The sandbox's empty placeholder for a missing `.mcp.json` is no config at all (2026-11-14).
+    from app.utils.sandbox.runtime.linux_sandbox_utils import is_bwrap_mount_point
+
+    if is_bwrap_mount_point(str(path)):
+        return {}, []
     config, errors = parse_mcp_config_from_file_path(path, expand_vars=True, scope=scope)
     if config is None:
         real = [e for e in errors if not e.message.startswith("MCP config file not found")]
