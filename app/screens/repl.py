@@ -11,6 +11,9 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
   (the `queued_command` attachment); a turn that ends first picks it up as the next turn.
 * **Esc interrupts** (`hooks/useCancelRequest.ts`): the turn's abort signal fires and control
   returns to the prompt; a pending permission question is answered "No".
+* **The status line** (`components/Spinner.tsx`, `app/components/spinner/spinner.py`): while a turn runs
+  and no question is on screen, `status_line` names what the agents are doing, the running tool's
+  activity first; the terminal shows it above the input line.
 * **Permission questions** (`components/permissions/`): `ask_permission` is the run's
   `canUseTool` prompt — the options are numbered and the next line typed answers them.
 * **The model's questions** (`AskUserQuestion`, upstream's `AskUserQuestionPermissionRequest`):
@@ -47,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import time
 from pathlib import Path
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -90,6 +94,8 @@ from app.components.permissions.ask_user_question_permission_request.preview_box
     preview_box,
 )
 from app.components.permissions.permission_options import PermissionOption
+from app.components.spinner.spinner import pick_spinner_verb, spinner_message, spinner_status_line
+from app.constants.spinner_verbs import get_spinner_verbs
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt
 from app.project_onboarding_state import (
     create_project_onboarding_feed,
@@ -112,7 +118,9 @@ from app.query_engine import ResultMessage
 from app.session.prompts import development_continue_prompt
 from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
 from app.tools.agent_tool.load_agents_dir import get_agent_definitions_with_overrides
+from app.tool import find_tool_by_name
 from app.tools.agent_tool.ui import extract_last_tool_info
+from app.tools.todo_write_tool.todo_write_tool import read_todos
 from app.types.hooks import PromptRequest, PromptResponse
 from app.types.permissions import PermissionBehavior, PermissionMode, PermissionRuleSource
 from app.utils.collapse_read_search import summarize_recent_activities
@@ -345,6 +353,51 @@ class Repl:
         store = getattr(run, "store", None)
         if store is not None:
             store.subscribe(self._on_state_change)
+        #: The status line's clock, and the running turn's start, output-token baseline and verb.
+        self.clock: Callable[[], float] = time.monotonic
+        self._turn_started_at: float | None = None
+        self._turn_tokens_base = 0
+        self._verb = "Working"
+        set_status = getattr(io, "set_status", None)
+        if callable(set_status):
+            set_status(self.status_line)
+
+    def _output_tokens(self) -> int:
+        tracker = getattr(self.run.ctx, "cost_tracker", None)
+        return int(tracker.total_usage().get("output_tokens", 0)) if tracker is not None else 0
+
+    def _spinner_verbs(self) -> list[str]:
+        locations = getattr(self.run, "settings_locations", None)
+        if locations is None:
+            return get_spinner_verbs()
+        from app.utils.settings.settings import load_settings
+
+        return get_spinner_verbs(load_settings(locations))
+
+    def status_line(self) -> str | None:
+        """
+        `SpinnerWithVerb`'s line while a turn runs and no question waits for an answer: the running tool's
+        activity, else the in-progress todo's `activeForm`, else the turn's verb; the elapsed time and the
+        turn's output tokens.
+        """
+        if not self.busy or self.pending is not None or self._turn_started_at is None:
+            return None
+        override = None
+        running = self.renderer.running_calls()
+        if running:
+            call = running[0]
+            tool = find_tool_by_name(getattr(self.run.ctx, "tools", ()) or (), str(call.get("name")))
+            args = call.get("args") or {}
+            if tool is not None:
+                override = tool.get_activity_description(args, self.run.ctx) or tool.user_facing_name(args)
+            else:
+                override = str(call.get("name"))
+        todos = read_todos(self.run.ctx) if callable(getattr(self.run.ctx, "get_app_state", None)) else ()
+        todo = next((t for t in todos if t.status == "in_progress"), None)
+        message = spinner_message(override, todo.active_form if todo is not None else None, self._verb)
+        elapsed_ms = (self.clock() - self._turn_started_at) * 1000
+        tokens = self._output_tokens() - self._turn_tokens_base
+        return spinner_status_line(message, elapsed_ms, tokens, verbose=self.renderer.verbose)
 
     def _on_progress(self, tool_use_id: str, data: Mapping[str, Any]) -> None:
         """
@@ -514,6 +567,9 @@ class Repl:
     def _start(self, turn: Coroutine[Any, Any, Terminal | None]) -> None:
         # `onQueryImpl`: "Mark onboarding as complete when any user message is sent to Claude".
         maybe_mark_project_onboarding_complete(self._project_dir())
+        self._turn_started_at = self.clock()
+        self._turn_tokens_base = self._output_tokens()
+        self._verb = pick_spinner_verb(self._spinner_verbs())
         self.turn = asyncio.create_task(self._run_turn(turn))
 
     async def _run_turn(self, turn: Coroutine[Any, Any, Terminal | None]) -> None:

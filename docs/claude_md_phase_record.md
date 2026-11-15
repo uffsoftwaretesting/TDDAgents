@@ -2509,6 +2509,42 @@ uncollected-files check read "unknown" and passed.
   RunTests); the cleanup removes them once no sandbox is active, as upstream. Meanwhile the empty `.mcp.json`
   read as "MCP config is not a valid JSON" ("1 settings issue"), as it would upstream; an empty settings
   file reads as `{}` in both.
+- **The REPL's screen (2026-11-14).** The user asked whether the CLI was clean; it was not. A session was
+  recorded with `script --log-timing` (palindrome, in the sandbox, 147 s) and its bytes analysed: no
+  full-screen clear, but 135 prompt redraws (0.9/s, up to 6/s in output bursts), each an erase and a
+  repaint of the input line (`patch_stdout`'s `run_in_terminal`, its writes batched every 0.2 s), plus a
+  cursor-position request; the 15-22 blank lines a redraw writes below the prompt while it is high on the
+  screen are prompt_toolkit's non-full-screen height reservation over lines already blank (no scroll, nothing
+  visible). Fixed by user decision 2026-11-14, each where upstream has it:
+  - **the settings notice** is written once per stay on screen: upstream's `addNotification` skips a key
+    already displayed (`context/notifications.tsx`), so a repeat waits `SETTINGS_ERRORS_TIMEOUT_MS` (60 s,
+    the toast's `timeoutMs`) or for the errors to go away (`removeNotification`). The project's MCP reader
+    skips bwrap's still-empty placeholder for a missing `.mcp.json` (`is_bwrap_mount_point`): it is the
+    sandbox's file, not a broken config (a divergence; upstream reports it);
+  - **tool rows** are upstream's: `⏺ {userFacingName}({renderToolUseMessage})`
+    (`app/components/messages/assistant_tool_use_message.py`) instead of the raw arguments cut at 60
+    characters, and each prints **with its result** when the result arrives
+    (`app/components/messages/user_tool_result_message/`, `UserToolResultMessage`'s dispatch and
+    `FallbackToolUseErrorMessage`: no `<tool_use_error>` tags, `Error: ` / `Cancelled: `, ten lines). A
+    result whose tool renders nothing shows its first line (upstream shows nothing). Every tool without
+    upstream's `userFacingName` / `renderToolUseMessage` got them, both renderers take the context (display
+    paths), and Write/Edit return upstream's structured output. Their result is upstream's `condensed` view
+    (user decision 2026-11-14): `Wrote N lines to <path>` / `Added N lines, removed M lines`, the content and
+    hunks with `--verbose`. RunTests (TDDAgents' own) returns its observations as structured output
+    (`run_tests_output`) and reads `exit 1 · 12 tests, 2 failed · coverage 84.0% · RED`. The hunks are the
+    `diff` package's line tokens (`split_lines`: each line keeps its newline while compared, then
+    `\ No newline at end of file` after a line without one; an empty side reads `start-1,0`): before, the
+    text was split at each newline, so a final newline read as an extra empty line and an Edit that creates a
+    file counted a removed line. `getPatchFromContents` keeps tabs, as upstream; which lines pair up still
+    comes from `difflib`'s matcher;
+  - **log lines** that still reach the terminal are the message alone (`TERMINAL_LOG_FORMAT`) and go
+    through the REPL's patched stderr (`route_terminal_logs`): `basicConfig` had bound the real one, so they
+    printed over the input line;
+  - **a status line** (`SpinnerWithVerb`, `app/components/spinner/spinner.py`) shows above the input while
+    a turn runs and no question waits: the running tool's activity, else the in-progress todo's
+    `activeForm`, else a verb from `SPINNER_VERBS`; the elapsed time and output tokens after 30 s; `esc to
+    interrupt`. It is static and looked at once a second, redrawing only when it changed (upstream animates
+    at 50 ms, which here would redraw the prompt twenty times a second).
 
 ### The three things that changed most
 

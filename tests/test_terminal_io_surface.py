@@ -50,3 +50,16 @@ def test_the_history_adapter_delegates(tmp_path):
     adapter = PromptToolkitHistory(history)
     adapter.store_string("one")
     assert list(adapter.load_history_strings()) == ["one"]
+
+
+def test_status_line_surface():
+    # The status line repaints through the session's application when it changed.
+    from prompt_toolkit.application import Application
+
+    assert callable(Application.invalidate)
+    assert isinstance(inspect.getattr_static(Application, "is_running"), property)
+    assert "self.app = " in inspect.getsource(PromptSession.__init__)  # the session's application
+    from app.screens import terminal_io
+
+    assert terminal_io.STATUS_REFRESH_SECONDS == 1.0
+    assert callable(terminal_io.TerminalIO.set_status)

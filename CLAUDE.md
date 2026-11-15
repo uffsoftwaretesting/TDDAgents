@@ -229,6 +229,15 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   `<config home>/debug/<thread id>.txt`. TDDAgents' own warnings and errors stay off the terminal
   (`TerminalLogFilter` on `main.py`'s stream handler), as upstream's `logForDebugging` / `logError`; they
   reach the debug log. The few upstream shows on purpose are marked `extra=TERMINAL`.
+- **The REPL's screen** (2026-11-14): a call prints as upstream's row, `⏺ Write(src/a.ts)`
+  (`userFacingName` + `renderToolUseMessage`), **together with its result** once it arrives
+  (`UserToolResultMessage`'s dispatch, `FallbackToolUseErrorMessage`); a result whose tool renders nothing
+  shows its first line. Write/Edit read as upstream's condensed line (the content and hunks with
+  `--verbose`); RunTests as `exit 1 · 12 tests, 2 failed · coverage 84.0% · RED` (`run_tests_output`). A static status line (`SpinnerWithVerb`: the running tool's activity, the todo's
+  `activeForm` or a spinner verb, then time and tokens after 30 s) is looked at once a second and redraws the
+  prompt only when it changed: every redraw erases and repaints the input line, so nothing animates. The
+  settings notice shows once per 60 s stay (upstream's same-key rule), and bwrap's empty `.mcp.json`
+  placeholder is no config. Terminal log lines are the message alone, through the patched stderr.
 - **`-p` is the SDK protocol** (`app/cli/structured_io.py`, `run_headless`): a text prompt is the
   one user message of a closed input; `--output-format text|json|stream-json` (stream-json needs
   `--verbose`), `--input-format stream-json` (user messages and every control request on stdin;

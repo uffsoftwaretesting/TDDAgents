@@ -36,7 +36,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 from app.utils.debug_filter import DebugFilter, parse_debug_filter, should_show_debug_message
 
@@ -271,17 +272,43 @@ class TerminalLogFilter(logging.Filter):
         return bool(getattr(record, "terminal", False))
 
 
+#: How a log record that reaches the terminal reads: its message alone, as the REPL's other lines
+#: (2026-11-14). The `--debug` file and the session log keep their timestamped formats.
+TERMINAL_LOG_FORMAT = "%(message)s"
+
+
+def terminal_log_handlers(root: logging.Logger | None = None) -> list[logging.StreamHandler[Any]]:
+    """
+    The root logger's terminal handlers: plain `StreamHandler`s (what `logging.basicConfig` installs)
+    writing to the process's stdout or stderr. Subclasses (file handlers, a test runner's capture
+    handlers) are not.
+    """
+    return [handler for handler in (root or logging.getLogger()).handlers
+            if type(handler) is logging.StreamHandler
+            and getattr(handler, "stream", None) in (sys.stderr, sys.stdout, sys.__stderr__, sys.__stdout__)]
+
+
 def install_terminal_log_filter(root: logging.Logger | None = None) -> None:
-    """
-    Add `TerminalLogFilter`, once, to the root logger's terminal handlers: plain `StreamHandler`s (what
-    `logging.basicConfig` installs) writing to the process's stdout or stderr. Subclasses (file handlers,
-    a test runner's capture handlers) are left alone.
-    """
-    for handler in (root or logging.getLogger()).handlers:
-        if type(handler) is logging.StreamHandler \
-                and getattr(handler, "stream", None) in (sys.stderr, sys.stdout, sys.__stderr__, sys.__stdout__) \
-                and not any(isinstance(f, TerminalLogFilter) for f in handler.filters):
+    """Add `TerminalLogFilter`, once, to the root logger's terminal handlers."""
+    for handler in terminal_log_handlers(root):
+        if not any(isinstance(f, TerminalLogFilter) for f in handler.filters):
             handler.addFilter(TerminalLogFilter())
+
+
+def route_terminal_logs(stream: Any, root: logging.Logger | None = None) -> Callable[[], None]:
+    """
+    Point the terminal handlers at `stream` (the REPL's patched stderr, so a record is printed above the
+    input line instead of over it, 2026-11-14) and return what puts them back. `logging.basicConfig` binds
+    its handler to the stderr of import time, before `prompt_toolkit`'s `patch_stdout` replaces it.
+    """
+    previous = [(handler, handler.setStream(stream)) for handler in terminal_log_handlers(root)]
+
+    def restore() -> None:
+        for handler, old in previous:
+            if old is not None:
+                handler.setStream(old)
+
+    return restore
 
 
 def install_debug_log_handler() -> DebugLogHandler | None:
@@ -299,6 +326,7 @@ __all__ = [
     "DEBUG_LOG_LEVEL_ENV",
     "DebugLogHandler",
     "TERMINAL",
+    "TERMINAL_LOG_FORMAT",
     "TerminalLogFilter",
     "DebugLogLevel",
     "LEVEL_ORDER",
@@ -310,6 +338,8 @@ __all__ = [
     "get_has_formatted_output",
     "get_min_debug_log_level",
     "install_terminal_log_filter",
+    "route_terminal_logs",
+    "terminal_log_handlers",
     "install_debug_log_handler",
     "is_debug_mode",
     "is_debug_to_stderr",

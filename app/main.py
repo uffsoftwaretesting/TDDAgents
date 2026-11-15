@@ -82,11 +82,11 @@ from app.tdd.plan import ItemStatus, TddPlan
 from app.tools.ask_user_question_tool.ask_user_question_tool import render_questions
 from app.types.permissions import PERMISSION_MODES
 from app.utils.claudemd import is_env_truthy
-from app.utils.debug import install_terminal_log_filter
+from app.utils.debug import TERMINAL_LOG_FORMAT, install_terminal_log_filter
 
 logging.basicConfig(
     level=logging.WARNING,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format=TERMINAL_LOG_FORMAT,
 )
 # TDDAgents' own warnings go to the debug log, as upstream's `logForDebugging` (2026-11-10).
 install_terminal_log_filter()

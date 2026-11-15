@@ -11,10 +11,17 @@ TTY, and there is no seam beneath it to fake. It is verified by a static surface
 Esc interrupts the agents (upstream `chat:cancel`); Ctrl-C does too while they work, and is
 otherwise ignored with a hint; Ctrl-D leaves. ↑ walks the prompt history (`app/history.py`, kept
 across sessions per project) through a prompt_toolkit `History` over it.
+
+**The status line** (`set_status`, the REPL's `status_line`) is drawn above the input line, as part of
+the prompt, and looked at once every `STATUS_REFRESH_SECONDS`: the prompt is redrawn only when the line
+changed (user decision 2026-11-14). A recorded session showed that every redraw hides the cursor, erases
+the prompt and paints it again, so an animated line would make the input line blink.
 """
 
 from __future__ import annotations
 
+import asyncio
+import sys
 from collections.abc import Callable, Iterable
 from types import TracebackType
 from typing import Self
@@ -26,6 +33,10 @@ from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from app.history import PromptHistory
+from app.utils.debug import route_terminal_logs
+
+#: How often the status line is looked at (a redraw follows only when it changed).
+STATUS_REFRESH_SECONDS = 1.0
 
 
 class PromptToolkitHistory(History):
@@ -57,20 +68,51 @@ class TerminalIO:
             key_bindings=bindings,
             history=PromptToolkitHistory(history) if history is not None else InMemoryHistory())
         self._patch = patch_stdout(raw=True)
+        self._restore_logs: Callable[[], None] = lambda: None
+        self._status: Callable[[], str | None] = lambda: None
+        self._ticker: asyncio.Task[None] | None = None
+
+    def set_status(self, status: Callable[[], str | None]) -> None:
+        """The line to show above the input while the agents work; `None` shows none."""
+        self._status = status
+
+    def _message(self, prompt: str) -> Callable[[], str]:
+        def message() -> str:
+            line = self._status()
+            return f"{line}\n{prompt}" if line else prompt
+        return message
+
+    async def _refresh_status(self) -> None:
+        shown = self._status()
+        while True:
+            await asyncio.sleep(STATUS_REFRESH_SECONDS)
+            current = self._status()
+            if current != shown:
+                shown = current
+                if self._session.app.is_running:
+                    self._session.app.invalidate()
 
     def __enter__(self) -> Self:
         self._patch.__enter__()
+        # The log records that still reach the terminal go above the input line, as print() does.
+        self._restore_logs = route_terminal_logs(sys.stderr)
         return self
 
     def __exit__(
         self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
     ) -> None:
+        if self._ticker is not None:
+            self._ticker.cancel()
+            self._ticker = None
+        self._restore_logs()
         self._patch.__exit__(exc_type, exc, tb)
 
     async def read_line(self, prompt: str) -> str | None:
+        if self._ticker is None:
+            self._ticker = asyncio.ensure_future(self._refresh_status())
         while True:
             try:
-                line: str = await self._session.prompt_async(prompt)
+                line: str = await self._session.prompt_async(self._message(prompt))
                 return line
             except KeyboardInterrupt:
                 self._on_interrupt()

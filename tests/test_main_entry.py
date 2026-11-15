@@ -711,3 +711,22 @@ def test_a_sandbox_that_refuses_the_session_exits_one_with_its_text(
     monkeypatch.setattr(entry, "develop_headless", refused)
     assert entry.main(["-p", "Build X", "--thread-id", "tdd-sbx"]) == 1
     assert text in capsys.readouterr().err
+
+
+def test_main_s_terminal_log_lines_are_the_message_alone():
+    """`main.py`'s handler (2026-11-14): no timestamp or level, TDDAgents' own warnings off the terminal."""
+    import subprocess
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    script = ("import logging, app.main\n"
+              "logging.getLogger('TDDMain').info('hello-main')\n"
+              "logging.getLogger('app.services.mcp.config').error('hidden-app-error')\n"
+              "logging.getLogger('TDDOrchestrator.REPL').warning('hidden-app-warning')\n"
+              "logging.getLogger('app.x').warning('shown-on-purpose', extra={'terminal': True})\n"
+              "logging.getLogger('httpx').error('library-error')\n")
+    done = subprocess.run([_sys.executable, "-c", script], cwd=_Path(__file__).resolve().parents[1],
+                          capture_output=True, text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
+    lines = [line for line in done.stderr.splitlines() if "Pydantic" not in line and "pydantic" not in line]
+    assert lines == ["hello-main", "shown-on-purpose", "library-error"]

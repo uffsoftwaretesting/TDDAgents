@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from typing import Any
 import json
 import logging
 import os
@@ -428,6 +429,34 @@ def test_the_terminal_filter_keeps_app_warnings_off_and_lets_the_rest_through():
             assert bool(handler.filter(record)) is shown, record.name
     finally:
         root.removeHandler(handler)
+
+
+def test_the_terminal_logs_follow_the_repl_s_stderr_and_come_back():
+    """`basicConfig` binds the real stderr; inside the REPL a record must go through the patched one."""
+    from app.utils.debug import TERMINAL_LOG_FORMAT, route_terminal_logs, terminal_log_handlers
+
+    root = logging.getLogger("tdd-route-test-root")
+    root.propagate = False
+    real: Any = sys.__stderr__
+    terminal = logging.StreamHandler(real)
+    terminal.setFormatter(logging.Formatter(TERMINAL_LOG_FORMAT))
+    elsewhere = logging.StreamHandler(io.StringIO())  # not the terminal: left alone
+    root.addHandler(terminal)
+    root.addHandler(elsewhere)
+    try:
+        assert terminal_log_handlers(root) == [terminal]
+        patched: Any = io.StringIO()
+        restore = route_terminal_logs(patched, root)
+        assert terminal.stream is patched and elsewhere.stream is not patched
+        root.warning("above the prompt")
+        assert patched.getvalue() == "above the prompt\n"  # the message alone, no timestamp
+        restore()
+        assert terminal.stream is real
+        route_terminal_logs(real, root)()  # already there: nothing to put back
+        assert terminal.stream is real
+    finally:
+        root.removeHandler(terminal)
+        root.removeHandler(elsewhere)
 
 
 def test_an_empty_mcp_json_reaches_the_debug_log_and_not_the_terminal(tmp_path):
