@@ -91,7 +91,7 @@ def test_an_edit_shows_the_patch_against_the_file_and_names_it():
     dialog = permission_dialog(build_edit_tool(), args, _ask({"type": "other", "reason": "x"}), ctx)
     assert (dialog.title, dialog.subtitle) == ("Edit file", "src/calc.py")
     assert dialog.question == "Do you want to make this edit to calc.py?"
-    assert dialog.body == "@@ -1,3 +1,3 @@\n a = 1\n-b = 2\n+b = 3\n "
+    assert dialog.body == "@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3"
     assert dialog.explanation == ""
 
 
@@ -103,7 +103,7 @@ def test_a_write_creates_or_overwrites():
     ctx = _ctx({"README.md": "old\n"})
     over = permission_dialog(tool, {"file_path": "README.md", "content": "new\n"}, _ask(), ctx)
     assert (over.title, over.question) == ("Overwrite file", "Do you want to overwrite README.md?")
-    assert over.body == "@@ -1,2 +1,2 @@\n-old\n+new\n "
+    assert over.body == "@@ -1 +1 @@\n-old\n+new"
 
 
 def test_read_and_search_tools_share_the_filesystem_dialog():

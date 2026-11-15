@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from app.tdd.plan import PlanError, TddPlan, render_plan, update_tdd_plan
+from app.tdd.tdd_plan_tool import ui
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
 from app.types.permissions import PermissionBehavior, PermissionResult
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
@@ -113,6 +114,7 @@ def build_update_plan_tool() -> BuiltTool:
 
     return build_tool(
         name=UPDATE_PLAN_TOOL_NAME,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1],
         input_schema=UPDATE_PLAN_INPUT_SCHEMA,
         description=lambda args: f"Update the TDD plan ({len(args.get('operations') or [])} changes)",

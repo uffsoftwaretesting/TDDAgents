@@ -50,6 +50,7 @@ from app.tdd.project_config import (
     save_project_config,
 )
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tools.exit_plan_mode_tool import ui
 from app.types.permissions import PermissionBehavior, PermissionMode, PermissionResult
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 from app.utils.permissions.permission_setup import set_permission_mode
@@ -211,6 +212,8 @@ def build_exit_plan_mode_tool() -> BuiltTool:
 
     return build_tool(
         name=EXIT_PLAN_MODE_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1],
         input_schema=EXIT_PLAN_MODE_INPUT_SCHEMA,
         description=lambda args: "Prompts the user to exit plan mode and start coding",

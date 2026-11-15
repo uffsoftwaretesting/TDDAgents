@@ -1,8 +1,11 @@
 """
 Edit: exact string replacement in a file that was read first.
 
-Ported from `reference/claude-code/src/tools/FileEditTool/FileEditTool.ts` -> `FileEditTool`;
-input contract `FileEditInput` (`sdk-tools.d.ts`). `validateInput` ends with the settings files' check
+Ported from `reference/claude-code/src/tools/FileEditTool/FileEditTool.ts` -> `FileEditTool`
+(`call`'s `FileEditOutput`, `FileEditTool/types.ts` -> `outputSchema`: `filePath`, `oldString`,
+`newString`, `originalFile`, `structuredPatch`, `userModified`, `replaceAll`, carried as the
+result's `metadata`, its `tool_use_result`); input contract `FileEditInput` (`sdk-tools.d.ts`). Not
+ported: `gitDiff` (remote sessions only). `validateInput` ends with the settings files' check
 (`app/utils/settings/validate_edit_tool.py`).
 """
 
@@ -34,6 +37,7 @@ from app.tools.utils import (
     track_file_history_edit,
     write_text,
 )
+from app.utils.diff import get_structured_patch_from_contents
 from app.utils.file import FILE_NOT_FOUND_CWD_NOTE
 from app.utils.path import backfill_path
 from app.utils.permissions.filesystem import (
@@ -125,15 +129,22 @@ def build_edit_tool() -> BuiltTool:
             return ToolResult(content=f"Error editing file: {e}", is_error=True)
 
         record_write(context, file_path, updated)
+        # `call`'s `data`: `getPatchForEdit`'s hunks, and `userModified` is `?? false` (no dialog here
+        # edits the proposed change).
+        output = {"filePath": file_path, "oldString": actual_old, "newString": new_string, "originalFile": base,
+                  "structuredPatch": get_structured_patch_from_contents(base, updated), "userModified": False,
+                  "replaceAll": replace_all}
         if replace_all:
             return ToolResult(
-                content=f"The file {file_path} has been updated. All occurrences were successfully replaced."
+                content=f"The file {file_path} has been updated. All occurrences were successfully replaced.",
+                metadata=output,
             )
-        return ToolResult(content=f"The file {file_path} has been updated successfully.")
+        return ToolResult(content=f"The file {file_path} has been updated successfully.", metadata=output)
 
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        render_tool_result_message=ui.render_tool_result_message,
         get_tool_use_summary=ui.get_tool_use_summary,
         get_activity_description=ui.get_activity_description,
         backfill_observable_input=backfill_path("file_path"),

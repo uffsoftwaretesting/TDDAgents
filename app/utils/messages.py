@@ -36,6 +36,7 @@ how the engine recognises `hook_stopped_continuation` (upstream's `query.ts` che
 from __future__ import annotations
 
 import logging
+import re
 import uuid as uuid_module
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -397,6 +398,7 @@ __all__ = [
     "create_stop_hook_summary_message",
     "create_tool_use_summary_message",
     "create_user_interruption_message",
+    "extract_tag",
     "is_attachment_message",
     "is_hook_stopped_continuation",
     "messages_for",
@@ -478,6 +480,27 @@ def create_stop_hook_summary_message(
 #: `INTERRUPT_MESSAGE` / `INTERRUPT_MESSAGE_FOR_TOOL_USE` (`src/utils/messages.ts`).
 INTERRUPT_MESSAGE = "[Request interrupted by user]"
 INTERRUPT_MESSAGE_FOR_TOOL_USE = "[Request interrupted by user for tool use]"
+
+
+def extract_tag(html: str, tag_name: str) -> str | None:
+    """
+    `extractTag`: the content of the first `<tag_name>` element (attributes allowed, case-insensitive) that
+    is not nested in another of the same name; `None` when there is none or it is empty.
+    """
+    if not html.strip() or not tag_name.strip():
+        return None
+    escaped = re.escape(tag_name)
+    pattern = re.compile(rf"<{escaped}(?:\s+[^>]*)?>([\s\S]*?)</{escaped}>", re.IGNORECASE)
+    opening = re.compile(rf"<{escaped}(?:\s+[^>]*?)?>", re.IGNORECASE)
+    closing = re.compile(rf"</{escaped}>", re.IGNORECASE)
+    last_index = 0
+    for match in pattern.finditer(html):
+        before = html[last_index:match.start()]
+        depth = len(opening.findall(before)) - len(closing.findall(before))
+        if depth == 0 and match.group(1):
+            return match.group(1)
+        last_index = match.end()
+    return None
 
 
 def create_user_interruption_message(*, tool_use: bool = False) -> HumanMessage:

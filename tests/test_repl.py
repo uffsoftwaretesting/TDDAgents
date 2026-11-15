@@ -308,7 +308,7 @@ def test_a_session_works_through_the_plan_and_stays_open(python_workspace, tmp_p
     assert io.out[0] == ("Tips for getting started\n"
                          "Run /init to create a TDDAGENTS.md file with instructions for TDDAgents\n")
     assert io.out[1].startswith("TDD plan:\n▶ 1. add\n\n" + HELP_TEXT)
-    assert "⏺ RunTests(test_path='tests')" in io.text()
+    assert "⏺ RunTests\n" in io.text() + "\n"
     assert io.prompts and io.prompts[0] == PROMPT
     assert model.seen[0].messages[0].content == "start"
 

@@ -18,6 +18,12 @@ lines instead of re-rendering a row (user decision 2026-11-01):
 Attachments, meta and system messages never close a group (upstream defers them past it), and a
 tool-use summary is not shown (the REPL ignores it upstream too). A stop-hook summary closes the
 group and prints as `app/components/messages/system_text_message.py` renders it (the turn is ending).
+
+Every other call prints when its result arrives, as upstream's finished screen shows it (user decision
+2026-11-14): its row (`app/components/messages/assistant_tool_use_message.py`) and, under it, its result
+(`app/components/messages/user_tool_result_message/`). A row printed at the call would be a row whose
+result lands lines later, among other calls'. Until then the call is running (`running_calls`, which the
+REPL's status line names); the end of the turn prints the rows of calls that never got a result.
 """
 
 from __future__ import annotations
@@ -28,7 +34,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from app.components.messages.assistant_tool_use_message import render_tool_use_row
 from app.components.messages.system_text_message import render_stop_hook_summary
+from app.components.messages.user_tool_result_message.user_tool_result_message import tool_result_text
 from app.tool import Tool, find_tool_by_name
 from app.utils.attachments import attachment_of
 from app.utils.collapse_read_search import (
@@ -69,6 +77,12 @@ class CollapsedReadSearchRenderer:
         self.verbose = verbose
         self.group: ReadSearchGroup | None = None
         self._shown_hint: str | None = None
+        #: The calls outside a group whose results have not arrived, by id, in call order.
+        self._pending: dict[str, Any] = {}
+
+    def running_calls(self) -> list[Any]:
+        """The calls printed only once their results arrive, oldest first."""
+        return list(self._pending.values())
 
     def feed(self, event: Any) -> list[str]:
         """The lines `event` adds to the terminal."""
@@ -88,10 +102,20 @@ class CollapsedReadSearchRenderer:
             return []
         if isinstance(event, StopHookSummaryMessage):
             return [*self.flush(), *render_stop_hook_summary(event, verbose=self.verbose)]
-        # Anything else (the turn's verdict, its result) closes the group.
-        return [*self.flush(), *self._plain(event)]
+        # Anything else (the turn's verdict, its result) closes the group; a running call keeps waiting.
+        return [*self._close_group(), *self._plain(event)]
 
     def flush(self) -> list[str]:
+        """Close the open group, then print the rows of the calls still without a result."""
+        lines = self._close_group()
+        pending, self._pending = list(self._pending.values()), {}
+        for call in pending:
+            row = render_tool_use_row(call, self._tools(), self._context(), verbose=self.verbose)
+            if row is not None:
+                lines.append(row)
+        return lines
+
+    def _close_group(self) -> list[str]:
         """Close the open group: its summary (or, verbose, its recalled memories)."""
         group, self.group, self._shown_hint = self.group, None, None
         if group is None or group.is_empty:
@@ -120,10 +144,8 @@ class CollapsedReadSearchRenderer:
             args = call.get("args") or {}
             info = get_tool_search_or_read_info(str(call.get("name")), args, tools, context)
             if not info.is_collapsible:
-                lines.extend(self.flush())
-                rendered = self._render(AIMessage(content="", tool_calls=[call]))
-                if rendered is not None:
-                    lines.append(rendered)
+                lines.extend(self._close_group())
+                self._pending[str(call.get("id"))] = call
                 continue
             if self.group is None:
                 self.group = ReadSearchGroup(context=context)
@@ -148,14 +170,22 @@ class CollapsedReadSearchRenderer:
 
     def _tool_result(self, message: ToolMessage) -> list[str]:
         if self.group is None or not self.group.owns(message.tool_call_id):
-            return [*self.flush(), *self._plain(message)]
+            call = self._pending.pop(message.tool_call_id, None)
+            lines = self._close_group()
+            tools = self._tools()
+            if call is not None:
+                row = render_tool_use_row(call, tools, self._context(), verbose=self.verbose)
+                if row is not None:
+                    lines.append(row)
+            text = tool_result_text(message, call, tools, verbose=self.verbose, context=self._context())
+            return [*lines, *(response_lines(text) if text else [])]
         output = message.additional_kwargs.get("tool_use_result")
         self.group.absorb_result(message.tool_call_id, output)
         if not self.verbose or message.status == "error":
             return []
         index = self.group.tool_use_ids.index(message.tool_call_id)
         tool = find_tool_by_name(self._tools(), str(self.group.calls[index].get("name")))
-        rendered = tool.render_tool_result_message(output, True) if tool is not None else None
+        rendered = tool.render_tool_result_message(output, True, self._context()) if tool is not None else None
         return response_lines(rendered) if rendered else []
 
 

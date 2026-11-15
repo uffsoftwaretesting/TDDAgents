@@ -18,6 +18,7 @@ from app.tool import (
     ToolResult,
     build_tool,
 )
+from app.tools.list_mcp_resources_tool import ui
 from app.tools.mcp_tool.mcp_tool import (
     MCP_MAX_RESULT_SIZE_CHARS,
     McpBuiltTool,
@@ -48,6 +49,8 @@ def build_list_mcp_resources_tool() -> McpBuiltTool:
 
     built = build_tool(
         name=LIST_MCP_RESOURCES_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=load_prompt(Path(__file__).with_name("prompt.md")),
         call=call,
         input_schema={

@@ -544,3 +544,26 @@ def test_initialize_registers_the_hosts_hook_callbacks(python_workspace: Any, tm
     (callback,) = callbacks
     assert callback["callback_id"] == "cb-stop" and callback["input"]["hook_event_name"] == "Stop"
     assert lines_of(written)[-1]["result"] == "All done."
+
+
+def test_a_run_tests_result_streams_its_structured_output(python_workspace: Any, tmp_path: Path) -> None:
+    """The REPL's verdict line reads `tool_use_result`; the SDK host gets the same object (2026-11-14)."""
+    feed = Feed(control("i1", "initialize"), user("run the tests", "u1"))
+    written: list[str] = []
+
+    def write(text: str) -> None:
+        written.append(text)
+        if any(m.get("type") == "result" for m in lines_of([text])):
+            feed.close()
+
+    model = Model([[AIMessage(content="", tool_calls=[{"name": "RunTests", "args": {}, "id": "rt1"}])],
+                   [AIMessage(content="ran")]])
+    asyncio.run(run_headless("sj-runtests", None, workspace=python_workspace, options=STREAM,
+                             input_blocks=feed.blocks(), write_stdout=write, **run_options(tmp_path, model)))
+    out = lines_of(written)
+    (result,) = [m for m in out if m["type"] == "user" and "tool_use_result" in m]
+    output = result["tool_use_result"]
+    assert set(output) == {"exitCode", "tests", "failures", "errors", "skipped", "coverage", "phase"}
+    assert isinstance(output["exitCode"], int)
+    assert output["phase"] is None  # no sub-requirement is current while the session plans
+    assert result["message"]["content"][0]["tool_use_id"] == "rt1"

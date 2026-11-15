@@ -7,6 +7,10 @@ Ported from `reference/claude-code/src/tools/AgentTool/UI.tsx` -> `extractLastTo
 `<user-facing name>: <tool-use summary>` ("Search: def main"), its name alone, or the raw tool name
 when the tool is unknown. The progress it reads is the worker's messages, one per content block,
 as the Agent tool hands them to `on_progress`.
+
+Also `userFacingName` (the agent type, `Agent` for `worker` or none) and `renderToolUseMessage`
+(the description, when the call has both a description and a prompt). Not ported, as React-only:
+`userFacingNameBackgroundColor` (the agent's colour) and `renderToolUseTag` (the model tag).
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.tool import Tool, find_tool_by_name
+from app.tools.agent_tool.prompt import GENERAL_PURPOSE_AGENT_TYPE
 from app.utils.collapse_read_search import (
     get_search_read_summary_text,
     get_tool_search_or_read_info,
@@ -67,4 +72,23 @@ def extract_last_tool_info(messages: Sequence[Any], tools: Sequence[Tool], conte
     return f"{name}: {summary}" if summary else name
 
 
-__all__ = ["extract_last_tool_info"]
+def user_facing_name(input: dict[str, Any] | None) -> str:
+    """`userFacingName`: the agent type, except `general-purpose` and `worker`, which read `Agent`."""
+    subagent_type = (input or {}).get("subagent_type")
+    if subagent_type and subagent_type != GENERAL_PURPOSE_AGENT_TYPE:
+        # Display "worker" agents as "Agent" for cleaner UI
+        if subagent_type == "worker":
+            return "Agent"
+        return str(subagent_type)
+    return "Agent"
+
+
+def render_tool_use_message(input: dict[str, Any], verbose: bool) -> str | None:
+    """`renderToolUseMessage`: the description, or no row until both it and the prompt are there."""
+    description, prompt = input.get("description"), input.get("prompt")
+    if not description or not prompt:
+        return None
+    return str(description)
+
+
+__all__ = ["extract_last_tool_info", "render_tool_use_message", "user_facing_name"]

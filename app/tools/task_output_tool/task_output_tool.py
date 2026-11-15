@@ -19,6 +19,7 @@ from typing import Any
 
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
 from app.tools.agent_tool.agent_tool import AbortError
+from app.tools.task_output_tool import ui
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 from app.utils.task.disk_output import format_task_output, get_task_output
 from app.utils.task.framework import update_task_state
@@ -136,6 +137,8 @@ def build_task_output_tool() -> BuiltTool:
 
     return build_tool(
         name=TASK_OUTPUT_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1].strip(),
         call=call,
         input_schema=TASK_OUTPUT_SCHEMA,

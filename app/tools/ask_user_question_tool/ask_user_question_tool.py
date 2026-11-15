@@ -27,6 +27,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tools.ask_user_question_tool import ui
 from app.types.permissions import PermissionBehavior, PermissionResult
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
@@ -150,6 +151,8 @@ def build_ask_user_question_tool() -> BuiltTool:
 
     return build_tool(
         name=ASK_USER_QUESTION_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1],
         input_schema=ASK_USER_QUESTION_INPUT_SCHEMA,
         description=lambda args: f"Ask the user {len(args.get('questions') or [])} question(s)",

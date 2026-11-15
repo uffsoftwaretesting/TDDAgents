@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
+from app.tools.todo_write_tool import ui
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 TODO_WRITE_TOOL_NAME = "TodoWrite"
@@ -134,6 +135,8 @@ def build_todo_write_tool() -> BuiltTool:
 
     return build_tool(
         name=TODO_WRITE_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=TODO_WRITE_PROMPT,
         input_schema=TODO_INPUT_SCHEMA,
         description=lambda args: f"Update {len(args.get('todos') or [])} todo items",

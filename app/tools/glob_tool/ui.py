@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.constants.tool_limits import TOOL_SUMMARY_MAX_LENGTH
+from app.utils.file import get_display_path
 from app.utils.truncate import truncate
 
 
@@ -17,14 +18,15 @@ def user_facing_name(input: dict[str, Any] | None) -> str:
     return "Search"
 
 
-def render_tool_use_message(input: dict[str, Any], verbose: bool) -> str | None:
+def render_tool_use_message(input: dict[str, Any], verbose: bool, context: Any = None) -> str | None:
+    """`renderToolUseMessage`: the pattern, and the path (its display path unless `verbose`)."""
     pattern = input.get("pattern")
     if not pattern:
         return None
     path = input.get("path")
     if not path:
         return f'pattern: "{pattern}"'
-    return f'pattern: "{pattern}", path: "{path}"'
+    return f'pattern: "{pattern}", path: "{path if verbose else get_display_path(str(path), context)}"'
 
 
 def get_tool_use_summary(input: dict[str, Any] | None, context: Any = None) -> str | None:

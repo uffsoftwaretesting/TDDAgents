@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
+from app.tools.enter_plan_mode_tool import ui
 from app.types.permissions import PermissionMode
 from app.utils.frontmatter_parser import parse_markdown_frontmatter, render_prompt
 from app.utils.permissions.permission_setup import set_permission_mode
@@ -72,6 +73,8 @@ def build_enter_plan_mode_tool() -> BuiltTool:
 
     return build_tool(
         name=ENTER_PLAN_MODE_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=get_enter_plan_mode_tool_prompt(),
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         description=lambda args: "Requests permission to enter plan mode for complex tasks requiring exploration "

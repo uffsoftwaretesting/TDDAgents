@@ -447,16 +447,16 @@ def test_searches_collapse_into_one_summary(tmp_path):
     assert r.feed(HumanMessage(content="meta", additional_kwargs={"is_meta": True})) == []
     assert r.feed(AIMessage(content="", tool_calls=[_call("ReadFile", "3", file_path="a.py")])) == []
     lines = r.feed(AIMessage(content="Found it", tool_calls=[_call("Edit", "4", file_path="a.py")]))
-    assert lines[0] == "  Searched for 1 pattern, read 1 file" and lines[1] == "● Found it"
-    assert lines[2].startswith("⏺ Edit(")
-    assert r.feed(_result("4", None)) == ["  ⎿ raw"]
+    assert lines == ["  Searched for 1 pattern, read 1 file", "● Found it"]  # the Edit prints with its result
+    row, result = r.feed(_result("4", None))
+    assert (row, result) == ("⏺ Update(a.py)", "  ⎿  raw")  # Edit is "Update" to the user, as upstream
     assert r.flush() == []
 
 
 def test_a_foreign_result_or_user_message_closes_the_group(tmp_path):
     r = _renderer(tmp_path)
     r.feed(AIMessage(content="", tool_calls=[_call("Bash", "1", command="cat a")]))
-    assert r.feed(ToolMessage(content="other", tool_call_id="zz")) == ["  Read 1 file", "  ⎿ other"]
+    assert r.feed(ToolMessage(content="other", tool_call_id="zz")) == ["  Read 1 file", "  ⎿  other"]
     r.feed(AIMessage(content="", tool_calls=[_call("Glob", "2", pattern="*")]))
     assert r.feed(HumanMessage(content=[{"type": "text", "text": "[Request interrupted by user]"}])) == [
         "  Searched for 1 pattern"]

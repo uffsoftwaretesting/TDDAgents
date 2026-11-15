@@ -27,6 +27,7 @@ from app.tools.mcp_tool.mcp_tool import (
     load_prompt,
     mcp_clients_of,
 )
+from app.tools.read_mcp_resource_tool import ui
 
 READ_MCP_RESOURCE_TOOL_NAME = "ReadMcpResourceTool"
 
@@ -52,6 +53,8 @@ def build_read_mcp_resource_tool() -> McpBuiltTool:
 
     built = build_tool(
         name=READ_MCP_RESOURCE_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=load_prompt(Path(__file__).with_name("prompt.md")),
         call=call,
         input_schema={

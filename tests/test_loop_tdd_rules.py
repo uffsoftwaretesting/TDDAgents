@@ -125,7 +125,7 @@ def test_tool_classification_helpers():
         def user_facing_name(self, input: dict[str, Any] | None) -> str:
             return self.name
 
-        def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None:
+        def render_tool_use_message(self, input: dict[str, Any], verbose: bool, context: Any = None) -> str | None:
             return None
 
         def backfill_observable_input(self, input: dict[str, Any], context: Any) -> None:
@@ -143,7 +143,7 @@ def test_tool_classification_helpers():
         def interrupt_behavior(self) -> Any:
             return "block"
 
-        def render_tool_result_message(self, output: Any, verbose: bool) -> str | None:
+        def render_tool_result_message(self, output: Any, verbose: bool, context: Any = None) -> str | None:
             return None
 
         def is_implementation_writer(self) -> bool:

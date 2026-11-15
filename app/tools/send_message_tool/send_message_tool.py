@@ -50,6 +50,7 @@ from app.tool import (
 )
 from app.tools.agent_tool.load_agents_dir import AgentDefinition
 from app.tools.agent_tool.resume_agent import resume_agent_background
+from app.tools.send_message_tool import ui
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 SEND_MESSAGE_TOOL_NAME = "SendMessage"
@@ -162,6 +163,8 @@ def build_send_message_tool(
 
     return build_tool(
         name=SEND_MESSAGE_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=_prompt(),
         call=call,
         input_schema=SEND_MESSAGE_SCHEMA,

@@ -3,7 +3,9 @@ Tool protocol and build_tool factory with fail-closed defaults (Part B2).
 
 Ported from:
 - `reference/claude-code/src/Tool.ts` -> `Tool`, `toolMatchesName`, `findToolByName`, `userFacingName`,
-  `renderToolUseMessage`, `backfillObservableInput`
+  `renderToolUseMessage`, `renderToolResultMessage`, `backfillObservableInput`. The two renderers
+  take an optional `context` (upstream reads the cwd process-wide); a stored renderer written
+  `(input, verbose)` is called without it (`takes_context`)
 - `reference/claude-code/src/tools/MCPTool/UI.tsx` -> `renderToolUseMessage` (the default rendering)
 - `app/tools/base.py` (Phase 1B) -> fail-closed defaults and protocol adaptation
 
@@ -46,6 +48,7 @@ from typing import (
     Any,
     Literal,
     Protocol,
+    cast,
     runtime_checkable,
 )
 
@@ -131,13 +134,13 @@ class Tool(Protocol):
 
     def description(self, input: dict[str, Any]) -> str: ...
     def user_facing_name(self, input: dict[str, Any] | None) -> str: ...
-    def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None: ...
+    def render_tool_use_message(self, input: dict[str, Any], verbose: bool, context: Any = None) -> str | None: ...
     def backfill_observable_input(self, input: dict[str, Any], context: ToolContext) -> None: ...
     def get_tool_use_summary(self, input: dict[str, Any] | None, context: Any = None) -> str | None: ...
     def get_activity_description(self, input: dict[str, Any] | None, context: Any = None) -> str | None: ...
     def is_search_or_read_command(self, input: dict[str, Any]) -> SearchOrRead | None: ...
     def interrupt_behavior(self) -> InterruptBehavior: ...
-    def render_tool_result_message(self, output: Any, verbose: bool) -> str | None: ...
+    def render_tool_result_message(self, output: Any, verbose: bool, context: Any = None) -> str | None: ...
     def is_enabled(self) -> bool: ...
     def is_concurrency_safe(self, input: dict[str, Any]) -> bool: ...
     def is_read_only(self, input: dict[str, Any]) -> bool: ...
@@ -151,6 +154,34 @@ class Tool(Protocol):
     ) -> Awaitable[PermissionResult] | PermissionResult: ...
     def call(self, input: dict[str, Any], context: ToolContext) -> Awaitable[ToolResult]: ...
     def map_result(self, result: ToolResult, tool_use_id: str) -> ToolMessage: ...
+
+
+#: A stored `renderToolUseMessage`: `(input, verbose)`, or `(input, verbose, context)` when it needs
+#: what upstream reads process-wide (the cwd a path is shown relative to).
+RenderToolUseMessage = (
+    Callable[[dict[str, Any], bool], str | None] | Callable[[dict[str, Any], bool, Any], str | None]
+)
+#: A stored `renderToolResultMessage`: `(output, verbose)`, or `(output, verbose, context)`.
+RenderToolResultMessage = Callable[[Any, bool], str | None] | Callable[[Any, bool, Any], str | None]
+
+
+def takes_context(fn: Callable[..., Any]) -> bool:
+    """
+    Whether a stored renderer takes a third positional argument, the `context`. A two-argument
+    renderer (`(input, verbose)`) is called without it, so the tools that need no cwd keep their
+    upstream signature.
+    """
+    try:
+        parameters = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):  # a builtin without a signature: the two-argument form
+        return False
+    positional = 0
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            positional += 1
+    return positional >= 3
 
 
 def render_input_as_key_values(input: dict[str, Any]) -> str:
@@ -203,8 +234,9 @@ class BuiltTool:
     #: default is the tool's own name).
     _user_facing_name: Callable[[dict[str, Any] | None], str] | None = None
     #: `Tool.ts` -> `renderToolUseMessage`: the call's input as a dialog shows it, in full when
-    #: `verbose`. The default is `MCPTool/UI.tsx`'s `key: <json>` join.
-    _render_tool_use_message: Callable[[dict[str, Any], bool], str | None] | None = None
+    #: `verbose`. The default is `MCPTool/UI.tsx`'s `key: <json>` join. `None` returned means no
+    #: row (upstream's `null`), `""` the name alone.
+    _render_tool_use_message: RenderToolUseMessage | None = None
     #: `Tool.ts` -> `backfillObservableInput`: fill in what hooks, permissions and the call should
     #: see (a file tool's path resolved against the tracked working directory). It takes the
     #: context because TDDAgents' working directory is per workspace, not process-wide.
@@ -221,7 +253,7 @@ class BuiltTool:
     _interrupt_behavior: Callable[[], InterruptBehavior] | None = None
     #: `Tool.ts` -> `renderToolResultMessage`, as text: how a result's structured output (its
     #: `tool_use_result`) reads in the REPL's expanded view; `None` when the tool has none.
-    _render_tool_result_message: Callable[[Any, bool], str | None] | None = None
+    _render_tool_result_message: RenderToolResultMessage | None = None
 
     def description(self, input: dict[str, Any]) -> str:
         return self._description(input)
@@ -229,10 +261,17 @@ class BuiltTool:
     def user_facing_name(self, input: dict[str, Any] | None) -> str:
         return self._user_facing_name(input) if self._user_facing_name is not None else self.name
 
-    def render_tool_use_message(self, input: dict[str, Any], verbose: bool) -> str | None:
-        if self._render_tool_use_message is not None:
-            return self._render_tool_use_message(input, verbose)
-        return render_input_as_key_values(input)
+    def render_tool_use_message(self, input: dict[str, Any], verbose: bool, context: Any = None) -> str | None:
+        """
+        `renderToolUseMessage(input, { verbose })`. `context` stands in for upstream's process-wide
+        cwd (a path is shown relative to it); a two-argument renderer never receives it.
+        """
+        fn = self._render_tool_use_message
+        if fn is None:
+            return render_input_as_key_values(input)
+        if takes_context(fn):
+            return cast(Callable[[dict[str, Any], bool, Any], str | None], fn)(input, verbose, context)
+        return cast(Callable[[dict[str, Any], bool], str | None], fn)(input, verbose)
 
     def backfill_observable_input(self, input: dict[str, Any], context: ToolContext) -> None:
         if self._backfill_observable_input is not None:
@@ -261,11 +300,17 @@ class BuiltTool:
         """`interruptBehavior?.() ?? 'block'`."""
         return self._interrupt_behavior() if self._interrupt_behavior is not None else "block"
 
-    def render_tool_result_message(self, output: Any, verbose: bool) -> str | None:
-        """`renderToolResultMessage?.(output, [], { verbose })`."""
-        if self._render_tool_result_message is None:
+    def render_tool_result_message(self, output: Any, verbose: bool, context: Any = None) -> str | None:
+        """
+        `renderToolResultMessage?.(output, [], { verbose })`. `context` stands in for upstream's
+        process-wide cwd, as `render_tool_use_message`'s; a two-argument renderer never receives it.
+        """
+        fn = self._render_tool_result_message
+        if fn is None:
             return None
-        return self._render_tool_result_message(output, verbose)
+        if takes_context(fn):
+            return cast(Callable[[Any, bool, Any], str | None], fn)(output, verbose, context)
+        return cast(Callable[[Any, bool], str | None], fn)(output, verbose)
 
     def is_enabled(self) -> bool:
         try:
@@ -374,13 +419,13 @@ def build_tool(
     max_result_size_chars: float = MAX_TOOL_RESULT_BYTES,
     prepare_permission_matcher: Callable[[dict[str, Any]], Callable[[str], bool]] | None = None,
     user_facing_name: Callable[[dict[str, Any] | None], str] | None = None,
-    render_tool_use_message: Callable[[dict[str, Any], bool], str | None] | None = None,
+    render_tool_use_message: RenderToolUseMessage | None = None,
     backfill_observable_input: Callable[[dict[str, Any], ToolContext], None] | None = None,
     get_tool_use_summary: Callable[[dict[str, Any] | None, Any], str | None] | None = None,
     get_activity_description: Callable[[dict[str, Any] | None, Any], str | None] | None = None,
     is_search_or_read_command: Callable[[dict[str, Any]], SearchOrRead] | None = None,
     interrupt_behavior: Callable[[], InterruptBehavior] | None = None,
-    render_tool_result_message: Callable[[Any, bool], str | None] | None = None,
+    render_tool_result_message: RenderToolResultMessage | None = None,
 ) -> BuiltTool:
     """
     Builds a Tool with fail-closed defaults for omitted members.

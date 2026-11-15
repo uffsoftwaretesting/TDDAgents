@@ -15,6 +15,7 @@ from typing import Any
 
 from app.tasks.stop_task import stop_task
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
+from app.tools.task_stop_tool import ui
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 TASK_STOP_TOOL_NAME = "TaskStop"
@@ -71,6 +72,8 @@ def build_task_stop_tool() -> BuiltTool:
 
     return build_tool(
         name=TASK_STOP_TOOL_NAME,
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=_prompt(),
         call=call,
         input_schema=TASK_STOP_SCHEMA,

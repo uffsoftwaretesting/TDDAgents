@@ -1,8 +1,12 @@
 """
 WriteFile: create or overwrite a file (an existing one must have been read first).
 
-Ported from `reference/claude-code/src/tools/FileWriteTool/FileWriteTool.ts` -> `FileWriteTool`;
-input contract `FileWriteInput` (`sdk-tools.d.ts`).
+Ported from `reference/claude-code/src/tools/FileWriteTool/FileWriteTool.ts` -> `FileWriteTool`
+(`call`'s `Output`: `type` `create` | `update`, `filePath`, `content`, `structuredPatch`,
+`originalFile`, carried as the result's `metadata`, its `tool_use_result`;
+`mapToolResultToToolResultBlockParam`); input contract `FileWriteInput` (`sdk-tools.d.ts`). As
+upstream's `if (oldContent)`, an existing empty file is a `create`. Not ported: `gitDiff` (remote
+sessions only).
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from app.tools.utils import (
     track_file_history_edit,
     write_text,
 )
+from app.utils.diff import FileEdit, get_structured_patch_for_display
 from app.utils.path import backfill_path
 from app.utils.permissions.filesystem import (
     check_file_write_permissions,
@@ -63,13 +68,23 @@ def build_write_file_tool() -> BuiltTool:
         except Exception as e:  # noqa: BLE001 - deliberate catch-all (fail-closed / upstream catch)
             return ToolResult(content=f"Error writing file: {e}", is_error=True)
         record_write(context, file_path, content)
-        if existing is None:
-            return ToolResult(content=f"File created successfully at: {file_path}")
-        return ToolResult(content=f"The file {file_path} has been updated successfully.")
+        if existing:
+            patch = get_structured_patch_for_display(existing, [FileEdit(existing, content)])
+            return ToolResult(
+                content=f"The file {file_path} has been updated successfully.",
+                metadata={"type": "update", "filePath": file_path, "content": content,
+                          "structuredPatch": patch, "originalFile": existing},
+            )
+        return ToolResult(
+            content=f"File created successfully at: {file_path}",
+            metadata={"type": "create", "filePath": file_path, "content": content,
+                      "structuredPatch": [], "originalFile": None},
+        )
 
     return build_tool(
         user_facing_name=ui.user_facing_name,
         render_tool_use_message=ui.render_tool_use_message,
+        render_tool_result_message=ui.render_tool_result_message,
         get_tool_use_summary=ui.get_tool_use_summary,
         get_activity_description=ui.get_activity_description,
         backfill_observable_input=backfill_path("file_path"),

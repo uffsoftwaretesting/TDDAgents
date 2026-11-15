@@ -61,6 +61,7 @@ from app.tool import (
     build_tool,
 )
 from app.tools.agent_tool.load_agents_dir import AgentDefinition
+from app.tools.skill_tool import ui
 from app.tools.skill_tool.prompt import SKILL_TOOL_NAME, get_prompt
 from app.types.permissions import (
     PermissionBehavior,
@@ -357,6 +358,7 @@ def build_skill_tool(
 
     return build_tool(
         name=SKILL_TOOL_NAME,
+        render_tool_use_message=ui.render_tool_use_message,
         prompt=get_prompt(),
         call=call,
         input_schema=SKILL_TOOL_SCHEMA,

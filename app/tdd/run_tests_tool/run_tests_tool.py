@@ -81,6 +81,7 @@ from app.tdd.project_config import (
     invalid_project_config_note,
 )
 from app.tdd.run_judgement import NOT_RUN, UNDECLARED, Judgement, Outcome, judge
+from app.tdd.run_tests_tool import ui
 from app.tdd.suite_fingerprint import (
     file_changed,
     fingerprint_test_files,
@@ -410,6 +411,25 @@ def next_test_floor(floor: TestFloor | None, record: TestRunRecord, judgement: J
     return floor
 
 
+def run_tests_output(exec_result: SuiteExecutionResult, phase: TddPhase | None) -> dict[str, Any]:
+    """
+    The run's structured output (the `tool_use_result` the REPL's result line reads): the exit code, the
+    JUnit report's counts (`None` without a readable report), the measured coverage and the phase the run
+    was judged in (`None` when no sub-requirement is current).
+    """
+    report = exec_result.report
+    coverage = exec_result.coverage
+    return {
+        "exitCode": exec_result.exit_code,
+        "tests": report.tests if report is not None else None,
+        "failures": report.failures if report is not None else None,
+        "errors": report.errors if report is not None else None,
+        "skipped": report.skipped if report is not None else None,
+        "coverage": coverage.percent if coverage.status == CoverageStatus.MEASURED else None,
+        "phase": phase.value if phase is not None else None,
+    }
+
+
 def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
     """A RunTests tool, with an optional runner standing in for the declared command (tests)."""
     runner_fn: Any = test_runner if test_runner is not None else _default_test_runner
@@ -441,12 +461,14 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         judgement = judge(code, report, collection, phase, state_now.test_floor, current,
                           report_problem=exec_result.report_problem,
                           red_scope=item_test_files(hashes, state_now.tdd_item_test_hashes))
+        judged_phase = phase if state_now.tdd_plan.current is not None else None
         if judgement.outcome is None:
             return ToolResult(content=render_result(exec_result, judgement, NOT_EVIDENCE, collection), is_error=True,
-                              exit_code=code)
+                              exit_code=code, metadata=run_tests_output(exec_result, judged_phase))
         if not context.shares_app_state:
             return ToolResult(content=render_result(exec_result, judgement, BACKGROUND_LEDGER, collection),
-                              is_error=judgement.is_error, exit_code=code)
+                              is_error=judgement.is_error, exit_code=code,
+                              metadata=run_tests_output(exec_result, judged_phase))
 
         before = context.get_app_state()
         changed = False
@@ -473,13 +495,16 @@ def build_run_tests_tool(test_runner: TestRunner | None = None) -> BuiltTool:
         line = (ledger_line(before.phase_ledger, after, judgement)
                 if before.tdd_plan.current is not None else NO_CURRENT_ITEM_LEDGER)
         return ToolResult(content=render_result(exec_result, judgement, line, collection),
-                          is_error=judgement.is_error, exit_code=code)
+                          is_error=judgement.is_error, exit_code=code,
+                          metadata=run_tests_output(exec_result, judged_phase))
 
     prompt_text = parse_markdown_frontmatter(PROMPT_PATH.read_text(encoding="utf-8"))[1]
 
     return build_tool(
         name="RunTests",
         prompt=prompt_text,
+        render_tool_use_message=ui.render_tool_use_message,
+        render_tool_result_message=ui.render_tool_result_message,
         input_schema={"type": "object", "properties": {}},
         description=lambda args: "Run the project's test suite",
         is_read_only=lambda args: True,

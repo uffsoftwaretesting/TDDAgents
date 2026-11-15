@@ -55,6 +55,7 @@ from app.tasks.local_agent_task.local_agent_task import (
 from app.tdd.phase_on_spawn import phase_on_spawn, refuse_background_phase_agent
 from app.tdd.suite_fingerprint import spawn_test_baseline, spawn_test_hashes
 from app.tool import BuiltTool, CancelToken, Tool, ToolContext, ToolResult, build_tool
+from app.tools.agent_tool import ui
 from app.tools.agent_tool.agent_tool_utils import (
     filter_denied_agents,
     get_deny_rule_for_agent,
@@ -364,6 +365,8 @@ def build_agent_tool(
         is_concurrency_safe=lambda args: True,
         # `checkPermissions` auto-approves a spawn in the external build: the default allow.
         description=lambda args: str(args.get("description", "")),
+        user_facing_name=ui.user_facing_name,
+        render_tool_use_message=ui.render_tool_use_message,
     )
 
 
