@@ -22,8 +22,9 @@ from collections.abc import Callable, Sequence
 
 from app.utils.format import format_duration, format_number
 
-#: The static glyph (`SpinnerGlyph` at rest).
-STATUS_GLYPH = "✻"
+#: The static glyph (`SpinnerGlyph` at rest): TDDAgents' shield, `⛨` (user decision 2026-11-17; upstream's
+#: frames are `·✢*✶✻✽`, `components/Spinner/utils.ts`).
+STATUS_GLYPH = "⛨"
 #: `SHOW_TOKENS_AFTER_MS`.
 SHOW_TOKENS_AFTER_MS = 30_000
 #: `figures.arrowDown`.
@@ -43,7 +44,7 @@ def spinner_message(override: str | None, active_form: str | None, verb: str) ->
 
 
 def spinner_status_line(message: str, elapsed_ms: float, tokens: int, *, verbose: bool = False) -> str:
-    """`✻ <message> (<elapsed> · ↓ <tokens> tokens · esc to interrupt)`."""
+    """`⛨ <message> (<elapsed> · ↓ <tokens> tokens · esc to interrupt)`."""
     parts: list[str] = []
     if verbose or elapsed_ms > SHOW_TOKENS_AFTER_MS:
         parts.append(format_duration(elapsed_ms))

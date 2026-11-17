@@ -2546,6 +2546,46 @@ uncollected-files check read "unknown" and passed.
     interrupt`. It is static and looked at once a second, redrawing only when it changed (upstream animates
     at 50 ms, which here would redraw the prompt twenty times a second).
 
+### The REPL's input, interrupt and start (2026-11-17)
+
+A live session broke when the user typed `/edit` at the plan approval. Ported from
+`reference/claude-code/src/`, with the user's decisions (plan `melhore-e-refatore-o-whimsical-lantern.md`):
+
+- **No plan editor** (decision): the `/edit` hint and the external editor are gone (upstream's ctrl-g,
+  `ExitPlanModePermissionRequest.tsx` / `utils/promptEditor.ts`, needs a suspended input the line REPL did
+  not have: the editor and prompt_toolkit split the keystrokes).
+- **The plan approval** follows `ExitPlanModePermissionRequest.tsx`'s `handleResponse`: text typed instead
+  of a choice is "No, keep planning" with that feedback (`REJECT_MESSAGE_WITH_REASON_PREFIX`), so the
+  Analyst revises the plan with the new or changed requirements; a "No" without feedback is upstream's
+  no-op (`PLAN_FEEDBACK_NEEDED` asks for it); Esc (`PermissionAnswer.cancelled`) rejects and stops.
+- **A pending question** (decision; upstream's keyed `Select` lists make a typed command impossible): a
+  line starting with `/` is never an answer (`PENDING_QUESTION_COMMANDS` — `/exit`, `/quit`, `/help`,
+  `/interrupt`, `/pause` — run; any other is "Unknown command" and the question is repeated); a parse
+  that fails is an invalid answer; `question_reminder` repeats the question line and its options and adds
+  `Esc to cancel.`; every typed number goes through `is_option_number` (ASCII digits: `"²".isdigit()` crashed
+  `int()`); the two screens with nothing to pick close on any line.
+- **Esc that stops at once** (upstream's abort signal reaches the request and the commands): the model
+  stream is read through `stop_on_cancel` (`claude.ts` passes `signal`), a running RunTests command is
+  killed as a process tree on a non-`'interrupt'` cancel (`LocalWorkspace.execute(cancel=…)`,
+  `ShellCommand.ts`'s `treeKill`; the run is no evidence, `INTERRUPTED_RUN`), and the background wait ends
+  (`_user_cancelled`). A pty check showed the Esc key itself always reached `on_interrupt`: what failed was
+  that nothing stopped until the stream, the suite or the wait finished. Esc aborts with `'user-cancel'`
+  (`REPL.tsx`'s `onCancel`).
+- **`/interrupt`** (decision, mandatory; upstream has the key only): the same path as Esc; TDDAgents stays
+  open, and the next message is an ordinary turn (the plan and ledger kept, the stop hook carries the cycle).
+- **`/send-anyways [text]`** (decision): upstream's `'now'` priority (`types/textInputTypes.ts`: "interrupt
+  and send immediately"): the command is enqueued at `'now'`, `interrupt_on_now_priority` aborts the turn
+  with `'interrupt'` (no interruption message, `'block'` tools finish) and it is the next turn; with no text
+  the queued prompts are re-enqueued at `'now'` (`dequeueAllMatching` + `enqueue`). The mid-turn drain never
+  takes a `'now'` command and takes nothing once the turn is cancelled.
+- **The start** (decision): no menu or warning (`get_initial_user_prompt` removed), no interactive banner;
+  a run with no request opens (`fresh_thread_id`), runs SessionStart at open without a turn
+  (`open_fresh_session`, as `main.tsx`'s `processSessionStartHooks('startup')`), and the first message typed
+  is the request (`pending_prefix`, `first_request` for the reports). The title is `LogoV2`'s rounded box in
+  `rich` (`app/components/logo_v2/logo_v2.py`), then `/help for commands`; the command list is `/help`'s.
+  A session folder TDDAgents created is trusted without the dialog (`is_tddagents_workspace`; a divergence).
+  The status glyph is `⛨` (decision).
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

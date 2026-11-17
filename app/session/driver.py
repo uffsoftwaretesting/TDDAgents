@@ -204,7 +204,7 @@ async def _develop_interactive(
             holder["repl"] = repl
             start_plugin_checks(run)
             terminal = await repl.run_session(request, prompt)
-            return outcome_of(run, terminal)
+            return outcome_of(run, terminal, first_request=repl.first_request)
 
 
 def start_plugin_checks(run: Any) -> None:

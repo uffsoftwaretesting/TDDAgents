@@ -133,13 +133,13 @@ def test_the_status_line_names_the_running_tool(python_workspace, tmp_path):
             line = repl.status_line()
             if line is not None:
                 seen.append(line)
-            return line is not None and line.startswith("✻ RunTests…")
+            return line is not None and line.startswith("⛨ RunTests…")
         await until(running_tests, timeout=60)
         await _until_done(repl, io)
 
     _, repl, _ = asyncio.run(_session(python_workspace, tmp_path, Model(cycle_turns()),
                                       TddPlan.from_texts(["add"]), script))
-    assert any(line == "✻ RunTests… (esc to interrupt)" for line in seen)
+    assert any(line == "⛨ RunTests… (esc to interrupt)" for line in seen)
     assert repl.status_line() is None
 
 

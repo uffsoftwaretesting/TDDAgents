@@ -60,6 +60,13 @@ def accept_trust(cwd: str | Path, home: str | Path | None = None) -> None:
     save_current_project_config(cwd, lambda current: {**current, HAS_TRUST_DIALOG_ACCEPTED: True})
 
 
+def is_tddagents_workspace(cwd: str | Path) -> bool:
+    """`cwd` is a session folder under TDDAgents' own workspaces directory (`LocalWorkspace.for_run`)."""
+    from app.workspace.local import workspaces_root
+
+    return Path(cwd).resolve().is_relative_to(workspaces_root())
+
+
 async def _next_answer(io: Any, escape: asyncio.Event) -> object:
     """The next line, `None` on Ctrl-D, or `ESCAPE` when Esc was pressed."""
     reading = asyncio.ensure_future(io.read_line(PROMPT))
@@ -83,6 +90,10 @@ async def show_trust_dialog(
     user accepts (saved) or leaves (`TrustDialogExit`). The session's trust is set either way it passes.
     `escape` is set by the terminal's Esc key while the dialog waits.
     """
+    if not check_has_trust_dialog_accepted(cwd) and is_tddagents_workspace(cwd):
+        # A session folder TDDAgents created itself (new and empty) is trusted without asking (user decision
+        # 2026-11-17; upstream asks for every folder it has not seen).
+        accept_trust(cwd, home)
     if not check_has_trust_dialog_accepted(cwd):
         io.write(render_trust_dialog(cwd))
         while True:
@@ -103,6 +114,7 @@ async def show_trust_dialog(
 
 __all__ = [
     "ABILITIES",
+    "is_tddagents_workspace",
     "OPTIONS",
     "SAFETY_CHECK",
     "TITLE",

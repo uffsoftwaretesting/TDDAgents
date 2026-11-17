@@ -237,7 +237,8 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   `activeForm` or a spinner verb, then time and tokens after 30 s) is looked at once a second and redraws the
   prompt only when it changed: every redraw erases and repaints the input line, so nothing animates. The
   settings notice shows once per 60 s stay (upstream's same-key rule), and bwrap's empty `.mcp.json`
-  placeholder is no config. Terminal log lines are the message alone, through the patched stderr.
+  placeholder is no config. Terminal log lines are the message alone, through the patched stderr. The
+  status glyph is `⛨`. Interrupting, `/send-anyways` and pending questions: see [Commands](#commands).
 - **`-p` is the SDK protocol** (`app/cli/structured_io.py`, `run_headless`): a text prompt is the
   one user message of a closed input; `--output-format text|json|stream-json` (stream-json needs
   `--verbose`), `--input-format stream-json` (user messages and every control request on stdin;
@@ -406,8 +407,8 @@ cp .env.example .env          # then fill ANTHROPIC_API_KEY, OPENAI_API_KEY (E2B
 sudo apt install bubblewrap socat python3.14-venv   # the sandbox (fail closed without them); the venv module for Python projects
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # also vendors rg, types-PyYAML
 
-# Interactive (from the repo root: the spec menu reads app/prompts/specs relatively)
-python -m app.main
+# Interactive: straight to the titled prompt; the first message typed is the request
+python -m app.main                                   # or: python -m app.main "<request>" | --spec <file>
 
 # Headless (upstream `claude -p`): ExitPlanMode is denied, so a new session plans and stops.
 # stdout carries only the result; the exit code is the result's is_error
@@ -427,13 +428,22 @@ python -m app.main -v | --version                               # 0.1.0 (TDDAgen
 # --replay-user-messages, --include-hook-events, --permission-prompt-tool <mcp tool|stdio>
 ```
 
-The REPL opens in plan mode (`⏸ plan mode on`). `ExitPlanMode` shows upstream's choices
-("Yes", "No, keep planning" with feedback, or `/edit`). Afterwards the same conversation
-develops the plan. Type at any time; Esc interrupts. `/help` lists `/plan`, `/pause`,
-`/resume`, `/requirements`, `/context`, `/mcp`, `/hooks`, `/doctor`, `/reload-plugins`, `/init` and `/exit` (resumable
-with `--thread-id`). A new interactive session first asks to trust its folder (upstream's trust dialog),
-then to approve the project's pending `.mcp.json` servers; `-p` treats trust as implicit and
-approves them, as `claude -p`.
+The REPL opens on its title (`LogoV2`'s rounded box) in plan mode (`⏸ plan mode on`), with no menu and
+no command list (`/help` has it); with no request it waits, and the first message typed is the request
+(SessionStart runs at open). `ExitPlanMode` shows upstream's choices; text typed instead of a choice is
+"No, keep planning" with that text, which the Analyst revises the plan with, and a bare "No" asks again
+(upstream's no-op). There is no plan editor. Afterwards the same conversation develops the plan. Type at
+any time (queued for the agents); Esc or `/interrupt` stops the agents at once (the model stream, a
+running test suite, a background wait) and keeps the session open, and the next message continues;
+`/send-anyways <text>` sends a message now (upstream's `'now'` priority: the turn is interrupted and the
+message is the next one; with no text, the queued messages). While a question waits, a command is never
+an answer: `/exit`, `/help`, `/interrupt` and `/pause` run, any other is refused and the question
+repeated; an invalid line repeats the options and says Esc cancels, and no input can crash the session.
+`/help` lists `/plan`, `/pause`, `/resume`, `/interrupt`, `/send-anyways`, `/requirements`, `/context`,
+`/mcp`, `/hooks`, `/doctor`, `/reload-plugins`, `/init` and `/exit` (resumable with `--thread-id`). A
+folder TDDAgents created for the session is trusted without asking; any other folder asks first
+(upstream's trust dialog), then the project's pending `.mcp.json` servers are approved; `-p` treats trust
+as implicit and approves them, as `claude -p`.
 
 **Experiment tooling:** `python mutation_tests/<task>/run_mutation_tests.py` (hardcoded
 `/home/amaro/...` paths; edit before running). SonarQube: `docker compose -f

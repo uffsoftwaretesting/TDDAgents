@@ -212,11 +212,11 @@ def test_the_status_line():
     assert spinner_message("Running npm install", "Writing tests", "Baking") == "Running npm install…"
     assert spinner_message(None, "Writing tests", "Baking") == "Writing tests…"
     assert spinner_message(None, None, "Baking") == "Baking…"
-    assert spinner_status_line("Baking…", 12_000, 500) == "✻ Baking… (esc to interrupt)"  # before 30 s: hint only
-    assert spinner_status_line("Baking…", SHOW_TOKENS_AFTER_MS, 500) == "✻ Baking… (esc to interrupt)"
-    assert spinner_status_line("Baking…", 43_000, 1234) == "✻ Baking… (43s · ↓ 1.2k tokens · esc to interrupt)"
-    assert spinner_status_line("Baking…", 43_000, 0) == "✻ Baking… (43s · esc to interrupt)"  # no tokens yet
-    assert spinner_status_line("Baking…", 2_000, 7, verbose=True) == "✻ Baking… (2s · ↓ 7 tokens · esc to interrupt)"
+    assert spinner_status_line("Baking…", 12_000, 500) == "⛨ Baking… (esc to interrupt)"  # before 30 s: hint only
+    assert spinner_status_line("Baking…", SHOW_TOKENS_AFTER_MS, 500) == "⛨ Baking… (esc to interrupt)"
+    assert spinner_status_line("Baking…", 43_000, 1234) == "⛨ Baking… (43s · ↓ 1.2k tokens · esc to interrupt)"
+    assert spinner_status_line("Baking…", 43_000, 0) == "⛨ Baking… (43s · esc to interrupt)"  # no tokens yet
+    assert spinner_status_line("Baking…", 2_000, 7, verbose=True) == "⛨ Baking… (2s · ↓ 7 tokens · esc to interrupt)"
 
 
 def test_the_spinner_verbs():
@@ -284,16 +284,16 @@ def test_the_repl_s_status_line_follows_the_turn():
         repl._spinner_verbs = lambda: ["Baking"]  # type: ignore[method-assign]
         repl._start(turn())
         await asyncio.sleep(0)
-        assert repl.status_line() == "✻ Baking… (esc to interrupt)"
+        assert repl.status_line() == "⛨ Baking… (esc to interrupt)"
         todos["main"] = (TodoItem("t", "in_progress", "Writing the failing test"),)
-        assert repl.status_line() == "✻ Writing the failing test… (esc to interrupt)"
+        assert repl.status_line() == "⛨ Writing the failing test… (esc to interrupt)"
         repl.renderer.feed(AIMessage(content="", tool_calls=[_call("Bash", {"command": "npm install"})]))
         now[0] += 43
         tracker.output = 1334
-        assert repl.status_line() == "✻ Running npm install… (43s · ↓ 1.2k tokens · esc to interrupt)"
+        assert repl.status_line() == "⛨ Running npm install… (43s · ↓ 1.2k tokens · esc to interrupt)"
         repl.renderer.feed(AIMessage(content="", tool_calls=[_call("Gone", {}, "c2")]))
         repl.renderer.feed(_result("ok", call_id="c1"))
-        assert repl.status_line() == "✻ Gone… (43s · ↓ 1.2k tokens · esc to interrupt)"  # an unknown tool: its name
+        assert repl.status_line() == "⛨ Gone… (43s · ↓ 1.2k tokens · esc to interrupt)"  # an unknown tool: its name
         repl.pending = object()  # type: ignore[assignment]
         assert repl.status_line() is None  # a question is on screen
         repl.pending = None
@@ -323,8 +323,8 @@ def test_the_terminal_message_puts_the_status_above_the_prompt():
     io = object.__new__(TerminalIO)
     io._status = lambda: None
     assert io._message("❯ ")() == "❯ "
-    io._status = lambda: "✻ Baking… (esc to interrupt)"
-    assert io._message("❯ ")() == "✻ Baking… (esc to interrupt)\n❯ "
+    io._status = lambda: "⛨ Baking… (esc to interrupt)"
+    assert io._message("❯ ")() == "⛨ Baking… (esc to interrupt)\n❯ "
 
 
 def test_the_terminal_repaints_only_when_the_status_changed(monkeypatch):

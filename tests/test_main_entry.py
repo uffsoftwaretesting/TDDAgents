@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import argparse
 import io
 import os
@@ -233,24 +235,48 @@ def test_thread_id_without_a_session_or_request_exits_one(fake_session: dict[str
     assert "No session 'tdd-missing' to continue" in capsys.readouterr().err
 
 
-def test_interactive_run_uses_the_menu_and_answers(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
-                                                   capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(entry, "get_initial_user_prompt", lambda: "Build Y")
+def test_interactive_run_opens_straight_on_the_prompt(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+                                                      capsys: pytest.CaptureFixture[str]) -> None:
+    """No menu, no banner (2026-11-17): a fresh session opens with no request; the first message is it."""
+    class Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", Tty(""))
     assert entry.main([]) == 0
     assert fake_session["options"][0].headless is False
-    from app.session.driver import derive_thread_id
-
-    assert fake_session["threads"] == [derive_thread_id("Build Y")]
-    assert "(INTERACTIVE)" in capsys.readouterr().out
-
-
-def test_menu_cancel_exits_zero(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    def cancel() -> str:
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(entry, "get_initial_user_prompt", cancel)
+    (thread,) = fake_session["threads"]
+    assert thread.startswith("tdd-") and fake_session["developed"] == [(thread, None)]
+    out = capsys.readouterr().out
+    assert "USE CASE MENU" not in out and "(INTERACTIVE)" not in out and "WARNING" not in out
     assert entry.main([]) == 0
-    assert fake_session["options"] == []
+    assert fake_session["threads"][1] != thread  # each start is a new session
+
+
+def test_the_first_message_typed_is_the_reported_request(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+                                                         tmp_path: Path) -> None:
+    class Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", Tty(""))
+    fake_session["outcome"] = dataclasses.replace(DONE, first_request="Build Z")
+    assert entry.main([]) == 0
+    (written,) = list(tmp_path.rglob("initial_user_prompt.txt"))
+    assert "INITIAL PROMPT SENT BY THE USER" in written.read_text(encoding="utf-8")
+    assert "\nBuild Z\n" in written.read_text(encoding="utf-8")
+
+
+def test_an_interactive_thread_id_without_a_session_exits_one(fake_session: dict[str, Any],
+                                                              monkeypatch: pytest.MonkeyPatch,
+                                                              capsys: pytest.CaptureFixture[str]) -> None:
+    class Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", Tty(""))
+    assert entry.main(["--thread-id", "tdd-missing"]) == 1
+    assert "No session 'tdd-missing' to continue" in capsys.readouterr().err
 
 
 def test_keyboard_interrupt_during_the_drive(
@@ -298,75 +324,6 @@ def test_the_log_file_handler_is_removed(fake_session: dict[str, Any]) -> None:
 
 
 # ── exact output: the entry point's user-facing text (Phase 9 mutation run) ──
-
-WARNING_TEXT = (
-    "WARNING: The Analyst agent may ask for more details about the requirements, "
-    "which will require more interaction and prompts from the user. For the purposes "
-    "of the scientific research being conducted, we consider attempts where the Analyst "
-    "agent did not ask for any additional implementation details and considered the initial "
-    "prompt sufficient to elicit the requirements. Therefore, when using any of the prompt "
-    "options provided, we recommend discarding any attempts that request further detail. "
-    "Only consider attempts where the INITIAL prompt is sufficient for requirements elicitation.\n"
-)
-
-
-def _scripted_input(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> list[str]:
-    prompts: list[str] = []
-
-    def fake_input(prompt: str) -> str:
-        prompts.append(prompt)
-        return replies.pop(0)
-
-    monkeypatch.setattr("builtins.input", fake_input)
-    return prompts
-
-
-def test_menu_lists_txt_specs_and_loads_the_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                   capsys: pytest.CaptureFixture[str]) -> None:
-    specs = tmp_path / "app" / "prompts" / "specs"
-    specs.mkdir(parents=True)
-    (specs / "b.txt").write_text("  spec B  \n", encoding="utf-8")
-    (specs / "a.txt").write_text("spec A", encoding="utf-8")
-    (specs / "notes.md").write_text("ignored", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    prompts = _scripted_input(monkeypatch, ["", "  ", "x", "0", "4", "2"])
-    assert entry.get_initial_user_prompt() == "spec B"
-    assert prompts == ["Select an option: "] * 6
-    assert capsys.readouterr().out == (
-        WARNING_TEXT + "\n"
-        "USE CASE MENU (type the desired option):\n\n"
-        "1. a.txt\n2. b.txt\n3. Type your own prompt\n\n"
-        "❌ Invalid input. Please type a number corresponding to the menu.\n"
-        "❌ Invalid option. Try again.\n"
-        "❌ Invalid option. Try again.\n"
-        "\n✅ [Prompt loaded from 'b.txt']\n\n"
-    )
-
-
-def test_menu_custom_prompt_and_missing_specs_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                  capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.chdir(tmp_path)
-    prompts = _scripted_input(monkeypatch, ["1", "  my own request  "])
-    assert entry.get_initial_user_prompt() == "my own request"
-    assert prompts == ["Select an option: ", "\n👤 [Your Initial Request]: "]
-    out = capsys.readouterr().out
-    assert out == (
-        WARNING_TEXT + "\n"
-        "⚠️ Warning: Specs directory not found at 'app/prompts/specs'.\n\n"
-        "USE CASE MENU (type the desired option):\n\n"
-        "1. Type your own prompt\n\n"
-    )
-
-
-def test_menu_specs_path_is_a_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                   capsys: pytest.CaptureFixture[str]) -> None:
-    (tmp_path / "app" / "prompts").mkdir(parents=True)
-    (tmp_path / "app" / "prompts" / "specs").write_text("not a dir")
-    monkeypatch.chdir(tmp_path)
-    _scripted_input(monkeypatch, ["1", "r"])
-    assert entry.get_initial_user_prompt() == "r"
-    assert "Specs directory not found" in capsys.readouterr().out
-
 
 def test_parser_help_and_metadata() -> None:
     parser = entry.build_parser()
@@ -573,7 +530,6 @@ def test_main_continues_a_thread_without_a_request(fake_session: dict[str, Any],
             return True
 
     monkeypatch.setattr("sys.stdin", Tty(""))
-    monkeypatch.setattr(entry, "get_initial_user_prompt", lambda: pytest.fail("the menu must not be shown"))
     assert entry.main(["-p", "Build X", "--thread-id", "tdd-c"]) == 0
     capsys.readouterr()
     # The thread exists, so no request and no menu are needed: its conversation is resumed.
@@ -598,28 +554,13 @@ def test_report_success_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     assert "SUCCESSFULLY" not in capsys.readouterr().out
 
 
-def test_menu_first_option(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    specs = tmp_path / "app" / "prompts" / "specs"
-    specs.mkdir(parents=True)
-    (specs / "only.txt").write_text("the one", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    _scripted_input(monkeypatch, ["1"])
-    assert entry.get_initial_user_prompt() == "the one"
-
-
-def test_main_messages_are_exact(fake_session: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
-                                 capsys: pytest.CaptureFixture[str]) -> None:
-    def cancel() -> str:
-        raise EOFError
-
-    monkeypatch.setattr(entry, "get_initial_user_prompt", cancel)
-    entry.main([])
-    assert capsys.readouterr().out == "\n👋 Operation cancelled by the user.\n"
-    monkeypatch.setattr(entry, "get_initial_user_prompt", lambda: "")
-    assert entry.main([]) == 1
-    assert capsys.readouterr().err == "❌ The initial request cannot be empty.\n"
+def test_main_messages_are_exact(fake_session: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
     entry.main(["Build Q"])
-    assert "🚀  TDDAGENTS SESSION (INTERACTIVE)\n" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "TDDAGENTS SESSION" not in out  # the interactive title is the REPL's panel
+    entry.main(["-p", "Build Q"])
+    captured = capsys.readouterr()
+    assert "🚀  TDDAGENTS SESSION (HEADLESS)\n" in captured.out + captured.err
 
 
 def test_the_final_run_names_the_files_that_did_not_run_when_pytest_stopped(python_workspace, tmp_path):

@@ -122,7 +122,7 @@ def test_the_repl_header_shows_the_tip_once_per_session_and_marks_on_each_turn(
 
     plan = TddPlan.from_texts(["A"]).complete_current(CYCLE)
     _, _, io = asyncio.run(session(python_workspace, tmp_path, model, plan, script))
-    assert io.out[0] == TIP
+    assert io.out[1] == TIP  # after the title panel
     assert get_current_project_config(tmp_path) == {"projectOnboardingSeenCount": 1,
                                                     "hasCompletedProjectOnboarding": True}
 

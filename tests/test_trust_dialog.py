@@ -218,13 +218,14 @@ def drive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lines: list[str | Non
     class Repl:
         def __init__(self, run: Any, io: Any, verbose: bool = False) -> None:
             self.run = run
+            self.first_request = None
 
         async def run_session(self, request: Any, prompt: Any) -> str:
             await asyncio.sleep(0.01)  # the startup checks run meanwhile, in the background
             return "ended"
 
     monkeypatch.setattr("app.screens.repl.Repl", Repl)
-    monkeypatch.setattr("app.cli.print.outcome_of", lambda run, terminal: terminal)
+    monkeypatch.setattr("app.cli.print.outcome_of", lambda run, terminal, **_: terminal)
 
     async def startup_checks(set_app_state: Any, locations: Any, *, trust_accepted: bool, refresh: Any) -> None:
         checks.append((locations.project_root, trust_accepted))

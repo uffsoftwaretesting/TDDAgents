@@ -8,10 +8,12 @@ specification and the `Implementation Plan` of sub-requirements) and asks for it
 
 Two modes, as claude-code has them:
 
-* **Interactive** (default): the use-case menu picks the initial request, and the session is a
-  REPL (`app/screens/repl.py`): the user answers the Analyst's questions, approves the plan (or
-  keeps planning, or edits it with `/edit`), then talks to the agents while they work, edits the
-  plan (`/plan`), re-plans (`/requirements`) or interrupts (Esc).
+* **Interactive** (default): the session is a REPL (`app/screens/repl.py`) that opens straight on the
+  prompt, under the title; the first message typed is the request (a prompt argument or `--spec` gives
+  it at once). The user answers the Analyst's questions, approves the plan (or keeps planning by
+  typing what to change), then talks to the agents while they work, edits the plan (`/plan`),
+  re-plans (`/requirements`), interrupts (Esc, `/interrupt`) or sends a message at once
+  (`/send-anyways`).
 * **Headless** (`-p/--print`, upstream `claude -p` -> `runHeadless`): the request comes from
   `--spec FILE`, the prompt argument or stdin, and nobody is asked anything. As upstream's `-p`,
   the plan's approval is denied, so a headless session plans and stops unplanned (exit 1). A
@@ -83,6 +85,7 @@ from app.tools.ask_user_question_tool.ask_user_question_tool import render_quest
 from app.types.permissions import PERMISSION_MODES
 from app.utils.claudemd import is_env_truthy
 from app.utils.debug import TERMINAL_LOG_FORMAT, install_terminal_log_filter
+from app.components.design_system.dialog import is_option_number
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -96,66 +99,6 @@ for noisy_logger in ("httpx", "httpcore", "anthropic", "e2b"):
 
 logger = logging.getLogger("TDDMain")
 logger.setLevel(logging.INFO)
-
-
-def get_initial_user_prompt() -> str:
-    """
-    Displays the use-case menu by reading the .txt files from the specs directory,
-    shows the standard disclaimer, and returns the prompt chosen (or typed) by the user.
-    """
-    warning_message = (
-        "WARNING: The Analyst agent may ask for more details about the requirements, "
-        "which will require more interaction and prompts from the user. For the purposes "
-        "of the scientific research being conducted, we consider attempts where the Analyst "
-        "agent did not ask for any additional implementation details and considered the initial "
-        "prompt sufficient to elicit the requirements. Therefore, when using any of the prompt "
-        "options provided, we recommend discarding any attempts that request further detail. "
-        "Only consider attempts where the INITIAL prompt is sufficient for requirements elicitation.\n"
-    )
-    print(warning_message)
-
-    # Resolves the path to the specs directory
-    specs_dir = Path("app/prompts/specs")
-
-    if not specs_dir.exists() or not specs_dir.is_dir():
-        print(f"⚠️ Warning: Specs directory not found at '{specs_dir}'.\n")
-        spec_files = []
-    else:
-        # Pulls the .txt files and sorts them alphabetically
-        spec_files = sorted([f for f in specs_dir.iterdir() if f.suffix == '.txt'])
-
-    print("USE CASE MENU (type the desired option):\n")
-    for i, file_path in enumerate(spec_files, start=1):
-        print(f"{i}. {file_path.name}")
-
-    custom_input_option = len(spec_files) + 1
-    print(f"{custom_input_option}. Type your own prompt\n")
-
-    while True:
-        try:
-            choice_str = input("Select an option: ").strip()
-            if not choice_str:
-                continue
-
-            choice = int(choice_str)
-
-            # If the user chose one of the .txt files
-            if 1 <= choice <= len(spec_files):
-                selected_file = spec_files[choice - 1]
-                with open(selected_file, "r", encoding="utf-8") as f:
-                    prompt = f.read().strip()
-                print(f"\n✅ [Prompt loaded from '{selected_file.name}']\n")
-                return prompt
-
-            # If the user decides to type their own prompt
-            elif choice == custom_input_option:
-                prompt = input("\n👤 [Your Initial Request]: ").strip()
-                return prompt
-
-            else:
-                print("❌ Invalid option. Try again.")
-        except ValueError:
-            print("❌ Invalid input. Please type a number corresponding to the menu.")
 
 
 def read_initial_request(args: argparse.Namespace) -> str | None:
@@ -394,7 +337,7 @@ def pick_thread(term: str | None) -> str | None:
             return None
         if not choice:
             return None
-        if choice.isdigit() and 1 <= int(choice) <= len(threads):
+        if is_option_number(choice) and 1 <= int(choice) <= len(threads):
             return threads[int(choice) - 1]
         print("❌ Invalid option. Try again.")
 
@@ -913,22 +856,16 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
     initial_input = read_initial_request(args)
     if args.rewind_files and args.print:
         return rewind_files(args, initial_input, write_stdout)
-    if initial_input is None and not args.thread_id and not args.print:
-        try:
-            initial_input = get_initial_user_prompt()
-        except (KeyboardInterrupt, EOFError):
-            print("\n👋 Operation cancelled by the user.")
-            return 0
-    if not args.thread_id and not initial_input and not stream_input:
-        if args.print:
-            print("Error: Input must be provided either through stdin or as a prompt argument when using --print",
-                  file=sys.stderr)
-            return 1
-        print("❌ The initial request cannot be empty.", file=sys.stderr)
+    # The interactive start opens straight on the prompt (2026-11-17, as upstream's REPL with no prompt):
+    # the first message typed is the request. `-p` still needs one.
+    if args.print and not args.thread_id and not initial_input and not stream_input:
+        print("Error: Input must be provided either through stdin or as a prompt argument when using --print",
+              file=sys.stderr)
         return 1
 
     thread_id = resolve_thread_id(args, initial_input)
-    logger.info("🔑 thread_id: %s", thread_id)
+    if args.print:
+        logger.info("🔑 thread_id: %s", thread_id)
     from app.utils.debug import set_debug_session_id
 
     # The debug log is named after the session (`getDebugLogPath`'s `getSessionId()`).
@@ -937,7 +874,7 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
 
     workspace = session_workspace(thread_id)
     resuming = session_exists(thread_id, workspace)
-    if not resuming and not initial_input and not stream_input:
+    if not resuming and not initial_input and not stream_input and (args.print or args.thread_id):
         print(f"❌ No session '{thread_id}' to continue, and no initial request to start one.", file=sys.stderr)
         return 1
 
@@ -949,9 +886,10 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
     logging.getLogger().addHandler(file_handler)
 
     try:
-        print("\n" + "=" * 80)
-        print("🚀  TDDAGENTS SESSION " + ("(HEADLESS)" if args.print else "(INTERACTIVE)"))
-        print("=" * 80)
+        if args.print:
+            print("\n" + "=" * 80)
+            print("🚀  TDDAGENTS SESSION (HEADLESS)")
+            print("=" * 80)
         # On a session that already exists, the prompt is the user's next message (upstream's
         # `--resume <id> "<prompt>"`): the answer to the question the agents stopped on.
         request = None if resuming else initial_input
@@ -973,7 +911,8 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
             # `print.ts` / `REPL.tsx`: the sandbox is required and cannot run, or failed to start (exit 1).
             sys.stderr.write(str(unavailable))
             return 1
-        report(thread_id, workspace, request, outcome, getattr(args, "settings", None))
+        # A session opened with no request takes its first typed message as the request.
+        report(thread_id, workspace, request or outcome.first_request, outcome, getattr(args, "settings", None))
         if outcome.question:
             print(waiting_text(thread_id, outcome.question, args.print))
         if args.print:

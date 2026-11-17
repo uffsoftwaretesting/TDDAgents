@@ -191,8 +191,11 @@ def test_a_resumed_session_with_nothing_to_say_waits_for_the_user(python_workspa
 
     assert asyncio.run(go("loop-p6", [[AIMessage(content="What should it do?")]], "Build it")) == Terminal.COMPLETED
     assert asyncio.run(go("loop-p6", [], None)) is None
-    # Nothing to resume: a fresh session with no request has nothing to submit but its empty turn.
-    assert asyncio.run(go("loop-p7", [[AIMessage(content="Hello.")]], None)) == Terminal.COMPLETED
+    # Nothing to resume: a fresh session with no request opens without a turn (upstream's REPL with an
+    # empty input, 2026-11-17); the first message the user types is its request.
+    before = len(seen)
+    assert asyncio.run(go("loop-p7", [[AIMessage(content="Hello.")]], None)) is None
+    assert len(seen) == before  # the model was not called
 
 
 # ── plan, approve, develop ──────────────────────────────────────────────────

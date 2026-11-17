@@ -377,7 +377,7 @@ def drive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lines: list[str | Non
 
     class Repl:
         def __init__(self, run: Any, io: Any, verbose: bool = False) -> None:
-            pass
+            self.first_request = None
 
         async def run_session(self, request: Any, prompt: Any) -> str:
             return "ended"
@@ -387,7 +387,7 @@ def drive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lines: list[str | Non
 
     monkeypatch.setattr("app.cli.print.open_session_run", open_run)
     monkeypatch.setattr("app.screens.repl.Repl", Repl)
-    monkeypatch.setattr("app.cli.print.outcome_of", lambda run, terminal: terminal)
+    monkeypatch.setattr("app.cli.print.outcome_of", lambda run, terminal, **_: terminal)
     monkeypatch.setattr("app.utils.plugins.perform_startup_checks.perform_startup_checks", no_checks)
     io = FakeIO()
     for line in lines:
