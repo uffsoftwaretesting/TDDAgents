@@ -56,6 +56,9 @@ class PromptToolkitHistory(History):
 class TerminalIO:
     """`ReplIO` on a real terminal."""
 
+    #: The REPL may write ANSI styles (the title panel): `patch_stdout(raw=True)` passes them through.
+    supports_color = True
+
     def __init__(self, on_interrupt: Callable[[], None], history: PromptHistory | None = None) -> None:
         self._on_interrupt = on_interrupt
         bindings = KeyBindings()
@@ -116,7 +119,7 @@ class TerminalIO:
                 return line
             except KeyboardInterrupt:
                 self._on_interrupt()
-                print("(Esc or Ctrl-C interrupts the agents; /exit leaves)", flush=True)
+                print("(Esc, Ctrl-C or /interrupt stops the agents; /exit leaves)", flush=True)
             except EOFError:
                 return None
 

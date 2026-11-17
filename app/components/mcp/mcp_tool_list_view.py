@@ -48,7 +48,8 @@ async def select_tool(io: DialogIO, server: ServerInfo, tools: Sequence[Any]) ->
     listed = server_tools(server, tools)
     heading = [f"Tools for {server.name}", f"{len(listed)} {plural(len(listed), 'tool')}"]
     if not listed:
-        await io.ask("\n".join([*heading, "No tools available", "Esc to go back"]), lambda _line: None,
+        # Any line goes back, as Esc does: a screen with nothing to pick never traps the input (2026-11-17).
+        await io.ask("\n".join([*heading, "No tools available", "Esc to go back"]), lambda _line: CANCELLED,
                      "Esc to go back", CANCELLED)
         return CANCELLED
     return await select(io, heading, [tool_display_name(t, server.name) for t in listed], "go back",

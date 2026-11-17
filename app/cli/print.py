@@ -526,6 +526,12 @@ class DevelopmentRun:
     deps: Any = None
     #: Upstream `mutableMessages`: the conversation every `ask` continues and mutates.
     messages: list[Any] = field(default_factory=list)
+    #: SessionStart's `initialUserMessage` from a session opened with no request (`open_fresh_session`),
+    #: sent ahead of the first prompt the user types, as upstream's deferred hook messages are
+    #: (`REPL.tsx`: available before the first API call); consumed by that first `submit_prompt`.
+    pending_prefix: list[Any] = field(default_factory=list)
+    #: Opened with no request (`open_fresh_session`): the first message typed is the session's request.
+    awaiting_request: bool = False
     #: Upstream `activeUserSpecifiedModel`: the model `set_model` chose for the next turns.
     user_specified_model: str | None = None
     #: Why the last turn's UserPromptSubmit hooks stopped it, when they did.
@@ -1012,7 +1018,9 @@ async def wait_for_background_work(run: DevelopmentRun) -> None:
     while True:
         command = next_main_thread_command(queue)
         if command is None:
-            if not _has_running_background_task(run.store):
+            if not _has_running_background_task(run.store) or _user_cancelled(run):
+                # Esc / `/interrupt` while only background tasks run: the REPL goes idle, as upstream's
+                # does (its queue processor delivers their notifications later), 2026-11-17.
                 return
             await asyncio.sleep(WAITING_FOR_AGENTS_POLL_SECONDS)
             continue
@@ -1020,6 +1028,14 @@ async def wait_for_background_work(run: DevelopmentRun) -> None:
         async for event in ask_turn(run, command.value, is_meta=command.is_meta):
             if run.on_message is not None:
                 run.on_message(event)
+
+
+def _user_cancelled(run: DevelopmentRun) -> bool:
+    """The engine's abort signal fired for the user (any reason but `'interrupt'`, a message sent now)."""
+    engine = getattr(run, "engine", None)
+    context = getattr(engine, "context", None) or run.ctx
+    cancel = getattr(context, "cancel", None)
+    return bool(cancel is not None and cancel.cancelled and cancel.reason != "interrupt")
 
 
 def _both(first: Any, second: Any) -> Any:
@@ -1178,7 +1194,8 @@ async def submit_prompt(run: DevelopmentRun, prompt_text: str) -> Terminal | Non
     first one starts the background housekeeping (`REPL.tsx`'s `submitCount === 1`).
     """
     run.start_housekeeping()
-    return await _submit(run, run.messages, prompt_text)
+    prefix, run.pending_prefix = run.pending_prefix, []
+    return await _submit(run, run.messages, prompt_text, prefix)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1195,6 +1212,8 @@ class DevelopmentOutcome:
     #: A headless run's last stdout message (`lastMessage`): its `result`, whose `is_error` is the
     #: exit code; `None` when no turn produced one.
     result: dict[str, Any] | None = None
+    #: The first message typed in a session opened with no request (the interactive start): its request.
+    first_request: str | None = None
 
     @property
     def planned(self) -> bool:
@@ -1228,9 +1247,26 @@ async def start_session(run: DevelopmentRun, request: str | None, prompt: str | 
     say is only loaded (`restore_session`) and its turn waits for the user; `None` then.
     """
     fresh, resume = first_prompts(run.store.get().tdd_plan, request, prompt)
-    if resume is None and not fresh and await restore_session(run):
+    if resume is None and not fresh:
+        if not await restore_session(run):
+            await open_fresh_session(run)
         return None
     return await begin_session(run, fresh, resume)
+
+
+async def open_fresh_session(run: DevelopmentRun) -> None:
+    """
+    A new session with no request yet (the interactive start, 2026-11-17): upstream's REPL opens on an
+    empty input and runs SessionStart (`startup`) at once, without a turn (`main.tsx`'s
+    `processSessionStartHooks('startup')`). The hooks' messages are the history the first typed prompt
+    continues, and their `initialUserMessage` goes ahead of that prompt (`pending_prefix`).
+    """
+    from app.utils.session_start import process_session_start_hooks
+
+    session = await process_session_start_hooks(run.ctx.hook_dispatcher, "startup", model=run.config.model)
+    run.messages[:] = list(session.messages)
+    run.pending_prefix = [HumanMessage(content=session.initial_user_message)] if session.initial_user_message else []
+    run.awaiting_request = True
 
 
 def outcome_of(run: DevelopmentRun, terminal: Terminal | None, **extra: Any) -> DevelopmentOutcome:
@@ -2745,6 +2781,7 @@ __all__ = [
     "seed_read_file_state",
     "session_run_id",
     "session_workspace",
+    "open_fresh_session",
     "start_session",
     "submit_prompt",
     "wait_for_background_work",

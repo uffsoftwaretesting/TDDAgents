@@ -23,6 +23,7 @@ from app.components.design_system.dialog import CANCELLED, Cancelled, DialogIO, 
 from app.components.mcp.types import ServerInfo
 from app.services.mcp.utils import describe_mcp_config_file_path
 from app.utils.string_utils import plural
+from app.components.design_system.dialog import is_option_number
 
 #: `SCOPE_ORDER`; `dynamic` (built-in) is listed separately, last.
 SCOPE_ORDER = ("project", "local", "user", "enterprise")
@@ -110,7 +111,7 @@ async def select_server(
 
     def parse(line: str) -> int | None:
         stripped = line.strip()
-        return int(stripped) - 1 if stripped.isdigit() and 1 <= int(stripped) <= len(rows) else None
+        return int(stripped) - 1 if is_option_number(stripped) and 1 <= int(stripped) <= len(rows) else None
 
     index: int | Cancelled = await io.ask(text, parse, f"Choose 1-{len(rows)}.", CANCELLED)
     return index if isinstance(index, Cancelled) else rows[index]

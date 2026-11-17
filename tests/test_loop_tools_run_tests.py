@@ -487,7 +487,7 @@ class _RecordingWorkspace:
         return []
 
     def execute(self, cmd: str, timeout: float | None = None, env: dict[str, str] | None = None,
-                sandbox: bool = False) -> CommandResult:
+                sandbox: bool = False, cancel: Any = None) -> CommandResult:
         self.calls.append((cmd, timeout, env))
         self.sandboxed.append(sandbox)
         if self.exc:

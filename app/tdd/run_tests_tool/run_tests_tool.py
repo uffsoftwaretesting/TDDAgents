@@ -91,6 +91,7 @@ from app.tdd.suite_fingerprint import (
 )
 from app.tdd.test_listing import TestListing, run_test_listing
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
+from app.workspace.base import WorkspaceCancelled
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
 
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
@@ -164,8 +165,12 @@ def report_environment(ws: Any, config: ProjectConfig) -> dict[str, str]:
     return env
 
 
+#: Why a run killed by Esc or `/interrupt` gave nothing: not evidence, the ledger untouched.
+INTERRUPTED_RUN = "the test run was interrupted"
+
+
 def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
-              env: Mapping[str, str] | None = None, sandbox: bool = False) -> SuiteExecutionResult:
+              env: Mapping[str, str] | None = None, sandbox: bool = False, cancel: Any = None) -> SuiteExecutionResult:
     """
     The whole suite in the workspace, exactly as RunTests runs it: the reports discarded, the declared
     test command run with the report variables (in the workspace's sandbox with `sandbox`), the reports
@@ -181,8 +186,12 @@ def run_suite(ws: Any, config: ProjectConfig, *, timeout: float | None = None,
             _discard(ws, path)
     environment = {**(env or {}), **report_environment(ws, config)}
     limit = timeout if timeout is not None else run_tests_timeout_seconds()
+    # The run's cancel token reaches the command (`Shell.ts`' `abortSignal`): Esc or `/interrupt` kills it.
+    extra: dict[str, Any] = {"cancel": cancel} if cancel is not None else {}
     try:
-        res = ws.execute(config.test, timeout=limit, env=environment, sandbox=sandbox)
+        res = ws.execute(config.test, timeout=limit, env=environment, sandbox=sandbox, **extra)
+    except WorkspaceCancelled as exc:
+        raise RunTestsUnavailable(INTERRUPTED_RUN) from exc
     except Exception as exc:
         raise RunTestsUnavailable(f"the test command could not be executed in the workspace: {exc}") from exc
     root = getattr(ws, "root", None)
@@ -226,7 +235,7 @@ async def _default_test_runner(context: ToolContext) -> SuiteExecutionResult:
     if config is None:
         raise RunTestsUnavailable(NO_TEST_COMMAND)
     return await asyncio.to_thread(run_suite, getattr(context, "workspace", None), config,
-                                   sandbox=sandbox_for_tests(context))
+                                   sandbox=sandbox_for_tests(context), cancel=getattr(context, "cancel", None))
 
 
 def sandbox_for_tests(context: Any) -> bool:

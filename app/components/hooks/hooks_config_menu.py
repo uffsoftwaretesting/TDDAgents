@@ -103,8 +103,9 @@ async def run_hooks_config_menu(io: DialogIO, context: HooksMenuContext) -> str:
         context.locations, tool_names, context.session_matchers, context.registered_matchers)
     counts, total = hooks_by_event(grouped)
     if hooks_disabled(context):
+        # Any line closes it, as Esc does: the screen has nothing to pick (2026-11-17).
         await io.ask("\n".join([*render_disabled(total, disabled_by_policy(context)), ESC_TO_CLOSE]),
-                     lambda _line: None, ESC_TO_CLOSE, CANCELLED)
+                     lambda _line: CANCELLED, ESC_TO_CLOSE, CANCELLED)
         return DISMISSED
     while True:
         event = await select_event(io, metadata, counts, total, restricted_by_policy(context))

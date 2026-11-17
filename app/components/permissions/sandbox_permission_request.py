@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.components.permissions.permission_dialog import PermissionDialog
+from app.components.design_system.dialog import is_option_number
 
 TITLE = "Network request outside of sandbox"
 QUESTION = "Do you want to allow this connection?"
@@ -62,7 +63,7 @@ def render_sandbox_permission_request(host: str, options: list[tuple[str, str]])
 def parse_sandbox_permission_answer(options: list[tuple[str, str]], line: str) -> SandboxPermissionResponse | None:
     """A number picks its choice; anything else asks again."""
     text = line.strip()
-    if not text.isdigit():
+    if not is_option_number(text):
         return None
     index = int(text) - 1
     if not 0 <= index < len(options):

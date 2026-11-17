@@ -39,10 +39,19 @@ class Cancelled:
 CANCELLED = Cancelled()
 
 
+def is_option_number(text: str) -> bool:
+    """
+    `text` is an option number typed in ASCII digits. `str.isdigit` alone also accepts `"²"` or `"①"`,
+    which `int` then rejects with a `ValueError`; every number the user types is checked here first
+    (2026-11-17: a typed `"²"` crashed the REPL).
+    """
+    return text.isascii() and text.isdigit()
+
+
 def parse_choice(count: int, line: str) -> int | None:
     """`2` picks the second of `count` options (index 1); anything else is `None`."""
     text = line.strip()
-    if not text.isdigit():
+    if not is_option_number(text):
         return None
     index = int(text) - 1
     return index if 0 <= index < count else None
@@ -75,6 +84,7 @@ async def select(
 
 
 __all__ = [
+    "is_option_number",
     "CANCELLED",
     "Cancelled",
     "DialogIO",

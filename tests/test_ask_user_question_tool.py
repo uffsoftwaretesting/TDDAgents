@@ -392,8 +392,9 @@ def test_the_repl_asks_each_question_and_the_model_continues(python_workspace, t
 
     async def script(repl: Repl, io: FakeIO) -> None:
         await until(lambda: "? [Perf size]" in io.text())
-        io.lines.put_nowait("")  # asks again
-        await until(lambda: "Choose 1-3, or type your own answer." in io.out)
+        io.lines.put_nowait("")  # asks again: the question, its options, its own range, and Esc
+        await until(lambda: any(o.endswith("Choose 1-2, or type your own answer. Esc to cancel.")
+                                and o.startswith("? [Perf size]") for o in io.out))
         io.lines.put_nowait("1")
         await until(lambda: "? [Checks] Which checks should run? (2/2)" in io.text())
         io.lines.put_nowait("1,2")

@@ -327,10 +327,10 @@ def test_the_policy_notice_and_the_disabled_screen(tmp_path: Path) -> None:
            in io.asked[0]
 
     _write(_user(loc), {"disableAllHooks": True, **_hooks("Stop", None, "a", "b")})
-    io = FakeDialog("1", ESC)
+    io = FakeDialog("1")
     assert asyncio.run(run_hooks_config_menu(io, HooksMenuContext(locations=loc))) == DISMISSED
     assert io.asked[0].startswith("Hook Configuration - Disabled")
-    assert io.out[-1] == "Esc to close"  # a line is not Esc: the screen stays
+    assert len(io.asked) == 1  # any line closes it, as Esc does: nothing to pick, no trap (2026-11-17)
     _write(loc.managed_dir / "managed-settings.json", {"disableAllHooks": True})
     io = FakeDialog(ESC)
     asyncio.run(run_hooks_config_menu(io, HooksMenuContext(locations=loc)))

@@ -54,6 +54,7 @@ from app.utils.mcp.elicitation_validation import (
     validate_elicitation_input_async,
 )
 from app.utils.string_utils import plural
+from app.components.design_system.dialog import is_option_number
 
 REQUIRED = "This field is required"
 #: `figures`.
@@ -245,12 +246,12 @@ def parse_field_line(f: SchemaField, line: str) -> Any:
     if is_multi_select_enum_schema(f.schema):
         values = get_multi_select_values(f.schema)
         tokens = text.replace(",", " ").split()
-        if not all(token.isdigit() and 1 <= int(token) <= len(values) for token in tokens):
+        if not all(is_option_number(token) and 1 <= int(token) <= len(values) for token in tokens):
             return None
         return [values[int(token) - 1] for token in dict.fromkeys(tokens)]
     if is_enum_schema(f.schema):
         values = get_enum_values(f.schema)
-        if text.isdigit():
+        if is_option_number(text):
             index = int(text) - 1
             return values[index] if 0 <= index < len(values) else None
         match = _typeahead(text, get_enum_labels(f.schema))

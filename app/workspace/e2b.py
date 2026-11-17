@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from typing import Any
 
 from app.sandbox.adapter import BackgroundCommand, E2BAdapter
 from app.workspace.base import CommandResult, FileEntry, WorkspaceKind
@@ -112,8 +113,12 @@ class E2BWorkspace:
         timeout: float | None = None,
         env: dict[str, str] | None = None,
         sandbox: bool = False,
+        cancel: Any = None,
     ) -> CommandResult:
-        """The E2B sandbox runs every command; the host sandbox's `sandbox` flag does not apply."""
+        """
+        The E2B sandbox runs every command; the host sandbox's `sandbox` flag does not apply, and a remote
+        command is not killed on `cancel` (the run notices the cancel when it returns).
+        """
         return self._adapter.execute(cmd, timeout=timeout, env=env)
 
     async def spawn(

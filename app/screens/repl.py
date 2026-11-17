@@ -38,10 +38,11 @@ Ported in shape from `reference/claude-code/src/screens/REPL.tsx` and the module
 
 The session opens in plan mode (the Analyst): the model plans, asks with `AskUserQuestion`, and
 asks for the plan's approval with `ExitPlanMode`, which `ask_permission` shows with upstream's
-choices and `/edit`. The TDD plan is the session's (`app/tdd/plan.py`): the approved plan's
-sub-requirements, which the loop moves through by the ledger; the user edits it with `/plan` and
-the model with `UpdatePlan` (asked here). `/requirements <request>` is upstream's
-`/plan <description>`: plan mode again, with the request; its approval replaces the pending items.
+choices; text typed instead of a choice is "No, keep planning" with that text. The TDD plan is the
+session's (`app/tdd/plan.py`): the approved plan's sub-requirements, which the loop moves through by
+the ledger; the user edits it with `/plan` and the model with `UpdatePlan` (asked here).
+`/requirements <request>` is upstream's `/plan <description>`: plan mode again, with the request; its
+approval replaces the pending items.
 The REPL keeps running after the plan is done, so the user can add more.
 """
 
@@ -49,6 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import time
 from pathlib import Path
@@ -70,7 +72,6 @@ from app.commands.commands import (
     CommandError,
     SlashCommand,
     apply_plan_command,
-    base_help_text,
     collect_context_data,
     find_command,
     format_context_as_markdown_table,
@@ -131,6 +132,7 @@ from app.utils.permissions.permission_update import PermissionUpdate
 from app.utils.permissions.permissions import persist_permissions
 from app.utils.process_user_input.process_slash_command import parse_slash_input
 from app.utils.sandbox.sandbox_adapter import should_allow_managed_sandbox_domains_only
+from app.components.design_system.dialog import is_option_number
 
 logger = logging.getLogger("TDDOrchestrator.REPL")
 
@@ -207,7 +209,7 @@ def parse_permission_answer(options: Sequence[PermissionOption], line: str) -> P
     if not text:
         return None
     head, _, rest = text.partition(" ")
-    if head.isdigit():
+    if is_option_number(head):
         index = int(head) - 1
         if not 0 <= index < len(options):
             return None
@@ -258,10 +260,10 @@ def parse_question_answer(question: Mapping[str, Any], line: str) -> str | None:
     labels = [str(o.get("label", "")) for o in _options(question)]
     other = len(labels) + 1
     head, _, rest = text.partition(" ")
-    if head.isdigit() and int(head) == other:
+    if is_option_number(head) and int(head) == other:
         return rest.strip() or None
     tokens = text.replace(",", " ").split() if question.get("multiSelect") else [text]
-    if not all(token.isdigit() for token in tokens):
+    if not all(is_option_number(token) for token in tokens):
         return text
     picks = [int(token) for token in tokens]
     if not all(1 <= pick <= len(labels) for pick in picks):
@@ -281,6 +283,8 @@ class PendingAnswer:
     retry: str
     cancelled: Any
     aborts_turn: bool = True
+    #: The question as shown, to repeat its question line and options after an invalid line.
+    text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +298,36 @@ class ReplDialog:
 
     async def ask(self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any) -> Any:
         return await self.repl.prompt(text, parse, retry, cancelled, aborts_turn=False)
+
+
+#: `abortController.abort('user-cancel')`: Esc and `/interrupt`.
+USER_CANCEL = "user-cancel"
+#: What `/interrupt` and `/send-anyways` say when no turn runs.
+NOTHING_RUNNING = "Nothing is running."
+
+#: The commands a line may run while a question waits for its answer (user decision 2026-11-17).
+PENDING_QUESTION_COMMANDS = frozenset({"exit", "quit", "help", "interrupt", "pause"})
+#: Added to every repeated question: Esc dismisses it.
+ESC_CANCELS = "Esc to cancel."
+_OPTION_LINE = re.compile(r"^\s*\d+[.)]\s")
+
+
+def question_reminder(text: str, retry: str) -> str:
+    """
+    What an invalid line is answered with: the question's heading (a first line starting `⚠ ` or `? `),
+    its last question line (ending in `?`) and the numbered options after it, then `retry` and how to
+    cancel. Numbered lines before the question (a plan's items) are not options. A question with none of
+    these repeats only `retry`.
+    """
+    lines = text.splitlines()
+    asked = max((i for i, line in enumerate(lines) if line.rstrip().endswith("?") or line.startswith("? ")),
+                default=-1)
+    kept = [lines[0]] if lines and lines[0].startswith(("? ", "⚠ ")) and asked != 0 else []
+    if asked >= 0:
+        kept.append(lines[asked])
+    kept += [line for line in lines[asked + 1:] if _OPTION_LINE.match(line)]
+    tail = f"{retry} {ESC_CANCELS}" if retry else ESC_CANCELS
+    return "\n".join([*kept, tail])
 
 
 def turn_end_text(terminal: Terminal, plan: TddPlan, paused: bool) -> str:
@@ -325,6 +359,8 @@ class Repl:
         #: (upstream's `toolUseConfirmQueue`).
         self._asking = asyncio.Lock()
         self.last_terminal: Terminal | None = None
+        #: The first message typed in a session opened with no request (`open_fresh_session`).
+        self.first_request: str | None = None
         self.exiting = False
         #: `hasInterruptibleToolInProgressRef`: every executing tool would be cancelled by a new message.
         self.has_interruptible_tool_in_progress = False
@@ -454,7 +490,7 @@ class Repl:
         """Show `text` and wait for the next line it accepts; the caller holds the screen (`_asking`)."""
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self.pending = PendingAnswer(parse=parse, future=future, retry=retry, cancelled=cancelled,
-                                     aborts_turn=aborts_turn)
+                                     aborts_turn=aborts_turn, text=text)
         self.io.write(text)
         try:
             return await future
@@ -469,7 +505,7 @@ class Repl:
         """The run's `canUseTool` prompt: shown now, answered by the next line typed."""
         answer: PermissionAnswer = await self._wait_for_answer(
             render_permission_prompt(prompt), lambda line: parse_permission_answer(prompt.options, line),
-            f"Choose 1-{len(prompt.options)}.", PermissionAnswer("no"),
+            f"Choose 1-{len(prompt.options)}.", PermissionAnswer("no", cancelled=True),
         )
         return answer
 
@@ -546,10 +582,9 @@ class Repl:
         answers: dict[str, str] = {}
         for number, question in enumerate(questions, start=1):
             parse: Callable[[str], str | None] = partial(parse_question_answer, question)
-            answer = await self._wait_for_answer(
-                render_question(question, number, len(questions)), parse,
-                f"Choose 1-{len(_options(question)) + 1}, or type your own answer.", None,
-            )
+            shown = render_question(question, number, len(questions))
+            # The retry is the question's own last line: its options are 1-N, any text is "Other".
+            answer = await self._wait_for_answer(shown, parse, shown.splitlines()[-1], None)
             if answer is None:
                 return None
             answers[str(question.get("question", ""))] = answer
@@ -591,15 +626,16 @@ class Repl:
 
     def interrupt(self) -> None:
         """
-        Esc: a pending question is answered No, and the turn is aborted (upstream `onReject` + abort);
-        a dialog's question is only closed.
+        Esc and `/interrupt` (`REPL.tsx`'s `onCancel`): a pending question is answered with its cancel
+        value, and the turn is aborted with `'user-cancel'` (upstream `onReject` + `abort('user-cancel')`);
+        a dialog's question is only closed. TDDAgents stays open; the next message is an ordinary turn.
         """
         if self.pending is not None and not self.pending.future.done():
             self.pending.future.set_result(self.pending.cancelled)
             if not self.pending.aborts_turn:
                 return
         if self.busy:
-            self.run.engine.interrupt()
+            self.run.engine.interrupt(USER_CANCEL)
 
     async def _stop_turn(self) -> None:
         if self.busy:
@@ -612,12 +648,7 @@ class Repl:
     async def handle_line(self, line: str) -> None:
         """One line from the user: an answer, a command, or a message to the agents."""
         if self.pending is not None:
-            pending = self.pending
-            answer = pending.parse(line)
-            if answer is None:
-                self.io.write(pending.retry)
-            elif not pending.future.done():
-                pending.future.set_result(answer)
+            await self._answer_pending(self.pending, line)
             return
         command = parse_slash_command(line) or self._typed_skill(line)
         if command is not None:
@@ -630,6 +661,8 @@ class Repl:
         text = line.strip()
         if not text:
             return
+        if not self.busy:
+            self._note_request(text)
         if self.busy:
             # `handlePromptSubmit` while busy: when every executing tool is a 'cancel' one, the
             # turn is aborted ('interrupt') first; then the message is queued for the loop to
@@ -640,6 +673,38 @@ class Repl:
             self.io.write("(queued for the agents)")
             return
         self._start(submit_prompt(self.run, text))
+
+    async def _answer_pending(self, pending: PendingAnswer, line: str) -> None:
+        """
+        A line typed while a question waits (user decision 2026-11-17). A command is never an answer:
+        `PENDING_QUESTION_COMMANDS` run (`/interrupt` cancels the question as Esc does), any other one is
+        refused and the question repeated. A line the question cannot read, or whose reading fails,
+        repeats the question's options and says Esc cancels; nothing typed ends the session.
+        """
+        text = line.strip()
+        if text.startswith("/"):
+            command = parse_slash_command(text)
+            name = text.split()[0]
+            if command is not None and command.name in PENDING_QUESTION_COMMANDS:
+                if command.name == "interrupt":
+                    self.interrupt()
+                    return
+                await self.run_command(command)
+                if self.pending is pending and not pending.future.done():
+                    self.io.write(question_reminder(pending.text, pending.retry))
+                return
+            self.io.write(f"Unknown command {name} while a question waits for an answer.\n"
+                          + question_reminder(pending.text, pending.retry))
+            return
+        try:
+            answer = pending.parse(line)
+        except Exception:  # noqa: BLE001 - a line the question cannot read is an invalid answer, never a crash
+            logger.debug("Could not read %r as an answer", line, exc_info=True)
+            answer = None
+        if answer is None:
+            self.io.write(question_reminder(pending.text, pending.retry))
+        elif not pending.future.done():
+            pending.future.set_result(answer)
 
     def _commands(self) -> list[Command]:
         return get_commands(getattr(self.run.ctx, "skill_registry", None))
@@ -672,6 +737,14 @@ class Repl:
                 self.io.write("Resumed.")
             else:
                 self._start(submit_prompt(self.run, development_continue_prompt(self.plan)))
+        elif name == "interrupt":
+            # Esc as a command (user decision 2026-11-17): upstream has the key alone (`chat:cancel`).
+            if self.busy or self.pending is not None:
+                self.interrupt()
+            else:
+                self.io.write(NOTHING_RUNNING)
+        elif name == "send-anyways":
+            self._send_anyways(command.args.strip())
         elif name == "requirements":
             await self._requirements(command.args)
         elif name == "context":
@@ -687,6 +760,42 @@ class Repl:
         else:  # exit, quit
             self.exiting = True
             await self._stop_turn()
+
+    def _note_request(self, text: str) -> None:
+        """The first message of a session opened with no request is its request (the reports name it)."""
+        if getattr(self.run, "awaiting_request", False):
+            self.run.awaiting_request = False
+            self.first_request = text
+
+    def _send_anyways(self, text: str) -> None:
+        """
+        `/send-anyways [text]` (user decision 2026-11-17): upstream's `'now'` priority ("interrupt and
+        send immediately", `types/textInputTypes.ts`). While a turn runs, `text` is queued at `'now'`; the
+        run's queue subscriber (`interrupt_on_now_priority`, `print.ts`'s) aborts the turn with
+        `'interrupt'`, so no interruption message is added and running `'block'` tools finish, and the
+        message is the next turn, first. With no text, the messages already queued for the agents go the
+        same way. Idle, `text` is an ordinary message.
+        """
+        queue = self.run.ctx.command_queue
+        if not self.busy:
+            if text:
+                self._note_request(text)
+                self._start(submit_prompt(self.run, text))
+            else:
+                self.io.write(NOTHING_RUNNING)
+            return
+        if text:
+            queue.enqueue(QueuedCommand(value=text, mode="prompt", priority="now"))
+            self.io.write("(sent to the agents now)")
+            return
+        queued = queue.dequeue_all_matching(
+            lambda c: c.mode == "prompt" and c.agent_id is None and not c.is_meta and c.priority != "now")
+        if not queued:
+            self.io.write("Nothing is queued for the agents. Usage: /send-anyways <message>")
+            return
+        for command in queued:
+            queue.enqueue(replace(command, priority="now"))
+        self.io.write(f"(sent {len(queued)} queued message{'s' if len(queued) != 1 else ''} to the agents now)")
 
     # ── dialogs ────────────────────────────────────────────────────────────
 
@@ -910,6 +1019,14 @@ class Repl:
         self.io.write(PLAN_MODE_ON)
         self._start(submit_prompt(self.run, request))
 
+    def _logo(self, project: Path) -> str:
+        """The title panel (`app/components/logo_v2/`), coloured on a terminal that shows colour."""
+        from app.components.logo_v2.logo_v2 import MAX_WIDTH, render_logo
+
+        model = str(getattr(getattr(self.run, "config", None), "model", "") or "")
+        width = min(shutil.get_terminal_size().columns, MAX_WIDTH)
+        return render_logo(model, project, width=width, color=bool(getattr(self.io, "supports_color", False)))
+
     # ── the session ────────────────────────────────────────────────────────
 
     async def run_session(self, request: str | None, prompt: str | None = None) -> Terminal | None:
@@ -921,14 +1038,16 @@ class Repl:
         from app.hooks.notifs.use_settings_errors import use_settings_errors
 
         project = self._project_dir()
+        # `Messages.tsx`'s `<LogoV2 />` first: the title, then `/help for commands` (the command list is
+        # `/help`'s, user decision 2026-11-17).
+        self.io.write(self._logo(project))
         if should_show_project_onboarding(project):
             # `LogoV2`'s onboarding feed, and its seen count (once per session here, see
             # `app/project_onboarding_state.py`).
             self.io.write(f"{create_project_onboarding_feed(get_steps(project), project)}\n")
             increment_project_onboarding_seen_count(project)
         in_plan = self.run.store.get().tool_permission_context.mode == PermissionMode.PLAN
-        header = PLAN_MODE_ON if in_plan else f"TDD plan:\n{render_plan(self.plan)}"
-        self.io.write(f"{header}\n\n{base_help_text()}")
+        self.io.write(PLAN_MODE_ON if in_plan else f"TDD plan:\n{render_plan(self.plan)}")
         # `usePluginAutoupdateNotification`: registered while the REPL runs.
         unsubscribe = use_plugin_autoupdate_notification(self.io.write)
         # `useSettingsErrors`: the settings' error count now and after each settings change.

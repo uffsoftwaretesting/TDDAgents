@@ -33,6 +33,7 @@ from app.workspace.base import (
     CommandResult,
     FileEntry,
     WorkspaceKind,
+    WorkspaceCancelled,
     WorkspaceNotFound,
     WorkspacePathError,
     WorkspaceProviderError,
@@ -84,6 +85,31 @@ def orchestrator_free_environment(environ: Mapping[str, str], prefix: str = sys.
     if result.get("VIRTUAL_ENV") and _same_path(result["VIRTUAL_ENV"], prefix):
         del result["VIRTUAL_ENV"]
     return result
+
+
+#: How often a running command looks at the run's cancel token.
+CANCEL_POLL_SECONDS = 0.1
+
+
+def _wait_or_cancel(process: subprocess.Popen[bytes], limit: float, cancel: Any) -> int:
+    """
+    `process.wait(timeout=limit)`, looking at `cancel` every `CANCEL_POLL_SECONDS`: a token fired for any
+    reason but `'interrupt'` raises `WorkspaceCancelled` (upstream's `'interrupt'` lets `'block'` tools,
+    RunTests among them, finish). `subprocess.TimeoutExpired` once `limit` passes.
+    """
+    if cancel is None:
+        return process.wait(timeout=limit)
+    deadline = time.monotonic() + limit
+    while True:
+        if cancel.cancelled and cancel.reason != "interrupt":
+            raise WorkspaceCancelled("the command was interrupted")
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise subprocess.TimeoutExpired(process.args, limit)
+        try:
+            return process.wait(timeout=min(CANCEL_POLL_SECONDS, left))
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def kill_process_group(pid: int) -> None:
@@ -326,6 +352,7 @@ class LocalWorkspace:
         timeout: float | None = None,
         env: dict[str, str] | None = None,
         sandbox: bool = False,
+        cancel: Any = None,
     ) -> CommandResult:
         """
         Runs a shell command from the workspace root.
@@ -338,7 +365,9 @@ class LocalWorkspace:
         (`ShellCommand.ts`: "'close' waits for stdio to close, which includes grandchild
         processes that inherit file descriptors (e.g. `sleep 30 &`)"), so a command that leaves
         something running in the background returns as soon as the shell is done. On timeout
-        the shell's whole process group is killed (upstream's `treeKill`).
+        the shell's whole process group is killed (upstream's `treeKill`), and so it is when `cancel`
+        fires for any reason but `'interrupt'` (`ShellCommand.ts`: the abort signal's handler `treeKill`s
+        the child), raising `WorkspaceCancelled`.
         """
         limit = timeout if timeout is not None else Config.COMMAND_TIMEOUT
         environment = self._environment(env)
@@ -366,11 +395,15 @@ class LocalWorkspace:
                     self._cleanup_after_command()
                 raise WorkspaceProviderError(f"Could not run local command '{cmd}': {exc}") from exc
             try:
-                code = process.wait(timeout=limit)
+                code = _wait_or_cancel(process, limit, cancel)
             except subprocess.TimeoutExpired as exc:
                 kill_process_group(process.pid)
                 process.wait()
                 raise WorkspaceTimeout(f"Local command exceeded {limit}s: {cmd}") from exc
+            except WorkspaceCancelled:
+                kill_process_group(process.pid)
+                process.wait()
+                raise
             finally:
                 if sandbox:
                     self._cleanup_after_command()

@@ -249,7 +249,10 @@ def test_the_repl_answers_a_hook_question(monkeypatch):
         return await pending
 
     assert asyncio.run(go()) == PromptResponse(prompt_response="r1", selected="y")
-    assert written[0].startswith("⚠ PreToolUse:Bash  ls") and written[1] == "Choose 1-2."
+    assert written[0].startswith("⚠ PreToolUse:Bash  ls")
+    # An invalid line repeats the question line and its options, then how to cancel.
+    assert written[1] == ("⚠ PreToolUse:Bash  ls\nDeploy to prod?\n  1. Yes — ship it\n  2. No\n"
+                          "Choose 1-2. Esc to cancel.")
 
 
 def test_esc_rejects_a_hook_question(monkeypatch):

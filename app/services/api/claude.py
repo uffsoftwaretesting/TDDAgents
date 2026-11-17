@@ -40,10 +40,16 @@ callback handler on the model call itself.
 Prompt-cache breakpoints (`claude.ts` -> `buildSystemPromptBlocks`, `getCacheControl`,
 `addCacheBreakpoints`): upstream's two markers, the system block and the last message, for
 Anthropic; nothing for OpenAI, which caches prefixes unaided.
+
+**The abort signal reaches the request** (`claude.ts` passes `signal` to the streaming request and reads its
+abort as the user's, `APIUserAbortError`; 2026-11-17): the provider stream is read through
+`stop_on_cancel`, which ends it the moment the run's cancel token fires — while waiting for the first
+frame too — instead of reading it to its end. The loop then ends the turn `aborted_streaming`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -262,7 +268,7 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
     duplicate content or orphan a tool call that was already dispatched.
     """
     async def operation(attempt: int, context: RetryContext) -> AsyncIterable[Any]:
-        stream = open_model_stream(state, config, context)
+        stream = stop_on_cancel(open_model_stream(state, config, context), state.tool_context.cancel)
         # Pull the first item inside the retried operation, so a provider that fails at
         # connect or on the first frame is still "before any output" and may be retried.
         iterator = stream.__aiter__()
@@ -289,6 +295,43 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
 
     async for message in frame_content_blocks(opened, getattr(state.tool_context, "on_stream_chunk", None)):
         yield message
+
+
+def stop_on_cancel(stream: AsyncIterable[Any], cancel: Any) -> AsyncIterator[Any]:
+    """
+    `stream`, ended as soon as `cancel` fires (the request's abort signal): each next item is raced with
+    the token's abort listener, so a cancel during a slow frame ends the stream at once. A plain function
+    returning the generator, so its cleanup (closing the provider stream) runs under mutmut too.
+    """
+    async def items() -> AsyncIterator[Any]:
+        iterator = stream.__aiter__()
+        fired = asyncio.Event()
+        remove = cancel.add_listener(fired.set) if cancel is not None else (lambda: None)
+        aborted = asyncio.ensure_future(fired.wait())
+        try:
+            while cancel is None or not cancel.cancelled:
+                nxt: asyncio.Future[Any] = asyncio.ensure_future(iterator.__anext__())
+                await asyncio.wait({nxt, aborted}, return_when=asyncio.FIRST_COMPLETED)
+                if not nxt.done():
+                    nxt.cancel()
+                    await asyncio.gather(nxt, return_exceptions=True)
+                    return
+                try:
+                    item = nxt.result()
+                except StopAsyncIteration:
+                    return
+                yield item
+        finally:
+            remove()
+            aborted.cancel()
+            close = getattr(iterator, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except Exception:  # noqa: BLE001 - closing an abandoned provider stream must not mask the abort
+                    logger.debug("Closing the aborted model stream failed", exc_info=True)
+
+    return items()
 
 
 async def _empty_stream() -> AsyncIterator[Any]:
@@ -507,6 +550,7 @@ def query_haiku_for(context: Any) -> Callable[[str, str], Awaitable[str]]:
 
 
 __all__ = [
+    "stop_on_cancel",
     "TEXT_BLOCK",
     "BlockAccumulator",
     "BlockKey",

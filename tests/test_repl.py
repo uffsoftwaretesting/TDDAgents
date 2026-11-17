@@ -305,9 +305,12 @@ def test_a_session_works_through_the_plan_and_stays_open(python_workspace, tmp_p
     assert terminal == Terminal.COMPLETED
     assert repl.plan.is_complete
     # The project has files and no TDDAGENTS.md: the onboarding tip comes first (`LogoV2`).
-    assert io.out[0] == ("Tips for getting started\n"
+    # The title first (`<LogoV2 />`), then the onboarding tip, then the plan; the command list is /help's.
+    assert io.out[0].startswith("╭─  TDDAgents v") and io.out[0].endswith("/help for commands")
+    assert io.out[1] == ("Tips for getting started\n"
                          "Run /init to create a TDDAGENTS.md file with instructions for TDDAgents\n")
-    assert io.out[1].startswith("TDD plan:\n▶ 1. add\n\n" + HELP_TEXT)
+    assert io.out[2] == "TDD plan:\n▶ 1. add"
+    assert HELP_TEXT not in io.out[:3]
     assert "⏺ RunTests\n" in io.text() + "\n"
     assert io.prompts and io.prompts[0] == PROMPT
     assert model.seen[0].messages[0].content == "start"
@@ -366,8 +369,8 @@ def test_a_permission_question_is_answered_by_the_next_line(python_workspace, tm
     async def script(repl: Repl, io: FakeIO) -> None:
         # Upstream's Bash dialog: the title, then the whole command.
         await until(lambda: "⚠ Bash command\nmake build\n" in io.text())
-        io.lines.put_nowait("")  # asks again
-        await until(lambda: "Choose 1-3." in io.out)
+        io.lines.put_nowait("")  # asks again: the question's options, the range, and Esc
+        await until(lambda: any(o.endswith("Choose 1-3. Esc to cancel.") and "  1. Yes" in o for o in io.out))
         io.lines.put_nowait("1")
         await until(lambda: not repl.busy)
         io.lines.put_nowait("/exit")
@@ -693,8 +696,9 @@ def test_develop_interactive_plans_then_develops_the_approved_plan(python_worksp
     outcome = develop_interactive("t-i", "build a calculator", python_workspace, SessionOptions(),
                                   io_factory=factory, deps=deps_for(model), permission_context=perm,
                                   project_root=tmp_path, home=tmp_path / "home", managed_dir=tmp_path / "etc")
-    assert io.out[0].startswith("Tips for getting started\n")
-    assert io.out[1].startswith("⏸ plan mode on")
+    assert io.out[0].startswith("╭─  TDDAgents v")
+    assert io.out[1].startswith("Tips for getting started\n")
+    assert io.out[2].startswith("⏸ plan mode on")
     assert [(i.text, i.status) for i in outcome.plan.items] == [("first", ItemStatus.DONE)]
     assert outcome.planned and outcome.plan_file is not None
     assert model.seen[0].messages[0].content == "build a calculator"

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import posixpath
 from dataclasses import dataclass
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 WorkspaceKind = Literal["sandbox", "local"]
 
@@ -90,6 +90,10 @@ class WorkspaceNotFound(WorkspaceError):
 
 class WorkspaceTimeout(WorkspaceError):
     """An operation or command exceeded its allotted time."""
+
+
+class WorkspaceCancelled(WorkspaceError):
+    """The run's cancel token fired while a command ran: its process tree was killed (upstream's abort)."""
 
 
 class WorkspaceRateLimited(WorkspaceError):
@@ -235,6 +239,7 @@ class Workspace(Protocol):
         timeout: float | None = None,
         env: dict[str, str] | None = None,
         sandbox: bool = False,
+        cancel: Any = None,
     ) -> CommandResult:
         """
         Runs a shell command from the workspace root.
@@ -242,7 +247,10 @@ class Workspace(Protocol):
         A non-zero exit code is returned in the CommandResult, not raised. Only
         infrastructure failures raise a WorkspaceError. With `sandbox` the command runs in the
         run's sandbox (`Shell.ts`' `shouldUseSandbox`): the caller opts in, TDDAgents' own internals
-        never do. A workspace without a host sandbox (E2B, the fakes) ignores it.
+        never do. A workspace without a host sandbox (E2B, the fakes) ignores it. `cancel` is the run's
+        cancel token (`Shell.ts`' `abortSignal`): when it fires (for any reason but `'interrupt'`, which
+        lets a running command finish) the command is killed and `WorkspaceCancelled` raised. A
+        workspace that cannot kill its command (E2B) ignores it.
         """
         ...
 

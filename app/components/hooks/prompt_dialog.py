@@ -14,6 +14,7 @@ import os
 from collections.abc import Mapping
 
 from app.types.hooks import PromptOption, PromptRequest
+from app.components.design_system.dialog import is_option_number
 
 HOOK_PROMPTS_ENV = "TDDAGENTS_HOOK_PROMPTS"
 #: The error a cancelled prompt rejects with (`REPL.tsx`).
@@ -43,7 +44,7 @@ def render_prompt_dialog(title: str, tool_input_summary: str | None, request: Pr
 def parse_prompt_choice(options: tuple[PromptOption, ...], line: str) -> str | None:
     """The chosen option's key for `N`, else `None` (asked again)."""
     text = line.strip()
-    if not text.isdigit():
+    if not is_option_number(text):
         return None
     index = int(text) - 1
     return options[index].key if 0 <= index < len(options) else None

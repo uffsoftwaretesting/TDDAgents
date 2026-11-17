@@ -928,10 +928,16 @@ def get_queued_command_attachments(messages: Sequence[Message], context: Any) ->
     queue = getattr(context, "command_queue", None)
     if queue is None:
         return []
+    cancel = getattr(context, "cancel", None)
+    if cancel is not None and cancel.cancelled:
+        # Upstream's aborted turn returns (`query.ts`'s abort check) before this drain runs.
+        return []
     agent_id = getattr(context, "agent_id", None)
 
     def addressed(command: QueuedCommand) -> bool:
-        if is_slash_command(command):
+        if is_slash_command(command) or command.priority == "now":
+            # A `'now'` command aborts the turn and is its own next turn (`/send-anyways`); taking it as
+            # an attachment of the turn it aborts would leave it unanswered (2026-11-17).
             return False
         if agent_id is None:
             return command.agent_id is None

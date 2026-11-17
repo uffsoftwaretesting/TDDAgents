@@ -42,7 +42,7 @@ class _Project(FakeWorkspace):
         self.sandboxed: list[tuple[str, bool]] = []
 
     def execute(self, cmd: str, timeout: float | None = None, env: dict | None = None,
-                sandbox: bool = False) -> CommandResult:
+                sandbox: bool = False, cancel: Any = None) -> CommandResult:
         self.envs.append((cmd, env))
         self.sandboxed.append((cmd, sandbox))
         if cmd == LIST:

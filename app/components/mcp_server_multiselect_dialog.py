@@ -22,6 +22,7 @@ from app.components.design_system.dialog import DialogIO, render_options
 from app.components.mcp_server_approval_dialog import listed_servers, write_local_settings
 from app.components.mcp_server_dialog_copy import MCP_SERVER_DIALOG_COPY
 from app.utils.settings.settings import SettingsLocations, get_initial_settings
+from app.components.design_system.dialog import is_option_number
 
 SUBTITLE = "Select any you wish to enable."
 #: What Esc answers: `handleEscRejectAll`.
@@ -43,7 +44,7 @@ def parse_selection(server_names: Sequence[str], line: str) -> list[str] | None:
     tokens = line.replace(",", " ").split()
     if not tokens:
         return list(server_names)
-    if not all(token.isdigit() and 1 <= int(token) <= len(server_names) for token in tokens):
+    if not all(is_option_number(token) and 1 <= int(token) <= len(server_names) for token in tokens):
         return None
     return [server_names[int(token) - 1] for token in dict.fromkeys(tokens)]
 
