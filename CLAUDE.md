@@ -246,6 +246,9 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   between dashed rules, "Ready to code?"), TDDAgents' notices take their level's colour (`notice`), a
   finished plan is a box, and the exit report is one summary box (`app/components/session_summary.py`).
   Every other sink, headless and the tests get the plain text unchanged; model text is never read as markup.
+  The boxes span the terminal's full width, and all text is the terminal's own foreground (`theme.TEXT`:
+  crisp white on dark, crisp black on light; never grey or dim); colour is kept for borders, titles and
+  marks (`⚠` yellow, `✔` / `⏸` green).
 - **`-p` is the SDK protocol** (`app/cli/structured_io.py`, `run_headless`): a text prompt is the
   one user message of a closed input; `--output-format text|json|stream-json` (stream-json needs
   `--verbose`), `--input-format stream-json` (user messages and every control request on stdin;

@@ -54,11 +54,11 @@ def render_logo(model: str, folder: str | Path, *, width: int = MAX_WIDTH, color
     """The title panel, then `HELP_HINT`; with `color` its ANSI styles, else plain text."""
     body = Text()
     body.append(f"{STATUS_GLYPH}  {PRODUCT_NAME}\n", style=f"bold {BRAND_COLOR}")
-    body.append(f"{model} · Red → Green → Refactor\n", style=theme.INACTIVE)
-    body.append(display_folder(folder, home), style=theme.INACTIVE)
+    body.append(f"{model} · Red → Green → Refactor\n", style=theme.TEXT)
+    body.append(display_folder(folder, home), style=theme.TEXT)
     panel = Panel(body, box=ROUNDED, title=f" {PRODUCT_NAME} v{VERSION} ", title_align="left",
                   border_style=BRAND_COLOR, padding=(1, 2), width=width)
-    styled = to_ansi(Group(panel, Text(HELP_HINT, style=theme.INACTIVE)), width)
+    styled = to_ansi(Group(panel, Text(HELP_HINT, style=theme.TEXT)), width)
     return styled if color else plain_text(styled)
 
 

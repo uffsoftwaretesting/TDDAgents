@@ -628,7 +628,7 @@ def _print_report_box(thread_id: str, workspace: Any, artifacts_dir: str, outcom
         reports=display_folder(artifacts_dir) + "/", done=plan.done_count, total=len(plan.items),
         final_run=final_run, tokens=tokens, stopped_on=str(outcome.terminal) if kind == "stopped" else None,
         current=current, plan_file=display_folder(plan_file) if plan_file else None,
-    ), max(60, min(shutil.get_terminal_size().columns, 100)))
+    ), max(60, shutil.get_terminal_size().columns))
     print("\n" + box + "\n")
 
 

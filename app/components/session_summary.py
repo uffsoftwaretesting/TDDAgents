@@ -37,8 +37,9 @@ def plan_done_box(items: Sequence[tuple[str, str]], width: int) -> str:
     grid.add_column(no_wrap=True)
     grid.add_column(overflow="fold")  # a long item wraps under its own text, not under the tick
     for item_id, text in items:
-        grid.add_row(Text.assemble(("✔ ", theme.SUCCESS), (f"{item_id}.", theme.INACTIVE)), Text(text))
-    lines: list[RenderableType] = [grid, Text(""), Text(PLAN_DONE_HINT, style=theme.INACTIVE)]
+        grid.add_row(Text.assemble(("✔ ", theme.SUCCESS), (f"{item_id}.", f"bold {theme.TEXT}")),
+                     Text(text, style=theme.TEXT))
+    lines: list[RenderableType] = [grid, Text(""), Text(PLAN_DONE_HINT, style=theme.TEXT)]
     title = Text(" ✔ All sub-requirements done ", style=f"bold {theme.BRAND}")
     return to_ansi(Panel(Group(*lines), box=ROUNDED, border_style=theme.BRAND, title=title, title_align="left",
                          padding=(0, 1), width=width), width)
@@ -78,7 +79,7 @@ def session_report_box(report: SessionReport, width: int) -> str:
     """The end-of-session box (see the module docstring)."""
     title, colour = OUTCOMES[report.outcome]
     rows = Table.grid(padding=(0, 2))
-    rows.add_column(style=theme.INACTIVE, no_wrap=True)
+    rows.add_column(style=f"bold {theme.TEXT}", no_wrap=True)
     rows.add_column(overflow="fold")
     if report.total:
         rows.add_row("Plan", f"{report.done}/{report.total} sub-requirements done")
@@ -94,7 +95,7 @@ def session_report_box(report: SessionReport, width: int) -> str:
         rows.add_row("Tokens", f"{total:,} (cached {cached:,})")
     rows.add_row("Project", report.project)
     rows.add_row("Reports", report.reports)
-    rows.add_row("Thread", Text.assemble(report.thread_id, ("  (resume: --thread-id)", theme.INACTIVE)))
+    rows.add_row("Thread", Text.assemble(report.thread_id, ("  (resume: --thread-id)", theme.TEXT)))
     panel = Panel(rows, box=ROUNDED, border_style=colour, title=Text(f" {title} ", style=f"bold {colour}"),
                   title_align="left", padding=(1, 2), width=width)
     return to_ansi(panel, width)

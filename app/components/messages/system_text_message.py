@@ -13,9 +13,11 @@ With `verbose` (`--verbose`, the REPL's expanded view in place of upstream's ctr
 hook's command (or `prompt: <text>`) is listed under it, then the stop reason when continuation was
 prevented, then each error. The internal build's slow-hook timings are not shown here either.
 
-`notice` is `SystemTextMessage`'s colouring of a line TDDAgents writes (user decision 2026-11-17): the
-`warning` level in `theme.warning` with upstream's `⚠` mark, `success` in `theme.success`, `info` dim
-(`dimColor`), on a terminal that shows colour; the text is unchanged everywhere else.
+`notice` is `SystemTextMessage`'s colouring of a line TDDAgents writes (user decision 2026-11-17), on a
+terminal that shows colour: the text in the terminal's own foreground (`theme.TEXT`, crisp on a dark or a
+light background, never dim), and only its mark in the level's colour — a warning's `⚠` in
+`theme.warning` (an error's in `theme.error`), a leading `✔` in `theme.success`, plan mode's `⏸` in green.
+The text is unchanged everywhere else.
 """
 
 from __future__ import annotations
@@ -61,12 +63,24 @@ def render_stop_hook_summary(message: StopHookSummaryMessage, *, verbose: bool =
     return lines
 
 
+#: The marks a notice may start with, coloured by its level.
+NOTICE_MARKS = (WARNING_MARK, "✔", "⏸")
+
+
 def notice(text: str, level: NoticeLevel, *, color: bool, width: int = 200) -> str:
-    """`text` in its level's colour (a warning marked `⚠`) when `color`, else `text` itself."""
+    """
+    `text` with `color`: crisp default text, its mark (a warning's `⚠`, added when missing; a leading `✔`
+    or `⏸`) in the level's colour. Without `color`, `text` itself.
+    """
     if not color:
         return text
-    marked = f"{WARNING_MARK} {text}" if level in ("warning", "error") and not text.startswith(WARNING_MARK) else text
-    return to_ansi(Text(marked, style=NOTICE_STYLES[level]), width)
+    if level in ("warning", "error") and not text.startswith(WARNING_MARK):
+        text = f"{WARNING_MARK} {text}"
+    mark = next((m for m in NOTICE_MARKS if text.startswith(m + " ")), None)
+    if mark is None or level == "info":
+        return to_ansi(Text(text, style=theme.TEXT), width)
+    return to_ansi(Text.assemble((mark, NOTICE_STYLES[level]), (text[len(mark):], theme.TEXT)), width)
 
 
-__all__ = ["BLACK_CIRCLE", "GUTTER", "NOTICE_STYLES", "NoticeLevel", "notice", "render_stop_hook_summary"]
+__all__ = ["BLACK_CIRCLE", "GUTTER", "NOTICE_MARKS", "NOTICE_STYLES", "NoticeLevel", "notice",
+           "render_stop_hook_summary"]

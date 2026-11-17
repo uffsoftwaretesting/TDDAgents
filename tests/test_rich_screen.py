@@ -33,6 +33,10 @@ from tests.test_repl import FakeIO
 
 GREEN = "38;2;134;239;172"
 WARNING = "38;2;255;193;7"
+GREY = "38;2;153;153;153"
+DIM = "\x1b[2m"
+#: The terminal's own foreground: crisp white on a dark background, crisp black on a light one.
+DEFAULT_FG = "39m"
 QUESTION = {"header": "Perf [size]", "question": "How large :smile: should it be?",
             "options": [{"label": "Small", "description": "A quick run"},
                         {"label": "Moderate (Recommended)", "description": "Realistic size"}]}
@@ -110,10 +114,14 @@ def test_notices_take_their_level_s_colour_and_stay_plain_without_colour():
     for level in ("info", "success", "warning", "error", "plan"):
         assert notice("Resumed.", level, color=False) == "Resumed."
     warned = notice("Interrupted.", "warning", color=True)
-    assert WARNING in warned and plain_text(warned) == "⚠ Interrupted."
+    assert plain_text(warned) == "⚠ Interrupted."
+    mark, _, words = warned.partition("⚠")
+    assert WARNING in mark and WARNING not in words and DEFAULT_FG in words  # only the mark is yellow
     assert plain_text(notice("⚠ already marked", "warning", color=True)) == "⚠ already marked"
-    assert "38;2;78;186;101" in notice("done", "success", color=True)
-    assert "38;2;153;153;153" in notice("(queued for the agents)", "info", color=True)
+    ticked = notice("✔ done", "success", color=True)
+    assert "38;2;78;186;101" in ticked.partition("done")[0] and DEFAULT_FG in ticked
+    info = notice("(queued for the agents)", "info", color=True)
+    assert info == f"\x1b[{DEFAULT_FG}(queued for the agents)\x1b[0m"  # crisp default text, no grey, no dim
     assert GREEN in notice("⏸ plan mode on", "plan", color=True)
 
 
@@ -221,3 +229,44 @@ def test_question_reminder_reads_the_plain_text_only():
     plain = render_question(QUESTION, 1, 1)
     assert question_reminder(plain, plain.split("\n")[-1]).startswith("? [Perf [size]] How large")
     assert all("\x1b" not in part for part in (plain, question_reminder(plain, "x")))
+
+
+# ── crisp text and full width (2026-11-17) ──────────────────────────────────
+
+def test_no_text_is_grey_or_dim_only_the_marks_are_coloured():
+    from app.components.design_system.question_box import style_question as box
+
+    styled = [
+        box(render_question(QUESTION, 1, 2), 80),
+        box(render_permission_prompt(PermissionPrompt("Bash", "Run make", "", {}, (YES, NO))), 80),
+        box(render_permission_prompt(PermissionPrompt("ExitPlanMode", "Exit", plan_approval_message("# P\n1. A"),
+                                                      {}, (YES, NO))), 80),
+        plan_done_box([("1", "Parse")], 80),
+        session_report_box(SessionReport(outcome="completed", thread_id="t", project="~/p", reports="~/r/",
+                                         done=1, total=1, final_run="passed", tokens=(1, 0)), 80),
+        notice("(queued for the agents)", "info", color=True),
+        render_logo("m", "/p", color=True),
+    ]
+    for ansi in styled:
+        assert GREY not in ansi and DIM not in ansi
+        assert DEFAULT_FG in ansi  # the text is the terminal's own foreground
+    assert all(GREEN in ansi for ansi in styled[:5])  # the boxes keep their green border and title
+
+
+def test_boxes_span_the_terminal_width():
+    from app.components.design_system.question_box import style_question as box
+
+    lines = _lines(box(render_question(QUESTION, 1, 1), 150))
+    boxed = [line for line in lines if line.startswith(("╭", "│", "╰"))]
+    assert boxed and all(len(line) == 150 for line in boxed)
+    assert all(len(line) == 150 for line in _lines(plan_done_box([("1", "x")], 150)))
+
+
+def test_the_repl_uses_the_full_terminal_width(monkeypatch: pytest.MonkeyPatch):
+    import os
+
+    repl = Repl(SimpleNamespace(on_message=None, ctx=SimpleNamespace()), FakeIO())  # type: ignore[arg-type]
+    monkeypatch.setattr("app.screens.repl.shutil.get_terminal_size", lambda *a, **k: os.terminal_size((160, 40)))
+    assert repl._width() == 160
+    monkeypatch.setattr("app.screens.repl.shutil.get_terminal_size", lambda *a, **k: os.terminal_size((20, 40)))
+    assert repl._width() == 40

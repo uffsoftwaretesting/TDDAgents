@@ -1031,9 +1031,8 @@ class Repl:
         return bool(getattr(self.io, "supports_color", False))
 
     def _width(self) -> int:
-        from app.components.logo_v2.logo_v2 import MAX_WIDTH
-
-        return max(40, min(shutil.get_terminal_size().columns, MAX_WIDTH + 28))
+        """The terminal's full width (the boxes span it, user decision 2026-11-17), at least 40 columns."""
+        return max(40, shutil.get_terminal_size().columns)
 
     def _note(self, text: str, level: NoticeLevel) -> None:
         """A TDDAgents notice, in its level's colour on a terminal that shows colour."""

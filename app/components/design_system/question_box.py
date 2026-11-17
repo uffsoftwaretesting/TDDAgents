@@ -23,7 +23,8 @@ The REPL's questions are built as plain text (what a non-terminal and the tests 
 
 *Divergences* (user decision 2026-11-17): a full rounded box where upstream's `PermissionDialog` draws its
 top border only, and TDDAgents' green (`theme.BRAND`) for every question where upstream uses `permission`
-blue and `planMode` sage. Model text is never read as markup (`Text`, not `console.print` markup).
+blue and `planMode` sage; every text in the terminal's own foreground (`theme.TEXT`, never upstream's dim
+grey), the box full width (2026-11-17). Model text is never read as markup (`Text`, not `console.print` markup).
 """
 
 from __future__ import annotations
@@ -85,7 +86,7 @@ def _heading(first: str, parts: _Parts) -> bool:
     asked = ASKED.match(first)
     if asked is not None:
         parts.title = f"? {asked['header']}{asked['count'] or ''}" if asked["header"] else f"?{asked['count'] or ''}"
-        parts.body.append(Text(asked["question"], style="bold"))
+        parts.body.append(Text(asked["question"], style=f"bold {theme.TEXT}"))
         return True
     if first.startswith("⚠ "):
         parts.title = first[2:]
@@ -95,10 +96,10 @@ def _heading(first: str, parts: _Parts) -> bool:
 
 def _option(match: re.Match[str]) -> Text:
     label, _, description = match[4].partition(DESCRIPTION_SEPARATOR)
-    text = Text(f"{match[1]}{match[2]}{match[3]} ", style=theme.INACTIVE)
-    text.append(label)
+    text = Text(f"{match[1]}{match[2]}{match[3]} ", style=f"bold {theme.TEXT}")
+    text.append(label, style=f"bold {theme.TEXT}")
     if description:
-        text.append("\n" + " " * (len(match[1]) + len(match[2]) + 2) + description, style=theme.INACTIVE)
+        text.append("\n" + " " * (len(match[1]) + len(match[2]) + 2) + description, style=theme.TEXT)
     return text
 
 
@@ -106,7 +107,7 @@ def _plan(lines: list[str], start: int) -> tuple[RenderableType, int]:
     """The plan between `PLAN_START` and `PLAN_END`, as Markdown between dashed rules; the index after it."""
     end = next((i for i in range(start + 1, len(lines)) if lines[i] == PLAN_END), len(lines))
     markdown = "\n".join(lines[start + 1:end]).strip("\n")
-    rule = Rule(characters="╌", style=theme.SUBTLE)
+    rule = Rule(characters="╌", style=theme.BRAND)
     return Group(Text(PLAN_START), rule, PlanMarkdown(markdown), rule), end
 
 
@@ -132,12 +133,12 @@ def style_question(plain: str, width: int) -> str:
                 parts.body.append(Text(""))  # a blank line before the options, as upstream's Select sits apart
             parts.body.append(_option(match))
         else:
-            parts.body.append(Text(line, style="bold" if i == asked_at else ""))
+            parts.body.append(Text(line, style=f"bold {theme.TEXT}" if i == asked_at else theme.TEXT))
         i += 1
     title = Text(f" {parts.title} ", style=f"bold {theme.BRAND}") if parts.title else None
     panel = Panel(Group(*parts.body), box=ROUNDED, border_style=theme.BRAND, title=title, title_align="left",
                   padding=(0, 1), width=width)
-    footer = [Text(parts.footer, style=theme.INACTIVE)] if parts.footer else []
+    footer = [Text(parts.footer, style=theme.TEXT)] if parts.footer else []
     return to_ansi(Group(panel, *footer), width)
 
 

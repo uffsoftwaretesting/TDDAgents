@@ -2610,6 +2610,10 @@ User decisions (plan `melhore-e-refatore-o-whimsical-lantern.md`), each part sha
   is one box (`session_report_box`: plan progress, final run, tokens, project, reports, thread; its title
   and colour follow the outcome). The token line then reaches the session log only (`OFF_TERMINAL`).
   Headless and non-terminals keep the report lines.
+- **Crisp and full width** (user decision, the same day): the boxes span the terminal's width
+  (`Repl._width`, the exit report too), and every text is the terminal's own foreground (`theme.TEXT`),
+  crisp on dark and light backgrounds, where upstream dims secondary text (`inactive` grey); only borders,
+  titles and the `⚠` / `✔` / `⏸` marks keep a colour.
 
 ### The three things that changed most
 
