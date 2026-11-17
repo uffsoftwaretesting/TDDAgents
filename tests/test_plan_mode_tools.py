@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage, ToolCall
 
 from app.components.permissions.permission_options import exit_plan_mode_options
 from app.hooks.use_can_use_tool import (
-    EDIT_PLAN_COMMAND,
+    PLAN_FEEDBACK_NEEDED,
     PermissionAnswer,
     PermissionPrompt,
     build_interactive_can_use_tool,
@@ -375,35 +375,28 @@ def test_the_options():
 
 
 def test_the_approval_message():
-    assert plan_approval_message("# P\n\n") == (
-        "Here is the plan:\n\n# P\n\nWould you like to proceed?\n(Type /edit to edit the plan in your editor.)")
-    assert plan_approval_message("# P", "No editor.").endswith("editor.)\nNo editor.")
+    assert plan_approval_message("# P\n\n") == "Here is the plan:\n\n# P\n\nWould you like to proceed?"
+    assert plan_approval_message("# P", "Say more.").endswith("proceed?\nSay more.")
+    assert "/edit" not in plan_approval_message("# P", PLAN_FEEDBACK_NEEDED)  # no plan editor (2026-11-17)
 
 
-def interactive(tmp_path: Path, answers: list[PermissionAnswer], edits: list[tuple[str | None, str]] | None = None,
-                **kw: Any) -> tuple[Any, list[PermissionPrompt], list[str]]:
+def interactive(tmp_path: Path, answers: list[PermissionAnswer], **kw: Any) -> tuple[Any, list[PermissionPrompt]]:
     prompts: list[PermissionPrompt] = []
-    edited_from: list[str] = []
     queue = list(answers)
-    edit_queue = list(edits or [])
 
     async def ask(prompt: PermissionPrompt) -> PermissionAnswer:
         prompts.append(prompt)
         return queue.pop(0)
 
-    def edit_plan(text: str) -> tuple[str | None, str]:
-        edited_from.append(text)
-        return edit_queue.pop(0)
-
     ctx = planning_context(tmp_path, interactive=True, **kw)
-    ctx.can_use_tool = build_interactive_can_use_tool(ask, edit_plan=edit_plan)
-    return ctx, prompts, edited_from
+    ctx.can_use_tool = build_interactive_can_use_tool(ask)
+    return ctx, prompts
 
 
 @pytest.mark.parametrize(("value", "mode"), [("yes-accept-edits-keep-context", PermissionMode.ACCEPT_EDITS),
                                              ("yes-default-keep-context", PermissionMode.DEFAULT)])
 def test_yes_sets_the_mode_and_development_starts(tmp_path: Path, value: str, mode: PermissionMode):
-    ctx, prompts, _ = interactive(tmp_path, [PermissionAnswer(value)], pre=PermissionMode.PLAN)
+    ctx, prompts = interactive(tmp_path, [PermissionAnswer(value)], pre=PermissionMode.PLAN)
     message = run_call(ctx, build_exit_plan_mode_tool()).message
     assert message.status == "success" and "## Approved Plan:\n" in message.content
     (prompt,) = prompts
@@ -415,7 +408,7 @@ def test_yes_sets_the_mode_and_development_starts(tmp_path: Path, value: str, mo
 
 
 def test_keep_planning_with_feedback_tells_the_model(tmp_path: Path):
-    ctx, _, _ = interactive(tmp_path, [PermissionAnswer("no", "  Split item 1.  ")])
+    ctx, _ = interactive(tmp_path, [PermissionAnswer("no", "  Split item 1.  ")])
     message = run_call(ctx, build_exit_plan_mode_tool()).message
     assert (message.status, message.content) == ("error", f"{REJECT_MESSAGE_WITH_REASON_PREFIX}Split item 1.")
     assert ctx.cancel.cancelled is False
@@ -423,30 +416,30 @@ def test_keep_planning_with_feedback_tells_the_model(tmp_path: Path):
     assert ctx.get_app_state().tdd_plan.items == ()
 
 
-def test_a_plain_no_ends_the_turn(tmp_path: Path):
-    ctx, _, _ = interactive(tmp_path, [PermissionAnswer("no")])
+def test_a_plain_no_asks_again_for_what_to_change(tmp_path: Path):
+    # `handleResponse` returns on a "No" without feedback: the dialog stays (2026-11-17).
+    ctx, prompts = interactive(tmp_path, [PermissionAnswer("no"), PermissionAnswer("no", "Add a divide item.")])
+    message = run_call(ctx, build_exit_plan_mode_tool()).message
+    assert (message.status, message.content) == ("error", f"{REJECT_MESSAGE_WITH_REASON_PREFIX}Add a divide item.")
+    assert [p.message for p in prompts] == [plan_approval_message(PLAN),
+                                            plan_approval_message(PLAN, PLAN_FEEDBACK_NEEDED)]
+    assert ctx.cancel.cancelled is False
+
+
+def test_a_plain_no_then_yes_approves(tmp_path: Path):
+    ctx, prompts = interactive(tmp_path, [PermissionAnswer("no"), PermissionAnswer("yes-default-keep-context")])
+    assert "## Approved Plan:\n" in run_call(ctx, build_exit_plan_mode_tool()).message.content
+    assert len(prompts) == 2
+
+
+def test_esc_at_the_approval_ends_the_turn(tmp_path: Path):
+    ctx, _ = interactive(tmp_path, [PermissionAnswer("no", cancelled=True)])
     message = run_call(ctx, build_exit_plan_mode_tool()).message
     assert (message.status, message.content) == ("error", REJECT_MESSAGE)
     assert ctx.cancel.cancelled is True
 
 
-def test_edit_opens_the_editor_asks_again_and_approves_the_edit(tmp_path: Path):
-    edited = PLAN.replace("2. subtract\n", "2. subtract\n3. multiply\n")
-    ctx, prompts, edited_from = interactive(
-        tmp_path,
-        [PermissionAnswer("no", EDIT_PLAN_COMMAND), PermissionAnswer("no", EDIT_PLAN_COMMAND),
-         PermissionAnswer("yes-default-keep-context")],
-        edits=[(edited, ""), (None, "The editor exited with an error.")])
-    message = run_call(ctx, build_exit_plan_mode_tool()).message
-    assert edited_from == [PLAN, edited]
-    assert [p.message for p in prompts] == [
-        plan_approval_message(PLAN), plan_approval_message(edited),
-        plan_approval_message(edited, "The editor exited with an error.")]
-    assert "## Approved Plan (edited by user):\n" in message.content
-    assert ctx.session_plans.read() == edited
-    assert [i.text for i in ctx.get_app_state().tdd_plan.items][-1] == "multiply"
-
-
-def test_an_unknown_answer_is_a_no(tmp_path: Path):
-    ctx, _, _ = interactive(tmp_path, [PermissionAnswer("maybe")])
+def test_an_unknown_answer_is_a_no_without_feedback(tmp_path: Path):
+    ctx, prompts = interactive(tmp_path, [PermissionAnswer("maybe"), PermissionAnswer("no", cancelled=True)])
     assert run_call(ctx, build_exit_plan_mode_tool()).message.content == REJECT_MESSAGE
+    assert prompts[1].message.endswith(PLAN_FEEDBACK_NEEDED)

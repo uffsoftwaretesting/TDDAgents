@@ -26,17 +26,18 @@ notes field); declining aborts the turn (`onReject`).
 `ExitPlanMode` has its own too, as upstream's `ExitPlanModePermissionRequest`: the plan is shown
 with upstream's choices; a "Yes" sets the mode the work goes on in (`onAllow` with a `setMode`
 update, through `set_permission_mode` so the plan-mode flags move as upstream's do); "No, keep
-planning" with feedback sends it to the model; `/edit` (upstream's ctrl-g) opens the plan in the
-user's editor and asks again, and an approved edit reaches the tool as `input["plan"]`
-(`planEditedLocally`).
+planning" with feedback (any text typed instead of an option) sends it to the model, which revises the
+plan (`onReject(trimmedFeedback)`, `REJECT_MESSAGE_WITH_REASON_PREFIX`); a "No" without feedback is a
+no-op, as upstream's `handleResponse` returns on it: the question is asked again. Esc (an answer
+`cancelled`) rejects and stops the turn (`handleCancel`).
 
 Divergences: the hooks run before the question, not in a race with it; an accept-with-feedback
-input, the classifier pre-check and the bridge/channel relays are not ported.
+input, the classifier pre-check and the bridge/channel relays are not ported; the plan cannot be edited
+in an external editor (upstream's ctrl-g, `editFileInEditor`; user decision 2026-11-17).
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -85,14 +86,14 @@ class PermissionAnswer:
 
     value: str
     feedback: str | None = None
+    #: Esc: the question was dismissed rather than answered (upstream's `handleCancel`).
+    cancelled: bool = False
 
 
 AskUser = Callable[[PermissionPrompt], Awaitable[PermissionAnswer]]
-#: The plan text in, the edited text out, or `None` and why there is none (`edit_text_in_editor`).
-EditPlan = Callable[[str], tuple[str | None, str]]
 
-#: What the user types at the plan approval to edit the plan in their editor (upstream's ctrl-g).
-EDIT_PLAN_COMMAND = "/edit"
+#: The line the plan approval adds after a "No" without feedback, which upstream ignores.
+PLAN_FEEDBACK_NEEDED = "Tell the Analyst what to change (type it after 3, or just type it), or Esc to cancel."
 
 
 def selected_preview_annotations(
@@ -131,64 +132,50 @@ def _chosen(options: Sequence[PermissionOption], value: str) -> PermissionOption
 
 def plan_approval_message(plan: str, notice: str = "") -> str:
     """The plan as the approval shows it (upstream's "Ready to code?" dialog)."""
-    lines = ["Here is the plan:", "", plan.rstrip(), "", "Would you like to proceed?",
-             f"(Type {EDIT_PLAN_COMMAND} to edit the plan in your editor.)"]
+    lines = ["Here is the plan:", "", plan.rstrip(), "", "Would you like to proceed?"]
     if notice:
         lines.append(notice)
     return "\n".join(lines)
 
 
-def _default_edit_plan(text: str) -> tuple[str | None, str]:
-    from app.utils.prompt_editor import edit_text_in_editor
-
-    return edit_text_in_editor(text, "plan")
-
-
-async def approve_plan(
-    tool: Any, input_args: dict[str, Any], context: Any, ask_user: AskUser, edit_plan: EditPlan
-) -> PermissionResult:
-    """`ExitPlanModePermissionRequest`: the plan, upstream's choices, and `/edit`."""
+async def approve_plan(tool: Any, input_args: dict[str, Any], context: Any, ask_user: AskUser) -> PermissionResult:
+    """`ExitPlanModePermissionRequest`: the plan and upstream's choices."""
     perm = extract_permission_context(context)
     options = permission_options(tool.name, input_args, None, perm, permission_cwd(context))
     plans = getattr(context, "session_plans", None)
     plan = plans.read(getattr(context, "agent_id", None)) if plans is not None else None
-    edited: str | None = None
     notice = ""
     while True:
         answer = await ask_user(PermissionPrompt(
             tool_name=tool.name,
             description=tool.description(input_args),
-            message=plan_approval_message(edited if edited is not None else plan or "", notice),
+            message=plan_approval_message(plan or "", notice),
             input=input_args,
             options=tuple(options),
             agent=getattr(context, "agent_type", None),
         ))
+        if answer.cancelled:
+            context.cancel.cancel()
+            return rejection(None)
         choice = _chosen(options, answer.value)
         feedback = (answer.feedback or "").strip() or None
-        if choice.reject and feedback == EDIT_PLAN_COMMAND:
-            text, notice = await asyncio.to_thread(edit_plan, edited if edited is not None else plan or "")
-            if text is not None:
-                edited = text
-            continue
         if choice.reject:
             if feedback is None:
-                context.cancel.cancel()
+                # `handleResponse`: `if (!trimmedFeedback && !hasImages) return` — the dialog stays.
+                notice = PLAN_FEEDBACK_NEEDED
+                continue
             return rejection(feedback)
         mode = next((u.mode for u in choice.updates if u.type == "setMode" and u.mode is not None), None)
         if mode is not None:
             context.set_app_state(lambda state, to=mode: set_permission_mode(state, to))
-        updated = {**input_args, "plan": edited} if edited is not None else input_args
-        return PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input=updated,
+        return PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input=input_args,
                                 decision_reason={"type": "user", "option": choice.value})
 
 
 def build_interactive_can_use_tool(
-    ask_user: AskUser, ask_questions: AskQuestions | None = None, edit_plan: EditPlan | None = None
+    ask_user: AskUser, ask_questions: AskQuestions | None = None
 ) -> CanUseTool:
-    """
-    The REPL's `canUseTool`, asking through `ask_user` (`ask_questions` for `AskUserQuestion`,
-    `edit_plan` for `/edit` at the plan approval).
-    """
+    """The REPL's `canUseTool`, asking through `ask_user` (`ask_questions` for `AskUserQuestion`)."""
 
     async def can_use_tool(
         tool: Any, input_args: dict[str, Any], result: PermissionResult, context: Any, tool_use_id: str
@@ -202,7 +189,7 @@ def build_interactive_can_use_tool(
         if hooked is not None:
             return hooked
         if tool.name == EXIT_PLAN_MODE_TOOL_NAME:
-            return await approve_plan(tool, input_args, context, ask_user, edit_plan or _default_edit_plan)
+            return await approve_plan(tool, input_args, context, ask_user)
         if tool.name == ASK_USER_QUESTION_TOOL_NAME and ask_questions is not None:
             answers = await ask_questions(tuple(input_args.get("questions") or ()))
             if answers is None:
