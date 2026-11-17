@@ -251,6 +251,8 @@ class DebugLogHandler(logging.Handler):
 #: `extra=` for one of TDDAgents' own warnings that upstream shows the user on purpose (2026-11-10): a
 #: `process.stderr.write` / `console.error` at startup or exit, a UI notification, `-p`'s error.
 TERMINAL: dict[str, bool] = {"terminal": True}
+#: `extra=OFF_TERMINAL`: a record the terminal handler never prints (the log file still gets it).
+OFF_TERMINAL: dict[str, bool] = {"terminal": False}
 
 
 def _is_app_record(record: logging.LogRecord) -> bool:
@@ -263,10 +265,13 @@ class TerminalLogFilter(logging.Filter):
     its diagnostics with `logForDebugging(…, {level})` or `logError`, neither of which reaches the
     terminal; here they reach the debug log through `DebugLogHandler`. A live sandboxed run printed "MCP
     config errors for …/.mcp.json" over the REPL's permission prompts. Records below WARNING (the
-    session's own report lines) and records marked `TERMINAL` still print.
+    session's own report lines) and records marked `TERMINAL` still print; a record marked `OFF_TERMINAL`
+    never does (a report line the terminal shows in another form, 2026-11-17).
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        if getattr(record, "terminal", None) is False:
+            return False
         if record.levelno < logging.WARNING or not _is_app_record(record):
             return True
         return bool(getattr(record, "terminal", False))
@@ -325,6 +330,7 @@ __all__ = [
     "DEBUG_LOGS_DIR_ENV",
     "DEBUG_LOG_LEVEL_ENV",
     "DebugLogHandler",
+    "OFF_TERMINAL",
     "TERMINAL",
     "TERMINAL_LOG_FORMAT",
     "TerminalLogFilter",

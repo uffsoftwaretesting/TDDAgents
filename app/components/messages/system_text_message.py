@@ -12,11 +12,28 @@ line upstream emits for its internal users only, shows as its child line). Its l
 With `verbose` (`--verbose`, the REPL's expanded view in place of upstream's ctrl+o transcript), each
 hook's command (or `prompt: <text>`) is listed under it, then the stop reason when continuation was
 prevented, then each error. The internal build's slow-hook timings are not shown here either.
+
+`notice` is `SystemTextMessage`'s colouring of a line TDDAgents writes (user decision 2026-11-17): the
+`warning` level in `theme.warning` with upstream's `⚠` mark, `success` in `theme.success`, `info` dim
+(`dimColor`), on a terminal that shows colour; the text is unchanged everywhere else.
 """
 
 from __future__ import annotations
 
+from typing import Literal
+
+from rich.text import Text
+
+from app.components.design_system import theme
+from app.components.design_system.rich_render import to_ansi
 from app.utils.messages import StopHookSummaryMessage
+
+NoticeLevel = Literal["info", "success", "warning", "error", "plan"]
+#: Each level's colour (`theme.ts`); `plan` is plan mode's.
+NOTICE_STYLES: dict[str, str] = {"info": theme.INACTIVE, "success": theme.SUCCESS, "warning": theme.WARNING,
+                                 "error": theme.ERROR, "plan": theme.PLAN_MODE}
+#: `figures.warning`, the mark of a warning line.
+WARNING_MARK = "⚠"
 
 #: `BLACK_CIRCLE` and the `⎿` gutter.
 BLACK_CIRCLE = "●"
@@ -44,4 +61,12 @@ def render_stop_hook_summary(message: StopHookSummaryMessage, *, verbose: bool =
     return lines
 
 
-__all__ = ["BLACK_CIRCLE", "GUTTER", "render_stop_hook_summary"]
+def notice(text: str, level: NoticeLevel, *, color: bool, width: int = 200) -> str:
+    """`text` in its level's colour (a warning marked `⚠`) when `color`, else `text` itself."""
+    if not color:
+        return text
+    marked = f"{WARNING_MARK} {text}" if level in ("warning", "error") and not text.startswith(WARNING_MARK) else text
+    return to_ansi(Text(marked, style=NOTICE_STYLES[level]), width)
+
+
+__all__ = ["BLACK_CIRCLE", "GUTTER", "NOTICE_STYLES", "NoticeLevel", "notice", "render_stop_hook_summary"]

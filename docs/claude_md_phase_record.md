@@ -2586,6 +2586,31 @@ A live session broke when the user typed `/edit` at the plan approval. Ported fr
   A session folder TDDAgents created is trusted without the dialog (`is_tddagents_workspace`; a divergence).
   The status glyph is `⛨` (decision).
 
+### The REPL in green: boxed questions, coloured notices, the end of a session (2026-11-17)
+
+User decisions (plan `melhore-e-refatore-o-whimsical-lantern.md`), each part shaped after
+`reference/claude-code/src/` (`utils/theme.ts`, `components/permissions/PermissionDialog.tsx`,
+`PermissionPrompt.tsx`, `CustomSelect/select.tsx`, `AskUserQuestionPermissionRequest/`,
+`ExitPlanModePermissionRequest/`, `messages/SystemTextMessage.tsx`):
+
+- **The colour** is a light green, `rgb(134,239,172)` (`theme.BRAND`), where upstream uses `claude` orange;
+  the dialogs' `permission` blue and the plan-mode sage take it too (divergences). The rest of the palette
+  is upstream's dark theme (`success`, `warning`, `error`, `inactive`, `subtle`).
+- **Questions** are drawn in a full rounded box (upstream's `PermissionDialog` draws its top border only: a
+  divergence) by `style_question`, which reads the plain layout every builder already produces, so the
+  plain text, `question_reminder` and every pinned test are unchanged: the `⚠`/`?` heading is the title
+  (the model's `[header]` as upstream's chip), options show their number dim and their description dim
+  beneath, the footer sits under the box, and the plan at approval is Markdown (`PlanMarkdown`, headings
+  left and bold) between dashed rules under "Ready to code?". Rich renders with markup and emoji codes
+  off (`rich_render.to_ansi`): model text such as `[Perf size]` is shown as written.
+- **Notices** TDDAgents writes take their level's colour (`notice`): warnings `⚠` in `warning`, the queue
+  and status lines dim, the plugin notice in `success`, the settings issues in `warning`, plan mode in green.
+  The model's own text is not restyled.
+- **The end of a session**: a finished plan is a box of ticked items (`plan_done_box`), and the exit report
+  is one box (`session_report_box`: plan progress, final run, tokens, project, reports, thread; its title
+  and colour follow the outcome). The token line then reaches the session log only (`OFF_TERMINAL`).
+  Headless and non-terminals keep the report lines.
+
 ### The three things that changed most
 
 1. **Routing by `status` string literals was replaced** by a closed vocabulary of seven

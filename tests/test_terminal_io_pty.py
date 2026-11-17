@@ -126,3 +126,59 @@ def test_unrouted_the_log_line_lands_on_the_input_line(tmp_path: Path) -> None:
     assert raw.index(b"LOGGED-LINE") < raw.index(b"WRITTEN-LINE")
     before = raw[:raw.index(b"LOGGED-LINE")]
     assert b"\x1b[J" not in before[before.rindex(b"PROMPT>"):]
+
+
+STYLED_DRIVER = """
+import asyncio
+from app.components.design_system.question_box import style_question
+from app.screens.terminal_io import TerminalIO
+
+
+async def main():
+    io = TerminalIO(lambda: None)
+    with io:
+        reader = asyncio.ensure_future(io.read_line("PROMPT> "))
+        await asyncio.sleep(0.3)
+        io.write(style_question("? [Size] How big?\\n  1. Small \u2014 quick\\nChoose 1-1.", 50))
+        await asyncio.sleep(0.5)
+        reader.cancel()
+        try:
+            await reader
+        except BaseException:
+            pass
+
+asyncio.run(main())
+"""
+
+
+def test_a_boxed_question_reaches_the_terminal_in_green(tmp_path: Path) -> None:
+    driver = tmp_path / "styled.py"
+    driver.write_text(STYLED_DRIVER)
+    master, slave = pty.openpty()
+    env = {**os.environ, "PROMPT_TOOLKIT_NO_CPR": "1", "TERM": "xterm", "PYTHONPATH": str(REPO)}
+    proc = subprocess.Popen([sys.executable, str(driver)], stdin=slave, stdout=slave, stderr=slave, env=env,
+                            close_fds=True)
+    os.close(slave)
+    out = b""
+    deadline = time.monotonic() + 20
+    try:
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([master], [], [], 0.2)
+            if ready:
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                out += chunk
+            elif proc.poll() is not None:
+                break
+    finally:
+        os.close(master)
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(5)
+    assert b"38;2;134;239;172" in out  # the brand green's escape passed through patch_stdout
+    text = _text(out)
+    assert "╭─  ? Size  ─" in text and "1. Small" in text and "quick" in text and "Choose 1-1." in text

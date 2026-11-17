@@ -419,9 +419,13 @@ def system_prompt_flag(text: str | None, file: str | None) -> str | None:
     return text
 
 
-def _write_token_report(artifacts_dir: str) -> None:
-    """Logs token usage and persists a report to artifacts_dir/token_usage.txt."""
+def _write_token_report(artifacts_dir: str, *, on_terminal: bool = True) -> tuple[int, int]:
+    """
+    Logs token usage and persists a report to artifacts_dir/token_usage.txt; the total and cached
+    tokens. With `on_terminal` false the log line reaches the session log only (the summary box shows it).
+    """
     from app.services.api.claude import get_global_token_tracker
+    from app.utils.debug import OFF_TERMINAL
 
     summary = get_global_token_tracker().summary()
     totals = summary["totals"]
@@ -431,6 +435,7 @@ def _write_token_report(artifacts_dir: str) -> None:
         totals["prompt_tokens"],
         totals["completion_tokens"],
         totals["cached_tokens"],
+        extra=None if on_terminal else OFF_TERMINAL,
     )
     with open(os.path.join(artifacts_dir, "token_usage.txt"), "w", encoding="utf-8") as f:
         f.write("TOKEN USAGE REPORT\n")
@@ -441,6 +446,7 @@ def _write_token_report(artifacts_dir: str) -> None:
             f.writelines(f"    {k}: {v}\n" for k, v in stats.items())
         f.write("\nTOTALS:\n")
         f.writelines(f"  {k}: {v}\n" for k, v in totals.items())
+    return int(totals["total_tokens"]), int(totals["cached_tokens"])
 
 
 def _write_text(path: str, title: str, body: str) -> None:
@@ -571,19 +577,25 @@ def waiting_text(thread_id: str, question: Sequence[dict[str, Any]], headless: b
 
 
 def report(thread_id: str, workspace: Any, request: str | None, outcome: DevelopmentOutcome,
-           settings_path: str | None = None) -> None:
-    """Write the reports beside the project, run its suite once more, then print the outcome."""
+           settings_path: str | None = None, *, color: bool = False) -> None:
+    """
+    Write the reports beside the project, run its suite once more, then print the outcome: one summary
+    box with `color` (an interactive terminal, 2026-11-17), the report lines otherwise.
+    """
     target = session_dir(workspace, thread_id)
     os.makedirs(target, exist_ok=True)
     artifacts_dir = write_session_artifacts(target, request, outcome)
     write_subreq_results(artifacts_dir, outcome.plan, outcome.terminal)
-    _write_token_report(artifacts_dir)
+    tokens = _write_token_report(artifacts_dir, on_terminal=not color)
+    final_run = write_final_test_run(artifacts_dir, workspace, settings_path) if outcome.planned else None
+    plan = outcome.plan
+    if color:
+        _print_report_box(thread_id, workspace, artifacts_dir, outcome, final_run, tokens)
+        return
     print(f"\n📁 Project: {getattr(workspace, 'root', '?')}")
     print(f"📝 Reports: {artifacts_dir}/")
-    if outcome.planned:
-        print(f"🧪 Final test run: {write_final_test_run(artifacts_dir, workspace, settings_path)}")
-
-    plan = outcome.plan
+    if final_run is not None:
+        print(f"🧪 Final test run: {final_run}")
     if not outcome.planned:
         print("\n📋  NO APPROVED PLAN: the session ended in plan mode.")
         if outcome.plan_file and os.path.exists(outcome.plan_file):
@@ -596,6 +608,28 @@ def report(thread_id: str, workspace: Any, request: str | None, outcome: Develop
             print(f"   • {plan.current.id}. {plan.current.text}: not done")
     print(f"\n🔑 Thread ID for this run: {thread_id}")
     print("   (To inspect the state or resume later, use --thread-id)\n")
+
+
+def _print_report_box(thread_id: str, workspace: Any, artifacts_dir: str, outcome: DevelopmentOutcome,
+                      final_run: str | None, tokens: tuple[int, int]) -> None:
+    """`report`'s summary as one box (`app/components/session_summary.py`)."""
+    import shutil
+
+    from app.components.logo_v2.logo_v2 import display_folder
+    from app.components.session_summary import SessionReport, session_report_box
+
+    plan = outcome.plan
+    kind = "unplanned" if not outcome.planned else ("completed" if outcome.completed else "stopped")
+    plan_file = outcome.plan_file if kind == "unplanned" and outcome.plan_file and os.path.exists(
+        outcome.plan_file) else None
+    current = f"{plan.current.id}. {plan.current.text}" if kind == "stopped" and plan.current is not None else None
+    box = session_report_box(SessionReport(
+        outcome=kind, thread_id=thread_id, project=display_folder(str(getattr(workspace, "root", "?"))),
+        reports=display_folder(artifacts_dir) + "/", done=plan.done_count, total=len(plan.items),
+        final_run=final_run, tokens=tokens, stopped_on=str(outcome.terminal) if kind == "stopped" else None,
+        current=current, plan_file=display_folder(plan_file) if plan_file else None,
+    ), max(60, min(shutil.get_terminal_size().columns, 100)))
+    print("\n" + box + "\n")
 
 
 def rewind_files(args: argparse.Namespace, initial_input: str | None, write_stdout: Any = None) -> int:
@@ -912,7 +946,8 @@ def run_main(args: argparse.Namespace, write_stdout: Any = None) -> int:
             sys.stderr.write(str(unavailable))
             return 1
         # A session opened with no request takes its first typed message as the request.
-        report(thread_id, workspace, request or outcome.first_request, outcome, getattr(args, "settings", None))
+        report(thread_id, workspace, request or outcome.first_request, outcome, getattr(args, "settings", None),
+               color=not args.print and sys.stdout.isatty())
         if outcome.question:
             print(waiting_text(thread_id, outcome.question, args.print))
         if args.print:

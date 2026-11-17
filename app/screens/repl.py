@@ -94,6 +94,8 @@ from app.components.permissions.ask_user_question_permission_request.preview_box
     has_any_preview,
     preview_box,
 )
+from app.components.design_system.question_box import style_question
+from app.components.messages.system_text_message import NoticeLevel, notice
 from app.components.permissions.permission_options import PermissionOption
 from app.components.spinner.spinner import pick_spinner_verb, spinner_message, spinner_status_line
 from app.constants.spinner_verbs import get_spinner_verbs
@@ -491,7 +493,7 @@ class Repl:
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self.pending = PendingAnswer(parse=parse, future=future, retry=retry, cancelled=cancelled,
                                      aborts_turn=aborts_turn, text=text)
-        self.io.write(text)
+        self._show_question(text)
         try:
             return await future
         finally:
@@ -618,7 +620,7 @@ class Repl:
             self.io.write(line)
         if terminal is not None:
             self.last_terminal = terminal
-            self.io.write(turn_end_text(terminal, self.plan, self.run.store.get().tdd_paused))
+            self._turn_end(terminal)
         deferred, self.deferred = self.deferred, []
         self.turn = None
         for command in deferred:
@@ -654,7 +656,7 @@ class Repl:
         if command is not None:
             if self.busy and not command.immediate:
                 self.deferred.append(command)
-                self.io.write(f"(/{command.name} runs when the current turn ends)")
+                self._note(f"(/{command.name} runs when the current turn ends)", "info")
                 return
             await self.run_command(command)
             return
@@ -670,7 +672,7 @@ class Repl:
             if self.has_interruptible_tool_in_progress:
                 self.run.engine.interrupt("interrupt")
             self.run.ctx.command_queue.enqueue(QueuedCommand(value=text, mode="prompt", priority="next"))
-            self.io.write("(queued for the agents)")
+            self._note("(queued for the agents)", "info")
             return
         self._start(submit_prompt(self.run, text))
 
@@ -691,10 +693,14 @@ class Repl:
                     return
                 await self.run_command(command)
                 if self.pending is pending and not pending.future.done():
-                    self.io.write(question_reminder(pending.text, pending.retry))
+                    self._show_question(question_reminder(pending.text, pending.retry))
                 return
-            self.io.write(f"Unknown command {name} while a question waits for an answer.\n"
-                          + question_reminder(pending.text, pending.retry))
+            unknown = f"Unknown command {name} while a question waits for an answer."
+            if self._colour:
+                self._note(unknown, "warning")
+                self._show_question(question_reminder(pending.text, pending.retry))
+            else:
+                self.io.write(f"{unknown}\n" + question_reminder(pending.text, pending.retry))
             return
         try:
             answer = pending.parse(line)
@@ -702,7 +708,7 @@ class Repl:
             logger.debug("Could not read %r as an answer", line, exc_info=True)
             answer = None
         if answer is None:
-            self.io.write(question_reminder(pending.text, pending.retry))
+            self._show_question(question_reminder(pending.text, pending.retry))
         elif not pending.future.done():
             pending.future.set_result(answer)
 
@@ -730,11 +736,11 @@ class Repl:
             self._plan_command(command.args)
         elif name == "pause":
             self.run.ctx.set_app_state(lambda s: replace(s, tdd_paused=True))
-            self.io.write("Paused: the agents will stop at the end of this turn. /resume to continue.")
+            self._note("Paused: the agents will stop at the end of this turn. /resume to continue.", "warning")
         elif name == "resume":
             self.run.ctx.set_app_state(lambda s: replace(s, tdd_paused=False))
             if self.busy:
-                self.io.write("Resumed.")
+                self._note("Resumed.", "info")
             else:
                 self._start(submit_prompt(self.run, development_continue_prompt(self.plan)))
         elif name == "interrupt":
@@ -742,7 +748,7 @@ class Repl:
             if self.busy or self.pending is not None:
                 self.interrupt()
             else:
-                self.io.write(NOTHING_RUNNING)
+                self._note(NOTHING_RUNNING, "info")
         elif name == "send-anyways":
             self._send_anyways(command.args.strip())
         elif name == "requirements":
@@ -782,20 +788,20 @@ class Repl:
                 self._note_request(text)
                 self._start(submit_prompt(self.run, text))
             else:
-                self.io.write(NOTHING_RUNNING)
+                self._note(NOTHING_RUNNING, "info")
             return
         if text:
             queue.enqueue(QueuedCommand(value=text, mode="prompt", priority="now"))
-            self.io.write("(sent to the agents now)")
+            self._note("(sent to the agents now)", "info")
             return
         queued = queue.dequeue_all_matching(
             lambda c: c.mode == "prompt" and c.agent_id is None and not c.is_meta and c.priority != "now")
         if not queued:
-            self.io.write("Nothing is queued for the agents. Usage: /send-anyways <message>")
+            self._note("Nothing is queued for the agents. Usage: /send-anyways <message>", "info")
             return
         for command in queued:
             queue.enqueue(replace(command, priority="now"))
-        self.io.write(f"(sent {len(queued)} queued message{'s' if len(queued) != 1 else ''} to the agents now)")
+        self._note(f"(sent {len(queued)} queued message{'s' if len(queued) != 1 else ''} to the agents now)", "info")
 
     # ── dialogs ────────────────────────────────────────────────────────────
 
@@ -1016,8 +1022,38 @@ class Repl:
             self.io.write("Usage: /requirements <what to change>")
             return
         self.run.store.update(lambda state: set_permission_mode(state, PermissionMode.PLAN))
-        self.io.write(PLAN_MODE_ON)
+        self._note(PLAN_MODE_ON, "plan")
         self._start(submit_prompt(self.run, request))
+
+    @property
+    def _colour(self) -> bool:
+        """The terminal shows colour (`TerminalIO.supports_color`); a plain text sink otherwise."""
+        return bool(getattr(self.io, "supports_color", False))
+
+    def _width(self) -> int:
+        from app.components.logo_v2.logo_v2 import MAX_WIDTH
+
+        return max(40, min(shutil.get_terminal_size().columns, MAX_WIDTH + 28))
+
+    def _note(self, text: str, level: NoticeLevel) -> None:
+        """A TDDAgents notice, in its level's colour on a terminal that shows colour."""
+        self.io.write(notice(text, level, color=self._colour, width=self._width()))
+
+    def _show_question(self, text: str) -> None:
+        """A question: boxed on a terminal that shows colour, else its plain layout."""
+        self.io.write(style_question(text, self._width()) if self._colour else text)
+
+    def _turn_end(self, terminal: Terminal) -> None:
+        """`turn_end_text`, as a notice; a finished plan as its box on a terminal that shows colour."""
+        text = turn_end_text(terminal, self.plan, self.run.store.get().tdd_paused)
+        if not self._colour:
+            self.io.write(text)
+        elif text.startswith("✔"):
+            from app.components.session_summary import plan_done_box
+
+            self.io.write(plan_done_box([(i.id, i.text) for i in self.plan.items], self._width()))
+        else:
+            self._note(text, "warning")
 
     def _logo(self, project: Path) -> str:
         """The title panel (`app/components/logo_v2/`), coloured on a terminal that shows colour."""
@@ -1047,12 +1083,16 @@ class Repl:
             self.io.write(f"{create_project_onboarding_feed(get_steps(project), project)}\n")
             increment_project_onboarding_seen_count(project)
         in_plan = self.run.store.get().tool_permission_context.mode == PermissionMode.PLAN
-        self.io.write(PLAN_MODE_ON if in_plan else f"TDD plan:\n{render_plan(self.plan)}")
+        if in_plan:
+            self._note(PLAN_MODE_ON, "plan")
+        else:
+            self.io.write(f"TDD plan:\n{render_plan(self.plan)}")
         # `usePluginAutoupdateNotification`: registered while the REPL runs.
-        unsubscribe = use_plugin_autoupdate_notification(self.io.write)
+        # Upstream colours them: the plugin names in `success`, the settings errors in `warning`.
+        unsubscribe = use_plugin_autoupdate_notification(lambda text: self._note(text, "success"))
         # `useSettingsErrors`: the settings' error count now and after each settings change.
         unsubscribe_settings_errors = use_settings_errors(
-            self.io.write, getattr(self.run, "settings_locations", None),
+            lambda text: self._note(text, "warning"), getattr(self.run, "settings_locations", None),
             getattr(self.run, "settings_change_detector", None))
         try:
             self._start(start_session(self.run, request, prompt))

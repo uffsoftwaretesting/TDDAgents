@@ -164,7 +164,7 @@ def test_main_opens_straight_on_a_titled_prompt_and_leaves_on_exit(tmp_path: Pat
     text = _strip(out)
     assert sent, text[-2000:]
     assert proc.returncode == 1, text[-2000:]  # left before any plan was approved: not completed
-    assert "NO APPROVED PLAN" in text
+    assert "TDDAgents · no approved plan" in text  # the exit report box on a terminal
     assert f"TDDAgents v{VERSION}" in text and "Red → Green → Refactor" in text and HELP_HINT in text
     assert "⏸ plan mode on" in text
     assert text.index(f"TDDAgents v{VERSION}") < text.index("plan mode on")

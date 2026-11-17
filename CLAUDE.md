@@ -239,6 +239,13 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   settings notice shows once per 60 s stay (upstream's same-key rule), and bwrap's empty `.mcp.json`
   placeholder is no config. Terminal log lines are the message alone, through the patched stderr. The
   status glyph is `⛨`. Interrupting, `/send-anyways` and pending questions: see [Commands](#commands).
+  On a terminal that shows colour (`TerminalIO.supports_color`; 2026-11-17) the screen is styled with
+  `rich` in TDDAgents' light green (`app/components/design_system/theme.py`, upstream's `theme.ts` palette
+  otherwise): every question is drawn in a rounded box from its plain layout (`style_question`: title,
+  options with their descriptions beneath, the footer under the box; the plan at approval as Markdown
+  between dashed rules, "Ready to code?"), TDDAgents' notices take their level's colour (`notice`), a
+  finished plan is a box, and the exit report is one summary box (`app/components/session_summary.py`).
+  Every other sink, headless and the tests get the plain text unchanged; model text is never read as markup.
 - **`-p` is the SDK protocol** (`app/cli/structured_io.py`, `run_headless`): a text prompt is the
   one user message of a closed input; `--output-format text|json|stream-json` (stream-json needs
   `--verbose`), `--input-format stream-json` (user messages and every control request on stdin;
