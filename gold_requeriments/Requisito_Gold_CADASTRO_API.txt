@@ -1,0 +1,1406 @@
+================================================================================
+REQUISITOS_GOLD_CADASTRO_USUARIOS
+Especificação Gold de Requisitos — API HTTP de Cadastro de Usuários
+Tecnologia obrigatória: TypeScript (runtime Node.js)
+================================================================================
+
+--------------------------------------------------------------------------------
+0. ESCOPO, CONVENÇÕES E DEFINIÇÕES
+--------------------------------------------------------------------------------
+
+0.1 Escopo
+Este documento especifica, de forma verificável, o comportamento de um backend
+que disponibiliza uma API HTTP para cadastro de usuários a partir de nome, data
+de nascimento, e-mail e senha. O documento é a referência (Gold Standard) para
+o desenvolvimento e para a geração de testes automatizados independentes. Não
+constitui implementação nem tutorial.
+
+0.2 Tecnologia
+A aplicação deve ser implementada exclusivamente em TypeScript, executada sobre
+o runtime Node.js (ver RF028). Nenhuma outra linguagem é admitida. Framework
+HTTP, biblioteca de acesso a dados e mecanismo de banco de dados são de livre
+escolha, desde que todos os requisitos deste documento sejam atendidos.
+
+0.3 Termos utilizados
+- "Endpoint de cadastro": a rota POST /api/v1/usuarios.
+- "Campos de cadastro": "nome", "data_nascimento", "email" e "senha", nesta
+  ordem canônica.
+- "Caractere": ponto de código Unicode. Comprimentos são medidos em pontos de
+  código (por exemplo, "ação" tem 4 caracteres e "😀" tem 1 caractere).
+- "Espaço em branco": espaço (U+0020), tabulação (U+0009), quebra de linha
+  (U+000A), retorno de carro (U+000D), tabulação vertical (U+000B), avanço de
+  página (U+000C) e espaço não separável (U+00A0).
+- "Cadeia em branco": cadeia vazia ("") ou composta exclusivamente por espaços
+  em branco.
+- "Aparar": remover os espaços em branco do início e do fim da cadeia, sem
+  alterar o conteúdo interno.
+- "Dígito": caractere ASCII de "0" (U+0030) a "9" (U+0039).
+- "Caractere de controle": pontos de código U+0000 a U+001F e U+007F.
+- "Data atual": data do calendário gregoriano correspondente ao instante de
+  processamento da requisição, em UTC.
+- "E-mail normalizado": valor do campo "email" aparado e convertido
+  integralmente para letras minúsculas (RF008).
+- "Requisição com Content-Type JSON": requisição cujo cabeçalho Content-Type
+  possui tipo de mídia "application/json", com ou sem parâmetros adicionais
+  (por exemplo, "application/json; charset=utf-8"), comparado sem distinção
+  entre maiúsculas e minúsculas.
+- "Resposta de sucesso": corpo JSON definido em RF002.
+- "Resposta de erro": corpo JSON definido em RF016.
+
+0.4 Convenções gerais aplicáveis a todos os requisitos
+- Todas as respostas da API (rotas sob /api, respostas de erro e rotas
+  inexistentes) possuem cabeçalho Content-Type "application/json; charset=utf-8"
+  e corpo codificado em UTF-8. A exceção é a interface Swagger UI (RF024),
+  servida como HTML.
+- O cabeçalho Accept da requisição não altera o formato da resposta.
+- Nomes de campos JSON são sensíveis a maiúsculas e minúsculas.
+- Todas as mensagens textuais especificadas neste documento devem ser
+  retornadas literalmente, caractere a caractere, incluindo acentuação e
+  pontuação final.
+- Nenhuma resposta da API, em nenhum cenário, contém a senha informada nem o
+  hash armazenado (RF012).
+
+0.5 Vetores de referência
+E-mails válidos (entrada → e-mail normalizado):
+  "usuario@exemplo.com"                → "usuario@exemplo.com"
+  "Nome.Sobrenome+tag@Sub.Exemplo.com.br" → "nome.sobrenome+tag@sub.exemplo.com.br"
+  "  ana@exemplo.com  "                → "ana@exemplo.com"
+  "a_b-c@exemplo-dominio.org"          → "a_b-c@exemplo-dominio.org"
+  "x@ex.io"                            → "x@ex.io"
+E-mails inválidos (FORMATO_INVALIDO):
+  "usuarioexemplo.com", "usuario@", "@exemplo.com", "usuario@@exemplo.com",
+  "usuario@exemplo", "usuario@exemplo.c", "usuario@exemplo.123",
+  ".usuario@exemplo.com", "usuario.@exemplo.com", "usu..ario@exemplo.com",
+  "usuario@-exemplo.com", "usuario@exemplo-.com", "usuario@exemplo..com",
+  "usuario@.exemplo.com", "usu ario@exemplo.com", "usuário@exemplo.com",
+  "usuario@exemplo.com.", "usuario@[192.168.0.1]", "\"usuario\"@exemplo.com",
+  parte local com 65 caracteres, endereço com 255 caracteres.
+Datas de nascimento válidas (considerando data atual posterior a 2024-12-31):
+  "2000-01-01", "2024-02-29", "1900-01-01", a própria data atual.
+Datas com formato inválido (FORMATO_INVALIDO):
+  "01/01/2000", "2000-1-1", "20000101", "2000/01/01",
+  "2000-01-01T00:00:00Z", " 2000-01-01", "２０００-０１-０１".
+Datas inexistentes (DATA_INEXISTENTE):
+  "2023-02-29", "1900-02-29", "2000-13-01", "2000-00-10", "2000-04-31",
+  "2000-01-00", "2000-01-32".
+Datas fora do intervalo (DATA_FORA_DO_INTERVALO):
+  "1899-12-31", o dia seguinte à data atual, "2999-01-01".
+
+0.6 Payload válido de referência
+  {
+    "nome": "Maria da Silva",
+    "data_nascimento": "1990-05-20",
+    "email": "maria.silva@exemplo.com",
+    "senha": "Senha@Forte123"
+  }
+
+================================================================================
+1. CADASTRO DE USUÁRIO
+================================================================================
+
+--------------------------------------------------------------------------------
+RF001 — Disponibilização do endpoint de cadastro de usuário
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve disponibilizar o endpoint POST /api/v1/usuarios, que recebe,
+no corpo da requisição, um objeto JSON com os campos de cadastro e, sendo os
+dados válidos e o e-mail ainda não cadastrado, cria um novo usuário.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 201 Created quando o usuário é cadastrado.
+   - Os demais códigos (400, 404, 409, 413, 415, 422, 500) são definidos em
+     RF003, RF010 e RF016 a RF022.
+2. Response Body:
+   - Para status 201, o corpo segue integralmente a estrutura de RF002.
+3. Regras de negócio:
+   - Um cadastro é efetuado somente quando todos os campos de cadastro são
+     válidos (RF004 a RF009) e o e-mail normalizado não pertence a usuário já
+     cadastrado (RF010).
+   - Os campos de cadastro são lidos exclusivamente do objeto JSON no corpo da
+     requisição; parâmetros de query string não são considerados (RF015).
+   - Não é exigido cabeçalho Location, pois a especificação não prevê endpoint
+     de consulta de usuário.
+4. Validação:
+   - A validação estrutural da requisição é especificada em RF016 a RF020; a
+     validação dos campos, em RF003 a RF009.
+5. Autenticação e autorização:
+   - Não aplicável — o endpoint é público e não exige credenciais (ver RF023).
+6. Estado:
+   - Em caso de sucesso, exatamente um novo registro de usuário é criado
+     (RF013). Em qualquer resposta diferente de 201, nenhum registro é criado
+     ou alterado (RF014).
+7. Efeitos colaterais:
+   - Persistência do usuário no banco de dados, com a senha armazenada
+     exclusivamente como hash (RF011, RF013). Nenhuma interação com serviços
+     externos (por exemplo, não há envio de e-mail).
+
+--------------------------------------------------------------------------------
+RF002 — Estrutura da resposta de cadastro bem-sucedido
+--------------------------------------------------------------------------------
+Descrição:
+Toda resposta com status 201 do endpoint de cadastro deve conter um objeto
+JSON com exatamente os campos "mensagem" e "usuario", sem campos adicionais.
+
+  Campo                     Tipo     Conteúdo
+  ------------------------  -------  ---------------------------------------------
+  mensagem                  string   "Usuário cadastrado com sucesso."
+  usuario                   objeto   Dados do usuário criado, com exatamente os
+                                     campos abaixo.
+  usuario.id                string   Identificador gerado pelo servidor, UUID
+                                     versão 4 em forma canônica minúscula
+                                     (8-4-4-4-12 caracteres hexadecimais).
+  usuario.nome              string   Nome aparado (RF005).
+  usuario.data_nascimento   string   Data no formato AAAA-MM-DD, igual à
+                                     informada.
+  usuario.email             string   E-mail normalizado (RF008).
+  usuario.criado_em         string   Instante do cadastro em UTC, no formato
+                                     AAAA-MM-DDTHH:mm:ss.sssZ.
+
+Exemplo (para o payload de referência 0.6):
+  {"mensagem":"Usuário cadastrado com sucesso.",
+   "usuario":{"id":"3f1c2a9e-8b7d-4c6e-9f0a-1b2c3d4e5f60",
+              "nome":"Maria da Silva","data_nascimento":"1990-05-20",
+              "email":"maria.silva@exemplo.com",
+              "criado_em":"2026-11-17T14:03:22.418Z"}}
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 201 Created em todos os casos cobertos por este requisito.
+2. Response Body:
+   - Conforme a tabela acima. O objeto "usuario" não contém os campos "senha",
+     "senha_hash" nem qualquer outro campo derivado da senha.
+   - Cabeçalho Content-Type: "application/json; charset=utf-8".
+3. Regras de negócio:
+   - "usuario.id" é único entre todos os usuários cadastrados.
+   - "usuario.criado_em" está compreendido entre o instante de envio da
+     requisição e o instante de recebimento da resposta.
+   - Os valores retornados são idênticos aos valores persistidos (RF013).
+4. Validação:
+   - Não aplicável — este requisito define o formato da saída; a validação da
+     entrada é tratada em RF003 a RF009 e RF016 a RF020.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - A resposta reflete o registro criado conforme RF013.
+7. Efeitos colaterais:
+   - Não aplicável — a montagem da resposta não produz efeitos além dos
+     descritos em RF001 e RF013.
+
+--------------------------------------------------------------------------------
+RF003 — Estrutura e agregação dos erros de validação de campos
+--------------------------------------------------------------------------------
+Descrição:
+Quando um ou mais campos de cadastro são inválidos, o sistema deve rejeitar a
+requisição informando, em uma única resposta, todos os campos inválidos.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity (Unprocessable Content).
+2. Response Body:
+   - {"erro":{"codigo":"DADOS_INVALIDOS",
+      "mensagem":"Os dados informados são inválidos.",
+      "detalhes":[{"campo":<string>,"codigo":<string>,"mensagem":<string>}, ...]}}
+   - "detalhes" contém exatamente um elemento para cada campo inválido e
+     nenhum elemento para campos válidos.
+   - Os elementos de "detalhes" seguem a ordem canônica dos campos: nome,
+     data_nascimento, email, senha.
+   - "codigo" e "mensagem" de cada elemento seguem exclusivamente o catálogo
+     abaixo:
+
+  campo            codigo                   mensagem
+  ---------------  -----------------------  ---------------------------------------------------------------
+  nome             CAMPO_OBRIGATORIO        "O campo nome é obrigatório."
+  nome             TIPO_INVALIDO            "O campo nome deve ser do tipo string."
+  nome             CAMPO_VAZIO              "O campo nome não pode estar vazio."
+  nome             TAMANHO_INVALIDO         "O campo nome deve ter entre 2 e 100 caracteres."
+  nome             CARACTERE_INVALIDO       "O campo nome contém caracteres não permitidos."
+  data_nascimento  CAMPO_OBRIGATORIO        "O campo data_nascimento é obrigatório."
+  data_nascimento  TIPO_INVALIDO            "O campo data_nascimento deve ser do tipo string."
+  data_nascimento  CAMPO_VAZIO              "O campo data_nascimento não pode estar vazio."
+  data_nascimento  FORMATO_INVALIDO         "O campo data_nascimento deve estar no formato AAAA-MM-DD."
+  data_nascimento  DATA_INEXISTENTE         "O campo data_nascimento não corresponde a uma data existente."
+  data_nascimento  DATA_FORA_DO_INTERVALO   "O campo data_nascimento deve estar entre 1900-01-01 e a data atual."
+  email            CAMPO_OBRIGATORIO        "O campo email é obrigatório."
+  email            TIPO_INVALIDO            "O campo email deve ser do tipo string."
+  email            CAMPO_VAZIO              "O campo email não pode estar vazio."
+  email            FORMATO_INVALIDO         "O campo email deve conter um endereço de e-mail válido."
+  senha            CAMPO_OBRIGATORIO        "O campo senha é obrigatório."
+  senha            TIPO_INVALIDO            "O campo senha deve ser do tipo string."
+  senha            CAMPO_VAZIO              "O campo senha não pode estar vazio."
+  senha            TAMANHO_INVALIDO         "O campo senha deve ter entre 8 e 128 caracteres."
+
+3. Regras de negócio:
+   - Para cada campo, as regras são avaliadas na ordem em que aparecem no
+     catálogo acima, e apenas a primeira regra violada é reportada.
+   - Exemplo: {"nome":"A","data_nascimento":"2023-02-29","email":"x",
+     "senha":"123"} → quatro elementos em "detalhes": nome/TAMANHO_INVALIDO,
+     data_nascimento/DATA_INEXISTENTE, email/FORMATO_INVALIDO,
+     senha/TAMANHO_INVALIDO.
+   - A verificação de unicidade do e-mail (RF010) não é realizada quando há
+     qualquer campo inválido; portanto, um e-mail já cadastrado acompanhado
+     de outro campo inválido resulta em 422, e não em 409.
+4. Validação:
+   - Os elementos de "detalhes" não ecoam os valores recebidos.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Nenhum registro é criado ou alterado.
+7. Efeitos colaterais:
+   - Não aplicável — nenhuma persistência e nenhuma consulta ao banco de
+     dados são realizadas quando há campos inválidos.
+
+--------------------------------------------------------------------------------
+RF004 — Presença, tipo e preenchimento dos campos de cadastro
+--------------------------------------------------------------------------------
+Descrição:
+Os quatro campos de cadastro são obrigatórios, devem ser do tipo string JSON e
+não podem ser cadeias em branco. Não há conversão implícita de tipos.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity quando qualquer campo violar este requisito.
+2. Response Body:
+   - Estrutura de RF003, com, para cada campo afetado:
+     ausente ou null              → codigo "CAMPO_OBRIGATORIO";
+     presente, não null, não string → codigo "TIPO_INVALIDO";
+     string em branco             → codigo "CAMPO_VAZIO".
+3. Regras de negócio:
+   - Exemplos de TIPO_INVALIDO: "nome": 123; "data_nascimento": 19900520;
+     "email": ["a@exemplo.com"]; "senha": 12345678; "senha": true;
+     "nome": {"primeiro":"Maria"}.
+   - Exemplos de CAMPO_VAZIO: "nome": ""; "email": "   "; "senha": "        "
+     (oito espaços); "data_nascimento": "\t".
+   - Corpo vazio (zero bytes ou apenas espaços em branco) com Content-Type
+     JSON, ou objeto vazio {}, resulta em 422 com quatro elementos
+     CAMPO_OBRIGATORIO, um para cada campo.
+   - Chaves com grafia diferente (por exemplo, "Nome", "e-mail",
+     "dataNascimento", "password") não são reconhecidas e equivalem à ausência
+     do campo correspondente.
+4. Validação:
+   - Avaliado antes das regras específicas de cada campo (RF005 a RF009).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Nenhum registro é criado ou alterado.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF005 — Validação do campo "nome"
+--------------------------------------------------------------------------------
+Descrição:
+O campo "nome", após ser aparado, deve ter entre 2 e 100 caracteres e não pode
+conter caracteres de controle.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity quando inválido; não impede o status 201 quando
+     válido e os demais campos também forem válidos.
+2. Response Body:
+   - Em caso de violação: elemento {"campo":"nome","codigo":"TAMANHO_INVALIDO"
+     ou "CARACTERE_INVALIDO", "mensagem": conforme catálogo de RF003}.
+   - Em caso de sucesso: "usuario.nome" contém o nome aparado.
+3. Regras de negócio:
+   - O comprimento é medido após aparar. Espaços internos são preservados sem
+     alteração.
+   - Válidos: "Ana", "Jo", "  Maria da Silva  " (armazenado como
+     "Maria da Silva"), "José D'Ávila-Souza", "李小龍", nome com exatamente 100
+     caracteres.
+   - TAMANHO_INVALIDO: "A", " A ", nome com 101 caracteres após aparar.
+   - CARACTERE_INVALIDO: "Maria\u0000Silva", "Maria\u0007", "Maria\u001bSilva"
+     (após aparar, qualquer caractere de controle remanescente).
+   - A verificação de tamanho precede a de caracteres de controle.
+   - Não há restrição de unicidade sobre o nome.
+4. Validação:
+   - Pressupõe que o campo passou nas verificações de RF004.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - O nome é persistido na forma aparada (RF013).
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos além da persistência descrita em RF013.
+
+--------------------------------------------------------------------------------
+RF006 — Validação do campo "data_nascimento"
+--------------------------------------------------------------------------------
+Descrição:
+O campo "data_nascimento" deve estar no formato AAAA-MM-DD, corresponder a uma
+data existente no calendário gregoriano e estar compreendido entre 1900-01-01
+e a data atual, inclusive.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity quando inválido.
+2. Response Body:
+   - Em caso de violação: elemento com "campo": "data_nascimento" e "codigo"
+     igual a "FORMATO_INVALIDO", "DATA_INEXISTENTE" ou
+     "DATA_FORA_DO_INTERVALO", com a mensagem do catálogo de RF003.
+   - Em caso de sucesso: "usuario.data_nascimento" é idêntico ao valor
+     recebido.
+3. Regras de negócio:
+   - FORMATO_INVALIDO: a cadeia não possui exatamente 10 caracteres no padrão
+     DDDD-DD-DD (D = dígito ASCII), sem espaços, horário ou fuso. O valor não
+     é aparado.
+   - DATA_INEXISTENTE: formato correto, mas mês fora de 01–12 ou dia fora do
+     intervalo válido para o mês e ano, considerando anos bissextos
+     (divisíveis por 4, exceto os divisíveis por 100 que não são divisíveis
+     por 400).
+   - DATA_FORA_DO_INTERVALO: data existente anterior a 1900-01-01 ou
+     posterior à data atual (UTC).
+   - A comparação com a data atual considera apenas a data, sem horário; a
+     data atual é aceita.
+   - Ordem de avaliação: FORMATO_INVALIDO → DATA_INEXISTENTE →
+     DATA_FORA_DO_INTERVALO.
+   - Não há requisito de idade mínima.
+   - Vetores de referência na seção 0.5.
+4. Validação:
+   - Pressupõe que o campo passou nas verificações de RF004.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - A data é persistida sem componente de horário e sem conversão de fuso
+     (RF013).
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos além da persistência descrita em RF013.
+
+--------------------------------------------------------------------------------
+RF007 — Validação do formato do campo "email"
+--------------------------------------------------------------------------------
+Descrição:
+O e-mail normalizado (RF008) deve atender às regras de formato abaixo. Não há
+verificação de existência do domínio nem da caixa postal.
+
+Regras (aplicadas ao e-mail normalizado):
+  a) comprimento total de 1 a 254 caracteres;
+  b) exatamente um caractere "@", que separa parte local e domínio;
+  c) parte local com 1 a 64 caracteres, composta apenas por letras ASCII
+     minúsculas, dígitos e os símbolos . ! # $ % & ' * + / = ? ^ _ ` { | } ~ -
+     sem iniciar nem terminar com "." e sem ".." consecutivos;
+  d) domínio composto por dois ou mais rótulos separados por ".", cada rótulo
+     com 1 a 63 caracteres formados por letras ASCII minúsculas, dígitos e
+     "-", sem iniciar nem terminar com "-";
+  e) último rótulo do domínio (TLD) com 2 ou mais caracteres, exclusivamente
+     letras;
+  f) não são aceitos: espaços ou espaços em branco internos, caracteres não
+     ASCII, parte local entre aspas, domínio em forma de endereço IP literal
+     ("[...]") e ponto final após o domínio.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity quando o formato é inválido.
+2. Response Body:
+   - Em caso de violação: {"campo":"email","codigo":"FORMATO_INVALIDO",
+     "mensagem":"O campo email deve conter um endereço de e-mail válido."}.
+3. Regras de negócio:
+   - Vetores válidos e inválidos na seção 0.5.
+   - Endereço com parte local de 64 caracteres e domínio válido é aceito;
+     com 65 caracteres, é rejeitado.
+   - Endereço de 254 caracteres que atenda às demais regras é aceito; com 255
+     caracteres, é rejeitado.
+4. Validação:
+   - Pressupõe que o campo passou nas verificações de RF004. A verificação de
+     formato precede a de unicidade (RF010).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Não aplicável — a validação de formato não consulta nem altera dados.
+7. Efeitos colaterais:
+   - Não aplicável — nenhuma consulta DNS, conexão SMTP ou chamada externa é
+     realizada.
+
+--------------------------------------------------------------------------------
+RF008 — Normalização do e-mail
+--------------------------------------------------------------------------------
+Descrição:
+Antes da validação de formato, da verificação de unicidade e da persistência,
+o valor do campo "email" deve ser aparado e convertido integralmente para
+letras minúsculas.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não altera o status por si só; determina a avaliação de RF007 e RF010.
+2. Response Body:
+   - "usuario.email" na resposta 201 contém o e-mail normalizado.
+3. Regras de negócio:
+   - "  Ana.Souza@Exemplo.COM " → "ana.souza@exemplo.com".
+   - Endereços que diferem apenas por maiúsculas/minúsculas ou por espaços nas
+     extremidades são o mesmo e-mail para fins de unicidade (RF010).
+   - Nenhuma outra transformação é aplicada (por exemplo, pontos e sufixos
+     "+tag" na parte local são preservados; "a.b@exemplo.com" e
+     "ab@exemplo.com" são e-mails distintos).
+4. Validação:
+   - Espaços em branco internos não são removidos e resultam em
+     FORMATO_INVALIDO (RF007).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - O e-mail é persistido exclusivamente na forma normalizada (RF013).
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos além da persistência descrita em RF013.
+
+--------------------------------------------------------------------------------
+RF009 — Validação do campo "senha"
+--------------------------------------------------------------------------------
+Descrição:
+O campo "senha" deve ter entre 8 e 128 caracteres. A senha não é aparada nem
+transformada antes da validação e do cálculo do hash.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity quando inválida.
+2. Response Body:
+   - Em caso de violação: {"campo":"senha","codigo":"TAMANHO_INVALIDO",
+     "mensagem":"O campo senha deve ter entre 8 e 128 caracteres."}.
+   - A senha nunca é ecoada, em nenhuma resposta.
+3. Regras de negócio:
+   - Qualquer caractere é permitido, inclusive espaços, acentos e emojis.
+   - Válidas: "12345678", "senha 123", "Senha@Forte123", senha com exatamente
+     128 caracteres, "ação😀ação😀" (10 caracteres).
+   - TAMANHO_INVALIDO: "1234567" (7 caracteres), senha com 129 caracteres.
+   - Espaços nas extremidades fazem parte da senha e contam no comprimento
+     (por exemplo, " abcdef " tem 8 caracteres e é válida).
+   - Não há exigências adicionais de composição (letras maiúsculas, dígitos ou
+     símbolos).
+4. Validação:
+   - Pressupõe que o campo passou nas verificações de RF004 (senha composta
+     apenas por espaços em branco resulta em CAMPO_VAZIO).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Apenas o hash da senha é persistido (RF011).
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos além do armazenamento do hash (RF011).
+
+--------------------------------------------------------------------------------
+RF010 — Unicidade do e-mail
+--------------------------------------------------------------------------------
+Descrição:
+Não pode existir mais de um usuário cadastrado com o mesmo e-mail normalizado.
+A tentativa de cadastro com e-mail normalizado já existente deve ser
+rejeitada.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 409 Conflict.
+2. Response Body:
+   - {"erro":{"codigo":"EMAIL_JA_CADASTRADO",
+      "mensagem":"Já existe um usuário cadastrado com este e-mail.",
+      "detalhes":[{"campo":"email","codigo":"EMAIL_JA_CADASTRADO",
+      "mensagem":"Já existe um usuário cadastrado com este e-mail."}]}}
+3. Regras de negócio:
+   - Após cadastrar "maria.silva@exemplo.com", as tentativas com
+     "maria.silva@exemplo.com", "Maria.Silva@Exemplo.com" e
+     " MARIA.SILVA@EXEMPLO.COM " resultam em 409, independentemente de nome,
+     data de nascimento e senha.
+   - A verificação ocorre somente quando todos os campos são válidos (RF003).
+   - A unicidade é garantida também sob concorrência (RF014).
+4. Validação:
+   - Não aplicável — trata-se de erro de regra de negócio, não de formato de
+     entrada.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - O usuário previamente cadastrado permanece inalterado; nenhum novo
+     registro é criado.
+7. Efeitos colaterais:
+   - Consulta ao armazenamento para verificar a existência do e-mail. Nenhuma
+     escrita é realizada.
+
+--------------------------------------------------------------------------------
+RF011 — Armazenamento da senha exclusivamente como hash seguro
+--------------------------------------------------------------------------------
+Descrição:
+A senha deve ser armazenada exclusivamente como hash produzido pelo algoritmo
+Argon2id, com sal aleatório por usuário, nunca em texto puro nem em forma
+reversível (codificação ou criptografia).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não altera o status de sucesso (201). Falha no cálculo do hash resulta
+     em 500 (RF022).
+2. Response Body:
+   - Não aplicável — o hash nunca é retornado (RF012).
+3. Regras de negócio:
+   - O valor armazenado está no formato de cadeia PHC do Argon2, iniciado por
+     "$argon2id$v=19$", contendo os parâmetros m (memória, em KiB), t
+     (iterações) e p (paralelismo) iguais aos configurados em RF029.
+   - Sal de no mínimo 16 bytes, gerado por fonte criptograficamente segura,
+     distinto para cada cadastro; hash resultante com no mínimo 32 bytes.
+   - Dois usuários cadastrados com a mesma senha possuem hashes armazenados
+     diferentes.
+   - A verificação do hash armazenado com a senha original, por implementação
+     padrão de Argon2id, resulta em sucesso; com qualquer outra senha, em
+     falha.
+   - Nenhum campo, coluna ou registro do armazenamento contém a senha em texto
+     puro, inteira ou parcial, nem sua representação codificada (por exemplo,
+     Base64 ou hexadecimal).
+4. Validação:
+   - O hash é calculado somente após a validação bem-sucedida de todos os
+     campos (RF003) e da unicidade do e-mail (RF010).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação; o hash é armazenado, mas não há
+     endpoint de login (ver seção 6).
+6. Estado:
+   - O hash é persistido no registro do usuário (RF013).
+7. Efeitos colaterais:
+   - Persistência do hash. Nenhum outro efeito.
+
+--------------------------------------------------------------------------------
+RF012 — Não exposição da senha e do hash
+--------------------------------------------------------------------------------
+Descrição:
+A senha em texto puro e o hash armazenado não podem ser expostos em respostas
+HTTP nem em registros de log, em nenhum cenário.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Aplica-se a respostas de todos os status (201, 400, 404, 409, 413, 415,
+     422, 500).
+2. Response Body:
+   - Nenhum corpo de resposta contém a cadeia da senha enviada, o hash
+     armazenado nem campos denominados "senha" ou "senha_hash" com valor.
+     O nome "senha" aparece apenas como valor de "campo" em "detalhes"
+     (RF003).
+3. Regras de negócio:
+   - Verificação: enviar senha com marcador único (por exemplo,
+     "Marcador#7f3a9c21") em cenários de sucesso, de 409, de 422 em outro
+     campo e de 500 simulado, e confirmar que o marcador e o hash não
+     aparecem em nenhuma resposta nem na saída de log.
+4. Validação:
+   - Não aplicável — requisito de confidencialidade, não de entrada.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Não aplicável — requisito sobre saídas, não sobre estado.
+7. Efeitos colaterais:
+   - Registros de log, em qualquer nível (inclusive "debug"), não contêm a
+     senha nem o hash. Se o corpo da requisição for registrado, o valor de
+     "senha" deve ser omitido ou substituído por máscara fixa (por exemplo,
+     "***").
+
+--------------------------------------------------------------------------------
+RF013 — Persistência do usuário cadastrado
+--------------------------------------------------------------------------------
+Descrição:
+Cada cadastro bem-sucedido deve criar um registro persistente de usuário em
+banco de dados configurado por variável de ambiente (RF029), contendo os
+atributos abaixo.
+
+  Atributo          Conteúdo
+  ----------------  ------------------------------------------------------------
+  id                UUID v4 gerado pelo servidor (igual a usuario.id).
+  nome              Nome aparado.
+  data_nascimento   Data informada, sem horário.
+  email             E-mail normalizado, com restrição de unicidade no próprio
+                    armazenamento.
+  senha_hash        Hash Argon2id da senha (RF011).
+  criado_em         Instante do cadastro em UTC (igual a usuario.criado_em).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 201 Created somente após a confirmação da gravação.
+2. Response Body:
+   - Valores de RF002 idênticos aos persistidos.
+3. Regras de negócio:
+   - O identificador e o instante de criação são definidos exclusivamente pelo
+     servidor (RF015).
+   - O registro permanece disponível após a reinicialização da aplicação:
+     após reiniciar o processo com o mesmo DATABASE_URL, novo cadastro com o
+     mesmo e-mail resulta em 409.
+4. Validação:
+   - A restrição de unicidade do e-mail existe no armazenamento, e não apenas
+     na verificação da aplicação.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Criação de exatamente um registro por cadastro bem-sucedido. Não há
+     atualização nem remoção de registros pela API.
+7. Efeitos colaterais:
+   - Escrita no banco de dados. Nenhuma interação com outros serviços.
+
+--------------------------------------------------------------------------------
+RF014 — Atomicidade e concorrência do cadastro
+--------------------------------------------------------------------------------
+Descrição:
+O cadastro deve ser atômico: ou o registro completo é criado e a resposta é
+201, ou nenhum registro é criado. Requisições concorrentes com o mesmo e-mail
+normalizado não podem gerar registros duplicados.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Para N requisições simultâneas e válidas com o mesmo e-mail normalizado
+     (por exemplo, N = 10), exatamente uma recebe 201 e as demais recebem 409.
+     Nenhuma recebe 500 em razão da disputa.
+2. Response Body:
+   - As respostas 409 seguem RF010.
+3. Regras de negócio:
+   - A violação da restrição de unicidade do armazenamento é convertida em
+     409 EMAIL_JA_CADASTRADO.
+   - Falha no cálculo do hash ou na gravação resulta em 500 (RF022) sem
+     registro criado.
+4. Validação:
+   - Não aplicável — requisito de consistência, não de entrada.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Após o cenário concorrente, existe exatamente um registro com o e-mail
+     disputado. Após qualquer resposta diferente de 201, a quantidade de
+     registros permanece inalterada.
+7. Efeitos colaterais:
+   - Não aplicável — não há efeitos parciais observáveis.
+
+--------------------------------------------------------------------------------
+RF015 — Desconsideração de campos adicionais e de parâmetros de consulta
+--------------------------------------------------------------------------------
+Descrição:
+Campos do objeto JSON diferentes dos campos de cadastro e parâmetros de query
+string devem ser ignorados, sem influenciar a validação, a persistência ou a
+resposta.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - O mesmo status que seria obtido sem os campos adicionais e sem a query
+     string.
+2. Response Body:
+   - Campos adicionais não são ecoados na resposta.
+3. Regras de negócio:
+   - Campos como "id", "criado_em", "senha_hash", "admin" ou "perfil"
+     enviados pelo cliente não são persistidos e não alteram os valores
+     gerados pelo servidor (por exemplo, enviar "id":"00000000-0000-4000-
+     8000-000000000000" não faz com que esse seja o identificador criado).
+   - POST /api/v1/usuarios?email=a@exemplo.com com corpo {} → 422 com quatro
+     elementos CAMPO_OBRIGATORIO.
+4. Validação:
+   - Campos adicionais não são validados quanto a tipo ou formato.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Campos adicionais não são persistidos.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais adicionais.
+
+================================================================================
+2. ESTRUTURA DA REQUISIÇÃO E TRATAMENTO DE ERROS
+================================================================================
+
+--------------------------------------------------------------------------------
+RF016 — Estrutura padronizada de resposta de erro e precedência entre erros
+--------------------------------------------------------------------------------
+Descrição:
+Toda resposta de erro da API (status 400, 404, 409, 413, 415, 422 e 500) deve
+seguir a estrutura abaixo, sem campos adicionais:
+  {
+    "erro": {
+      "codigo":   string,
+      "mensagem": string,
+      "detalhes": array
+    }
+  }
+Cada elemento de "detalhes" é um objeto com exatamente os campos "campo",
+"codigo" e "mensagem" (todos string). "detalhes" é preenchido apenas nos erros
+DADOS_INVALIDOS (RF003) e EMAIL_JA_CADASTRADO (RF010); nos demais, é um array
+vazio ([]).
+
+Catálogo fechado de códigos de erro (nível superior):
+  Status  codigo                        mensagem
+  ------  ----------------------------  ------------------------------------------------------------
+  400     "JSON_MALFORMADO"             "O corpo da requisição não é um JSON válido."
+  404     "ROTA_NAO_ENCONTRADA"         "Rota não encontrada."
+  409     "EMAIL_JA_CADASTRADO"         "Já existe um usuário cadastrado com este e-mail."
+  413     "PAYLOAD_MUITO_GRANDE"        "O corpo da requisição excede o tamanho máximo de 100 KiB."
+  415     "CONTENT_TYPE_NAO_SUPORTADO"  "O cabeçalho Content-Type deve ser application/json."
+  422     "PAYLOAD_INVALIDO"            "O corpo da requisição deve ser um objeto JSON."
+  422     "DADOS_INVALIDOS"             "Os dados informados são inválidos."
+  500     "ERRO_INTERNO"                "Erro interno do servidor."
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Conforme o catálogo. Cada código de erro está associado a um único status.
+2. Response Body:
+   - Estrutura acima; Content-Type "application/json; charset=utf-8".
+   - Respostas de erro nunca contêm o campo "usuario", e respostas 201 nunca
+     contêm o campo "erro".
+3. Regras de negócio — precedência no endpoint de cadastro, avaliada nesta
+   ordem; o primeiro erro encontrado é o único retornado:
+   1º Content-Type não JSON → 415 (RF018);
+   2º corpo maior que 102400 bytes → 413 (RF020);
+   3º corpo não vazio e sintaticamente inválido como JSON → 400 (RF017);
+   4º corpo JSON válido que não é objeto → 422 PAYLOAD_INVALIDO (RF019);
+   5º um ou mais campos inválidos → 422 DADOS_INVALIDOS (RF003 a RF009);
+   6º e-mail normalizado já cadastrado → 409 (RF010);
+   7º falha inesperada em qualquer etapa → 500 (RF022);
+   8º demais casos → 201 (RF001, RF002).
+4. Validação:
+   - Nenhum código de erro fora do catálogo pode ser retornado.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023); portanto, os status 401 e
+     403 nunca são retornados.
+6. Estado:
+   - Nenhuma resposta de erro é acompanhada de criação ou alteração de
+     registro (RF014).
+7. Efeitos colaterais:
+   - Não aplicável — a geração de respostas de erro não produz efeitos
+     observáveis além do retorno HTTP e de eventual registro em log (RF012).
+
+--------------------------------------------------------------------------------
+RF017 — Corpo JSON malformado
+--------------------------------------------------------------------------------
+Descrição:
+Quando a requisição ao endpoint de cadastro possui Content-Type JSON e corpo
+não vazio que não pode ser interpretado como JSON sintaticamente válido, o
+sistema deve rejeitá-la.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 400 Bad Request.
+2. Response Body:
+   - {"erro":{"codigo":"JSON_MALFORMADO","mensagem":"O corpo da requisição não
+     é um JSON válido.","detalhes":[]}}
+   - O corpo não contém mensagens do analisador JSON, nomes de classes de
+     erro, rastreamento de pilha, trechos do corpo recebido nem páginas HTML.
+3. Regras de negócio:
+   - Exemplos: {"nome":"Maria" (chave de fechamento ausente);
+     {nome:"Maria"} (chave sem aspas); {'nome':'Maria'} (aspas simples);
+     {"nome":"Maria",} (vírgula final); texto livre "nome=Maria".
+4. Validação:
+   - Corpo vazio não é considerado malformado (ver RF004).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Nenhum registro é criado ou alterado.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais; nenhum acesso ao banco de dados.
+
+--------------------------------------------------------------------------------
+RF018 — Content-Type não suportado
+--------------------------------------------------------------------------------
+Descrição:
+Quando a requisição ao endpoint de cadastro não possui Content-Type JSON,
+incluindo a ausência do cabeçalho, o sistema deve rejeitá-la sem interpretar o
+corpo.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 415 Unsupported Media Type.
+2. Response Body:
+   - {"erro":{"codigo":"CONTENT_TYPE_NAO_SUPORTADO","mensagem":"O cabeçalho
+     Content-Type deve ser application/json.","detalhes":[]}}
+3. Regras de negócio:
+   - Produzem este erro: ausência de Content-Type; "text/plain";
+     "application/x-www-form-urlencoded"; "multipart/form-data";
+     "application/xml".
+   - Não produzem este erro: "application/json",
+     "application/json; charset=utf-8", "Application/JSON".
+   - Tem precedência sobre todos os demais erros do endpoint (RF016).
+4. Validação:
+   - O corpo não é interpretado quando este erro ocorre.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Nenhum registro é criado ou alterado.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF019 — Corpo JSON que não é um objeto
+--------------------------------------------------------------------------------
+Descrição:
+Quando o corpo é JSON sintaticamente válido cujo valor de nível superior não é
+objeto (array, string, número, booleano ou null), o sistema deve rejeitar a
+requisição.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity.
+2. Response Body:
+   - {"erro":{"codigo":"PAYLOAD_INVALIDO","mensagem":"O corpo da requisição
+     deve ser um objeto JSON.","detalhes":[]}}
+3. Regras de negócio:
+   - Exemplos: [], [{"nome":"Maria"}], "Maria", 123, true, null.
+4. Validação:
+   - Avaliado após RF018, RF020 e RF017 e antes da validação dos campos.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Nenhum registro é criado ou alterado.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF020 — Limite de tamanho do corpo da requisição
+--------------------------------------------------------------------------------
+Descrição:
+O endpoint de cadastro deve rejeitar requisições cujo corpo exceda 102400
+bytes (100 KiB).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 413 Content Too Large (Payload Too Large).
+2. Response Body:
+   - {"erro":{"codigo":"PAYLOAD_MUITO_GRANDE","mensagem":"O corpo da requisição
+     excede o tamanho máximo de 100 KiB.","detalhes":[]}}
+3. Regras de negócio:
+   - Corpo com exatamente 102400 bytes não produz este erro; corpo com 102401
+     bytes produz, mesmo que seja JSON válido.
+   - O limite independe de o excesso estar nos campos de cadastro ou em campos
+     adicionais.
+4. Validação:
+   - O corpo excedente não é interpretado.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Nenhum registro é criado ou alterado.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF021 — Rotas e métodos não mapeados
+--------------------------------------------------------------------------------
+Descrição:
+Requisições a rotas inexistentes, ou à rota /api/v1/usuarios com método
+diferente de POST, devem receber resposta de erro padronizada.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 404 Not Found.
+2. Response Body:
+   - {"erro":{"codigo":"ROTA_NAO_ENCONTRADA","mensagem":"Rota não
+     encontrada.","detalhes":[]}}
+   - Nenhuma página HTML de erro do framework é retornada.
+3. Regras de negócio:
+   - Exemplos: GET /api/v1/usuarios; PUT /api/v1/usuarios;
+     DELETE /api/v1/usuarios; GET /api/v1/usuarios/<id>;
+     POST /api/v1/usuario; POST /api/v2/usuarios; GET /inexistente.
+   - As rotas /docs e /docs/openapi.json (RF024, RF025) não são afetadas.
+4. Validação:
+   - Content-Type e corpo não são avaliados para rotas não mapeadas.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Nenhum registro é consultado, criado ou alterado.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF022 — Tratamento de falhas inesperadas
+--------------------------------------------------------------------------------
+Descrição:
+Qualquer falha não prevista durante o processamento de uma requisição —
+incluindo indisponibilidade do banco de dados durante a requisição e falha no
+cálculo do hash — deve ser capturada e convertida em resposta de erro
+padronizada, em todos os ambientes (development, test e production).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 500 Internal Server Error.
+2. Response Body:
+   - {"erro":{"codigo":"ERRO_INTERNO","mensagem":"Erro interno do
+     servidor.","detalhes":[]}}
+   - O corpo não contém mensagem do erro, nome de classe, consulta SQL,
+     caminhos de arquivo, rastreamento de pilha nem dados do usuário.
+3. Regras de negócio:
+   - Verificação: em ambiente de teste, substituir o repositório de usuários
+     ou o componente de hash por dublê que lance erro genérico, enviar o
+     payload de referência 0.6 e observar a resposta acima.
+   - Violação da restrição de unicidade do e-mail não é falha inesperada e
+     resulta em 409 (RF014).
+   - Após uma falha, requisições subsequentes continuam sendo atendidas.
+4. Validação:
+   - Não aplicável — trata-se de falha interna; entradas inválidas nunca
+     resultam em 500.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF023).
+6. Estado:
+   - Nenhum registro parcial é criado (RF014).
+7. Efeitos colaterais:
+   - O detalhe técnico da falha pode ser registrado em log, observado RF012.
+     Nenhum outro efeito.
+
+================================================================================
+3. REQUISITOS TRANSVERSAIS
+================================================================================
+
+--------------------------------------------------------------------------------
+RF023 — Ausência de autenticação e autorização
+--------------------------------------------------------------------------------
+Descrição:
+O cadastro de usuários é público: a API não possui mecanismo de autenticação
+nem de autorização, e todos os endpoints (cadastro e documentação) são
+acessíveis sem credenciais.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Os status 401 Unauthorized e 403 Forbidden nunca são retornados.
+2. Response Body:
+   - Idêntico com ou sem cabeçalhos de credenciais.
+3. Regras de negócio:
+   - Cabeçalhos como Authorization, Cookie ou X-API-Key são ignorados.
+   - A API não emite tokens, cookies de sessão nem cabeçalhos Set-Cookie.
+4. Validação:
+   - Valores arbitrários ou malformados em cabeçalhos de credenciais não geram
+     erro.
+5. Autenticação e autorização:
+   - Acesso permitido a qualquer cliente, sem credenciais, em todas as rotas.
+     Não existe cenário de acesso negado.
+6. Estado:
+   - Não aplicável — não há sessões nem tokens.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+================================================================================
+4. DOCUMENTAÇÃO DA API (OPENAPI / SWAGGER) — OBRIGATÓRIA
+================================================================================
+
+--------------------------------------------------------------------------------
+RF024 — Documentação interativa Swagger UI na rota /docs
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve, obrigatoriamente, disponibilizar documentação interativa da
+API por meio da interface Swagger UI, acessível pela rota /docs, construída a
+partir da especificação OpenAPI de RF025. A documentação não é opcional e deve
+estar disponível em todos os ambientes (development, test e production).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - GET /docs retorna 200 OK com página HTML; alternativamente, retorna
+     redirecionamento (301, 302, 307 ou 308) para URL cujo caminho se inicia
+     por /docs e cuja resposta final, após seguir os redirecionamentos, é
+     200 OK com página HTML.
+2. Response Body:
+   - Resposta final com Content-Type "text/html" contendo a interface Swagger
+     UI, que carrega a especificação a partir de /docs/openapi.json.
+3. Regras de negócio:
+   - A interface exibe a operação POST /api/v1/usuarios, com resumo, esquema
+     de requisição, exemplos e respostas documentadas (RF026, RF027).
+   - A funcionalidade "Try it out" está habilitada para POST; a execução a
+     partir da interface envia a requisição à própria instância em execução e
+     exibe status, cabeçalhos e corpo da resposta real.
+   - Os recursos da interface (HTML, CSS e JavaScript) são servidos pela
+     própria aplicação, sem dependência de CDN, de modo que a documentação
+     funcione sem acesso à internet.
+4. Validação:
+   - Não aplicável — a rota não recebe payload.
+5. Autenticação e autorização:
+   - Acesso público, sem credenciais (ver RF023).
+6. Estado:
+   - A consulta à documentação não altera estado. Cadastros executados pela
+     interface têm exatamente os mesmos efeitos de requisições diretas ao
+     endpoint (RF013).
+7. Efeitos colaterais:
+   - Não aplicável — a exibição da documentação não produz efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF025 — Especificação OpenAPI disponível e válida
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve disponibilizar o documento de especificação da API no formato
+OpenAPI 3.0, em JSON, na rota GET /docs/openapi.json, utilizado pela interface
+Swagger UI (RF024).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - GET /docs/openapi.json retorna 200 OK.
+2. Response Body:
+   - Content-Type "application/json".
+   - Objeto JSON contendo, no mínimo: "openapi" (string iniciada por "3.0.");
+     "info.title" e "info.version" (strings não vazias); "paths" contendo
+     "/api/v1/usuarios".
+3. Regras de negócio:
+   - O documento é válido segundo o esquema oficial da especificação OpenAPI
+     3.0, sem erros, quando submetido a um validador de especificações
+     OpenAPI.
+   - Se o campo "servers" estiver presente, contém apenas URL relativa ("/"),
+     de modo que a interface utilize a mesma origem da aplicação, qualquer que
+     seja a porta configurada (RF029).
+   - Todas as referências internas ("$ref") são resolvíveis dentro do próprio
+     documento.
+4. Validação:
+   - Não aplicável — a rota não recebe payload.
+5. Autenticação e autorização:
+   - Acesso público (RF023). O documento não declara "securitySchemes" nem
+     requisitos "security".
+6. Estado:
+   - Não aplicável — o documento não é alterado por chamadas à API.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF026 — Documentação do endpoint, parâmetros e payloads
+--------------------------------------------------------------------------------
+Descrição:
+A especificação OpenAPI deve descrever o endpoint de cadastro, seu corpo de
+requisição e os tipos de dados e restrições de cada campo.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito sobre o conteúdo do documento de RF025.
+2. Response Body:
+   - Em "paths./api/v1/usuarios" existe a operação "post" (e nenhuma outra),
+     com "summary" e "description" não vazios.
+   - "requestBody.required" igual a true, com conteúdo "application/json" cujo
+     esquema é do tipo "object", com "required" contendo exatamente "nome",
+     "data_nascimento", "email" e "senha", todos do tipo "string", com:
+     nome: "minLength": 2, "maxLength": 100;
+     data_nascimento: "format": "date";
+     email: "format": "email", "maxLength": 254;
+     senha: "format": "password", "minLength": 8, "maxLength": 128.
+   - Cada propriedade possui "description" com as regras deste documento
+     (aparar, normalização do e-mail, intervalo de datas) e exemplo; o corpo
+     de requisição possui o exemplo de referência 0.6.
+3. Regras de negócio:
+   - O documento é consistente com RF001 a RF015: não declara campos de
+     requisição inexistentes, parâmetros de query string, nem outros métodos
+     para a rota.
+4. Validação:
+   - O esquema de requisição documentado corresponde às regras de RF004 a
+     RF009.
+5. Autenticação e autorização:
+   - Não aplicável — a operação não declara requisitos de segurança (RF023).
+6. Estado:
+   - Não aplicável — documentação descritiva.
+7. Efeitos colaterais:
+   - Não aplicável — documentação descritiva.
+
+--------------------------------------------------------------------------------
+RF027 — Documentação dos códigos HTTP e das estruturas de resposta
+--------------------------------------------------------------------------------
+Descrição:
+A especificação OpenAPI deve documentar, para POST /api/v1/usuarios, todos os
+códigos HTTP que a operação pode retornar e o esquema de cada resposta.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - A operação documenta as respostas 201, 400, 409, 413, 415, 422 e 500,
+     cada uma com "description" não vazia. A resposta 404 (RF021) refere-se a
+     rotas não mapeadas e não precisa constar na operação.
+2. Response Body:
+   - Resposta 201: esquema conforme RF002, com "required" em todos os campos,
+     "usuario.id" com "format": "uuid", "usuario.data_nascimento" com
+     "format": "date", "usuario.criado_em" com "format": "date-time", e sem
+     qualquer propriedade relativa à senha.
+   - Respostas de erro: esquema de RF016; em 422, "detalhes[].codigo" com
+     "enum" contendo os códigos de campo de RF003.
+   - Exemplos documentados: um para 201; um para cada código de erro do
+     catálogo de RF016 associado a 400, 409, 413, 415, 422 e 500, incluindo
+     um exemplo de 422 DADOS_INVALIDOS com mais de um elemento em "detalhes".
+3. Regras de negócio:
+   - As respostas reais da API são válidas segundo os esquemas documentados
+     (verificável por teste de contrato contra /docs/openapi.json).
+4. Validação:
+   - Não aplicável — documentação descritiva.
+5. Autenticação e autorização:
+   - Não aplicável — as respostas 401 e 403 não são documentadas por não
+     existirem (RF023).
+6. Estado:
+   - Não aplicável — documentação descritiva.
+7. Efeitos colaterais:
+   - Não aplicável — documentação descritiva.
+
+================================================================================
+5. TECNOLOGIA, CONFIGURAÇÃO, ORGANIZAÇÃO, TESTES E DOCUMENTAÇÃO DO PROJETO
+================================================================================
+
+--------------------------------------------------------------------------------
+RF028 — Uso obrigatório de TypeScript e arquivo de dependências
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve ser implementada obrigatoriamente em TypeScript, executada
+sobre o runtime Node.js. As dependências devem ser declaradas no arquivo
+package.json, com versões resolvidas no arquivo package-lock.json.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito tecnológico, verificado por inspeção, pela
+     compilação e pela inicialização da aplicação.
+2. Response Body:
+   - Não aplicável — requisito tecnológico.
+3. Regras de negócio:
+   - Existem, na raiz do projeto, package.json, package-lock.json e
+     tsconfig.json. A dependência "typescript" está declarada no package.json,
+     e a versão mínima do Node.js, no campo "engines.node".
+   - O tsconfig.json habilita o modo estrito ("strict": true).
+   - Todo o código-fonte da aplicação e dos testes é escrito em arquivos .ts;
+     não há arquivos-fonte .js escritos manualmente em src/ e tests/. Não são
+     utilizadas outras linguagens de programação no backend (instruções SQL
+     de migração, quando existentes, são admitidas como artefato de banco de
+     dados).
+   - O package.json define, no mínimo, os scripts:
+     "build"   — compila o projeto com o compilador TypeScript;
+     "start"   — inicia a aplicação a partir do código compilado;
+     "migrate" — prepara o esquema do banco de dados (RF032);
+     "test"    — executa a suíte de testes (RF033).
+   - Após "npm install", "npm run build" conclui sem erros de compilação nem
+     de tipos.
+   - Framework HTTP, biblioteca de acesso a dados e mecanismo de banco de dados
+     são de livre escolha. O cálculo de hash utiliza biblioteca que implemente
+     Argon2id (RF011).
+4. Validação:
+   - Não aplicável — requisito tecnológico.
+5. Autenticação e autorização:
+   - Não aplicável — requisito tecnológico.
+6. Estado:
+   - Não aplicável — requisito tecnológico.
+7. Efeitos colaterais:
+   - Não aplicável — requisito tecnológico.
+
+--------------------------------------------------------------------------------
+RF029 — Configuração externalizada por variáveis de ambiente
+--------------------------------------------------------------------------------
+Descrição:
+Todas as configurações da aplicação devem ser obtidas de variáveis de
+ambiente. O conjunto de variáveis é:
+
+  Variável              Finalidade                                 Valores admitidos
+  --------------------  -----------------------------------------  -------------------------------------------
+  NODE_ENV              Ambiente de execução                       development, test, production
+  HOST                  Endereço de rede em que a aplicação escuta string não vazia (ex.: 0.0.0.0)
+  PORT                  Porta HTTP                                 inteiro de 1 a 65535
+  LOG_LEVEL             Nível de log                               error, warn, info, debug
+  DATABASE_URL          Conexão com o banco de dados               string não vazia, no formato exigido pelo
+                                                                   mecanismo de banco escolhido
+  ARGON2_MEMORY_COST    Memória do Argon2id, em KiB                inteiro maior ou igual a 19456
+  ARGON2_TIME_COST      Iterações do Argon2id                      inteiro maior ou igual a 2
+  ARGON2_PARALLELISM    Paralelismo do Argon2id                    inteiro maior ou igual a 1
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Com PORT definido como N, a aplicação responde na porta N (por exemplo,
+     GET http://localhost:N/docs/openapi.json → 200) e não responde em outra
+     porta por padrão.
+2. Response Body:
+   - Não aplicável — as variáveis não alteram o conteúdo das respostas.
+3. Regras de negócio:
+   - Os valores acima não são fixados no código-fonte; são lidos das variáveis
+     de ambiente em um único módulo de configuração (RF031).
+   - Variáveis do ambiente do processo têm precedência sobre o arquivo .env
+     (RF030).
+   - As oito variáveis são obrigatórias em todos os ambientes; não há valores
+     padrão definidos no código.
+   - Os parâmetros do Argon2id registrados no hash (m, t, p) são iguais aos
+     valores configurados (RF011).
+4. Validação:
+   - Ausência de variável obrigatória (no ambiente e no .env), valor fora dos
+     valores admitidos ou impossibilidade de conectar ao banco indicado por
+     DATABASE_URL impedem a inicialização: o processo encerra com código de
+     saída diferente de zero e emite mensagem que identifica a variável
+     ausente ou inválida, ou informa a falha de conexão sem expor credenciais
+     contidas em DATABASE_URL.
+   - Exemplos de falha: PORT="abc", PORT="70000", LOG_LEVEL="verbose",
+     DATABASE_URL="", ARGON2_MEMORY_COST="1024", ARGON2_TIME_COST="1",
+     ARGON2_PARALLELISM="0", NODE_ENV="staging".
+5. Autenticação e autorização:
+   - Não aplicável — as variáveis não configuram autenticação (RF023).
+6. Estado:
+   - Configuração lida na inicialização; não há alteração em tempo de
+     execução. DATABASE_URL determina onde os usuários são persistidos.
+7. Efeitos colaterais:
+   - Conexão com o banco de dados na inicialização. Nenhum outro efeito.
+
+--------------------------------------------------------------------------------
+RF030 — Arquivos .env e .env.example
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter, na raiz, o arquivo .env, carregado automaticamente na
+inicialização, e o arquivo .env.example, com valores ilustrativos.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito de configuração do projeto.
+2. Response Body:
+   - Não aplicável — requisito de configuração do projeto.
+3. Regras de negócio:
+   - Ambos os arquivos declaram exatamente as oito variáveis de RF029, no
+     formato CHAVE=valor, uma por linha.
+   - O .env.example contém valores ilustrativos (por exemplo, NODE_ENV=
+     development, HOST=0.0.0.0, PORT=3000, LOG_LEVEL=info, um DATABASE_URL de
+     exemplo com credenciais fictícias, ARGON2_MEMORY_COST=19456,
+     ARGON2_TIME_COST=2, ARGON2_PARALLELISM=1) e um comentário ("#")
+     descrevendo cada variável.
+   - O .env.example não contém credenciais reais.
+   - Seguindo as instruções do README (RF034), copiar .env.example para .env,
+     executar "npm run migrate", "npm run build" e "npm start" resulta em
+     aplicação em execução.
+   - O .env é carregado automaticamente, sem necessidade de exportar as
+     variáveis manualmente, respeitando a precedência de RF029.
+4. Validação:
+   - Valores inválidos no .env produzem a falha de inicialização de RF029.
+5. Autenticação e autorização:
+   - Não aplicável — requisito de configuração do projeto.
+6. Estado:
+   - Não aplicável — a aplicação apenas lê os arquivos; nunca os altera.
+7. Efeitos colaterais:
+   - Não aplicável — a leitura dos arquivos não produz efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF031 — Organização do projeto com separação de responsabilidades
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve separar configurações, schemas, rotas, serviços e
+infraestrutura, conforme o mapeamento obrigatório abaixo:
+
+  Responsabilidade   Localização                     Conteúdo
+  -----------------  ------------------------------  ---------------------------------------------
+  Configurações      src/config/                     Leitura e validação das variáveis de ambiente
+                                                     (RF029, RF030).
+  Rotas              src/routes/                     Declaração de POST /api/v1/usuarios e das
+                                                     rotas de documentação.
+  Schemas            src/schemas/                    Validação e normalização do payload (RF003 a
+                                                     RF009), sem acesso a banco de dados.
+  Serviços           src/services/                   Regra de cadastro: unicidade (RF010),
+                                                     acionamento do hash (RF011) e persistência
+                                                     via repositório (RF013, RF014).
+  Controladores      src/controllers/                Orquestração da requisição e montagem da
+                                                     resposta.
+  Infraestrutura     src/infrastructure/             Acesso ao banco de dados (repositório,
+                                                     conexão e migrações), implementação do hash
+                                                     Argon2id, tratamento e formatação de erros
+                                                     (RF016 a RF022), logs e documentação
+                                                     OpenAPI.
+  Montagem da app    src/app.ts                      Criação da aplicação HTTP, sem abrir porta.
+  Inicialização      src/server.ts                   Carregamento da configuração, conexão ao
+                                                     banco e início da escuta em HOST:PORT.
+  Testes             tests/                          Suíte de testes (RF033).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito estrutural, verificado por inspeção e testes.
+2. Response Body:
+   - Não aplicável — requisito estrutural.
+3. Regras de negócio:
+   - O serviço de cadastro recebe suas dependências (repositório de usuários,
+     componente de hash e fonte da data/hora atual) por injeção, podendo ser
+     testado com dublês, sem banco de dados real.
+   - A aplicação exportada por src/app.ts pode ser exercitada por testes de
+     requisição sem abrir porta de rede.
+   - Controladores não acessam o banco de dados diretamente nem calculam
+     hashes; schemas não acessam o banco de dados; serviços não dependem de
+     objetos de requisição/resposta HTTP.
+4. Validação:
+   - Não aplicável — requisito estrutural.
+5. Autenticação e autorização:
+   - Não aplicável — requisito estrutural.
+6. Estado:
+   - Não aplicável — requisito estrutural.
+7. Efeitos colaterais:
+   - Não aplicável — requisito estrutural.
+
+--------------------------------------------------------------------------------
+RF032 — Preparação do esquema do banco de dados
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve fornecer o comando "npm run migrate", que cria no banco de
+dados indicado por DATABASE_URL a estrutura necessária ao armazenamento de
+usuários (RF013).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — comando de linha de comando, sem interação HTTP.
+2. Response Body:
+   - Não aplicável — comando de linha de comando.
+3. Regras de negócio:
+   - A estrutura criada contém os atributos de RF013 e restrição de
+     unicidade sobre o e-mail.
+   - O comando é idempotente: executá-lo novamente sobre banco já preparado
+     termina com código de saída 0, sem erros e sem perda de registros.
+4. Validação:
+   - Com DATABASE_URL ausente ou banco inacessível, o comando termina com
+     código de saída diferente de zero e mensagem de erro, sem expor
+     credenciais.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação na API (RF023).
+6. Estado:
+   - Cria a estrutura de armazenamento quando inexistente; não altera
+     registros de usuários existentes.
+7. Efeitos colaterais:
+   - Alteração de esquema no banco de dados indicado por DATABASE_URL.
+
+--------------------------------------------------------------------------------
+RF033 — Testes automatizados
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter suíte de testes automatizados, escrita em TypeScript no
+diretório tests/, executável por "npm test", que cubra casos válidos,
+inválidos e situações excepcionais.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Os testes de requisição verificam os status 201, 400, 404, 409, 413, 415,
+     422 e 500 nos cenários deste documento.
+2. Response Body:
+   - Os testes verificam campos e valores exatos de RF002, RF003 e RF016,
+     incluindo mensagens literais e a ordem de "detalhes".
+3. Regras de negócio — a suíte cobre, no mínimo:
+   - cadastro bem-sucedido com o payload de referência 0.6;
+   - cada regra e cada código de campo de RF003 a RF009, incluindo limites
+     (nome com 1, 2, 100 e 101 caracteres; senha com 7, 8, 128 e 129
+     caracteres; e-mail com parte local de 64 e 65 caracteres);
+   - os vetores de e-mail e de data da seção 0.5, com a data atual controlada
+     por dublê de relógio;
+   - agregação de múltiplos erros de campo em uma única resposta;
+   - e-mail duplicado com variação de maiúsculas e espaços (409);
+   - cadastro concorrente com o mesmo e-mail (RF014);
+   - hash Argon2id: prefixo, parâmetros, verificação positiva e negativa,
+     hashes distintos para senhas iguais e ausência da senha em texto puro no
+     armazenamento (RF011);
+   - não exposição da senha em respostas e logs (RF012);
+   - campos adicionais ignorados (RF015);
+   - cada código de erro do catálogo de RF016, incluindo ERRO_INTERNO simulado
+     por dublê de repositório e de hash (RF022);
+   - as rotas /docs e /docs/openapi.json e a validade do documento OpenAPI;
+   - testes unitários do serviço de cadastro com dublês (RF031).
+4. Validação:
+   - "npm test" termina com código de saída 0 e nenhuma falha.
+   - A suíte não depende de acesso à internet nem de serviços externos já em
+     execução: utiliza banco de dados isolado (distinto do configurado para
+     development), preparado automaticamente pela própria suíte (por exemplo,
+     banco embarcado ou em memória).
+5. Autenticação e autorização:
+   - Não aplicável — os testes não utilizam credenciais (RF023).
+6. Estado:
+   - O armazenamento é limpo entre testes; os testes são independentes e
+     podem ser executados em qualquer ordem com o mesmo resultado.
+7. Efeitos colaterais:
+   - A execução dos testes não altera o banco de dados de development nem
+     arquivos versionados do projeto.
+
+--------------------------------------------------------------------------------
+RF034 — Documentação de instalação, configuração e execução
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter, na raiz, o arquivo README.md com instruções de
+instalação, configuração e execução da aplicação.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito de documentação do projeto.
+2. Response Body:
+   - Não aplicável — requisito de documentação do projeto.
+3. Regras de negócio — o README.md contém, no mínimo:
+   - pré-requisitos: versões do Node.js e do npm, e o mecanismo de banco de
+     dados escolhido com instruções para disponibilizá-lo localmente;
+   - instalação: "npm install";
+   - configuração: cópia de .env.example para .env e descrição de cada
+     variável de RF029;
+   - preparação do banco: "npm run migrate";
+   - execução: "npm run build" e "npm start", e porta utilizada;
+   - testes: "npm test";
+   - documentação da API: endereços /docs e /docs/openapi.json;
+   - exemplo de uso: requisição de cadastro (por exemplo, com curl) e
+     respostas de exemplo para 201, 409 e 422;
+   - menção explícita de que a senha é armazenada apenas como hash Argon2id e
+     de que a API não possui autenticação.
+4. Validação:
+   - Seguindo exclusivamente as instruções do README.md, em ambiente limpo, é
+     possível instalar, configurar, preparar o banco, compilar, iniciar a
+     aplicação, acessar /docs e executar a suíte com sucesso.
+5. Autenticação e autorização:
+   - Não aplicável — requisito de documentação.
+6. Estado:
+   - Não aplicável — requisito de documentação.
+7. Efeitos colaterais:
+   - Não aplicável — requisito de documentação.
+
+================================================================================
+FIM DO DOCUMENTO — 34 requisitos (RF001 a RF034)
+================================================================================

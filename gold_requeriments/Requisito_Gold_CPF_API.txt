@@ -1,0 +1,2503 @@
+================================================================================
+REQUISITOS_GOLD_CPF
+Especificação Gold de Requisitos — API HTTP de Validação de CPF
+Tecnologia obrigatória: TypeScript (runtime Node.js)
+================================================================================
+
+--------------------------------------------------------------------------------
+0. ESCOPO, CONVENÇÕES E DEFINIÇÕES
+--------------------------------------------------------------------------------
+
+0.1 Escopo
+Este documento especifica, de forma verificável, o comportamento de um backend
+que disponibiliza uma API HTTP para validação de números de CPF brasileiros. O
+documento é a referência (Gold Standard) para o desenvolvimento e para a geração
+de testes automatizados independentes. Não constitui implementação nem tutorial.
+
+0.2 Tecnologia
+A aplicação deve ser implementada exclusivamente em TypeScript, executada sobre
+o runtime Node.js (ver RF026). Nenhuma outra linguagem é admitida.
+
+0.3 Termos utilizados
+- "Endpoint de validação": a rota POST /api/v1/cpf/validacao.
+- "Dígito": caractere ASCII de "0" (U+0030) a "9" (U+0039). Dígitos de outros
+  sistemas de escrita (por exemplo, dígitos de largura total "０"–"９" ou
+  dígitos arábico-índicos) NÃO são considerados dígitos.
+- "Formato sem máscara": cadeia composta por exatamente 11 dígitos, sem nenhum
+  outro caractere. Exemplo: "52998224725".
+- "Formato com máscara": cadeia com exatamente 14 caracteres no padrão
+  DDD.DDD.DDD-DD, em que D é um dígito, "." é o caractere U+002E e "-" é o
+  caractere U+002D. Exemplo: "529.982.247-25".
+- "CPF normalizado": cadeia de 11 dígitos obtida a partir de uma entrada em
+  formato sem máscara (inalterada) ou com máscara (removidos os dois pontos e o
+  hífen).
+- "Cadeia em branco": cadeia vazia ("") ou composta exclusivamente por
+  caracteres de espaço em branco (espaço U+0020, tabulação U+0009, quebra de
+  linha U+000A, retorno de carro U+000D, tabulação vertical U+000B e avanço de
+  página U+000C).
+- "Requisição com Content-Type JSON": requisição cujo cabeçalho Content-Type
+  possui tipo de mídia "application/json", com ou sem parâmetros adicionais
+  (por exemplo, "application/json; charset=utf-8"), comparado sem distinção
+  entre maiúsculas e minúsculas.
+- "Resposta de validação": corpo JSON definido em RF002.
+- "Resposta de erro": corpo JSON definido em RF010.
+
+0.4 Convenções gerais aplicáveis a todos os requisitos
+- Todas as respostas da API (rotas sob /api, respostas de erro e rotas
+  inexistentes) possuem cabeçalho Content-Type "application/json; charset=utf-8"
+  e corpo codificado em UTF-8. As exceções são a interface Swagger UI (RF022),
+  servida como HTML.
+- O cabeçalho Accept da requisição não altera o formato da resposta.
+- Nomes de campos JSON são sensíveis a maiúsculas e minúsculas.
+- Todas as mensagens textuais especificadas neste documento devem ser
+  retornadas literalmente, caractere a caractere, incluindo acentuação e
+  pontuação final.
+- Exemplos de CPF utilizados neste documento foram verificados contra o
+  algoritmo descrito em RF006 e RF007.
+
+0.5 Tabela de vetores de referência
+CPFs válidos (dígitos verificadores corretos e não repetidos):
+  52998224725    (com máscara: 529.982.247-25)
+  11144477735    (com máscara: 111.444.777-35)
+  12345678909    (primeiro dígito verificador igual a 0)
+  10000000280    (segundo dígito verificador igual a 0)
+  10000003700    (ambos os dígitos verificadores iguais a 0)
+  01234567890    (iniciado por zero)
+  00000000191    (contém zeros, mas não é sequência repetida)
+CPFs com dígito verificador inválido:
+  52998224715    (primeiro dígito verificador incorreto)
+  52998224724    (primeiro correto, segundo dígito verificador incorreto)
+  12345678900    (primeiro correto, segundo dígito verificador incorreto)
+Sequências repetidas (todas satisfazem aritmeticamente o algoritmo de dígitos
+verificadores e, ainda assim, devem ser consideradas inválidas):
+  00000000000, 11111111111, 22222222222, 33333333333, 44444444444,
+  55555555555, 66666666666, 77777777777, 88888888888, 99999999999
+
+================================================================================
+1. ENDPOINT DE VALIDAÇÃO E REGRAS DO CPF
+================================================================================
+
+--------------------------------------------------------------------------------
+RF001 — Disponibilização do endpoint de validação de CPF
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve disponibilizar o endpoint POST /api/v1/cpf/validacao, que
+recebe, no corpo da requisição, um objeto JSON contendo o campo "cpf" do tipo
+string e retorna o resultado da validação desse CPF. Exemplo de requisição:
+  POST /api/v1/cpf/validacao
+  Content-Type: application/json
+  {"cpf": "529.982.247-25"}
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK quando a requisição é bem-formada (Content-Type JSON, corpo JSON
+     sintaticamente válido, objeto JSON com campo "cpf" do tipo string não em
+     branco), independentemente de o CPF ser válido ou inválido.
+   - Os demais códigos (400, 415, 422, 404, 500) são definidos em RF014 a
+     RF019.
+2. Response Body:
+   - Para status 200, o corpo segue integralmente a estrutura de RF002.
+3. Regras de negócio:
+   - O resultado "válido" ou "inválido" do CPF é expresso exclusivamente no
+     corpo da resposta (campo "valido"), e não pelo código HTTP. Um CPF inválido
+     enviado em requisição bem-formada é uma consulta processada com sucesso.
+   - O CPF a ser validado é lido exclusivamente do campo "cpf" do objeto JSON
+     no corpo da requisição.
+4. Validação:
+   - A validação estrutural da requisição é especificada em RF011 a RF017. A
+     validação do conteúdo do CPF é especificada em RF003 a RF009.
+5. Autenticação e autorização:
+   - Não aplicável — o endpoint é público e não exige credenciais (ver RF020).
+6. Estado:
+   - Não aplicável — a operação é uma consulta sem persistência; nenhum recurso
+     é criado, alterado ou removido (ver RF021).
+7. Efeitos colaterais:
+   - Não aplicável — a operação não persiste dados nem interage com serviços
+     externos (ver RF021).
+
+--------------------------------------------------------------------------------
+RF002 — Estrutura padronizada da resposta de validação
+--------------------------------------------------------------------------------
+Descrição:
+Toda resposta com status 200 do endpoint de validação deve conter um objeto
+JSON com exatamente os cinco campos abaixo, sem campos adicionais.
+
+  Campo             Tipo              Obrigatório  Conteúdo
+  ----------------  ----------------  -----------  -----------------------------
+  cpf               string            sim          Valor do campo "cpf" exatamente
+                                                   como recebido, sem alteração.
+  cpf_normalizado   string ou null    sim          CPF normalizado (11 dígitos)
+                                                   quando o formato é aceito
+                                                   (RF003); null quando o motivo
+                                                   é FORMATO_INVALIDO.
+  valido            boolean           sim          true se o CPF é válido; false
+                                                   caso contrário.
+  motivo            string ou null    sim          null se valido = true; caso
+                                                   contrário, um dos valores:
+                                                   "FORMATO_INVALIDO",
+                                                   "SEQUENCIA_REPETIDA",
+                                                   "DIGITO_VERIFICADOR_INVALIDO".
+  mensagem          string            sim          Mensagem associada ao
+                                                   resultado (tabela abaixo).
+
+  Resultado                       motivo                          mensagem
+  ------------------------------  ------------------------------  -------------------------------------------------------------------------------------
+  CPF válido                      null                            "CPF válido."
+  Formato inválido                "FORMATO_INVALIDO"              "CPF com formato inválido. Informe 11 dígitos, com ou sem a máscara 000.000.000-00."
+  Sequência repetida              "SEQUENCIA_REPETIDA"            "CPF inválido: todos os dígitos são iguais."
+  Dígito verificador inválido     "DIGITO_VERIFICADOR_INVALIDO"   "CPF inválido: dígitos verificadores não conferem."
+
+Exemplo (CPF válido):
+  {"cpf":"529.982.247-25","cpf_normalizado":"52998224725","valido":true,
+   "motivo":null,"mensagem":"CPF válido."}
+Exemplo (formato inválido):
+  {"cpf":"529982247","cpf_normalizado":null,"valido":false,
+   "motivo":"FORMATO_INVALIDO","mensagem":"CPF com formato inválido. Informe 11 dígitos, com ou sem a máscara 000.000.000-00."}
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK em todos os casos cobertos por este requisito.
+2. Response Body:
+   - Conforme as tabelas acima. Os campos "cpf_normalizado" e "motivo" devem
+     estar presentes mesmo quando o valor for null (não podem ser omitidos).
+   - Cabeçalho Content-Type: "application/json; charset=utf-8".
+3. Regras de negócio:
+   - valido = true se, e somente se, motivo = null.
+   - valido = true implica cpf_normalizado não nulo e mensagem "CPF válido.".
+   - A combinação motivo/mensagem segue estritamente a tabela; nenhuma outra
+     combinação é admitida.
+4. Validação:
+   - Não aplicável — este requisito define o formato da saída; a validação da
+     entrada é tratada em RF003 a RF017.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — a resposta é calculada a partir da entrada, sem
+     consulta ou alteração de estado (ver RF021).
+7. Efeitos colaterais:
+   - Não aplicável — a produção da resposta não gera efeitos observáveis além do
+     próprio retorno HTTP.
+
+--------------------------------------------------------------------------------
+RF003 — Aceitação e normalização dos formatos de CPF
+--------------------------------------------------------------------------------
+Descrição:
+O sistema deve aceitar o CPF em dois formatos: sem máscara (11 dígitos) e com
+máscara (DDD.DDD.DDD-DD), conforme definições da seção 0.3. Em ambos os casos,
+o CPF é convertido para o CPF normalizado antes das verificações
+definidas em RF005 a RF007.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK para qualquer CPF em formato aceito, seja ele válido ou inválido.
+2. Response Body:
+   - Estrutura de RF002, com "cpf" igual ao valor recebido e "cpf_normalizado"
+     igual aos 11 dígitos extraídos. Exemplos:
+     entrada "529.982.247-25" → cpf_normalizado "52998224725";
+     entrada "52998224725"    → cpf_normalizado "52998224725";
+     entrada "012.345.678-90" → cpf_normalizado "01234567890".
+3. Regras de negócio:
+   - Os dois formatos são equivalentes: o mesmo CPF informado com e sem máscara
+     produz valores idênticos de "cpf_normalizado", "valido", "motivo" e
+     "mensagem".
+   - Zeros à esquerda são preservados na normalização.
+   - O CPF não é convertido para número em nenhuma etapa observável.
+4. Validação:
+   - Apenas as duas formas definidas na seção 0.3 são aceitas. Qualquer outra
+     forma é tratada em RF004.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — a normalização não persiste nem altera dados.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF004 — Identificação de CPF com formato inválido
+--------------------------------------------------------------------------------
+Descrição:
+Quando o campo "cpf" é uma string não em branco que não corresponde a nenhum
+dos formatos aceitos em RF003, o sistema deve retornar resultado inválido com
+motivo "FORMATO_INVALIDO".
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - "cpf": valor recebido; "cpf_normalizado": null; "valido": false;
+     "motivo": "FORMATO_INVALIDO"; "mensagem": "CPF com formato inválido.
+     Informe 11 dígitos, com ou sem a máscara 000.000.000-00."
+3. Regras de negócio:
+   - Quando o formato é inválido, as verificações de sequência repetida e de
+     dígitos verificadores não são realizadas (ver RF009).
+4. Validação — são casos de FORMATO_INVALIDO, entre outros:
+   - menos de 11 dígitos: "5299822472", "529.982.247-2";
+   - mais de 11 dígitos: "529982247251", "529.982.247-251";
+   - presença de letras ou símbolos: "5299822472a", "529.982.247/25",
+     "529-982-247.25", "abc";
+   - máscara parcial ou inconsistente: "529.98224725", "529982247-25",
+     "529.982.24725", "529 982 247 25";
+   - espaços em branco no início, no fim ou no meio de uma cadeia não em
+     branco: " 52998224725", "52998224725 ", "529 98224725";
+   - dígitos não ASCII: "５２９９８２２４７２５";
+   - cadeia de comprimento arbitrário que não atenda aos formatos aceitos
+     (não há limite de comprimento que gere erro 422; cadeias longas resultam
+     em FORMATO_INVALIDO).
+   - Espaços em branco não são removidos antes da verificação de formato.
+   - Cadeias em branco não pertencem a este requisito (ver RF012).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF005 — Identificação de sequências de dígitos repetidos
+--------------------------------------------------------------------------------
+Descrição:
+Quando o CPF normalizado é composto por 11 dígitos iguais, o sistema deve
+retornar resultado inválido com motivo "SEQUENCIA_REPETIDA", ainda que os
+dígitos verificadores sejam aritmeticamente consistentes.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - "cpf": valor recebido; "cpf_normalizado": os 11 dígitos; "valido": false;
+     "motivo": "SEQUENCIA_REPETIDA"; "mensagem": "CPF inválido: todos os
+     dígitos são iguais."
+3. Regras de negócio:
+   - As dez sequências 00000000000 a 99999999999 (dígito d repetido 11 vezes,
+     d de 0 a 9) são inválidas, nos formatos sem e com máscara (por exemplo,
+     "111.111.111-11" e "11111111111").
+   - Esta verificação precede a verificação de dígitos verificadores
+     (ver RF009); portanto, essas entradas nunca retornam motivo
+     "DIGITO_VERIFICADOR_INVALIDO" nem valido = true.
+   - CPFs com muitos dígitos iguais, mas não todos, não são sequências
+     repetidas (exemplo: "00000000191" é válido).
+4. Validação:
+   - Aplica-se somente a entradas aprovadas na verificação de formato (RF003).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF006 — Verificação do primeiro dígito verificador
+--------------------------------------------------------------------------------
+Descrição:
+O sistema deve calcular o primeiro dígito verificador (10º dígito) a partir dos
+9 primeiros dígitos do CPF normalizado, conforme o algoritmo oficial, e
+compará-lo com o 10º dígito informado.
+
+Algoritmo: sendo d1..d9 os nove primeiros dígitos,
+  S1 = 10*d1 + 9*d2 + 8*d3 + 7*d4 + 6*d5 + 5*d6 + 4*d7 + 3*d8 + 2*d9
+  R1 = S1 mod 11
+  DV1 = 0, se R1 < 2; caso contrário, DV1 = 11 - R1.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - Se o 10º dígito informado for diferente de DV1: "valido": false;
+     "motivo": "DIGITO_VERIFICADOR_INVALIDO"; "mensagem": "CPF inválido:
+     dígitos verificadores não conferem."; "cpf_normalizado": os 11 dígitos.
+3. Regras de negócio:
+   - Exemplo: para "529982247", S1 = 295, R1 = 9, DV1 = 2.
+   - Exemplo com resto menor que 2: para "123456789", S1 = 210, R1 = 1,
+     DV1 = 0; logo "12345678909" tem primeiro dígito verificador correto.
+   - "52998224715" deve retornar DIGITO_VERIFICADOR_INVALIDO (10º dígito 1,
+     esperado 2).
+4. Validação:
+   - Aplica-se somente a entradas aprovadas nas verificações de RF003 e RF005.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — cálculo puro, sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF007 — Verificação do segundo dígito verificador
+--------------------------------------------------------------------------------
+Descrição:
+O sistema deve calcular o segundo dígito verificador (11º dígito) a partir dos
+10 primeiros dígitos do CPF normalizado (os 9 primeiros mais o 10º dígito
+informado), conforme o algoritmo oficial, e compará-lo com o 11º dígito
+informado.
+
+Algoritmo: sendo d1..d10 os dez primeiros dígitos,
+  S2 = 11*d1 + 10*d2 + 9*d3 + 8*d4 + 7*d5 + 6*d6 + 5*d7 + 4*d8 + 3*d9 + 2*d10
+  R2 = S2 mod 11
+  DV2 = 0, se R2 < 2; caso contrário, DV2 = 11 - R2.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - Se o 11º dígito informado for diferente de DV2: "valido": false;
+     "motivo": "DIGITO_VERIFICADOR_INVALIDO"; "mensagem": "CPF inválido:
+     dígitos verificadores não conferem."; "cpf_normalizado": os 11 dígitos.
+3. Regras de negócio:
+   - Exemplo: para "5299822472", S2 = 347, R2 = 6, DV2 = 5.
+   - Exemplo com resto menor que 2: "10000000280" possui DV2 = 0 e é válido.
+   - "52998224724" e "12345678900" devem retornar DIGITO_VERIFICADOR_INVALIDO
+     (primeiro dígito correto, segundo incorreto).
+   - O motivo é o mesmo ("DIGITO_VERIFICADOR_INVALIDO") quando apenas o
+     primeiro, apenas o segundo ou ambos os dígitos verificadores estão
+     incorretos.
+4. Validação:
+   - Aplica-se somente a entradas aprovadas nas verificações de RF003 e RF005.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — cálculo puro, sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF008 — Reconhecimento de CPF válido
+--------------------------------------------------------------------------------
+Descrição:
+O sistema deve declarar o CPF válido se, e somente se, (a) estiver em formato
+aceito (RF003), (b) não for sequência repetida (RF005), (c) o 10º dígito for
+igual a DV1 (RF006) e (d) o 11º dígito for igual a DV2 (RF007).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - "cpf": valor recebido; "cpf_normalizado": os 11 dígitos; "valido": true;
+     "motivo": null; "mensagem": "CPF válido."
+3. Regras de negócio:
+   - Todos os CPFs válidos da tabela 0.5 devem ser reconhecidos como válidos
+     nos formatos sem e com máscara (por exemplo, "10000003700" e
+     "100.000.037-00").
+   - A validade é determinada apenas pelas regras deste documento; não há
+     consulta à Receita Federal nem a qualquer base externa de situação
+     cadastral.
+4. Validação:
+   - Pressupõe requisição bem-formada (RF001); entradas malformadas seguem
+     RF011 a RF017.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais; em particular, nenhuma chamada a
+     serviço externo é realizada.
+
+--------------------------------------------------------------------------------
+RF009 — Precedência das verificações do CPF
+--------------------------------------------------------------------------------
+Descrição:
+As verificações do conteúdo do CPF devem ser aplicadas na seguinte ordem, e o
+primeiro critério não atendido determina o motivo retornado:
+  1º formato (RF003/RF004) → "FORMATO_INVALIDO";
+  2º sequência repetida (RF005) → "SEQUENCIA_REPETIDA";
+  3º dígitos verificadores (RF006/RF007) → "DIGITO_VERIFICADOR_INVALIDO".
+Se todos forem atendidos, o CPF é válido (RF008).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK em todos os casos deste requisito.
+2. Response Body:
+   - Exatamente um motivo é retornado por resposta; não há lista de motivos.
+3. Regras de negócio:
+   - "111.111.111-11" → "SEQUENCIA_REPETIDA" (e não válido, embora satisfaça
+     o algoritmo de dígitos verificadores).
+   - "1111111111" (10 dígitos) → "FORMATO_INVALIDO" (e não
+     "SEQUENCIA_REPETIDA").
+   - "52998224715" → "DIGITO_VERIFICADOR_INVALIDO".
+4. Validação:
+   - A precedência entre erros estruturais da requisição (415, 400, 422) é
+     definida em RF010.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+================================================================================
+2. VALIDAÇÃO DA REQUISIÇÃO E TRATAMENTO DE ERROS
+================================================================================
+
+--------------------------------------------------------------------------------
+RF010 — Estrutura padronizada de resposta de erro e precedência entre erros
+--------------------------------------------------------------------------------
+Descrição:
+Toda resposta de erro da API (status 400, 404, 415, 422 e 500) deve seguir a
+estrutura abaixo, sem campos adicionais:
+  {
+    "erro": {
+      "codigo":   string,
+      "mensagem": string,
+      "detalhes": array
+    }
+  }
+Cada elemento de "detalhes" é um objeto com exatamente os campos
+"campo" (string) e "mensagem" (string). Para erros relativos ao campo "cpf"
+(RF011, RF012, RF013), "detalhes" contém exatamente um elemento, com
+"campo": "cpf" e "mensagem" idêntica a "erro.mensagem". Para os demais erros,
+"detalhes" é um array vazio ([]).
+
+Catálogo fechado de códigos de erro:
+  Status  codigo                        mensagem
+  ------  ----------------------------  -------------------------------------------------
+  400     "JSON_MALFORMADO"             "O corpo da requisição não é um JSON válido."
+  404     "ROTA_NAO_ENCONTRADA"         "Rota não encontrada."
+  415     "CONTENT_TYPE_NAO_SUPORTADO"  "O cabeçalho Content-Type deve ser application/json."
+  422     "PAYLOAD_INVALIDO"            "O corpo da requisição deve ser um objeto JSON."
+  422     "CAMPO_OBRIGATORIO"           "O campo cpf é obrigatório."
+  422     "CAMPO_VAZIO"                 "O campo cpf não pode estar vazio."
+  422     "TIPO_INVALIDO"               "O campo cpf deve ser do tipo string."
+  500     "ERRO_INTERNO"                "Erro interno do servidor."
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Conforme o catálogo. Cada código de erro está associado a um único status.
+2. Response Body:
+   - Estrutura acima; Content-Type "application/json; charset=utf-8".
+   - Respostas de erro nunca contêm os campos da resposta de validação
+     (RF002), e respostas de validação nunca contêm o campo "erro".
+3. Regras de negócio — precedência no endpoint de validação, avaliada nesta
+   ordem; o primeiro erro encontrado é o único retornado:
+   1º Content-Type não JSON → 415 (RF016);
+   2º corpo não vazio e sintaticamente inválido como JSON → 400 (RF015);
+   3º corpo JSON válido que não é objeto → 422 PAYLOAD_INVALIDO (RF014);
+   4º campo "cpf" ausente ou null → 422 CAMPO_OBRIGATORIO (RF011);
+   5º campo "cpf" com tipo diferente de string → 422 TIPO_INVALIDO (RF013);
+   6º campo "cpf" string em branco → 422 CAMPO_VAZIO (RF012);
+   7º demais casos → processamento do CPF com status 200 (RF001 a RF009).
+4. Validação:
+   - Nenhum outro código de erro além dos do catálogo pode ser retornado.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020); portanto, os status 401 e
+     403 nunca são retornados.
+6. Estado:
+   - Não aplicável — erros não alteram estado algum.
+7. Efeitos colaterais:
+   - Não aplicável — a geração de respostas de erro não produz efeitos
+     observáveis além do retorno HTTP.
+
+--------------------------------------------------------------------------------
+RF011 — Campo "cpf" ausente ou nulo
+--------------------------------------------------------------------------------
+Descrição:
+Quando o objeto JSON do corpo não contém a chave "cpf", ou a contém com valor
+null, ou quando o corpo da requisição com Content-Type JSON está vazio (zero
+bytes ou apenas espaços em branco), o sistema deve rejeitar a requisição com
+erro de validação.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity (Unprocessable Content).
+2. Response Body:
+   - {"erro":{"codigo":"CAMPO_OBRIGATORIO","mensagem":"O campo cpf é
+     obrigatório.","detalhes":[{"campo":"cpf","mensagem":"O campo cpf é
+     obrigatório."}]}}
+3. Regras de negócio:
+   - A chave é sensível a maiúsculas e minúsculas: {"CPF":"52998224725"} e
+     {"Cpf":"52998224725"} são tratados como ausência de "cpf".
+   - Corpos de exemplo que produzem este erro: "" (vazio), "{}",
+     "{\"cpf\":null}", "{\"documento\":\"52998224725\"}".
+4. Validação:
+   - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF012 — Campo "cpf" em branco
+--------------------------------------------------------------------------------
+Descrição:
+Quando o campo "cpf" é uma string em branco (definição da seção 0.3), o sistema
+deve rejeitar a requisição com erro de validação.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity.
+2. Response Body:
+   - {"erro":{"codigo":"CAMPO_VAZIO","mensagem":"O campo cpf não pode estar
+     vazio.","detalhes":[{"campo":"cpf","mensagem":"O campo cpf não pode estar
+     vazio."}]}}
+3. Regras de negócio:
+   - Exemplos que produzem este erro: {"cpf":""}, {"cpf":"   "},
+     {"cpf":"\t"}, {"cpf":"\n"}.
+   - Uma string que contenha ao menos um caractere que não seja espaço em
+     branco não é considerada em branco e segue RF003/RF004 (por exemplo,
+     {"cpf":" 1 "} → 200 com motivo FORMATO_INVALIDO).
+4. Validação:
+   - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF013 — Campo "cpf" com tipo de dado incorreto
+--------------------------------------------------------------------------------
+Descrição:
+Quando o campo "cpf" está presente, não é null e não é do tipo string JSON, o
+sistema deve rejeitar a requisição com erro de validação. Não há conversão
+implícita de tipos.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity.
+2. Response Body:
+   - {"erro":{"codigo":"TIPO_INVALIDO","mensagem":"O campo cpf deve ser do tipo
+     string.","detalhes":[{"campo":"cpf","mensagem":"O campo cpf deve ser do
+     tipo string."}]}}
+3. Regras de negócio:
+   - Números são rejeitados mesmo quando representam um CPF válido, pois a
+     representação numérica elimina zeros à esquerda. Exemplos que produzem
+     este erro: {"cpf":52998224725}, {"cpf":5.2}, {"cpf":true},
+     {"cpf":false}, {"cpf":["52998224725"]}, {"cpf":{"numero":"52998224725"}}.
+4. Validação:
+   - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF014 — Corpo JSON que não é um objeto
+--------------------------------------------------------------------------------
+Descrição:
+Quando o corpo da requisição é um JSON sintaticamente válido, mas seu valor de
+nível superior não é um objeto (array, string, número, booleano ou null), o
+sistema deve rejeitar a requisição.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity.
+2. Response Body:
+   - {"erro":{"codigo":"PAYLOAD_INVALIDO","mensagem":"O corpo da requisição
+     deve ser um objeto JSON.","detalhes":[]}}
+3. Regras de negócio:
+   - Exemplos de corpo que produzem este erro: [], ["52998224725"],
+     [{"cpf":"52998224725"}], "52998224725", 52998224725, true, null.
+4. Validação:
+   - Avaliado após a verificação de Content-Type (RF016) e de sintaxe JSON
+     (RF015), e antes das verificações do campo "cpf" (RF011 a RF013).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF015 — Corpo JSON malformado
+--------------------------------------------------------------------------------
+Descrição:
+Quando a requisição ao endpoint de validação possui Content-Type JSON e corpo
+não vazio que não pode ser interpretado como JSON sintaticamente válido, o
+sistema deve rejeitar a requisição.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 400 Bad Request.
+2. Response Body:
+   - {"erro":{"codigo":"JSON_MALFORMADO","mensagem":"O corpo da requisição não
+     é um JSON válido.","detalhes":[]}}
+   - O corpo não deve conter mensagens do analisador JSON, nomes de classes de
+     exceção, rastreamento de pilha (stack trace) nem páginas HTML de erro do
+     framework.
+3. Regras de negócio:
+   - Exemplos de corpo que produzem este erro: {"cpf": "52998224725"
+     (chave de fechamento ausente), {cpf: "52998224725"} (chave sem aspas),
+     {'cpf':'52998224725'} (aspas simples), {"cpf":"52998224725",} (vírgula
+     final), texto livre "cpf=52998224725".
+4. Validação:
+   - Corpo vazio não é considerado malformado (ver RF011).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF016 — Content-Type não suportado
+--------------------------------------------------------------------------------
+Descrição:
+Quando a requisição ao endpoint de validação não possui Content-Type JSON
+(definição da seção 0.3), incluindo a ausência do cabeçalho Content-Type, o
+sistema deve rejeitar a requisição sem interpretar o corpo.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 415 Unsupported Media Type.
+2. Response Body:
+   - {"erro":{"codigo":"CONTENT_TYPE_NAO_SUPORTADO","mensagem":"O cabeçalho
+     Content-Type deve ser application/json.","detalhes":[]}}
+3. Regras de negócio:
+   - Exemplos que produzem este erro: ausência do cabeçalho Content-Type;
+     "text/plain"; "application/x-www-form-urlencoded"; "multipart/form-data";
+     "application/xml".
+   - Exemplos aceitos (não produzem este erro): "application/json",
+     "application/json; charset=utf-8", "Application/JSON".
+   - Este erro tem precedência sobre todos os demais erros do endpoint de
+     validação (RF010), inclusive quando o corpo seria um JSON válido.
+4. Validação:
+   - O corpo não é interpretado quando este erro ocorre.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF017 — Desconsideração de campos adicionais e de parâmetros de consulta
+--------------------------------------------------------------------------------
+Descrição:
+Campos do objeto JSON diferentes de "cpf" e parâmetros de query string não
+devem influenciar o processamento nem a resposta.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - O mesmo status que seria obtido sem os campos adicionais e sem a query
+     string.
+2. Response Body:
+   - Idêntico ao que seria obtido sem os campos adicionais e sem a query string;
+     campos adicionais não são ecoados na resposta.
+3. Regras de negócio:
+   - {"cpf":"52998224725","nome":"Teste","extra":123} → 200 com valido = true.
+   - POST /api/v1/cpf/validacao?cpf=52998224725 com corpo {} → 422
+     CAMPO_OBRIGATORIO (o CPF da query string não é considerado).
+   - POST /api/v1/cpf/validacao?cpf=52998224725 com corpo
+     {"cpf":"11111111111"} → 200 com motivo SEQUENCIA_REPETIDA.
+4. Validação:
+   - Campos adicionais não são validados quanto a tipo ou formato.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF018 — Rotas e métodos não mapeados
+--------------------------------------------------------------------------------
+Descrição:
+Requisições a rotas inexistentes, ou à rota /api/v1/cpf/validacao com método
+diferente de POST, devem receber resposta de erro padronizada em JSON.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 404 Not Found.
+2. Response Body:
+   - {"erro":{"codigo":"ROTA_NAO_ENCONTRADA","mensagem":"Rota não
+     encontrada.","detalhes":[]}}
+   - Nenhuma página HTML de erro do framework é retornada.
+3. Regras de negócio:
+   - Exemplos: GET /api/v1/cpf/validacao; PUT /api/v1/cpf/validacao;
+     DELETE /api/v1/cpf/validacao; POST /api/v1/cpf; GET /inexistente;
+     POST /api/v2/cpf/validacao.
+   - As rotas de documentação (/docs e /docs/openapi.json, RF022 e RF023) não
+     são afetadas por este requisito.
+4. Validação:
+   - Content-Type e corpo não são avaliados para rotas não mapeadas.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF019 — Tratamento de falhas inesperadas
+--------------------------------------------------------------------------------
+Descrição:
+Qualquer exceção não prevista ocorrida durante o processamento de uma
+requisição da API deve ser capturada e convertida em resposta de erro
+padronizada, em todos os ambientes (development, test e production).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 500 Internal Server Error.
+2. Response Body:
+   - {"erro":{"codigo":"ERRO_INTERNO","mensagem":"Erro interno do
+     servidor.","detalhes":[]}}
+   - O corpo não deve conter mensagem da exceção, nome de classe, caminhos de
+     arquivo nem rastreamento de pilha.
+3. Regras de negócio:
+   - Verificação: substituir, em ambiente de teste, o serviço de validação de
+     CPF por um dublê que lance exceção genérica, enviar requisição bem-formada
+     ao endpoint de validação e observar a resposta acima.
+   - Após uma falha inesperada, requisições subsequentes continuam sendo
+     atendidas normalmente.
+4. Validação:
+   - Não aplicável — trata-se de falha interna, não de entrada inválida;
+     entradas inválidas nunca resultam em 500.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência; a falha não deixa estado residual.
+7. Efeitos colaterais:
+   - O detalhe da exceção pode ser registrado no log da aplicação, mas não é
+     exposto ao cliente. Nenhum outro efeito colateral.
+
+================================================================================
+3. REQUISITOS TRANSVERSAIS DA API
+================================================================================
+
+--------------------------------------------------------------------------------
+RF020 — Ausência de autenticação e autorização
+--------------------------------------------------------------------------------
+Descrição:
+A API não possui mecanismo de autenticação nem de autorização. Todos os
+endpoints (validação e documentação) são acessíveis sem credenciais.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Os status 401 Unauthorized e 403 Forbidden nunca são retornados.
+2. Response Body:
+   - Idêntico com ou sem cabeçalhos de credenciais.
+3. Regras de negócio:
+   - Cabeçalhos como Authorization, Cookie ou X-API-Key, quando enviados, são
+     ignorados e não alteram status nem corpo da resposta.
+4. Validação:
+   - Valores arbitrários ou malformados em cabeçalhos de credenciais não geram
+     erro.
+5. Autenticação e autorização:
+   - Acesso permitido a qualquer cliente, sem credenciais, em todas as rotas.
+     Não existe cenário de acesso negado.
+6. Estado:
+   - Não aplicável — não há sessões, tokens ou usuários.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF021 — Operação sem estado e determinística
+--------------------------------------------------------------------------------
+Descrição:
+A validação de CPF é uma operação de consulta sem persistência: a aplicação
+não utiliza banco de dados para armazenar CPFs ou resultados e não depende de
+serviços externos. Para a mesma requisição, a resposta é sempre a mesma.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Requisições idênticas produzem o mesmo status, independentemente da ordem
+     ou da quantidade de requisições anteriores.
+2. Response Body:
+   - Requisições idênticas produzem corpos idênticos.
+3. Regras de negócio:
+   - O resultado depende exclusivamente do corpo da requisição e das regras
+     deste documento.
+4. Validação:
+   - Não aplicável — este requisito não introduz validações de entrada.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Nenhum recurso é criado, atualizado ou removido. Não há endpoints de
+     criação, consulta por identificador, atualização ou remoção de CPFs.
+     A aplicação não exige banco de dados para iniciar nem para responder.
+7. Efeitos colaterais:
+   - Nenhum dado de CPF é persistido em banco de dados, arquivo ou cache.
+   - Nenhuma chamada de rede a serviços externos é realizada durante a
+     validação (por exemplo, Receita Federal ou APIs de terceiros).
+   - Registros de log não são considerados persistência de resultado para fins
+     deste requisito.
+
+================================================================================
+4. DOCUMENTAÇÃO DA API (OPENAPI / SWAGGER) — OBRIGATÓRIA
+================================================================================
+
+--------------------------------------------------------------------------------
+RF022 — Documentação interativa Swagger UI na rota /docs
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve, obrigatoriamente, disponibilizar documentação interativa da
+API por meio da interface Swagger UI, acessível pela rota /docs, construída a
+partir da especificação OpenAPI definida em RF023. A documentação não é
+opcional e deve estar disponível em todos os ambientes (development, test e
+production).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - GET /docs retorna 200 OK com página HTML; alternativamente, retorna
+     redirecionamento (301, 302, 307 ou 308) para URL cujo caminho se inicia
+     por /docs e cuja resposta final, após seguir os redirecionamentos, é
+     200 OK com página HTML.
+2. Response Body:
+   - Resposta final com Content-Type "text/html" contendo a interface Swagger
+     UI.
+   - A interface carrega a especificação a partir de /docs/openapi.json.
+3. Regras de negócio:
+   - A interface exibe a operação POST /api/v1/cpf/validacao, com seu resumo,
+     esquema de requisição, exemplos e respostas documentadas (RF024 e RF025).
+   - A interface permite interagir com o endpoint: a funcionalidade "Try it
+     out" está habilitada para POST, e a execução a partir da interface envia
+     a requisição à própria instância em execução e exibe status, cabeçalhos e
+     corpo da resposta real.
+   - Os recursos da interface (HTML, CSS e JavaScript) são servidos pela
+     própria aplicação, sem dependência de rede externa (CDN), de modo que a
+     documentação funcione sem acesso à internet.
+4. Validação:
+   - Não aplicável — a rota não recebe payload.
+5. Autenticação e autorização:
+   - Acesso público, sem credenciais (ver RF020).
+6. Estado:
+   - Não aplicável — a consulta à documentação não altera estado.
+7. Efeitos colaterais:
+   - Não aplicável — a exibição da documentação não produz efeitos colaterais.
+     Requisições executadas pela interface produzem exatamente os mesmos
+     efeitos de requisições diretas ao endpoint (ou seja, nenhum, ver RF021).
+
+--------------------------------------------------------------------------------
+RF023 — Especificação OpenAPI disponível e válida
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve disponibilizar o documento de especificação da API no formato
+OpenAPI 3.0, em JSON, na rota GET /docs/openapi.json. Esse documento é a fonte
+utilizada pela interface Swagger UI (RF022).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - GET /docs/openapi.json retorna 200 OK.
+2. Response Body:
+   - Content-Type "application/json".
+   - Objeto JSON contendo, no mínimo:
+     "openapi": string iniciada por "3.0." (por exemplo, "3.0.3");
+     "info.title": string não vazia;
+     "info.version": string não vazia;
+     "paths": objeto contendo "/api/v1/cpf/validacao".
+3. Regras de negócio:
+   - O documento deve ser válido segundo o esquema oficial da especificação
+     OpenAPI 3.0, sem erros, quando submetido a um validador de especificações
+     OpenAPI.
+   - Se o campo "servers" estiver presente, deve conter apenas URL relativa
+     ("/"), de modo que a interface utilize a mesma origem em que a aplicação
+     está em execução, qualquer que seja a porta configurada (RF027).
+   - Todas as referências internas ("$ref") devem ser resolvíveis dentro do
+     próprio documento.
+4. Validação:
+   - Não aplicável — a rota não recebe payload.
+5. Autenticação e autorização:
+   - Acesso público, sem credenciais (ver RF020). O documento não declara
+     esquemas de segurança ("securitySchemes") nem requisitos "security".
+6. Estado:
+   - Não aplicável — documento estático em relação às requisições; não é
+     alterado por chamadas à API.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF024 — Documentação do endpoint, parâmetros e payloads
+--------------------------------------------------------------------------------
+Descrição:
+A especificação OpenAPI deve descrever o endpoint de validação, seu corpo de
+requisição e os tipos de dados correspondentes.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito sobre o conteúdo do documento servido em RF023.
+2. Response Body:
+   - Em "paths./api/v1/cpf/validacao" deve existir a operação "post" (e
+     nenhuma outra operação), com "summary" e "description" não vazios.
+   - "requestBody.required" igual a true, com conteúdo "application/json" cujo
+     esquema é do tipo "object", com "required": ["cpf"] e propriedade "cpf"
+     do tipo "string".
+   - A propriedade "cpf" possui "description" que informa os dois formatos
+     aceitos (11 dígitos sem máscara e máscara 000.000.000-00) e exemplos de
+     ambos os formatos (por exemplo, "52998224725" e "529.982.247-25").
+3. Regras de negócio:
+   - O documento é consistente com RF001 a RF017: não declara campos de
+     requisição inexistentes, não declara parâmetros de query string ou de
+     cabeçalho além de Content-Type e não declara outros métodos para a rota.
+4. Validação:
+   - O esquema de requisição documentado deve corresponder às regras de
+     validação de RF011 a RF014 (campo obrigatório, tipo string).
+5. Autenticação e autorização:
+   - Não aplicável — a operação não declara requisitos de segurança (RF020).
+6. Estado:
+   - Não aplicável — documentação descritiva.
+7. Efeitos colaterais:
+   - Não aplicável — documentação descritiva.
+
+--------------------------------------------------------------------------------
+RF025 — Documentação dos códigos HTTP e das estruturas de resposta
+--------------------------------------------------------------------------------
+Descrição:
+A especificação OpenAPI deve documentar, para a operação POST
+/api/v1/cpf/validacao, todos os códigos HTTP que ela pode retornar e o esquema
+de cada resposta.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - A operação documenta as respostas 200, 400, 415, 422 e 500, cada uma com
+     "description" não vazia. A resposta 404 (RF018) refere-se a rotas não
+     mapeadas e não precisa constar na operação.
+2. Response Body:
+   - Resposta 200: esquema "object" com "required" contendo "cpf",
+     "cpf_normalizado", "valido", "motivo" e "mensagem"; tipos conforme RF002;
+     "cpf_normalizado" e "motivo" anuláveis ("nullable": true); "motivo" com
+     "enum" contendo exatamente "FORMATO_INVALIDO", "SEQUENCIA_REPETIDA",
+     "DIGITO_VERIFICADOR_INVALIDO" (além de null).
+   - Respostas 400, 415, 422 e 500: esquema de erro de RF010 (objeto "erro"
+     com "codigo", "mensagem" e "detalhes", sendo "detalhes" um array de
+     objetos com "campo" e "mensagem").
+   - Exemplos documentados: ao menos um CPF válido, um FORMATO_INVALIDO, um
+     SEQUENCIA_REPETIDA e um DIGITO_VERIFICADOR_INVALIDO na resposta 200; ao
+     menos um exemplo para cada código de erro do catálogo de RF010 associado
+     às respostas 400, 415, 422 e 500.
+3. Regras de negócio:
+   - As respostas reais da API devem ser válidas segundo os esquemas
+     documentados (verificável por teste de contrato que compare respostas
+     reais ao documento /docs/openapi.json).
+4. Validação:
+   - Não aplicável — documentação descritiva; a validação de entrada está em
+     RF011 a RF017.
+5. Autenticação e autorização:
+   - Não aplicável — sem autenticação; as respostas 401 e 403 não são
+     documentadas por não existirem (RF020).
+6. Estado:
+   - Não aplicável — documentação descritiva.
+7. Efeitos colaterais:
+   - Não aplicável — documentação descritiva.
+
+================================================================================
+5. TECNOLOGIA, CONFIGURAÇÃO, ORGANIZAÇÃO, TESTES E DOCUMENTAÇÃO DO PROJETO
+================================================================================
+
+--------------------------------------------------------------------------------
+RF026 — Uso obrigatório de TypeScript e arquivo de dependências
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve ser implementada obrigatoriamente em TypeScript, executada
+sobre o runtime Node.js. As dependências devem ser declaradas no arquivo
+package.json, com versões resolvidas no arquivo package-lock.json.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito tecnológico, verificado por inspeção do
+     projeto, pela compilação e pela inicialização da aplicação.
+2. Response Body:
+   - Não aplicável — requisito tecnológico.
+3. Regras de negócio:
+   - Existem, na raiz do projeto, os arquivos package.json, package-lock.json
+     e tsconfig.json.
+   - A dependência "typescript" está declarada no package.json.
+   - A versão mínima do Node.js é declarada no campo "engines.node" do
+     package.json.
+   - O tsconfig.json habilita o modo estrito ("strict": true).
+   - Todo o código-fonte da aplicação (rotas, controladores, schemas,
+     serviços, configuração, infraestrutura) e dos testes é escrito em
+     arquivos TypeScript (.ts). Não há arquivos-fonte .js escritos
+     manualmente nos diretórios src/ e tests/. Não são utilizadas outras
+     linguagens de programação no backend.
+   - O package.json define, no mínimo, os scripts:
+     "build" — compila o projeto com o compilador TypeScript;
+     "start" — inicia a aplicação a partir do código compilado;
+     "test"  — executa a suíte de testes (RF030).
+   - Após "npm install", o comando "npm run build" conclui sem erros de
+     compilação nem de tipos, e o comando "npm start" inicia a aplicação sem
+     erros, utilizando as variáveis de RF027.
+   - A escolha do framework HTTP para Node.js é livre, desde que todos os
+     comportamentos deste documento sejam atendidos.
+4. Validação:
+   - Não aplicável — requisito tecnológico.
+5. Autenticação e autorização:
+   - Não aplicável — requisito tecnológico.
+6. Estado:
+   - Não aplicável — requisito tecnológico.
+7. Efeitos colaterais:
+   - Não aplicável — requisito tecnológico.
+
+--------------------------------------------------------------------------------
+RF027 — Configuração externalizada por variáveis de ambiente
+--------------------------------------------------------------------------------
+Descrição:
+Todas as configurações da aplicação devem ser obtidas de variáveis de
+ambiente. O conjunto de variáveis é:
+
+  Variável    Finalidade                                  Valores admitidos
+  ----------  ------------------------------------------  ----------------------------------
+  NODE_ENV    Ambiente de execução                        development, test, production
+  HOST        Endereço de rede em que a aplicação escuta  string não vazia (ex.: 0.0.0.0)
+  PORT        Porta HTTP em que a aplicação escuta         inteiro de 1 a 65535
+  LOG_LEVEL   Nível de log da aplicação                   error, warn, info, debug
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Com PORT definido como N, a aplicação responde às requisições na porta
+     N (por exemplo, GET http://localhost:N/docs/openapi.json → 200) e não
+     responde em outra porta por padrão.
+2. Response Body:
+   - Não aplicável — as variáveis não alteram o conteúdo das respostas da API.
+3. Regras de negócio:
+   - Os valores de configuração listados acima não são fixados no
+     código-fonte; são lidos das variáveis de ambiente, em um único módulo de
+     configuração (RF029).
+   - Variáveis definidas no ambiente do processo têm precedência sobre os
+     valores do arquivo .env (RF028).
+   - As quatro variáveis são obrigatórias em todos os ambientes; não há
+     valores padrão definidos no código.
+4. Validação:
+   - Ausência de variável obrigatória (no ambiente e no .env), ou valor fora
+     dos valores admitidos, impede a inicialização: o processo encerra com
+     código de saída diferente de zero e emite mensagem que identifica o nome
+     da variável ausente ou inválida.
+   - Exemplos: PORT="abc", PORT="0", PORT="70000", PORT="3000.5",
+     NODE_ENV="staging", LOG_LEVEL="verbose", HOST="" → falha de
+     inicialização.
+5. Autenticação e autorização:
+   - Não aplicável — as variáveis não configuram autenticação (RF020).
+6. Estado:
+   - Não aplicável — configuração lida na inicialização; não há alteração de
+     estado em tempo de execução.
+7. Efeitos colaterais:
+   - Não aplicável — a leitura de configuração não produz efeitos além da
+     própria configuração do processo.
+
+--------------------------------------------------------------------------------
+RF028 — Arquivos .env e .env.example
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter, na raiz, o arquivo .env, carregado automaticamente na
+inicialização da aplicação, e o arquivo .env.example, com valores
+ilustrativos.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito de configuração do projeto.
+2. Response Body:
+   - Não aplicável — requisito de configuração do projeto.
+3. Regras de negócio:
+   - Ambos os arquivos declaram exatamente as quatro variáveis de RF027, no
+     formato CHAVE=valor, uma por linha.
+   - O arquivo .env.example contém valores ilustrativos (por exemplo,
+     NODE_ENV=development, HOST=0.0.0.0, PORT=3000 e LOG_LEVEL=info) e um
+     comentário ("#") descrevendo cada variável.
+   - Copiar .env.example para .env, sem alterações, resulta em aplicação que
+     inicia com sucesso por meio de "npm run build" seguido de "npm start".
+   - O arquivo .env é carregado automaticamente na inicialização, sem
+     necessidade de exportar as variáveis manualmente, respeitando a
+     precedência definida em RF027.
+4. Validação:
+   - Valores inválidos no .env produzem o comportamento de falha de
+     inicialização descrito em RF027.
+5. Autenticação e autorização:
+   - Não aplicável — requisito de configuração do projeto.
+6. Estado:
+   - Não aplicável — a aplicação apenas lê os arquivos; nunca os altera.
+7. Efeitos colaterais:
+   - Não aplicável — a leitura dos arquivos não produz efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF029 — Organização do projeto com separação de responsabilidades
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve separar configurações, schemas, rotas, serviços e
+infraestrutura, conforme o mapeamento obrigatório abaixo:
+
+  Responsabilidade      Localização           Conteúdo
+  --------------------  --------------------  ------------------------------------------------
+  Configurações         src/config/           Leitura e validação das variáveis de ambiente
+                                              (RF027, RF028).
+  Rotas                 src/routes/           Declaração de POST /api/v1/cpf/validacao e das
+                                              rotas de documentação (RF022, RF023).
+  Schemas               src/schemas/          Validação estrutural do payload (RF011 a RF014),
+                                              sem lógica do algoritmo de CPF.
+  Serviços              src/services/         Regras de CPF (RF003 a RF009).
+  Controladores         src/controllers/      Orquestração: recebe a requisição, aciona schema
+                                              e serviço e monta a resposta.
+  Infraestrutura        src/infrastructure/   Tratamento de erros, formatação das respostas de
+                                              erro (RF010, RF015, RF016, RF018, RF019) e
+                                              disponibilização da documentação OpenAPI.
+  Montagem da app       src/app.ts            Criação e configuração da aplicação HTTP, sem
+                                              abrir porta de rede.
+  Inicialização         src/server.ts         Carregamento da configuração e início da escuta
+                                              em HOST:PORT.
+  Testes                tests/                Suíte de testes automatizados (RF030).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito estrutural, verificado por inspeção e por testes
+     unitários.
+2. Response Body:
+   - Não aplicável — requisito estrutural.
+3. Regras de negócio:
+   - O serviço de validação de CPF pode ser invocado diretamente, sem
+     requisição HTTP, recebendo uma string e retornando um resultado tipado
+     que expõe, no mínimo, o indicador de validade, o motivo e o CPF
+     normalizado, com os mesmos valores definidos em RF002 a RF009.
+   - A aplicação exportada por src/app.ts pode ser exercitada por testes de
+     requisição sem que uma porta de rede seja aberta.
+   - O controlador não contém o cálculo de dígitos verificadores nem a
+     detecção de sequências repetidas.
+   - O schema de entrada não contém o algoritmo de CPF, e o serviço não
+     contém validação de tipo ou presença do payload HTTP.
+4. Validação:
+   - Não aplicável — requisito estrutural.
+5. Autenticação e autorização:
+   - Não aplicável — requisito estrutural.
+6. Estado:
+   - Não aplicável — requisito estrutural.
+7. Efeitos colaterais:
+   - Não aplicável — requisito estrutural.
+
+--------------------------------------------------------------------------------
+RF030 — Testes automatizados
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter suíte de testes automatizados, escrita em TypeScript no
+diretório tests/, executável pelo comando "npm test", que cubra casos válidos,
+inválidos e situações excepcionais.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Os testes de requisição verificam os status 200, 400, 404, 415, 422 e 500
+     nos cenários definidos neste documento.
+2. Response Body:
+   - Os testes verificam os campos e valores exatos das respostas de RF002 e
+     RF010, incluindo mensagens literais.
+3. Regras de negócio — a suíte cobre, no mínimo:
+   - todos os CPFs válidos da tabela 0.5, nos formatos sem e com máscara;
+   - as dez sequências repetidas, ao menos no formato sem máscara, e ao menos
+     uma no formato com máscara;
+   - erro apenas no primeiro dígito verificador e erro apenas no segundo;
+   - cada categoria de FORMATO_INVALIDO listada em RF004;
+   - cada código de erro do catálogo de RF010, incluindo ERRO_INTERNO
+     simulado por dublê de teste (RF019);
+   - a precedência entre verificações (RF009) e entre erros (RF010);
+   - as rotas /docs e /docs/openapi.json (RF022 e RF023);
+   - testes unitários do serviço de CPF invocado sem HTTP (RF029).
+4. Validação:
+   - A execução de "npm test" termina com código de saída 0 e nenhuma falha.
+   - A suíte não depende de acesso à internet, de banco de dados nem de
+     serviços externos.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação a testar; os testes não utilizam
+     credenciais (RF020).
+6. Estado:
+   - Os testes são independentes entre si e podem ser executados em qualquer
+     ordem com o mesmo resultado.
+7. Efeitos colaterais:
+   - Não aplicável — a execução dos testes não altera arquivos versionados do
+     projeto nem dados externos.
+
+--------------------------------------------------------------------------------
+RF031 — Documentação de instalação, configuração e execução
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter, na raiz, o arquivo README.md com instruções de
+instalação, configuração e execução da aplicação.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito de documentação do projeto.
+2. Response Body:
+   - Não aplicável — requisito de documentação do projeto.
+3. Regras de negócio — o README.md contém, no mínimo, as seções:
+   - pré-requisitos: versões do Node.js e do npm;
+   - instalação: comando de instalação das dependências ("npm install");
+   - configuração: cópia de .env.example para .env e descrição de cada
+     variável de RF027;
+   - execução: comandos de compilação ("npm run build") e de inicialização
+     ("npm start"), e porta utilizada;
+   - testes: comando de execução da suíte ("npm test");
+   - documentação da API: endereços /docs e /docs/openapi.json;
+   - exemplo de uso: requisição ao endpoint de validação (por exemplo, com
+     curl) e respostas de exemplo para CPF válido e inválido.
+4. Validação:
+   - Seguindo exclusivamente as instruções do README.md, em ambiente limpo com
+     a versão de Node.js indicada, é possível instalar as dependências,
+     compilar e iniciar a aplicação, acessar /docs e executar a suíte de
+     testes com sucesso.
+5. Autenticação e autorização:
+   - Não aplicável — requisito de documentação; a API não possui
+     autenticação (RF020), o que deve constar no README.md.
+6. Estado:
+   - Não aplicável — requisito de documentação.
+7. Efeitos colaterais:
+   - Não aplicável — requisito de documentação.
+
+================================================================================
+6. ITENS FORA DE ESCOPO
+================================================================================
+Os itens abaixo não fazem parte da especificação e não devem ser
+implementados como comportamento da API:
+- consulta da situação cadastral do CPF na Receita Federal ou em qualquer
+  serviço externo;
+- geração de números de CPF;
+- validação de múltiplos CPFs em uma única requisição;
+- persistência ou histórico de consultas;
+- autenticação, autorização, limitação de taxa (rate limiting) ou CORS;
+- validação de outros documentos (CNPJ, RG etc.).
+
+================================================================================
+7. MATRIZ DE RASTREABILIDADE
+================================================================================
+  Especificação original                                      Requisitos
+  ----------------------------------------------------------  ---------------------
+  API HTTP para validação de CPF                              RF001
+  Receber CPF por meio de requisição                          RF001, RF003, RF017
+  Validar formato                                             RF003, RF004
+  Verificar dígitos verificadores (algoritmo oficial)         RF006, RF007, RF008
+  Identificar números inválidos e sequências repetidas        RF004, RF005, RF009
+  Respostas padronizadas (válido/inválido), mensagens claras  RF002, RF010
+  Códigos HTTP apropriados                                    RF001, RF010–RF019
+  Validação dos dados de entrada                              RF011–RF017
+  Tratamento de erros                                         RF010, RF015, RF016, RF018, RF019
+  Documentação dos endpoints (obrigatória em /docs)           RF022, RF023, RF024, RF025
+  Separação: configurações, schemas, rotas, serviços, infra   RF029
+  Testes automatizados (válidos, inválidos, excepcionais)     RF030
+  Configuração por variáveis de ambiente                      RF027
+  Arquivos .env e .env.example                                RF028
+  Arquivo de dependências (package.json)                      RF026
+  Instruções de instalação, configuração e execução           RF031
+  Tecnologia obrigatória: TypeScript                          RF026
+  Ausência de autenticação (explicitada)                      RF020
+  Ausência de estado/persistência (explicitada)               RF021
+
+================================================================================
+FIM DO DOCUMENTO — 31 requisitos (RF001 a RF031)
+================================================================================================================================================================
+REQUISITOS_GOLD_CPF
+Especificação Gold de Requisitos — API HTTP de Validação de CPF
+Tecnologia obrigatória: TypeScript (runtime Node.js)
+================================================================================
+
+--------------------------------------------------------------------------------
+0. ESCOPO, CONVENÇÕES E DEFINIÇÕES
+--------------------------------------------------------------------------------
+
+0.1 Escopo
+Este documento especifica, de forma verificável, o comportamento de um backend
+que disponibiliza uma API HTTP para validação de números de CPF brasileiros. O
+documento é a referência (Gold Standard) para o desenvolvimento e para a geração
+de testes automatizados independentes. Não constitui implementação nem tutorial.
+
+0.2 Tecnologia
+A aplicação deve ser implementada exclusivamente em TypeScript, executada sobre
+o runtime Node.js (ver RF026). Nenhuma outra linguagem é admitida.
+
+0.3 Termos utilizados
+- "Endpoint de validação": a rota POST /api/v1/cpf/validacao.
+- "Dígito": caractere ASCII de "0" (U+0030) a "9" (U+0039). Dígitos de outros
+  sistemas de escrita (por exemplo, dígitos de largura total "０"–"９" ou
+  dígitos arábico-índicos) NÃO são considerados dígitos.
+- "Formato sem máscara": cadeia composta por exatamente 11 dígitos, sem nenhum
+  outro caractere. Exemplo: "52998224725".
+- "Formato com máscara": cadeia com exatamente 14 caracteres no padrão
+  DDD.DDD.DDD-DD, em que D é um dígito, "." é o caractere U+002E e "-" é o
+  caractere U+002D. Exemplo: "529.982.247-25".
+- "CPF normalizado": cadeia de 11 dígitos obtida a partir de uma entrada em
+  formato sem máscara (inalterada) ou com máscara (removidos os dois pontos e o
+  hífen).
+- "Cadeia em branco": cadeia vazia ("") ou composta exclusivamente por
+  caracteres de espaço em branco (espaço U+0020, tabulação U+0009, quebra de
+  linha U+000A, retorno de carro U+000D, tabulação vertical U+000B e avanço de
+  página U+000C).
+- "Requisição com Content-Type JSON": requisição cujo cabeçalho Content-Type
+  possui tipo de mídia "application/json", com ou sem parâmetros adicionais
+  (por exemplo, "application/json; charset=utf-8"), comparado sem distinção
+  entre maiúsculas e minúsculas.
+- "Resposta de validação": corpo JSON definido em RF002.
+- "Resposta de erro": corpo JSON definido em RF010.
+
+0.4 Convenções gerais aplicáveis a todos os requisitos
+- Todas as respostas da API (rotas sob /api, respostas de erro e rotas
+  inexistentes) possuem cabeçalho Content-Type "application/json; charset=utf-8"
+  e corpo codificado em UTF-8. As exceções são a interface Swagger UI (RF022),
+  servida como HTML.
+- O cabeçalho Accept da requisição não altera o formato da resposta.
+- Nomes de campos JSON são sensíveis a maiúsculas e minúsculas.
+- Todas as mensagens textuais especificadas neste documento devem ser
+  retornadas literalmente, caractere a caractere, incluindo acentuação e
+  pontuação final.
+- Exemplos de CPF utilizados neste documento foram verificados contra o
+  algoritmo descrito em RF006 e RF007.
+
+0.5 Tabela de vetores de referência
+CPFs válidos (dígitos verificadores corretos e não repetidos):
+  52998224725    (com máscara: 529.982.247-25)
+  11144477735    (com máscara: 111.444.777-35)
+  12345678909    (primeiro dígito verificador igual a 0)
+  10000000280    (segundo dígito verificador igual a 0)
+  10000003700    (ambos os dígitos verificadores iguais a 0)
+  01234567890    (iniciado por zero)
+  00000000191    (contém zeros, mas não é sequência repetida)
+CPFs com dígito verificador inválido:
+  52998224715    (primeiro dígito verificador incorreto)
+  52998224724    (primeiro correto, segundo dígito verificador incorreto)
+  12345678900    (primeiro correto, segundo dígito verificador incorreto)
+Sequências repetidas (todas satisfazem aritmeticamente o algoritmo de dígitos
+verificadores e, ainda assim, devem ser consideradas inválidas):
+  00000000000, 11111111111, 22222222222, 33333333333, 44444444444,
+  55555555555, 66666666666, 77777777777, 88888888888, 99999999999
+
+================================================================================
+1. ENDPOINT DE VALIDAÇÃO E REGRAS DO CPF
+================================================================================
+
+--------------------------------------------------------------------------------
+RF001 — Disponibilização do endpoint de validação de CPF
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve disponibilizar o endpoint POST /api/v1/cpf/validacao, que
+recebe, no corpo da requisição, um objeto JSON contendo o campo "cpf" do tipo
+string e retorna o resultado da validação desse CPF. Exemplo de requisição:
+  POST /api/v1/cpf/validacao
+  Content-Type: application/json
+  {"cpf": "529.982.247-25"}
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK quando a requisição é bem-formada (Content-Type JSON, corpo JSON
+     sintaticamente válido, objeto JSON com campo "cpf" do tipo string não em
+     branco), independentemente de o CPF ser válido ou inválido.
+   - Os demais códigos (400, 415, 422, 404, 500) são definidos em RF014 a
+     RF019.
+2. Response Body:
+   - Para status 200, o corpo segue integralmente a estrutura de RF002.
+3. Regras de negócio:
+   - O resultado "válido" ou "inválido" do CPF é expresso exclusivamente no
+     corpo da resposta (campo "valido"), e não pelo código HTTP. Um CPF inválido
+     enviado em requisição bem-formada é uma consulta processada com sucesso.
+   - O CPF a ser validado é lido exclusivamente do campo "cpf" do objeto JSON
+     no corpo da requisição.
+4. Validação:
+   - A validação estrutural da requisição é especificada em RF011 a RF017. A
+     validação do conteúdo do CPF é especificada em RF003 a RF009.
+5. Autenticação e autorização:
+   - Não aplicável — o endpoint é público e não exige credenciais (ver RF020).
+6. Estado:
+   - Não aplicável — a operação é uma consulta sem persistência; nenhum recurso
+     é criado, alterado ou removido (ver RF021).
+7. Efeitos colaterais:
+   - Não aplicável — a operação não persiste dados nem interage com serviços
+     externos (ver RF021).
+
+--------------------------------------------------------------------------------
+RF002 — Estrutura padronizada da resposta de validação
+--------------------------------------------------------------------------------
+Descrição:
+Toda resposta com status 200 do endpoint de validação deve conter um objeto
+JSON com exatamente os cinco campos abaixo, sem campos adicionais.
+
+  Campo             Tipo              Obrigatório  Conteúdo
+  ----------------  ----------------  -----------  -----------------------------
+  cpf               string            sim          Valor do campo "cpf" exatamente
+                                                   como recebido, sem alteração.
+  cpf_normalizado   string ou null    sim          CPF normalizado (11 dígitos)
+                                                   quando o formato é aceito
+                                                   (RF003); null quando o motivo
+                                                   é FORMATO_INVALIDO.
+  valido            boolean           sim          true se o CPF é válido; false
+                                                   caso contrário.
+  motivo            string ou null    sim          null se valido = true; caso
+                                                   contrário, um dos valores:
+                                                   "FORMATO_INVALIDO",
+                                                   "SEQUENCIA_REPETIDA",
+                                                   "DIGITO_VERIFICADOR_INVALIDO".
+  mensagem          string            sim          Mensagem associada ao
+                                                   resultado (tabela abaixo).
+
+  Resultado                       motivo                          mensagem
+  ------------------------------  ------------------------------  -------------------------------------------------------------------------------------
+  CPF válido                      null                            "CPF válido."
+  Formato inválido                "FORMATO_INVALIDO"              "CPF com formato inválido. Informe 11 dígitos, com ou sem a máscara 000.000.000-00."
+  Sequência repetida              "SEQUENCIA_REPETIDA"            "CPF inválido: todos os dígitos são iguais."
+  Dígito verificador inválido     "DIGITO_VERIFICADOR_INVALIDO"   "CPF inválido: dígitos verificadores não conferem."
+
+Exemplo (CPF válido):
+  {"cpf":"529.982.247-25","cpf_normalizado":"52998224725","valido":true,
+   "motivo":null,"mensagem":"CPF válido."}
+Exemplo (formato inválido):
+  {"cpf":"529982247","cpf_normalizado":null,"valido":false,
+   "motivo":"FORMATO_INVALIDO","mensagem":"CPF com formato inválido. Informe 11 dígitos, com ou sem a máscara 000.000.000-00."}
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK em todos os casos cobertos por este requisito.
+2. Response Body:
+   - Conforme as tabelas acima. Os campos "cpf_normalizado" e "motivo" devem
+     estar presentes mesmo quando o valor for null (não podem ser omitidos).
+   - Cabeçalho Content-Type: "application/json; charset=utf-8".
+3. Regras de negócio:
+   - valido = true se, e somente se, motivo = null.
+   - valido = true implica cpf_normalizado não nulo e mensagem "CPF válido.".
+   - A combinação motivo/mensagem segue estritamente a tabela; nenhuma outra
+     combinação é admitida.
+4. Validação:
+   - Não aplicável — este requisito define o formato da saída; a validação da
+     entrada é tratada em RF003 a RF017.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — a resposta é calculada a partir da entrada, sem
+     consulta ou alteração de estado (ver RF021).
+7. Efeitos colaterais:
+   - Não aplicável — a produção da resposta não gera efeitos observáveis além do
+     próprio retorno HTTP.
+
+--------------------------------------------------------------------------------
+RF003 — Aceitação e normalização dos formatos de CPF
+--------------------------------------------------------------------------------
+Descrição:
+O sistema deve aceitar o CPF em dois formatos: sem máscara (11 dígitos) e com
+máscara (DDD.DDD.DDD-DD), conforme definições da seção 0.3. Em ambos os casos,
+o CPF é convertido para o CPF normalizado antes das verificações
+definidas em RF005 a RF007.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK para qualquer CPF em formato aceito, seja ele válido ou inválido.
+2. Response Body:
+   - Estrutura de RF002, com "cpf" igual ao valor recebido e "cpf_normalizado"
+     igual aos 11 dígitos extraídos. Exemplos:
+     entrada "529.982.247-25" → cpf_normalizado "52998224725";
+     entrada "52998224725"    → cpf_normalizado "52998224725";
+     entrada "012.345.678-90" → cpf_normalizado "01234567890".
+3. Regras de negócio:
+   - Os dois formatos são equivalentes: o mesmo CPF informado com e sem máscara
+     produz valores idênticos de "cpf_normalizado", "valido", "motivo" e
+     "mensagem".
+   - Zeros à esquerda são preservados na normalização.
+   - O CPF não é convertido para número em nenhuma etapa observável.
+4. Validação:
+   - Apenas as duas formas definidas na seção 0.3 são aceitas. Qualquer outra
+     forma é tratada em RF004.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — a normalização não persiste nem altera dados.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF004 — Identificação de CPF com formato inválido
+--------------------------------------------------------------------------------
+Descrição:
+Quando o campo "cpf" é uma string não em branco que não corresponde a nenhum
+dos formatos aceitos em RF003, o sistema deve retornar resultado inválido com
+motivo "FORMATO_INVALIDO".
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - "cpf": valor recebido; "cpf_normalizado": null; "valido": false;
+     "motivo": "FORMATO_INVALIDO"; "mensagem": "CPF com formato inválido.
+     Informe 11 dígitos, com ou sem a máscara 000.000.000-00."
+3. Regras de negócio:
+   - Quando o formato é inválido, as verificações de sequência repetida e de
+     dígitos verificadores não são realizadas (ver RF009).
+4. Validação — são casos de FORMATO_INVALIDO, entre outros:
+   - menos de 11 dígitos: "5299822472", "529.982.247-2";
+   - mais de 11 dígitos: "529982247251", "529.982.247-251";
+   - presença de letras ou símbolos: "5299822472a", "529.982.247/25",
+     "529-982-247.25", "abc";
+   - máscara parcial ou inconsistente: "529.98224725", "529982247-25",
+     "529.982.24725", "529 982 247 25";
+   - espaços em branco no início, no fim ou no meio de uma cadeia não em
+     branco: " 52998224725", "52998224725 ", "529 98224725";
+   - dígitos não ASCII: "５２９９８２２４７２５";
+   - cadeia de comprimento arbitrário que não atenda aos formatos aceitos
+     (não há limite de comprimento que gere erro 422; cadeias longas resultam
+     em FORMATO_INVALIDO).
+   - Espaços em branco não são removidos antes da verificação de formato.
+   - Cadeias em branco não pertencem a este requisito (ver RF012).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF005 — Identificação de sequências de dígitos repetidos
+--------------------------------------------------------------------------------
+Descrição:
+Quando o CPF normalizado é composto por 11 dígitos iguais, o sistema deve
+retornar resultado inválido com motivo "SEQUENCIA_REPETIDA", ainda que os
+dígitos verificadores sejam aritmeticamente consistentes.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - "cpf": valor recebido; "cpf_normalizado": os 11 dígitos; "valido": false;
+     "motivo": "SEQUENCIA_REPETIDA"; "mensagem": "CPF inválido: todos os
+     dígitos são iguais."
+3. Regras de negócio:
+   - As dez sequências 00000000000 a 99999999999 (dígito d repetido 11 vezes,
+     d de 0 a 9) são inválidas, nos formatos sem e com máscara (por exemplo,
+     "111.111.111-11" e "11111111111").
+   - Esta verificação precede a verificação de dígitos verificadores
+     (ver RF009); portanto, essas entradas nunca retornam motivo
+     "DIGITO_VERIFICADOR_INVALIDO" nem valido = true.
+   - CPFs com muitos dígitos iguais, mas não todos, não são sequências
+     repetidas (exemplo: "00000000191" é válido).
+4. Validação:
+   - Aplica-se somente a entradas aprovadas na verificação de formato (RF003).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF006 — Verificação do primeiro dígito verificador
+--------------------------------------------------------------------------------
+Descrição:
+O sistema deve calcular o primeiro dígito verificador (10º dígito) a partir dos
+9 primeiros dígitos do CPF normalizado, conforme o algoritmo oficial, e
+compará-lo com o 10º dígito informado.
+
+Algoritmo: sendo d1..d9 os nove primeiros dígitos,
+  S1 = 10*d1 + 9*d2 + 8*d3 + 7*d4 + 6*d5 + 5*d6 + 4*d7 + 3*d8 + 2*d9
+  R1 = S1 mod 11
+  DV1 = 0, se R1 < 2; caso contrário, DV1 = 11 - R1.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - Se o 10º dígito informado for diferente de DV1: "valido": false;
+     "motivo": "DIGITO_VERIFICADOR_INVALIDO"; "mensagem": "CPF inválido:
+     dígitos verificadores não conferem."; "cpf_normalizado": os 11 dígitos.
+3. Regras de negócio:
+   - Exemplo: para "529982247", S1 = 295, R1 = 9, DV1 = 2.
+   - Exemplo com resto menor que 2: para "123456789", S1 = 210, R1 = 1,
+     DV1 = 0; logo "12345678909" tem primeiro dígito verificador correto.
+   - "52998224715" deve retornar DIGITO_VERIFICADOR_INVALIDO (10º dígito 1,
+     esperado 2).
+4. Validação:
+   - Aplica-se somente a entradas aprovadas nas verificações de RF003 e RF005.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — cálculo puro, sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF007 — Verificação do segundo dígito verificador
+--------------------------------------------------------------------------------
+Descrição:
+O sistema deve calcular o segundo dígito verificador (11º dígito) a partir dos
+10 primeiros dígitos do CPF normalizado (os 9 primeiros mais o 10º dígito
+informado), conforme o algoritmo oficial, e compará-lo com o 11º dígito
+informado.
+
+Algoritmo: sendo d1..d10 os dez primeiros dígitos,
+  S2 = 11*d1 + 10*d2 + 9*d3 + 8*d4 + 7*d5 + 6*d6 + 5*d7 + 4*d8 + 3*d9 + 2*d10
+  R2 = S2 mod 11
+  DV2 = 0, se R2 < 2; caso contrário, DV2 = 11 - R2.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - Se o 11º dígito informado for diferente de DV2: "valido": false;
+     "motivo": "DIGITO_VERIFICADOR_INVALIDO"; "mensagem": "CPF inválido:
+     dígitos verificadores não conferem."; "cpf_normalizado": os 11 dígitos.
+3. Regras de negócio:
+   - Exemplo: para "5299822472", S2 = 347, R2 = 6, DV2 = 5.
+   - Exemplo com resto menor que 2: "10000000280" possui DV2 = 0 e é válido.
+   - "52998224724" e "12345678900" devem retornar DIGITO_VERIFICADOR_INVALIDO
+     (primeiro dígito correto, segundo incorreto).
+   - O motivo é o mesmo ("DIGITO_VERIFICADOR_INVALIDO") quando apenas o
+     primeiro, apenas o segundo ou ambos os dígitos verificadores estão
+     incorretos.
+4. Validação:
+   - Aplica-se somente a entradas aprovadas nas verificações de RF003 e RF005.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — cálculo puro, sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF008 — Reconhecimento de CPF válido
+--------------------------------------------------------------------------------
+Descrição:
+O sistema deve declarar o CPF válido se, e somente se, (a) estiver em formato
+aceito (RF003), (b) não for sequência repetida (RF005), (c) o 10º dígito for
+igual a DV1 (RF006) e (d) o 11º dígito for igual a DV2 (RF007).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK.
+2. Response Body:
+   - "cpf": valor recebido; "cpf_normalizado": os 11 dígitos; "valido": true;
+     "motivo": null; "mensagem": "CPF válido."
+3. Regras de negócio:
+   - Todos os CPFs válidos da tabela 0.5 devem ser reconhecidos como válidos
+     nos formatos sem e com máscara (por exemplo, "10000003700" e
+     "100.000.037-00").
+   - A validade é determinada apenas pelas regras deste documento; não há
+     consulta à Receita Federal nem a qualquer base externa de situação
+     cadastral.
+4. Validação:
+   - Pressupõe requisição bem-formada (RF001); entradas malformadas seguem
+     RF011 a RF017.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais; em particular, nenhuma chamada a
+     serviço externo é realizada.
+
+--------------------------------------------------------------------------------
+RF009 — Precedência das verificações do CPF
+--------------------------------------------------------------------------------
+Descrição:
+As verificações do conteúdo do CPF devem ser aplicadas na seguinte ordem, e o
+primeiro critério não atendido determina o motivo retornado:
+  1º formato (RF003/RF004) → "FORMATO_INVALIDO";
+  2º sequência repetida (RF005) → "SEQUENCIA_REPETIDA";
+  3º dígitos verificadores (RF006/RF007) → "DIGITO_VERIFICADOR_INVALIDO".
+Se todos forem atendidos, o CPF é válido (RF008).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 200 OK em todos os casos deste requisito.
+2. Response Body:
+   - Exatamente um motivo é retornado por resposta; não há lista de motivos.
+3. Regras de negócio:
+   - "111.111.111-11" → "SEQUENCIA_REPETIDA" (e não válido, embora satisfaça
+     o algoritmo de dígitos verificadores).
+   - "1111111111" (10 dígitos) → "FORMATO_INVALIDO" (e não
+     "SEQUENCIA_REPETIDA").
+   - "52998224715" → "DIGITO_VERIFICADOR_INVALIDO".
+4. Validação:
+   - A precedência entre erros estruturais da requisição (415, 400, 422) é
+     definida em RF010.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+================================================================================
+2. VALIDAÇÃO DA REQUISIÇÃO E TRATAMENTO DE ERROS
+================================================================================
+
+--------------------------------------------------------------------------------
+RF010 — Estrutura padronizada de resposta de erro e precedência entre erros
+--------------------------------------------------------------------------------
+Descrição:
+Toda resposta de erro da API (status 400, 404, 415, 422 e 500) deve seguir a
+estrutura abaixo, sem campos adicionais:
+  {
+    "erro": {
+      "codigo":   string,
+      "mensagem": string,
+      "detalhes": array
+    }
+  }
+Cada elemento de "detalhes" é um objeto com exatamente os campos
+"campo" (string) e "mensagem" (string). Para erros relativos ao campo "cpf"
+(RF011, RF012, RF013), "detalhes" contém exatamente um elemento, com
+"campo": "cpf" e "mensagem" idêntica a "erro.mensagem". Para os demais erros,
+"detalhes" é um array vazio ([]).
+
+Catálogo fechado de códigos de erro:
+  Status  codigo                        mensagem
+  ------  ----------------------------  -------------------------------------------------
+  400     "JSON_MALFORMADO"             "O corpo da requisição não é um JSON válido."
+  404     "ROTA_NAO_ENCONTRADA"         "Rota não encontrada."
+  415     "CONTENT_TYPE_NAO_SUPORTADO"  "O cabeçalho Content-Type deve ser application/json."
+  422     "PAYLOAD_INVALIDO"            "O corpo da requisição deve ser um objeto JSON."
+  422     "CAMPO_OBRIGATORIO"           "O campo cpf é obrigatório."
+  422     "CAMPO_VAZIO"                 "O campo cpf não pode estar vazio."
+  422     "TIPO_INVALIDO"               "O campo cpf deve ser do tipo string."
+  500     "ERRO_INTERNO"                "Erro interno do servidor."
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Conforme o catálogo. Cada código de erro está associado a um único status.
+2. Response Body:
+   - Estrutura acima; Content-Type "application/json; charset=utf-8".
+   - Respostas de erro nunca contêm os campos da resposta de validação
+     (RF002), e respostas de validação nunca contêm o campo "erro".
+3. Regras de negócio — precedência no endpoint de validação, avaliada nesta
+   ordem; o primeiro erro encontrado é o único retornado:
+   1º Content-Type não JSON → 415 (RF016);
+   2º corpo não vazio e sintaticamente inválido como JSON → 400 (RF015);
+   3º corpo JSON válido que não é objeto → 422 PAYLOAD_INVALIDO (RF014);
+   4º campo "cpf" ausente ou null → 422 CAMPO_OBRIGATORIO (RF011);
+   5º campo "cpf" com tipo diferente de string → 422 TIPO_INVALIDO (RF013);
+   6º campo "cpf" string em branco → 422 CAMPO_VAZIO (RF012);
+   7º demais casos → processamento do CPF com status 200 (RF001 a RF009).
+4. Validação:
+   - Nenhum outro código de erro além dos do catálogo pode ser retornado.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020); portanto, os status 401 e
+     403 nunca são retornados.
+6. Estado:
+   - Não aplicável — erros não alteram estado algum.
+7. Efeitos colaterais:
+   - Não aplicável — a geração de respostas de erro não produz efeitos
+     observáveis além do retorno HTTP.
+
+--------------------------------------------------------------------------------
+RF011 — Campo "cpf" ausente ou nulo
+--------------------------------------------------------------------------------
+Descrição:
+Quando o objeto JSON do corpo não contém a chave "cpf", ou a contém com valor
+null, ou quando o corpo da requisição com Content-Type JSON está vazio (zero
+bytes ou apenas espaços em branco), o sistema deve rejeitar a requisição com
+erro de validação.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity (Unprocessable Content).
+2. Response Body:
+   - {"erro":{"codigo":"CAMPO_OBRIGATORIO","mensagem":"O campo cpf é
+     obrigatório.","detalhes":[{"campo":"cpf","mensagem":"O campo cpf é
+     obrigatório."}]}}
+3. Regras de negócio:
+   - A chave é sensível a maiúsculas e minúsculas: {"CPF":"52998224725"} e
+     {"Cpf":"52998224725"} são tratados como ausência de "cpf".
+   - Corpos de exemplo que produzem este erro: "" (vazio), "{}",
+     "{\"cpf\":null}", "{\"documento\":\"52998224725\"}".
+4. Validação:
+   - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF012 — Campo "cpf" em branco
+--------------------------------------------------------------------------------
+Descrição:
+Quando o campo "cpf" é uma string em branco (definição da seção 0.3), o sistema
+deve rejeitar a requisição com erro de validação.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity.
+2. Response Body:
+   - {"erro":{"codigo":"CAMPO_VAZIO","mensagem":"O campo cpf não pode estar
+     vazio.","detalhes":[{"campo":"cpf","mensagem":"O campo cpf não pode estar
+     vazio."}]}}
+3. Regras de negócio:
+   - Exemplos que produzem este erro: {"cpf":""}, {"cpf":"   "},
+     {"cpf":"\t"}, {"cpf":"\n"}.
+   - Uma string que contenha ao menos um caractere que não seja espaço em
+     branco não é considerada em branco e segue RF003/RF004 (por exemplo,
+     {"cpf":" 1 "} → 200 com motivo FORMATO_INVALIDO).
+4. Validação:
+   - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF013 — Campo "cpf" com tipo de dado incorreto
+--------------------------------------------------------------------------------
+Descrição:
+Quando o campo "cpf" está presente, não é null e não é do tipo string JSON, o
+sistema deve rejeitar a requisição com erro de validação. Não há conversão
+implícita de tipos.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity.
+2. Response Body:
+   - {"erro":{"codigo":"TIPO_INVALIDO","mensagem":"O campo cpf deve ser do tipo
+     string.","detalhes":[{"campo":"cpf","mensagem":"O campo cpf deve ser do
+     tipo string."}]}}
+3. Regras de negócio:
+   - Números são rejeitados mesmo quando representam um CPF válido, pois a
+     representação numérica elimina zeros à esquerda. Exemplos que produzem
+     este erro: {"cpf":52998224725}, {"cpf":5.2}, {"cpf":true},
+     {"cpf":false}, {"cpf":["52998224725"]}, {"cpf":{"numero":"52998224725"}}.
+4. Validação:
+   - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF014 — Corpo JSON que não é um objeto
+--------------------------------------------------------------------------------
+Descrição:
+Quando o corpo da requisição é um JSON sintaticamente válido, mas seu valor de
+nível superior não é um objeto (array, string, número, booleano ou null), o
+sistema deve rejeitar a requisição.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 422 Unprocessable Entity.
+2. Response Body:
+   - {"erro":{"codigo":"PAYLOAD_INVALIDO","mensagem":"O corpo da requisição
+     deve ser um objeto JSON.","detalhes":[]}}
+3. Regras de negócio:
+   - Exemplos de corpo que produzem este erro: [], ["52998224725"],
+     [{"cpf":"52998224725"}], "52998224725", 52998224725, true, null.
+4. Validação:
+   - Avaliado após a verificação de Content-Type (RF016) e de sintaxe JSON
+     (RF015), e antes das verificações do campo "cpf" (RF011 a RF013).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF015 — Corpo JSON malformado
+--------------------------------------------------------------------------------
+Descrição:
+Quando a requisição ao endpoint de validação possui Content-Type JSON e corpo
+não vazio que não pode ser interpretado como JSON sintaticamente válido, o
+sistema deve rejeitar a requisição.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 400 Bad Request.
+2. Response Body:
+   - {"erro":{"codigo":"JSON_MALFORMADO","mensagem":"O corpo da requisição não
+     é um JSON válido.","detalhes":[]}}
+   - O corpo não deve conter mensagens do analisador JSON, nomes de classes de
+     exceção, rastreamento de pilha (stack trace) nem páginas HTML de erro do
+     framework.
+3. Regras de negócio:
+   - Exemplos de corpo que produzem este erro: {"cpf": "52998224725"
+     (chave de fechamento ausente), {cpf: "52998224725"} (chave sem aspas),
+     {'cpf':'52998224725'} (aspas simples), {"cpf":"52998224725",} (vírgula
+     final), texto livre "cpf=52998224725".
+4. Validação:
+   - Corpo vazio não é considerado malformado (ver RF011).
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF016 — Content-Type não suportado
+--------------------------------------------------------------------------------
+Descrição:
+Quando a requisição ao endpoint de validação não possui Content-Type JSON
+(definição da seção 0.3), incluindo a ausência do cabeçalho Content-Type, o
+sistema deve rejeitar a requisição sem interpretar o corpo.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 415 Unsupported Media Type.
+2. Response Body:
+   - {"erro":{"codigo":"CONTENT_TYPE_NAO_SUPORTADO","mensagem":"O cabeçalho
+     Content-Type deve ser application/json.","detalhes":[]}}
+3. Regras de negócio:
+   - Exemplos que produzem este erro: ausência do cabeçalho Content-Type;
+     "text/plain"; "application/x-www-form-urlencoded"; "multipart/form-data";
+     "application/xml".
+   - Exemplos aceitos (não produzem este erro): "application/json",
+     "application/json; charset=utf-8", "Application/JSON".
+   - Este erro tem precedência sobre todos os demais erros do endpoint de
+     validação (RF010), inclusive quando o corpo seria um JSON válido.
+4. Validação:
+   - O corpo não é interpretado quando este erro ocorre.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF017 — Desconsideração de campos adicionais e de parâmetros de consulta
+--------------------------------------------------------------------------------
+Descrição:
+Campos do objeto JSON diferentes de "cpf" e parâmetros de query string não
+devem influenciar o processamento nem a resposta.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - O mesmo status que seria obtido sem os campos adicionais e sem a query
+     string.
+2. Response Body:
+   - Idêntico ao que seria obtido sem os campos adicionais e sem a query string;
+     campos adicionais não são ecoados na resposta.
+3. Regras de negócio:
+   - {"cpf":"52998224725","nome":"Teste","extra":123} → 200 com valido = true.
+   - POST /api/v1/cpf/validacao?cpf=52998224725 com corpo {} → 422
+     CAMPO_OBRIGATORIO (o CPF da query string não é considerado).
+   - POST /api/v1/cpf/validacao?cpf=52998224725 com corpo
+     {"cpf":"11111111111"} → 200 com motivo SEQUENCIA_REPETIDA.
+4. Validação:
+   - Campos adicionais não são validados quanto a tipo ou formato.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF018 — Rotas e métodos não mapeados
+--------------------------------------------------------------------------------
+Descrição:
+Requisições a rotas inexistentes, ou à rota /api/v1/cpf/validacao com método
+diferente de POST, devem receber resposta de erro padronizada em JSON.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 404 Not Found.
+2. Response Body:
+   - {"erro":{"codigo":"ROTA_NAO_ENCONTRADA","mensagem":"Rota não
+     encontrada.","detalhes":[]}}
+   - Nenhuma página HTML de erro do framework é retornada.
+3. Regras de negócio:
+   - Exemplos: GET /api/v1/cpf/validacao; PUT /api/v1/cpf/validacao;
+     DELETE /api/v1/cpf/validacao; POST /api/v1/cpf; GET /inexistente;
+     POST /api/v2/cpf/validacao.
+   - As rotas de documentação (/docs e /docs/openapi.json, RF022 e RF023) não
+     são afetadas por este requisito.
+4. Validação:
+   - Content-Type e corpo não são avaliados para rotas não mapeadas.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF019 — Tratamento de falhas inesperadas
+--------------------------------------------------------------------------------
+Descrição:
+Qualquer exceção não prevista ocorrida durante o processamento de uma
+requisição da API deve ser capturada e convertida em resposta de erro
+padronizada, em todos os ambientes (development, test e production).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 500 Internal Server Error.
+2. Response Body:
+   - {"erro":{"codigo":"ERRO_INTERNO","mensagem":"Erro interno do
+     servidor.","detalhes":[]}}
+   - O corpo não deve conter mensagem da exceção, nome de classe, caminhos de
+     arquivo nem rastreamento de pilha.
+3. Regras de negócio:
+   - Verificação: substituir, em ambiente de teste, o serviço de validação de
+     CPF por um dublê que lance exceção genérica, enviar requisição bem-formada
+     ao endpoint de validação e observar a resposta acima.
+   - Após uma falha inesperada, requisições subsequentes continuam sendo
+     atendidas normalmente.
+4. Validação:
+   - Não aplicável — trata-se de falha interna, não de entrada inválida;
+     entradas inválidas nunca resultam em 500.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Não aplicável — sem persistência; a falha não deixa estado residual.
+7. Efeitos colaterais:
+   - O detalhe da exceção pode ser registrado no log da aplicação, mas não é
+     exposto ao cliente. Nenhum outro efeito colateral.
+
+================================================================================
+3. REQUISITOS TRANSVERSAIS DA API
+================================================================================
+
+--------------------------------------------------------------------------------
+RF020 — Ausência de autenticação e autorização
+--------------------------------------------------------------------------------
+Descrição:
+A API não possui mecanismo de autenticação nem de autorização. Todos os
+endpoints (validação e documentação) são acessíveis sem credenciais.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Os status 401 Unauthorized e 403 Forbidden nunca são retornados.
+2. Response Body:
+   - Idêntico com ou sem cabeçalhos de credenciais.
+3. Regras de negócio:
+   - Cabeçalhos como Authorization, Cookie ou X-API-Key, quando enviados, são
+     ignorados e não alteram status nem corpo da resposta.
+4. Validação:
+   - Valores arbitrários ou malformados em cabeçalhos de credenciais não geram
+     erro.
+5. Autenticação e autorização:
+   - Acesso permitido a qualquer cliente, sem credenciais, em todas as rotas.
+     Não existe cenário de acesso negado.
+6. Estado:
+   - Não aplicável — não há sessões, tokens ou usuários.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF021 — Operação sem estado e determinística
+--------------------------------------------------------------------------------
+Descrição:
+A validação de CPF é uma operação de consulta sem persistência: a aplicação
+não utiliza banco de dados para armazenar CPFs ou resultados e não depende de
+serviços externos. Para a mesma requisição, a resposta é sempre a mesma.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Requisições idênticas produzem o mesmo status, independentemente da ordem
+     ou da quantidade de requisições anteriores.
+2. Response Body:
+   - Requisições idênticas produzem corpos idênticos.
+3. Regras de negócio:
+   - O resultado depende exclusivamente do corpo da requisição e das regras
+     deste documento.
+4. Validação:
+   - Não aplicável — este requisito não introduz validações de entrada.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF020).
+6. Estado:
+   - Nenhum recurso é criado, atualizado ou removido. Não há endpoints de
+     criação, consulta por identificador, atualização ou remoção de CPFs.
+     A aplicação não exige banco de dados para iniciar nem para responder.
+7. Efeitos colaterais:
+   - Nenhum dado de CPF é persistido em banco de dados, arquivo ou cache.
+   - Nenhuma chamada de rede a serviços externos é realizada durante a
+     validação (por exemplo, Receita Federal ou APIs de terceiros).
+   - Registros de log não são considerados persistência de resultado para fins
+     deste requisito.
+
+================================================================================
+4. DOCUMENTAÇÃO DA API (OPENAPI / SWAGGER) — OBRIGATÓRIA
+================================================================================
+
+--------------------------------------------------------------------------------
+RF022 — Documentação interativa Swagger UI na rota /docs
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve, obrigatoriamente, disponibilizar documentação interativa da
+API por meio da interface Swagger UI, acessível pela rota /docs, construída a
+partir da especificação OpenAPI definida em RF023. A documentação não é
+opcional e deve estar disponível em todos os ambientes (development, test e
+production).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - GET /docs retorna 200 OK com página HTML; alternativamente, retorna
+     redirecionamento (301, 302, 307 ou 308) para URL cujo caminho se inicia
+     por /docs e cuja resposta final, após seguir os redirecionamentos, é
+     200 OK com página HTML.
+2. Response Body:
+   - Resposta final com Content-Type "text/html" contendo a interface Swagger
+     UI.
+   - A interface carrega a especificação a partir de /docs/openapi.json.
+3. Regras de negócio:
+   - A interface exibe a operação POST /api/v1/cpf/validacao, com seu resumo,
+     esquema de requisição, exemplos e respostas documentadas (RF024 e RF025).
+   - A interface permite interagir com o endpoint: a funcionalidade "Try it
+     out" está habilitada para POST, e a execução a partir da interface envia
+     a requisição à própria instância em execução e exibe status, cabeçalhos e
+     corpo da resposta real.
+   - Os recursos da interface (HTML, CSS e JavaScript) são servidos pela
+     própria aplicação, sem dependência de rede externa (CDN), de modo que a
+     documentação funcione sem acesso à internet.
+4. Validação:
+   - Não aplicável — a rota não recebe payload.
+5. Autenticação e autorização:
+   - Acesso público, sem credenciais (ver RF020).
+6. Estado:
+   - Não aplicável — a consulta à documentação não altera estado.
+7. Efeitos colaterais:
+   - Não aplicável — a exibição da documentação não produz efeitos colaterais.
+     Requisições executadas pela interface produzem exatamente os mesmos
+     efeitos de requisições diretas ao endpoint (ou seja, nenhum, ver RF021).
+
+--------------------------------------------------------------------------------
+RF023 — Especificação OpenAPI disponível e válida
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve disponibilizar o documento de especificação da API no formato
+OpenAPI 3.0, em JSON, na rota GET /docs/openapi.json. Esse documento é a fonte
+utilizada pela interface Swagger UI (RF022).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - GET /docs/openapi.json retorna 200 OK.
+2. Response Body:
+   - Content-Type "application/json".
+   - Objeto JSON contendo, no mínimo:
+     "openapi": string iniciada por "3.0." (por exemplo, "3.0.3");
+     "info.title": string não vazia;
+     "info.version": string não vazia;
+     "paths": objeto contendo "/api/v1/cpf/validacao".
+3. Regras de negócio:
+   - O documento deve ser válido segundo o esquema oficial da especificação
+     OpenAPI 3.0, sem erros, quando submetido a um validador de especificações
+     OpenAPI.
+   - Se o campo "servers" estiver presente, deve conter apenas URL relativa
+     ("/"), de modo que a interface utilize a mesma origem em que a aplicação
+     está em execução, qualquer que seja a porta configurada (RF027).
+   - Todas as referências internas ("$ref") devem ser resolvíveis dentro do
+     próprio documento.
+4. Validação:
+   - Não aplicável — a rota não recebe payload.
+5. Autenticação e autorização:
+   - Acesso público, sem credenciais (ver RF020). O documento não declara
+     esquemas de segurança ("securitySchemes") nem requisitos "security".
+6. Estado:
+   - Não aplicável — documento estático em relação às requisições; não é
+     alterado por chamadas à API.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF024 — Documentação do endpoint, parâmetros e payloads
+--------------------------------------------------------------------------------
+Descrição:
+A especificação OpenAPI deve descrever o endpoint de validação, seu corpo de
+requisição e os tipos de dados correspondentes.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito sobre o conteúdo do documento servido em RF023.
+2. Response Body:
+   - Em "paths./api/v1/cpf/validacao" deve existir a operação "post" (e
+     nenhuma outra operação), com "summary" e "description" não vazios.
+   - "requestBody.required" igual a true, com conteúdo "application/json" cujo
+     esquema é do tipo "object", com "required": ["cpf"] e propriedade "cpf"
+     do tipo "string".
+   - A propriedade "cpf" possui "description" que informa os dois formatos
+     aceitos (11 dígitos sem máscara e máscara 000.000.000-00) e exemplos de
+     ambos os formatos (por exemplo, "52998224725" e "529.982.247-25").
+3. Regras de negócio:
+   - O documento é consistente com RF001 a RF017: não declara campos de
+     requisição inexistentes, não declara parâmetros de query string ou de
+     cabeçalho além de Content-Type e não declara outros métodos para a rota.
+4. Validação:
+   - O esquema de requisição documentado deve corresponder às regras de
+     validação de RF011 a RF014 (campo obrigatório, tipo string).
+5. Autenticação e autorização:
+   - Não aplicável — a operação não declara requisitos de segurança (RF020).
+6. Estado:
+   - Não aplicável — documentação descritiva.
+7. Efeitos colaterais:
+   - Não aplicável — documentação descritiva.
+
+--------------------------------------------------------------------------------
+RF025 — Documentação dos códigos HTTP e das estruturas de resposta
+--------------------------------------------------------------------------------
+Descrição:
+A especificação OpenAPI deve documentar, para a operação POST
+/api/v1/cpf/validacao, todos os códigos HTTP que ela pode retornar e o esquema
+de cada resposta.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - A operação documenta as respostas 200, 400, 415, 422 e 500, cada uma com
+     "description" não vazia. A resposta 404 (RF018) refere-se a rotas não
+     mapeadas e não precisa constar na operação.
+2. Response Body:
+   - Resposta 200: esquema "object" com "required" contendo "cpf",
+     "cpf_normalizado", "valido", "motivo" e "mensagem"; tipos conforme RF002;
+     "cpf_normalizado" e "motivo" anuláveis ("nullable": true); "motivo" com
+     "enum" contendo exatamente "FORMATO_INVALIDO", "SEQUENCIA_REPETIDA",
+     "DIGITO_VERIFICADOR_INVALIDO" (além de null).
+   - Respostas 400, 415, 422 e 500: esquema de erro de RF010 (objeto "erro"
+     com "codigo", "mensagem" e "detalhes", sendo "detalhes" um array de
+     objetos com "campo" e "mensagem").
+   - Exemplos documentados: ao menos um CPF válido, um FORMATO_INVALIDO, um
+     SEQUENCIA_REPETIDA e um DIGITO_VERIFICADOR_INVALIDO na resposta 200; ao
+     menos um exemplo para cada código de erro do catálogo de RF010 associado
+     às respostas 400, 415, 422 e 500.
+3. Regras de negócio:
+   - As respostas reais da API devem ser válidas segundo os esquemas
+     documentados (verificável por teste de contrato que compare respostas
+     reais ao documento /docs/openapi.json).
+4. Validação:
+   - Não aplicável — documentação descritiva; a validação de entrada está em
+     RF011 a RF017.
+5. Autenticação e autorização:
+   - Não aplicável — sem autenticação; as respostas 401 e 403 não são
+     documentadas por não existirem (RF020).
+6. Estado:
+   - Não aplicável — documentação descritiva.
+7. Efeitos colaterais:
+   - Não aplicável — documentação descritiva.
+
+================================================================================
+5. TECNOLOGIA, CONFIGURAÇÃO, ORGANIZAÇÃO, TESTES E DOCUMENTAÇÃO DO PROJETO
+================================================================================
+
+--------------------------------------------------------------------------------
+RF026 — Uso obrigatório de TypeScript e arquivo de dependências
+--------------------------------------------------------------------------------
+Descrição:
+A aplicação deve ser implementada obrigatoriamente em TypeScript, executada
+sobre o runtime Node.js. As dependências devem ser declaradas no arquivo
+package.json, com versões resolvidas no arquivo package-lock.json.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito tecnológico, verificado por inspeção do
+     projeto, pela compilação e pela inicialização da aplicação.
+2. Response Body:
+   - Não aplicável — requisito tecnológico.
+3. Regras de negócio:
+   - Existem, na raiz do projeto, os arquivos package.json, package-lock.json
+     e tsconfig.json.
+   - A dependência "typescript" está declarada no package.json.
+   - A versão mínima do Node.js é declarada no campo "engines.node" do
+     package.json.
+   - O tsconfig.json habilita o modo estrito ("strict": true).
+   - Todo o código-fonte da aplicação (rotas, controladores, schemas,
+     serviços, configuração, infraestrutura) e dos testes é escrito em
+     arquivos TypeScript (.ts). Não há arquivos-fonte .js escritos
+     manualmente nos diretórios src/ e tests/. Não são utilizadas outras
+     linguagens de programação no backend.
+   - O package.json define, no mínimo, os scripts:
+     "build" — compila o projeto com o compilador TypeScript;
+     "start" — inicia a aplicação a partir do código compilado;
+     "test"  — executa a suíte de testes (RF030).
+   - Após "npm install", o comando "npm run build" conclui sem erros de
+     compilação nem de tipos, e o comando "npm start" inicia a aplicação sem
+     erros, utilizando as variáveis de RF027.
+   - A escolha do framework HTTP para Node.js é livre, desde que todos os
+     comportamentos deste documento sejam atendidos.
+4. Validação:
+   - Não aplicável — requisito tecnológico.
+5. Autenticação e autorização:
+   - Não aplicável — requisito tecnológico.
+6. Estado:
+   - Não aplicável — requisito tecnológico.
+7. Efeitos colaterais:
+   - Não aplicável — requisito tecnológico.
+
+--------------------------------------------------------------------------------
+RF027 — Configuração externalizada por variáveis de ambiente
+--------------------------------------------------------------------------------
+Descrição:
+Todas as configurações da aplicação devem ser obtidas de variáveis de
+ambiente. O conjunto de variáveis é:
+
+  Variável    Finalidade                                  Valores admitidos
+  ----------  ------------------------------------------  ----------------------------------
+  NODE_ENV    Ambiente de execução                        development, test, production
+  HOST        Endereço de rede em que a aplicação escuta  string não vazia (ex.: 0.0.0.0)
+  PORT        Porta HTTP em que a aplicação escuta         inteiro de 1 a 65535
+  LOG_LEVEL   Nível de log da aplicação                   error, warn, info, debug
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Com PORT definido como N, a aplicação responde às requisições na porta
+     N (por exemplo, GET http://localhost:N/docs/openapi.json → 200) e não
+     responde em outra porta por padrão.
+2. Response Body:
+   - Não aplicável — as variáveis não alteram o conteúdo das respostas da API.
+3. Regras de negócio:
+   - Os valores de configuração listados acima não são fixados no
+     código-fonte; são lidos das variáveis de ambiente, em um único módulo de
+     configuração (RF029).
+   - Variáveis definidas no ambiente do processo têm precedência sobre os
+     valores do arquivo .env (RF028).
+   - As quatro variáveis são obrigatórias em todos os ambientes; não há
+     valores padrão definidos no código.
+4. Validação:
+   - Ausência de variável obrigatória (no ambiente e no .env), ou valor fora
+     dos valores admitidos, impede a inicialização: o processo encerra com
+     código de saída diferente de zero e emite mensagem que identifica o nome
+     da variável ausente ou inválida.
+   - Exemplos: PORT="abc", PORT="0", PORT="70000", PORT="3000.5",
+     NODE_ENV="staging", LOG_LEVEL="verbose", HOST="" → falha de
+     inicialização.
+5. Autenticação e autorização:
+   - Não aplicável — as variáveis não configuram autenticação (RF020).
+6. Estado:
+   - Não aplicável — configuração lida na inicialização; não há alteração de
+     estado em tempo de execução.
+7. Efeitos colaterais:
+   - Não aplicável — a leitura de configuração não produz efeitos além da
+     própria configuração do processo.
+
+--------------------------------------------------------------------------------
+RF028 — Arquivos .env e .env.example
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter, na raiz, o arquivo .env, carregado automaticamente na
+inicialização da aplicação, e o arquivo .env.example, com valores
+ilustrativos.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito de configuração do projeto.
+2. Response Body:
+   - Não aplicável — requisito de configuração do projeto.
+3. Regras de negócio:
+   - Ambos os arquivos declaram exatamente as quatro variáveis de RF027, no
+     formato CHAVE=valor, uma por linha.
+   - O arquivo .env.example contém valores ilustrativos (por exemplo,
+     NODE_ENV=development, HOST=0.0.0.0, PORT=3000 e LOG_LEVEL=info) e um
+     comentário ("#") descrevendo cada variável.
+   - Copiar .env.example para .env, sem alterações, resulta em aplicação que
+     inicia com sucesso por meio de "npm run build" seguido de "npm start".
+   - O arquivo .env é carregado automaticamente na inicialização, sem
+     necessidade de exportar as variáveis manualmente, respeitando a
+     precedência definida em RF027.
+4. Validação:
+   - Valores inválidos no .env produzem o comportamento de falha de
+     inicialização descrito em RF027.
+5. Autenticação e autorização:
+   - Não aplicável — requisito de configuração do projeto.
+6. Estado:
+   - Não aplicável — a aplicação apenas lê os arquivos; nunca os altera.
+7. Efeitos colaterais:
+   - Não aplicável — a leitura dos arquivos não produz efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF029 — Organização do projeto com separação de responsabilidades
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve separar configurações, schemas, rotas, serviços e
+infraestrutura, conforme o mapeamento obrigatório abaixo:
+
+  Responsabilidade      Localização           Conteúdo
+  --------------------  --------------------  ------------------------------------------------
+  Configurações         src/config/           Leitura e validação das variáveis de ambiente
+                                              (RF027, RF028).
+  Rotas                 src/routes/           Declaração de POST /api/v1/cpf/validacao e das
+                                              rotas de documentação (RF022, RF023).
+  Schemas               src/schemas/          Validação estrutural do payload (RF011 a RF014),
+                                              sem lógica do algoritmo de CPF.
+  Serviços              src/services/         Regras de CPF (RF003 a RF009).
+  Controladores         src/controllers/      Orquestração: recebe a requisição, aciona schema
+                                              e serviço e monta a resposta.
+  Infraestrutura        src/infrastructure/   Tratamento de erros, formatação das respostas de
+                                              erro (RF010, RF015, RF016, RF018, RF019) e
+                                              disponibilização da documentação OpenAPI.
+  Montagem da app       src/app.ts            Criação e configuração da aplicação HTTP, sem
+                                              abrir porta de rede.
+  Inicialização         src/server.ts         Carregamento da configuração e início da escuta
+                                              em HOST:PORT.
+  Testes                tests/                Suíte de testes automatizados (RF030).
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito estrutural, verificado por inspeção e por testes
+     unitários.
+2. Response Body:
+   - Não aplicável — requisito estrutural.
+3. Regras de negócio:
+   - O serviço de validação de CPF pode ser invocado diretamente, sem
+     requisição HTTP, recebendo uma string e retornando um resultado tipado
+     que expõe, no mínimo, o indicador de validade, o motivo e o CPF
+     normalizado, com os mesmos valores definidos em RF002 a RF009.
+   - A aplicação exportada por src/app.ts pode ser exercitada por testes de
+     requisição sem que uma porta de rede seja aberta.
+   - O controlador não contém o cálculo de dígitos verificadores nem a
+     detecção de sequências repetidas.
+   - O schema de entrada não contém o algoritmo de CPF, e o serviço não
+     contém validação de tipo ou presença do payload HTTP.
+4. Validação:
+   - Não aplicável — requisito estrutural.
+5. Autenticação e autorização:
+   - Não aplicável — requisito estrutural.
+6. Estado:
+   - Não aplicável — requisito estrutural.
+7. Efeitos colaterais:
+   - Não aplicável — requisito estrutural.
+
+--------------------------------------------------------------------------------
+RF030 — Testes automatizados
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter suíte de testes automatizados, escrita em TypeScript no
+diretório tests/, executável pelo comando "npm test", que cubra casos válidos,
+inválidos e situações excepcionais.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Os testes de requisição verificam os status 200, 400, 404, 415, 422 e 500
+     nos cenários definidos neste documento.
+2. Response Body:
+   - Os testes verificam os campos e valores exatos das respostas de RF002 e
+     RF010, incluindo mensagens literais.
+3. Regras de negócio — a suíte cobre, no mínimo:
+   - todos os CPFs válidos da tabela 0.5, nos formatos sem e com máscara;
+   - as dez sequências repetidas, ao menos no formato sem máscara, e ao menos
+     uma no formato com máscara;
+   - erro apenas no primeiro dígito verificador e erro apenas no segundo;
+   - cada categoria de FORMATO_INVALIDO listada em RF004;
+   - cada código de erro do catálogo de RF010, incluindo ERRO_INTERNO
+     simulado por dublê de teste (RF019);
+   - a precedência entre verificações (RF009) e entre erros (RF010);
+   - as rotas /docs e /docs/openapi.json (RF022 e RF023);
+   - testes unitários do serviço de CPF invocado sem HTTP (RF029).
+4. Validação:
+   - A execução de "npm test" termina com código de saída 0 e nenhuma falha.
+   - A suíte não depende de acesso à internet, de banco de dados nem de
+     serviços externos.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação a testar; os testes não utilizam
+     credenciais (RF020).
+6. Estado:
+   - Os testes são independentes entre si e podem ser executados em qualquer
+     ordem com o mesmo resultado.
+7. Efeitos colaterais:
+   - Não aplicável — a execução dos testes não altera arquivos versionados do
+     projeto nem dados externos.
+
+--------------------------------------------------------------------------------
+RF031 — Documentação de instalação, configuração e execução
+--------------------------------------------------------------------------------
+Descrição:
+O projeto deve conter, na raiz, o arquivo README.md com instruções de
+instalação, configuração e execução da aplicação.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - Não aplicável — requisito de documentação do projeto.
+2. Response Body:
+   - Não aplicável — requisito de documentação do projeto.
+3. Regras de negócio — o README.md contém, no mínimo, as seções:
+   - pré-requisitos: versões do Node.js e do npm;
+   - instalação: comando de instalação das dependências ("npm install");
+   - configuração: cópia de .env.example para .env e descrição de cada
+     variável de RF027;
+   - execução: comandos de compilação ("npm run build") e de inicialização
+     ("npm start"), e porta utilizada;
+   - testes: comando de execução da suíte ("npm test");
+   - documentação da API: endereços /docs e /docs/openapi.json;
+   - exemplo de uso: requisição ao endpoint de validação (por exemplo, com
+     curl) e respostas de exemplo para CPF válido e inválido.
+4. Validação:
+   - Seguindo exclusivamente as instruções do README.md, em ambiente limpo com
+     a versão de Node.js indicada, é possível instalar as dependências,
+     compilar e iniciar a aplicação, acessar /docs e executar a suíte de
+     testes com sucesso.
+5. Autenticação e autorização:
+   - Não aplicável — requisito de documentação; a API não possui
+     autenticação (RF020), o que deve constar no README.md.
+6. Estado:
+   - Não aplicável — requisito de documentação.
+7. Efeitos colaterais:
+   - Não aplicável — requisito de documentação.
+
+================================================================================
+FIM DO DOCUMENTO — 31 requisitos (RF001 a RF031)
+================================================================================
