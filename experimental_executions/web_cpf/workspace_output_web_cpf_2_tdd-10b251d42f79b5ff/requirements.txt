@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-pydantic
-validate-docbr
-pydantic-settings
-pytest
-pytest-cov
-httpx

@@ -3016,7 +3016,7 @@ python -m app.main
 
 # Headless (upstream `claude -p`): no questions, so ExitPlanMode is denied: the session plans and exits 1.
 # A session with an approved plan (resumed) develops it; exit 0 only if every item completed its cycle
-python -m app.main -p --spec app/prompts/specs/<file>.txt
+python -m app.main -p --spec <file>.txt
 echo "Build a calculator" | python -m app.main -p
 
 # Continue a session (its transcript, TDD plan and plan file); a prompt is its next message
@@ -3048,7 +3048,7 @@ $P/mutmut run && $P/python scripts/mutmut_score.py      # mutation testing; see 
 
 The full procedure and its pass criteria are in [Quality gate](#quality-gate-mandatory).
 
-Without `-p`, `app.main` is interactive: it prints a menu built from `app/prompts/specs/*.txt` (unless a prompt, `--spec` or `--thread-id` is given), then opens the REPL (`app/screens/repl.py`) in plan mode (`⏸ plan mode on`): the Analyst explores, asks through AskUserQuestion and writes the plan file, and `ExitPlanMode` shows the plan with upstream's choices (a "Yes", "No, keep planning" with feedback, or `/edit`). After the approval the same conversation develops the plan; `/exit` (or `/quit`) leaves, resumable with `--thread-id`. Type to the agents at any time, Esc interrupts, `/help` lists `/plan`, `/pause`, `/resume`, `/requirements` and `/exit`. Because the menu resolves `Path("app/prompts/specs")` relatively, the CWD must be the repo root.
+Without `-p`, `app.main` is interactive (2026-11-17: no menu, and the old `app/prompts/specs/*.txt` use cases are deleted; a prompt or `--spec <file>` still gives the request): it opens the REPL (`app/screens/repl.py`) in plan mode (`⏸ plan mode on`): the Analyst explores, asks through AskUserQuestion and writes the plan file, and `ExitPlanMode` shows the plan with upstream's choices (a "Yes", "No, keep planning" with feedback, or `/edit`). After the approval the same conversation develops the plan; `/exit` (or `/quit`) leaves, resumable with `--thread-id`. Type to the agents at any time, Esc interrupts, `/help` lists `/plan`, `/pause`, `/resume`, `/requirements` and `/exit`.
 
 ### Experiment tooling (post-hoc analysis of generated workspaces)
 

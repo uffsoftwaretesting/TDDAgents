@@ -422,7 +422,7 @@ python -m app.main                                   # or: python -m app.main "<
 
 # Headless (upstream `claude -p`): ExitPlanMode is denied, so a new session plans and stops.
 # stdout carries only the result; the exit code is the result's is_error
-python -m app.main -p --spec app/prompts/specs/<file>.txt
+python -m app.main -p --spec <file>.txt
 echo "Build a calculator" | python -m app.main -p --output-format json
 python -m app.main -p --input-format stream-json --output-format stream-json --verbose   # SDK host
 
@@ -513,5 +513,5 @@ PostToolUse), the turn's attachments, then a continue reason or a terminal. `mai
 - **Package `__init__.py` files re-export nothing.** Import from the defining module. Two
   import cycles are broken by commented function-level imports (TDD stop hook, TDD state
   source).
-- `experimental_executions/` and `mutation_tests/` are **frozen research artifacts** backing
-  the paper's results. Do not regenerate or reformat them.
+- `mutation_tests/` is a **frozen research artifact** backing the paper's results. Do not
+  regenerate or reformat it. (`experimental_executions/` was deleted by the user on 2026-11-17.)
