@@ -402,7 +402,8 @@ def test_validate_command_paths_scans_every_path_and_keeps_reasons(tmp_path):
     reason = f"The agent requested permissions to edit {cwd}/.git/x which is a sensitive file."
     assert pv.validate_command_paths("touch", [".git/x"], cwd, accept) == PermissionResult(
         behavior=ASK, message=reason,
-        decision_reason={"type": "safetyCheck", "reason": reason, "classifierApprovable": True})
+        decision_reason={"type": "safetyCheck", "reason": reason, "classifierApprovable": True},
+        blocked_path=f"{cwd}/.git/x")  # upstream's `blockedPath` on every path ask
     assert pv.validate_command_paths("mkdir", ["d"], cwd, ctx(), True) == PermissionResult(
         behavior=ASK, message=CD_WRITE_MSG,
         decision_reason={"type": "other", "reason": "Compound command contains cd with write operation - manual "

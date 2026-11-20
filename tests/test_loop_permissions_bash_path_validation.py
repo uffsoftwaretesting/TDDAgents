@@ -297,3 +297,58 @@ def test_validate_single_path_command(cwd):
     assert validate_single_path_command("rm -- -/../x", cwd, EDITS).behavior == "passthrough"  # stays inside
     assert validate_single_path_command("rm -- -/../../x", cwd, EDITS).behavior == "ask"
     assert validate_single_path_command("'' x", cwd, CTX).message == "Command '' is not a path-restricted command"
+
+
+# ── createPathChecker's suggestions (pathValidation.ts:703-790) ─────────────────
+
+def test_a_blocked_read_suggests_reading_its_folder_for_the_session(tmp_path):
+    from app.tools.bash_tool import path_validation as pv
+    from app.types.permissions import PermissionMode, PermissionRuleSource, ToolPermissionContext
+
+    cwd = str(tmp_path / "ws")
+    result = pv.check_command_paths("grep", ["-n", "x", "/home/u/go/pkg/mod/fpdf@v0.12.0/fpdf.go"], cwd,
+                                    ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS))
+    assert result.behavior == "ask"
+    assert result.blocked_path == "/home/u/go/pkg/mod/fpdf@v0.12.0/fpdf.go"
+    assert result.suggestions is not None
+    [suggestion] = result.suggestions
+    assert (suggestion.type, suggestion.destination) == ("addRules", PermissionRuleSource.SESSION)
+    assert suggestion.rules == (("Read", "//home/u/go/pkg/mod/fpdf@v0.12.0/**"),)
+
+
+def test_a_blocked_write_suggests_the_folder_and_accept_edits_for_the_session(tmp_path):
+    from app.tools.bash_tool import path_validation as pv
+    from app.types.permissions import PermissionMode, PermissionRuleSource, ToolPermissionContext
+
+    result = pv.check_command_paths("mkdir", ["/opt/tools/bin"], str(tmp_path), ToolPermissionContext())
+    assert result.behavior == "ask" and result.suggestions is not None
+    assert [(s.type, s.destination, s.directories, s.mode) for s in result.suggestions] == [
+        ("addDirectories", PermissionRuleSource.SESSION, ("/opt/tools",), None),
+        ("setMode", PermissionRuleSource.SESSION, (), PermissionMode.ACCEPT_EDITS)]
+
+
+def test_a_write_ask_without_a_blocked_path_still_suggests_accept_edits(tmp_path):
+    from app.tools.bash_tool import path_validation as pv
+    from app.types.permissions import ToolPermissionContext
+
+    result = pv.check_command_paths("mkdir", ["d"], str(tmp_path), ToolPermissionContext(), True)
+    assert result.blocked_path is None and result.suggestions is not None
+    assert [s.type for s in result.suggestions] == ["setMode"]
+
+
+def test_a_passing_or_denied_check_carries_no_suggestions(tmp_path):
+    from app.tools.bash_tool import path_validation as pv
+    from app.types.permissions import PermissionMode, ToolPermissionContext
+
+    inside = pv.check_command_paths("grep", ["x", "a.txt"], str(tmp_path),
+                                    ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS))
+    assert (inside.behavior, inside.suggestions) == ("passthrough", None)
+
+
+def test_the_root_folder_gets_no_read_rule(tmp_path):
+    from app.tools.bash_tool import path_validation as pv
+    from app.types.permissions import ToolPermissionContext
+
+    result = pv.check_command_paths("cat", ["/etc"], str(tmp_path), ToolPermissionContext())
+    assert result.behavior == "ask"
+    assert result.suggestions == ()

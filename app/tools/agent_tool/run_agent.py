@@ -67,7 +67,7 @@ from app.services.compact.compact import is_compact_boundary_message
 from app.skills.load_skills_dir import SkillCommand, SkillRegistry
 from app.state.app_state_store import AppState
 from app.tasks.local_shell_task.kill_shell_tasks import kill_shell_tasks_for_agent
-from app.tool import CancelToken, DenialTrackingBox, Tool, ToolContext
+from app.tool import CancelToken, DenialTrackingBox, Tool, ToolContext, root_set_app_state
 from app.tools.agent_tool.agent_tool_utils import resolve_agent_tools
 from app.tools.agent_tool.load_agents_dir import AgentDefinition
 from app.tools.skill_tool.skill_tool import format_skill_loading_metadata
@@ -246,7 +246,8 @@ def run_agent(
             parent,
             cancel=worker_cancel,
             get_app_state=get_app_state,
-            set_app_state=_task_state_only(parent.set_app_state) if is_async else parent.set_app_state,
+            set_app_state=_task_state_only(root_set_app_state(parent)) if is_async else parent.set_app_state,
+            set_app_state_for_tasks=root_set_app_state(parent) if is_async else parent.set_app_state_for_tasks,
             local_denial_tracking=DenialTrackingBox() if is_async else parent.local_denial_tracking,
             messages=tuple(initial),
             in_flight_tool_ids=set(),

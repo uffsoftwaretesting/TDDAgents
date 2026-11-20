@@ -13,8 +13,9 @@ sits under `projects[<project key>]`, the key being the folder's git root, else 
 
 Upstream reads the session's cwd from module state; here every function takes the project folder
 (`cwd`), since a TDDAgents process may hold several sessions. For the same reason the trust latch
-(`_trustAccepted`: once true, never recomputed) is kept per folder. Not ported: the config cache
-and its file lock (`saveConfigWithLock`), the auth-loss guard, and the other global config keys.
+(`_trustAccepted`: once true, never recomputed) is kept per folder. The notifier's two keys,
+`preferredNotifChannel` and `messageIdleNotifThresholdMs`, are read with upstream's defaults. Not ported:
+the config cache and its file lock (`saveConfigWithLock`), the auth-loss guard, and the other keys.
 """
 
 from __future__ import annotations
@@ -52,6 +53,26 @@ def get_global_config() -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+#: `DEFAULT_GLOBAL_CONFIG.preferredNotifChannel` (`utils/config.ts`): how the notifier reaches the user.
+DEFAULT_PREFERRED_NOTIF_CHANNEL = "auto"
+#: `DEFAULT_GLOBAL_CONFIG.messageIdleNotifThresholdMs`: how long the user must be idle after a turn before the
+#: "waiting for your input" notification.
+DEFAULT_MESSAGE_IDLE_NOTIF_THRESHOLD_MS = 60000
+
+
+def get_preferred_notif_channel() -> str:
+    """`getGlobalConfig().preferredNotifChannel`, with its default."""
+    channel = get_global_config().get("preferredNotifChannel")
+    return channel if isinstance(channel, str) and channel else DEFAULT_PREFERRED_NOTIF_CHANNEL
+
+
+def get_message_idle_notif_threshold_ms() -> int:
+    """`getGlobalConfig().messageIdleNotifThresholdMs`, with its default."""
+    value = get_global_config().get("messageIdleNotifThresholdMs")
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 \
+        else DEFAULT_MESSAGE_IDLE_NOTIF_THRESHOLD_MS
 
 
 def _projects(config: dict[str, Any]) -> dict[str, Any]:
@@ -136,11 +157,15 @@ def _walk_up(projects: dict[str, Any], start: Path) -> bool:
 
 
 __all__ = [
+    "DEFAULT_MESSAGE_IDLE_NOTIF_THRESHOLD_MS",
+    "DEFAULT_PREFERRED_NOTIF_CHANNEL",
     "HAS_TRUST_DIALOG_ACCEPTED",
     "ProjectConfig",
     "check_has_trust_dialog_accepted",
     "get_current_project_config",
     "get_global_config",
+    "get_message_idle_notif_threshold_ms",
+    "get_preferred_notif_channel",
     "get_project_path_for_config",
     "is_path_trusted",
     "normalize_path_for_config_key",

@@ -36,6 +36,9 @@ class PermissionResult:
     #: permission prompt offers as "don't ask again" (Phase 11). `None` means none were made,
     #: `()` that none may be (a command the security checks flagged).
     suggestions: tuple[Any, ...] | None = None
+    #: Upstream `blockedPath` (`src/types/permissions.ts`): on an 'ask' for a path outside the allowed
+    #: working directories, that path (resolved), from which `createPathChecker` builds its suggestions.
+    blocked_path: str | None = None
 
 
 class PermissionMode(StrEnum):

@@ -96,10 +96,13 @@ from app.components.permissions.ask_user_question_permission_request.preview_box
 )
 from app.components.design_system.question_box import style_question
 from app.components.messages.system_text_message import NoticeLevel, notice
+from app.bootstrap.state import get_last_interaction_time, update_last_interaction_time
 from app.components.permissions.permission_options import PermissionOption
+from app.components.permissions.permission_request import get_notification_message
 from app.components.spinner.spinner import pick_spinner_verb, spinner_message, spinner_status_line
 from app.constants.spinner_verbs import get_spinner_verbs
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt
+from app.hooks.use_notify_after_timeout import DEFAULT_INTERACTION_THRESHOLD_MS
 from app.project_onboarding_state import (
     create_project_onboarding_feed,
     get_steps,
@@ -360,6 +363,8 @@ class Repl:
         #: One question on screen at a time: a background agent's prompt waits for the one shown
         #: (upstream's `toolUseConfirmQueue`).
         self._asking = asyncio.Lock()
+        #: The armed `idle_prompt` notification (`_notify_when_idle`), if any.
+        self._idle_notice: asyncio.Task[None] | None = None
         self.last_terminal: Terminal | None = None
         #: The first message typed in a session opened with no request (`open_fresh_session`).
         self.first_request: str | None = None
@@ -487,28 +492,103 @@ class Repl:
     # ── permissions ────────────────────────────────────────────────────────
 
     async def prompt(
-        self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any, *, aborts_turn: bool = True
+        self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any, *, aborts_turn: bool = True,
+        notification: str = "TDDAgents needs your attention",
     ) -> Any:
-        """Show `text` and wait for the next line it accepts; the caller holds the screen (`_asking`)."""
+        """
+        Show `text` and wait for the next line it accepts; the caller holds the screen (`_asking`). While it
+        waits, `notification` goes out once the user has been idle for `DEFAULT_INTERACTION_THRESHOLD_MS`
+        (`useNotifyAfterTimeout(message, 'permission_prompt')`, `PermissionRequest.tsx`).
+        """
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self.pending = PendingAnswer(parse=parse, future=future, retry=retry, cancelled=cancelled,
                                      aborts_turn=aborts_turn, text=text)
         self._show_question(text)
+        reminder = self._notify_after_timeout(notification, "permission_prompt",
+                                              DEFAULT_INTERACTION_THRESHOLD_MS / 1000)
         try:
             return await future
         finally:
+            reminder.cancel()
             self.pending = None
+
+    # ── notifications (`services/notifier.ts`) ─────────────────────────────
+
+    def _notify(self, message: str, notification_type: str) -> asyncio.Task[str]:
+        """`sendNotification`: the Notification hooks, then the terminal's channel."""
+        from app.ink.terminal_notification import TerminalNotification
+        from app.services.notifier import NotificationOptions, send_notification
+        from app.utils.env import detect_terminal
+
+        name = detect_terminal()
+        write_raw = getattr(self.io, "write_raw", None)
+        terminal = TerminalNotification(write_raw if callable(write_raw) else (lambda _data: None), terminal=name)
+        return asyncio.ensure_future(send_notification(
+            NotificationOptions(message=message, notification_type=notification_type), terminal,
+            dispatcher=getattr(self.run.ctx, "hook_dispatcher", None), terminal_name=name))
+
+    def _notify_after_timeout(self, message: str, notification_type: str, seconds: float) -> asyncio.Task[None]:
+        """
+        `useNotifyAfterTimeout`: the interaction clock is stamped now (a long request does not notify at
+        once), and the notification goes out after `seconds` unless the user typed meanwhile.
+        """
+        update_last_interaction_time()
+        started = get_last_interaction_time()
+
+        async def wait() -> None:
+            await asyncio.sleep(seconds)
+            if get_last_interaction_time() <= started:
+                await self._notify(message, notification_type)
+
+        return asyncio.ensure_future(wait())
+
+    def _notify_when_idle(self) -> None:
+        """
+        `REPL.tsx`'s idle effect: once a turn has ended and the user stays idle for
+        `messageIdleNotifThresholdMs`, `idle_prompt` "… is waiting for your input" (with nothing running and
+        no question on screen). This is the notice that the work is done when the plan completes.
+        """
+        from app.utils.config import get_message_idle_notif_threshold_ms
+
+        if self._idle_notice is not None:
+            self._idle_notice.cancel()
+            self._idle_notice = None
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:  # no event loop (a synchronous caller): nothing can wait to notify
+            return
+        completed = time.time()
+        seconds = get_message_idle_notif_threshold_ms() / 1000
+
+        async def wait() -> None:
+            await asyncio.sleep(seconds)
+            if get_last_interaction_time() > completed or self.busy or self.pending is not None:
+                return
+            await self._notify("TDDAgents is waiting for your input", "idle_prompt")
+
+        self._idle_notice = asyncio.ensure_future(wait())
 
     async def _wait_for_answer(self, text: str, parse: Callable[[str], Any], retry: str, cancelled: Any) -> Any:
         async with self._asking:
             return await self.prompt(text, parse, retry, cancelled)
 
     async def ask_permission(self, prompt: PermissionPrompt) -> PermissionAnswer:
-        """The run's `canUseTool` prompt: shown now, answered by the next line typed."""
-        answer: PermissionAnswer = await self._wait_for_answer(
-            render_permission_prompt(prompt), lambda line: parse_permission_answer(prompt.options, line),
-            f"Choose 1-{len(prompt.options)}.", PermissionAnswer("no", cancelled=True),
-        )
+        """
+        The run's `canUseTool` prompt: shown when its turn comes, answered by the next line typed. Prompts
+        queue behind each other (`_asking`, upstream's `toolUseConfirmQueue`); when one's turn comes it is
+        rechecked first, so an earlier answer that now allows it ("allow reading from <dir> during this
+        session") resolves it unasked (`REPL.tsx` → `recheckPermission`).
+        """
+        async with self._asking:
+            if prompt.recheck is not None:
+                fresh = await prompt.recheck()
+                if fresh is not None:
+                    return PermissionAnswer("yes", rechecked=fresh)
+            answer: PermissionAnswer = await self.prompt(
+                render_permission_prompt(prompt), lambda line: parse_permission_answer(prompt.options, line),
+                f"Choose 1-{len(prompt.options)}.", PermissionAnswer("no", cancelled=True),
+                notification=get_notification_message(prompt.tool_name),
+            )
         return answer
 
     async def ask_sandbox_permission(self, host_pattern: Mapping[str, Any]) -> bool:
@@ -649,6 +729,7 @@ class Repl:
 
     async def handle_line(self, line: str) -> None:
         """One line from the user: an answer, a command, or a message to the agents."""
+        update_last_interaction_time()
         if self.pending is not None:
             await self._answer_pending(self.pending, line)
             return
@@ -1043,7 +1124,11 @@ class Repl:
         self.io.write(style_question(text, self._width()) if self._colour else text)
 
     def _turn_end(self, terminal: Terminal) -> None:
-        """`turn_end_text`, as a notice; a finished plan as its box on a terminal that shows colour."""
+        """
+        `turn_end_text`, as a notice; a finished plan as its box on a terminal that shows colour. Then the
+        idle notification is armed (`_notify_when_idle`), so a finished plan is announced to a user away.
+        """
+        self._notify_when_idle()
         text = turn_end_text(terminal, self.plan, self.run.store.get().tdd_paused)
         if not self._colour:
             self.io.write(text)
@@ -1105,6 +1190,8 @@ class Repl:
                 task.cancel()
             await asyncio.gather(*self._dialog_tasks, return_exceptions=True)
         finally:
+            if self._idle_notice is not None:
+                self._idle_notice.cancel()
             unsubscribe()
             unsubscribe_settings_errors()
         return self.last_terminal

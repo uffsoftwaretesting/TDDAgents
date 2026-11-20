@@ -634,6 +634,10 @@ class ToolContext:
     cancel: CancelToken
     get_app_state: Callable[[], AppState]
     set_app_state: Callable[[Callable[[AppState], AppState]], None]
+    #: `setAppStateForTasks` (`utils/forkedAgent.ts`): the always-shared channel to the root store, for a
+    #: background agent whose `set_app_state` keeps only its tasks. `None` on the main thread, where
+    #: `set_app_state` is the root (`root_set_app_state`).
+    set_app_state_for_tasks: Callable[[Callable[[AppState], AppState]], None] | None = None
     messages: tuple[Message, ...] = ()
     in_flight_tool_ids: set[str] = field(default_factory=set)
     tools: tuple[Any, ...] = ()
@@ -776,6 +780,15 @@ class DenialTrackingBox:
     """A worker's local denial tally (`localDenialTracking`), mutated in place."""
 
     state: DenialTrackingState = field(default_factory=lambda: DenialTrackingState())
+
+
+def root_set_app_state(context: Any) -> Callable[[Callable[[AppState], AppState]], None]:
+    """`runAgent.ts`'s `rootSetAppState`: `setAppStateForTasks ?? setAppState`."""
+    root: Callable[[Callable[[AppState], AppState]], None] | None = getattr(context, "set_app_state_for_tasks", None)
+    if root is not None:
+        return root
+    setter: Callable[[Callable[[AppState], AppState]], None] = context.set_app_state
+    return setter
 
 
 def tool_context_for(

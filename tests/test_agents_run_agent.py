@@ -461,6 +461,24 @@ def test_an_async_worker_writes_task_state_through_to_the_root():
     assert store.get() is before
 
 
+def test_an_async_worker_keeps_the_root_channel_and_a_sync_worker_inherits_it():
+    """`runAgent.ts` `rootSetAppState = setAppStateForTasks ?? setAppState`: a background worker keeps the
+    root store's setter, through which a permission answered for it is applied (`persist_permissions`)."""
+    from app.tool import root_set_app_state
+
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN,
+                                   project_config=TEST_PROJECT_CONFIG, phase_ledger=PhaseLedger()))
+    parent = _parent(store)
+    model, _ = _run(parent=parent, is_async=True)
+    background = model.seen[0].tool_context
+    assert background.set_app_state_for_tasks is parent.set_app_state
+    root_set_app_state(background)(lambda s: dataclasses.replace(s, todos={"x": ("y",)}))
+    assert store.get().todos == {"x": ("y",)}
+    model, _ = _run(parent=parent)
+    assert model.seen[0].tool_context.set_app_state_for_tasks is None
+    assert root_set_app_state(model.seen[0].tool_context) is parent.set_app_state
+
+
 def test_an_async_worker_has_its_own_cancel_token_unless_given_one():
     from app.tool import CancelToken
 

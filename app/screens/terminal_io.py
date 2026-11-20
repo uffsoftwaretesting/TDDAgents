@@ -125,3 +125,8 @@ class TerminalIO:
 
     def write(self, text: str) -> None:
         print(text, flush=True)
+
+    def write_raw(self, data: str) -> None:
+        """Ink's `writeRaw`: escape sequences (the notifier's bell and OSC) straight to the terminal."""
+        sys.stdout.write(data)
+        sys.stdout.flush()

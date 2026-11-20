@@ -825,6 +825,10 @@ def persist_permissions(updates: Sequence[Any], context: ToolContext) -> bool:
     `PermissionContext.persistPermissions`: write the persistable updates to their settings
     files, apply all of them to the run's context — re-stripped of dangerous allows, the TDD
     managed tier — and say whether any of them persisted.
+
+    Upstream applies them through the REPL's own `setToolPermissionContext`, the root store, whoever
+    asked (`hooks/toolPermission/PermissionContext.ts`); here that is `root_set_app_state`, so a
+    background agent's answer (its `set_app_state` keeps only its tasks) reaches the session too.
     """
     if not updates:
         return False
@@ -837,7 +841,9 @@ def persist_permissions(updates: Sequence[Any], context: ToolContext) -> bool:
         updated = strip_dangerous_permissions(apply_permission_updates(state.tool_permission_context, updates))
         return replace(state, tool_permission_context=updated)
 
-    context.set_app_state(apply)
+    from app.tool import root_set_app_state  # app.tool imports this module
+
+    root_set_app_state(context)(apply)
     return any(supports_persistence(update.destination) for update in updates)
 
 

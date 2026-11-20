@@ -197,7 +197,10 @@ def test_contains_dangerous_operations(expr, dangerous):
     ("sed 's/a/b/'", False, True),
     ("sed 's/a/b/' f", False, False),         # substitution to a file without acceptEdits
     ("sed -i 's/a/b/' f", True, True),
-    ("sed -n '1,5p' f", True, False),         # write mode only checks substitution
+    # acceptEdits keeps the read-only print (upstream skips it there; divergence, user decision 2026-11-20)
+    ("sed -n '1,5p' f", True, True),
+    ("sed -n 1,140p f", True, True),
+    ("sed -n '1p;w out' f", True, False),     # a write command is still refused in acceptEdits
     ("sed 's/a/b/;s/c/d/'", False, False),    # ; in a substitution
     ("sed -n '1p;w out' f", False, False),
     ("sed 's/a/b/w out'", False, False),
@@ -220,6 +223,36 @@ def test_check_sed_constraints():
     edits = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
     assert check_sed_constraints("sed -i 's/a/b/' f", edits).behavior == "passthrough"
     assert check_sed_constraints("sed -i 's/a/b/' f", ctx).behavior == "ask"
+
+
+@pytest.mark.parametrize("command", [
+    "cd /p && sed -n 483,505p internal/services/pdf_renderer.go",
+    "sed -n 1,140p internal/config/config.go; cat .env.example; ls",
+    "sed -n 120,127p pdf_renderer.go",
+    "sed -n '1,5p;8p' f",
+    "sed -n 1,5p f | head",
+    "sed -n 1,5p f; sed -n 8p g",
+    "sed -n 1,5p f 2>&1",
+])
+def test_a_read_only_print_passes_in_accept_edits_as_in_default(command):
+    """The live run's shapes (2026-11-20): `sedCommandIsAllowedByAllowlist` dropped the print pattern in
+    acceptEdits (`tools/BashTool/sedValidation.ts:247-279`), so every `sed -n` asked."""
+    for mode in (PermissionMode.DEFAULT, PermissionMode.ACCEPT_EDITS):
+        assert check_sed_constraints(command, ToolPermissionContext(mode=mode)).behavior == "passthrough", mode
+
+
+@pytest.mark.parametrize("command", [
+    "sed -n '1p;w out' f", "sed -n 'e ls' f", "sed -n '1,5p' -e 'w x' f", "sed -n '$p' f", "sed -n '/re/p' f",
+])
+def test_what_upstream_refuses_is_still_refused_in_accept_edits(command):
+    edits = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
+    assert check_sed_constraints(command, edits).behavior == "ask"
+
+
+def test_accept_edits_still_allows_an_in_place_substitution_and_refuses_one_with_a_semicolon():
+    edits = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
+    assert check_sed_constraints("sed -i 's/a/b/' f", edits).behavior == "passthrough"
+    assert check_sed_constraints("sed -i 's/a/b/;s/c/d/' f", edits).behavior == "ask"
 
 
 def test_messages():

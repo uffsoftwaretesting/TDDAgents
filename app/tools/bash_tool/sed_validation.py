@@ -294,18 +294,21 @@ def contains_dangerous_operations(expression: str) -> bool:
 
 
 def sed_command_is_allowed_by_allowlist(command: str, *, allow_file_writes: bool = False) -> bool:
-    """`sedCommandIsAllowedByAllowlist`."""
+    """
+    `sedCommandIsAllowedByAllowlist`.
+
+    Divergence (user decision 2026-11-20): upstream checks only the substitution pattern when
+    `allowFileWrites` is set (acceptEdits), so every read-only `sed -n 'N,Mp'` asked in that mode
+    (`sedValidation.ts:247-279`). The line-printing pattern is checked in both modes; file writes
+    only widen the substitution pattern.
+    """
     try:
         expressions = extract_sed_expressions(command)
     except SedParseError:
         return False
     has_files = has_file_args(command)
-    if allow_file_writes:
-        is_print = False
-        is_subst = is_substitution_command(command, expressions, has_files, allow_file_writes=True)
-    else:
-        is_print = is_line_printing_command(command, expressions)
-        is_subst = is_substitution_command(command, expressions, has_files)
+    is_print = is_line_printing_command(command, expressions)
+    is_subst = is_substitution_command(command, expressions, has_files, allow_file_writes=allow_file_writes)
     if not is_print and not is_subst:
         return False
     if is_subst and any(";" in e for e in expressions):

@@ -401,3 +401,128 @@ def test_ledger_phases_are_unaffected_by_an_answer(tmp_path: Path):
     ctx = interactive_context(tmp_path, asker, ledger=PhaseLedger(phase=TddPhase.GREEN, tests_written=True))
     call(build_bash_tool(), {"command": "make build"}, ctx)
     assert ctx.get_app_state().phase_ledger == PhaseLedger(phase=TddPhase.GREEN, tests_written=True)
+
+
+# ── "allow reading from <dir> during this session" (live run 2026-11-20) ─────────
+
+def _module_cache(tmp_path: Path) -> Path:
+    """A file outside the project, in a folder whose name has an `@`, as Go's module cache."""
+    folder = tmp_path / "home" / "go" / "pkg" / "mod" / "codeberg.org" / "go-pdf" / "fpdf@v0.12.0"
+    folder.mkdir(parents=True)
+    source = folder / "fpdf.go"
+    source.write_text("".join(f"line {n}\n" for n in range(1, 400)))
+    return source
+
+
+def test_reading_from_a_folder_for_the_session_is_asked_once(tmp_path: Path):
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
+
+    source = _module_cache(tmp_path)
+    asker = Asker(PermissionAnswer("yes-session"))
+    ctx = interactive_context(tmp_path, asker, mode="acceptEdits")
+    tool = build_read_file_tool()
+    assert call(tool, {"file_path": str(source), "offset": 1, "limit": 20}, ctx).message.status == "success"
+    assert [o.label for o in asker.prompts[0].options][1] == "Yes, allow reading from fpdf@v0.12.0/ during this session"
+    assert call(tool, {"file_path": str(source), "offset": 200, "limit": 20}, ctx).message.status == "success"
+    assert len(asker.prompts) == 1
+
+
+def test_a_background_agents_session_grant_reaches_the_session(tmp_path: Path):
+    """
+    Upstream persists the answer through the REPL's own setter (`hooks/toolPermission/PermissionContext.ts`
+    `persistPermissions` → `setToolPermissionContext`), not the asking agent's `setAppState`, which a
+    background agent has as a no-op (`utils/forkedAgent.ts`); the root channel is `setAppStateForTasks`.
+    """
+    from dataclasses import replace as dc_replace
+
+    from app.tools.agent_tool.run_agent import _task_state_only
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
+
+    source = _module_cache(tmp_path)
+    asker = Asker(PermissionAnswer("yes-session"))
+    main = interactive_context(tmp_path, asker, mode="acceptEdits")
+    # What `run_agent` gives a background `bubble` agent (the verifier).
+    worker = dc_replace(main, set_app_state=_task_state_only(main.set_app_state),
+                        set_app_state_for_tasks=main.set_app_state)
+    tool = build_read_file_tool()
+    assert call(tool, {"file_path": str(source)}, worker).message.status == "success"
+    rules = main.get_app_state().tool_permission_context.always_allow_rules
+    assert any(r.tool_name == "Read" and "fpdf@v0.12.0" in str(r.rule_content) for r in rules)
+    assert call(tool, {"file_path": str(source)}, main).message.status == "success"
+    assert len(asker.prompts) == 1
+
+
+class SerialAsker(Asker):
+    """The REPL's prompts: one at a time (`Repl._asking`), each queued prompt rechecked first."""
+
+    def __init__(self, *answers: PermissionAnswer) -> None:
+        super().__init__(*answers)
+        self.lock = asyncio.Lock()
+
+    async def __call__(self, prompt: PermissionPrompt) -> PermissionAnswer:
+        async with self.lock:
+            if prompt.recheck is not None:
+                fresh = await prompt.recheck()
+                if fresh is not None:
+                    return PermissionAnswer("recheck", rechecked=fresh)
+            self.prompts.append(prompt)
+            return self.answers.pop(0)
+
+
+def test_parallel_reads_are_asked_once_when_the_first_answer_grants_the_folder(tmp_path: Path):
+    """
+    The live run (2026-11-20) read `fpdf.go` twice in one response: both asks were queued before the
+    first answer ("allow reading from fpdf@v0.12.0/ during this session") applied, so the second asked
+    again. Upstream rechecks every queued prompt when the permission context changes
+    (`screens/REPL.tsx` `setToolPermissionContext` → `recheckPermission`,
+    `hooks/toolPermission/handlers/interactiveHandler.ts`).
+    """
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
+
+    source = _module_cache(tmp_path)
+    asker = SerialAsker(PermissionAnswer("yes-session"), PermissionAnswer("yes"))
+    ctx = interactive_context(tmp_path, asker, mode="acceptEdits")
+    ctx.can_use_tool = build_interactive_can_use_tool(asker)
+    tool = build_read_file_tool()
+    ctx.tools = (tool,)
+    calls = [ToolCall(name=tool.name, args={"file_path": str(source), "offset": n, "limit": 10}, id=f"r{n}")
+             for n in (1, 200)]
+
+    async def go() -> list[Any]:
+        # A concurrent batch (`runToolsConcurrently`): both calls are checked before either answer.
+        message = AIMessage(content="", tool_calls=calls)
+        return list(await asyncio.gather(*(run_tool_use(c, message, ctx, (tool,)) for c in calls)))
+
+    outcomes = asyncio.run(go())
+    assert len(asker.prompts) == 1
+    assert [o.message.status for o in outcomes] == ["success", "success"]
+
+
+def test_a_queued_prompt_is_not_rechecked_when_nothing_changed(tmp_path: Path):
+    asker = SerialAsker(PermissionAnswer("yes"), PermissionAnswer("yes"))
+    ctx = interactive_context(tmp_path, asker)
+    tool = build_bash_tool()
+    assert call(tool, {"command": "make build"}, ctx).message.status == "success"
+    recheck = asker.prompts[0].recheck
+    assert recheck is not None
+
+    async def again() -> Any:
+        return await recheck()
+
+    assert asyncio.run(again()) is None  # the context is the one it was decided in
+
+
+def test_a_hook_forced_ask_is_never_rechecked_away(tmp_path: Path):
+    """The install gate's ask (a hook's `forceDecision`) must reach the user even if the rules changed."""
+    from app.hooks.use_can_use_tool import PermissionPrompt as Prompt
+
+    asker = SerialAsker(PermissionAnswer("yes"))
+    ctx = interactive_context(tmp_path, asker, mode="bypassPermissions")
+    can_use = build_interactive_can_use_tool(asker)
+    forced = PermissionResult(behavior=PermissionBehavior.ASK, message="installs software: x",
+                              decision_reason={"type": "hook", "hookName": "PreToolUse:Bash"})
+    ctx.set_app_state(lambda s: s)
+    result = asyncio.run(can_use(build_bash_tool(), {"command": "nvm install 20"}, forced, ctx, "t1"))
+    assert result.behavior == PermissionBehavior.ALLOW
+    assert len(asker.prompts) == 1
+    assert isinstance(asker.prompts[0], Prompt) and asker.prompts[0].recheck is None

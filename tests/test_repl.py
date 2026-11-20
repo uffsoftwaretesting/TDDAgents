@@ -150,6 +150,51 @@ def test_two_prompts_at_once_are_shown_one_after_the_other():
     assert asyncio.run(go()) == ["⚠ Permission needed: Bash — one", "⚠ Permission needed: Bash — two"]
 
 
+def test_a_queued_prompt_an_earlier_answer_now_allows_is_never_shown():
+    """`REPL.tsx` rechecks every queued prompt when the permission context changes (`recheckPermission`)."""
+    from app.types.permissions import PermissionResult
+
+    granted: list[bool] = []
+    allowed = PermissionResult(behavior="allow", updated_input={"command": "two"})
+
+    async def recheck() -> PermissionResult | None:
+        return allowed if granted else None
+
+    async def go() -> tuple[PermissionAnswer, list[str]]:
+        io = FakeIO()
+        repl = Repl(SimpleNamespace(on_message=None, ctx=SimpleNamespace()), io)  # type: ignore[arg-type]
+        first = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "one", "", {}, OPTIONS)))
+        second = asyncio.create_task(repl.ask_permission(
+            PermissionPrompt("Bash", "two", "", {}, OPTIONS, recheck=recheck)))
+        await asyncio.sleep(0.01)
+        granted.append(True)  # the first answer's rule now allows the second call
+        repl.pending.future.set_result(PermissionAnswer("yes-session"))  # type: ignore[union-attr]
+        await first
+        answer = await second
+        return answer, [text.splitlines()[0] for text in io.out if "Permission needed" in text]
+
+    answer, shown = asyncio.run(go())
+    assert answer.rechecked is allowed
+    assert shown == ["⚠ Permission needed: Bash — one"]
+
+
+def test_a_queued_prompt_still_disallowed_is_shown():
+    async def recheck() -> None:
+        return None
+
+    async def go() -> list[str]:
+        io = FakeIO()
+        repl = Repl(SimpleNamespace(on_message=None, ctx=SimpleNamespace()), io)  # type: ignore[arg-type]
+        task = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "two", "", {}, OPTIONS,
+                                                                        recheck=recheck)))
+        await asyncio.sleep(0.01)
+        repl.pending.future.set_result(PermissionAnswer("no"))  # type: ignore[union-attr]
+        assert (await task).value == "no"
+        return [text.splitlines()[0] for text in io.out if "Permission needed" in text]
+
+    assert asyncio.run(go()) == ["⚠ Permission needed: Bash — two"]
+
+
 def test_render_message():
     call = AIMessage(content="Writing it", tool_calls=[{"id": "1", "name": "WriteFile", "args": {"file_path": "a.py"}}])
     assert render_message(call) == "● Writing it\n⏺ WriteFile(file_path='a.py')"

@@ -63,3 +63,21 @@ def permission_dialog(
     if name in FILESYSTEM_TOOL_NAMES:
         return filesystem_permission_request(tool, input_args, result)
     return fallback_permission_request(tool, input_args, result)
+
+
+def get_notification_message(tool_name: str, user_facing_name: str | None = None) -> str:
+    """
+    `PermissionRequest.tsx` `getNotificationMessage`: what the notifier says while a permission prompt
+    waits (`useNotifyAfterTimeout(message, 'permission_prompt')`). Claude Code reads TDDAgents.
+    """
+    from app.tools.enter_plan_mode_tool.enter_plan_mode_tool import ENTER_PLAN_MODE_TOOL_NAME
+    from app.tools.exit_plan_mode_tool.exit_plan_mode_tool import EXIT_PLAN_MODE_TOOL_NAME
+
+    if tool_name == EXIT_PLAN_MODE_TOOL_NAME:
+        return "TDDAgents needs your approval for the plan"
+    if tool_name == ENTER_PLAN_MODE_TOOL_NAME:
+        return "TDDAgents wants to enter plan mode"
+    name = tool_name if user_facing_name is None else user_facing_name
+    if not name or not name.strip():
+        return "TDDAgents needs your attention"
+    return f"TDDAgents needs your permission to use {name}"

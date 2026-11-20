@@ -18,10 +18,10 @@ upstream's. The final containment and mode decision is upstream's `isPathAllowed
 (writes only in `acceptEdits`), then allow rules.
 
 Divergences: paths are resolved with `os.path.normpath` (Node's `path.resolve`), without
-upstream's symlink canonicalisation (`safeResolvePath`); the AST-only
-`validateSinglePathCommandArgv`/`stripWrappersFromArgv` are not needed on this path; and
-permission-update suggestions are not produced (they feed an approval UI this loop does
-not have). Messages name TDDAgents where upstream names Claude Code.
+upstream's symlink canonicalisation (`safeResolvePath`); and the AST-only
+`validateSinglePathCommandArgv`/`stripWrappersFromArgv` are not needed on this path. An ask carries
+upstream's `blockedPath` and `createPathChecker`'s suggestions, which the REPL's permission prompt offers.
+Messages name TDDAgents where upstream names Claude Code.
 """
 
 from __future__ import annotations
@@ -29,12 +29,14 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from app.tools.bash_tool.bash_security import try_parse_shell_command
-from app.types.permissions import PermissionBehavior, PermissionResult
-from app.utils.permissions.filesystem import is_path_allowed
+from app.types.permissions import PermissionBehavior, PermissionMode, PermissionResult, PermissionRuleSource
+from app.utils.permissions.filesystem import get_directory_for_path, is_path_allowed
+from app.utils.permissions.permission_update import PermissionUpdate, create_read_rule_suggestion
 from app.utils.shell.read_only_command_validation import contains_vulnerable_unc_path
 
 if TYPE_CHECKING:
@@ -438,7 +440,8 @@ def validate_command_paths(
                 f"{ACTION_VERBS[command]} the allowed working directories for this session: {dirs}."
             )
         behavior = PermissionBehavior.DENY if reason_type == "rule" else PermissionBehavior.ASK
-        return PermissionResult(behavior=behavior, message=message, decision_reason=reason)
+        return PermissionResult(behavior=behavior, message=message, decision_reason=reason,
+                                blocked_path=resolved if behavior == PermissionBehavior.ASK else None)
     return PermissionResult(
         behavior=PermissionBehavior.PASSTHROUGH, message=f"Path validation passed for {command} command"
     )
@@ -452,7 +455,11 @@ def check_command_paths(
     compound_command_has_cd: bool = False,
     operation_override: FileOperationType | None = None,
 ) -> PermissionResult:
-    """`createPathChecker(command, override)(...)`: deny rules first, then dangerous removals."""
+    """
+    `createPathChecker(command, override)(...)`: deny rules first, then dangerous removals, then an ask's
+    suggestions: for a blocked read, `Read(//<dir>/**)` for the session (`createReadRuleSuggestion`); for a
+    blocked write, the directory added for the session; for any write, acceptEdits for the session.
+    """
     result = validate_command_paths(command, args, cwd, context, compound_command_has_cd, operation_override)
     if result.behavior == PermissionBehavior.DENY:
         return result
@@ -460,7 +467,23 @@ def check_command_paths(
         dangerous = check_dangerous_removal_paths(command, args, cwd)
         if dangerous.behavior != PermissionBehavior.PASSTHROUGH:
             return dangerous
-    return result
+    if result.behavior != PermissionBehavior.ASK:
+        return result
+    operation = operation_override or COMMAND_OPERATION_TYPE[command]
+    suggestions: list[PermissionUpdate] = []
+    if result.blocked_path:
+        directory = get_directory_for_path(result.blocked_path)
+        if operation == "read":
+            read_rule = create_read_rule_suggestion(directory, PermissionRuleSource.SESSION)
+            if read_rule is not None:
+                suggestions.append(read_rule)
+        else:
+            suggestions.append(PermissionUpdate("addDirectories", PermissionRuleSource.SESSION,
+                                                directories=(directory,)))
+    if operation in ("write", "create"):
+        suggestions.append(PermissionUpdate("setMode", PermissionRuleSource.SESSION,
+                                            mode=PermissionMode.ACCEPT_EDITS))
+    return replace(result, suggestions=tuple(suggestions))
 
 
 def parse_command_arguments(cmd: str) -> list[str]:

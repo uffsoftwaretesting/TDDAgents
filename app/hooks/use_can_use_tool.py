@@ -59,6 +59,7 @@ from app.utils.permissions.filesystem import permission_cwd
 from app.utils.permissions.permission_setup import set_permission_mode
 from app.utils.permissions.permissions import (
     extract_permission_context,
+    has_permissions_to_use_tool,
     persist_permissions,
     run_permission_request_hooks_for_headless_agent,
 )
@@ -78,6 +79,11 @@ class PermissionPrompt:
     #: The tool's dialog (`components/permissions/`), as upstream's `PermissionRequest` draws it.
     #: `None` for the flows with their own text (the plan approval, a plan change).
     dialog: PermissionDialog | None = None
+    #: `recheckPermission` (`hooks/toolPermission/handlers/interactiveHandler.ts`): called when the prompt's
+    #: turn comes, it returns the decision that now allows the call if an earlier answer changed the
+    #: permission context (upstream rechecks every queued prompt then, `screens/REPL.tsx`), else `None`.
+    #: `None` for a hook's forced ask, which must reach the user.
+    recheck: Callable[[], Awaitable[PermissionResult | None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +94,8 @@ class PermissionAnswer:
     feedback: str | None = None
     #: Esc: the question was dismissed rather than answered (upstream's `handleCancel`).
     cancelled: bool = False
+    #: The prompt was never shown: its `recheck` found the call allowed (upstream's `onAllow` from a recheck).
+    rechecked: PermissionResult | None = None
 
 
 AskUser = Callable[[PermissionPrompt], Awaitable[PermissionAnswer]]
@@ -201,6 +209,15 @@ def build_interactive_can_use_tool(
                                                    **({"annotations": annotations} if annotations else {})},
                                     decision_reason={"type": "user", "option": "answered"})
         options = permission_options(tool.name, input_args, result.suggestions, perm, permission_cwd(context))
+
+        async def recheck() -> PermissionResult | None:
+            # `recheckPermission`: only after the context changed (an earlier answer's rules or mode).
+            if extract_permission_context(context) is perm:
+                return None
+            fresh = await has_permissions_to_use_tool(tool, input_args, context, tool_use_id)
+            return fresh if fresh.behavior == PermissionBehavior.ALLOW else None
+
+        forced_by_hook = (result.decision_reason or {}).get("type") == "hook"
         # A plan change shows its before/after diff (its message), as ExitPlanMode shows its plan.
         dialog = None if tool.name == UPDATE_PLAN_TOOL_NAME else permission_dialog(tool, input_args, result, context)
         answer = await ask_user(PermissionPrompt(
@@ -211,7 +228,10 @@ def build_interactive_can_use_tool(
             options=tuple(options),
             agent=getattr(context, "agent_type", None),
             dialog=dialog,
+            recheck=None if forced_by_hook else recheck,
         ))
+        if answer.rechecked is not None:
+            return answer.rechecked
         choice = _chosen(options, answer.value)
         if choice.reject:
             feedback = (answer.feedback or "").strip() or None
