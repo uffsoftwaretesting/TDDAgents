@@ -45,6 +45,21 @@ def set_flag_settings_inline(settings: Mapping[str, Any] | None) -> None:
     _FLAG_SETTINGS_INLINE[0] = dict(settings) if settings is not None else None
 
 
+#: The settings the command line's own flags imply (`--no-sandbox`): kept apart from the SDK host's
+#: inline settings, which a headless session clears when it opens.
+_CLI_FLAG_SETTINGS: list[dict[str, Any] | None] = [None]
+
+
+def set_cli_flag_settings(settings: Mapping[str, Any] | None) -> None:
+    """The settings implied by command-line flags, merged beneath the inline flag settings."""
+    _CLI_FLAG_SETTINGS[0] = dict(settings) if settings is not None else None
+
+
+def get_cli_flag_settings() -> dict[str, Any] | None:
+    value = _CLI_FLAG_SETTINGS[0]
+    return dict(value) if value is not None else None
+
+
 def get_flag_settings_inline() -> dict[str, Any] | None:
     """`getFlagSettingsInline`."""
     value = _FLAG_SETTINGS_INLINE[0]
