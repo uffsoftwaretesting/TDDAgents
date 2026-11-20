@@ -339,7 +339,7 @@ def test_parser_help_and_metadata() -> None:
         "fresh": "Forces a new run by generating a random thread_id.",
         "thread_id": "Explicitly sets the thread_id (continues that session).",
         "permission_mode": None,
-        "settings": "A settings file (upstream's flag settings).",
+        "settings": "Path to a settings JSON file or a JSON string to load additional settings from",
         "dangerously_skip_permissions": None,
         "coordinator": "Run development in coordinator mode.",
         "debug": 'Enable debug mode with optional category filtering (e.g., "api,hooks" or "!1p,!file")',
@@ -674,35 +674,3 @@ def test_main_s_terminal_log_lines_are_the_message_alone():
     assert done.returncode == 0, done.stderr
     lines = [line for line in done.stderr.splitlines() if "Pydantic" not in line and "pydantic" not in line]
     assert lines == ["hello-main", "shown-on-purpose", "library-error"]
-
-
-def test_no_sandbox_flag_turns_the_sandbox_off_for_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.bootstrap.state import get_cli_flag_settings, set_flag_settings_inline
-    from app.utils.settings.settings import get_inline_flag_settings
-
-    assert entry.parse_args([]).no_sandbox is False
-    assert entry.parse_args(["--no-sandbox"]).no_sandbox is True
-    seen: list[Any] = []
-
-    def run_entry(args: argparse.Namespace) -> int:
-        seen.append(get_inline_flag_settings())
-        return 0
-
-    monkeypatch.setattr(entry, "run_entry", run_entry)
-    assert entry.main(["--no-sandbox"]) == 0
-    assert get_cli_flag_settings() == {"sandbox": {"enabled": False}}
-    assert seen == [{"sandbox": {"enabled": False}}]
-    # A headless session clears the SDK's inline settings when it opens: the flag survives that.
-    set_flag_settings_inline(None)
-    assert get_inline_flag_settings() == {"sandbox": {"enabled": False}}
-    # What the SDK host applies wins over the flag.
-    set_flag_settings_inline({"sandbox": {"enabled": True}})
-    assert get_inline_flag_settings() == {"sandbox": {"enabled": True}}
-
-
-def test_without_no_sandbox_the_settings_are_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.bootstrap.state import get_cli_flag_settings
-
-    monkeypatch.setattr(entry, "run_entry", lambda args: 0)
-    assert entry.main([]) == 0
-    assert get_cli_flag_settings() is None

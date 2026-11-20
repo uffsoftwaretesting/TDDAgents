@@ -327,11 +327,10 @@ def get_inline_flag_settings() -> dict[str, Any] | None:
     upstream's, its permission rules are not filtered first (an invalid rule rejects the document) and
     its errors are reported nowhere.
     """
-    from app.bootstrap.state import get_cli_flag_settings, get_flag_settings_inline
+    from app.bootstrap.state import get_flag_settings_inline
     from app.utils.settings.schema_validator import safe_parse_settings
 
-    # The command line's flags (`--no-sandbox`) sit beneath what the SDK host applies.
-    inline = merge_settings(get_cli_flag_settings() or {}, get_flag_settings_inline() or {})
+    inline = get_flag_settings_inline()
     if not inline:
         return None
     return safe_parse_settings(inline)[0]

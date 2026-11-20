@@ -52,9 +52,10 @@ prints `VERSION`, as upstream's `.version(...)`.
 import argparse
 import logging
 import os
+import json
 import sys
 import textwrap
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +70,8 @@ from dotenv import load_dotenv
 from app.cli.print import DevelopmentOutcome, HeadlessOptions
 from app.constants.product import CLI_COMMAND, VERSION
 from app.components.trust_dialog.trust_dialog import TrustDialogExit
-from app.bootstrap.state import set_cli_flag_settings, set_flag_settings_path
+from app.bootstrap.state import set_flag_settings_path
+from app.utils.tempfile import generate_temp_file_path
 from app.workspace.project import load_sandbox_profile
 from app.utils.sandbox.sandbox_adapter import SandboxUnavailableError
 from app.query.transitions import Terminal
@@ -145,7 +147,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-id", default=None,
                         help="Use a specific session ID for the conversation (must be a valid UUID)")
     parser.add_argument("--permission-mode", choices=[str(m) for m in PERMISSION_MODES], default=None)
-    parser.add_argument("--settings", default=None, help="A settings file (upstream's flag settings).")
+    parser.add_argument("--settings", default=None, metavar="<file-or-json>",
+                        help="Path to a settings JSON file or a JSON string to load additional settings from")
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
     sandbox_mode = parser.add_mutually_exclusive_group()
     sandbox_mode.add_argument("--sandbox", action="store_true",
@@ -833,17 +836,87 @@ def main(argv: list[str] | None = None) -> int:
     if error is not None:
         print(error, file=sys.stderr)
         return 1
-    debug_handler = apply_debug_flags(args)
+    try:
+        args.settings = load_settings_from_flag(args.settings, sandbox_flag_settings(args))
+    except FlagSettingsError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
     set_flag_settings_path(args.settings)
-    if args.no_sandbox:
-        set_cli_flag_settings({"sandbox": {"enabled": False}})
-    elif args.sandbox:
-        set_cli_flag_settings(load_sandbox_profile())
+    debug_handler = apply_debug_flags(args)
     try:
         return run_entry(args)
     finally:
         if debug_handler is not None:
             logging.getLogger().removeHandler(debug_handler)
+
+
+class FlagSettingsError(Exception):
+    """`--settings` (with the sandbox flags) cannot be turned into a flag settings file."""
+
+
+#: `loadSettingsFromFlag`'s temp file name (upstream's prefix is `claude-settings`).
+FLAG_SETTINGS_PREFIX = "tddagents-settings"
+
+
+def sandbox_flag_settings(args: argparse.Namespace) -> dict[str, Any] | None:
+    """
+    The settings `--no-sandbox` / `--sandbox` stand for (TDDAgents' own flags, user decisions 2026-11-20):
+    `sandbox.enabled` false, or the profile in `.tddagents/settings.sandbox.json`; `None` without either.
+    """
+    if getattr(args, "no_sandbox", False):
+        return {"sandbox": {"enabled": False}}
+    if getattr(args, "sandbox", False):
+        return load_sandbox_profile()
+    return None
+
+
+def _write_flag_settings(text: str) -> str:
+    path = generate_temp_file_path(FLAG_SETTINGS_PREFIX, ".json", content_hash=text)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return path
+
+
+def load_settings_from_flag(settings: str | None, overlay: Mapping[str, Any] | None) -> str | None:
+    """
+    `main.tsx` `loadSettingsFromFlag`: the session's flag settings file. A value that looks like JSON
+    (`{...}`) is parsed and written to a content-hash temp file (`generateTempFilePath`), so the same
+    settings get the same path; anything else is a path, resolved, that must exist. Upstream prints
+    the error and exits 1; here `FlagSettingsError` carries the message to `main`.
+
+    TDDAgents' sandbox flags give an `overlay`, merged over the `--settings` document (which needs to be
+    a JSON object then) into one flag file; the user's own file is never written.
+    """
+    if settings is None and overlay is None:
+        return None
+    document: Any = {}
+    if settings is not None:
+        trimmed = settings.strip()
+        if trimmed.startswith("{") and trimmed.endswith("}"):
+            try:
+                document = json.loads(trimmed)
+            except ValueError as error:
+                raise FlagSettingsError("Invalid JSON provided to --settings") from error
+            if overlay is None:
+                return _write_flag_settings(trimmed)
+        else:
+            path = Path(settings).expanduser().resolve()
+            try:
+                text = path.read_text(encoding="utf-8")
+            except FileNotFoundError as error:
+                raise FlagSettingsError(f"Settings file not found: {path}") from error
+            if overlay is None:
+                return str(path)
+            try:
+                document = json.loads(text)
+            except ValueError:
+                document = None
+    if not isinstance(document, dict):
+        raise FlagSettingsError("--settings must hold a JSON object to combine it with --sandbox or --no-sandbox")
+    from app.utils.settings.settings import merge_settings
+
+    merged = merge_settings(document, overlay or {})
+    return _write_flag_settings(json.dumps(merged, sort_keys=True, separators=(",", ":")))
 
 
 def apply_debug_flags(args: argparse.Namespace) -> Any:

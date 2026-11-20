@@ -526,20 +526,25 @@ class TestTheModeComesFromTheSettings:
     def test_the_local_settings_count(self, tmp_path: Path) -> None:
         assert sandbox_enabled(_project(tmp_path, {"sandbox": {"enabled": True}}, "settings.local.json")) is True
 
-    def test_the_sandbox_flag_turns_it_on(self, tmp_path: Path) -> None:
-        from app.bootstrap.state import set_cli_flag_settings
+    def test_the_sandbox_flag_turns_it_on(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.bootstrap.state import set_flag_settings_path
+        from app.main import load_settings_from_flag
         from app.workspace.project import load_sandbox_profile
 
+        monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
         cwd = _project(tmp_path, None)
-        set_cli_flag_settings(load_sandbox_profile())
+        set_flag_settings_path(load_settings_from_flag(None, load_sandbox_profile()))
         assert sandbox_enabled(cwd) is True
         assert "runs in a sandbox" in _prompt(cwd=cwd)
 
-    def test_the_no_sandbox_flag_turns_it_off_over_a_sandboxed_project(self, tmp_path: Path) -> None:
-        from app.bootstrap.state import set_cli_flag_settings
+    def test_the_no_sandbox_flag_turns_it_off_over_a_sandboxed_project(
+            self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.bootstrap.state import set_flag_settings_path
+        from app.main import load_settings_from_flag
 
+        monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
         cwd = _project(tmp_path, {"sandbox": {"enabled": True}})
-        set_cli_flag_settings({"sandbox": {"enabled": False}})
+        set_flag_settings_path(load_settings_from_flag(None, {"sandbox": {"enabled": False}}))
         assert sandbox_enabled(cwd) is False
         assert "runs in a sandbox" not in _prompt(cwd=cwd)
 

@@ -45,37 +45,40 @@ def set_flag_settings_inline(settings: Mapping[str, Any] | None) -> None:
     _FLAG_SETTINGS_INLINE[0] = dict(settings) if settings is not None else None
 
 
-#: The settings the command line's own flags imply (`--no-sandbox`): kept apart from the SDK host's
-#: inline settings, which a headless session clears when it opens.
-_CLI_FLAG_SETTINGS: list[dict[str, Any] | None] = [None]
-
-
-#: `--settings <file>`: the flag settings file the process was started with, `None` without one.
+#: `STATE.flagSettingsPath`: the `--settings` file (`loadSettingsFromFlag`'s result), `None` without one.
 _FLAG_SETTINGS_PATH: list[str | None] = [None]
 
 
 def set_flag_settings_path(path: str | None) -> None:
+    """`setFlagSettingsPath`."""
     _FLAG_SETTINGS_PATH[0] = path
 
 
 def get_flag_settings_path() -> str | None:
+    """`getFlagSettingsPath`."""
     return _FLAG_SETTINGS_PATH[0]
-
-
-def set_cli_flag_settings(settings: Mapping[str, Any] | None) -> None:
-    """The settings implied by command-line flags, merged beneath the inline flag settings."""
-    _CLI_FLAG_SETTINGS[0] = dict(settings) if settings is not None else None
-
-
-def get_cli_flag_settings() -> dict[str, Any] | None:
-    value = _CLI_FLAG_SETTINGS[0]
-    return dict(value) if value is not None else None
 
 
 def get_flag_settings_inline() -> dict[str, Any] | None:
     """`getFlagSettingsInline`."""
     value = _FLAG_SETTINGS_INLINE[0]
     return dict(value) if value is not None else None
+
+
+#: `STATE.lastInteractionTime` (seconds since the epoch): the user's last input.
+_LAST_INTERACTION_TIME: list[float] = [0.0]
+
+
+def update_last_interaction_time(now: float | None = None) -> None:
+    """`updateLastInteractionTime(true)`: the user just typed (the REPL reads lines, so there is no batching)."""
+    import time
+
+    _LAST_INTERACTION_TIME[0] = time.time() if now is None else now
+
+
+def get_last_interaction_time() -> float:
+    """`getLastInteractionTime`."""
+    return _LAST_INTERACTION_TIME[0]
 
 
 def set_session_trust_accepted(accepted: bool) -> None:
