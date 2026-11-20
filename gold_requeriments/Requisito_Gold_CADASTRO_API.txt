@@ -1,7 +1,7 @@
 ================================================================================
 REQUISITOS_GOLD_CADASTRO_USUARIOS
 Especificação Gold de Requisitos — API HTTP de Cadastro de Usuários
-Tecnologia obrigatória: TypeScript (runtime Node.js)
+Tecnologia obrigatória: TypeScript (Node.js), Fastify, PostgreSQL (pg), argon2
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -17,9 +17,20 @@ constitui implementação nem tutorial.
 
 0.2 Tecnologia
 A aplicação deve ser implementada exclusivamente em TypeScript, executada sobre
-o runtime Node.js (ver RF028). Nenhuma outra linguagem é admitida. Framework
-HTTP, biblioteca de acesso a dados e mecanismo de banco de dados são de livre
-escolha, desde que todos os requisitos deste documento sejam atendidos.
+o runtime Node.js (ver RF028). Nenhuma outra linguagem é admitida. A pilha
+tecnológica obrigatória é apresentada abaixo.
+
+  Componente               Escolha obrigatória
+  -----------------------  -----------------------------------------------------
+  Framework HTTP           Fastify (pacote "fastify")
+  Documentação da API      Pacotes "@fastify/swagger" e "@fastify/swagger-ui"
+  Banco de dados           PostgreSQL, provisionado por docker-compose (RF032)
+  Acesso a dados           Pacote "pg" (node-postgres)
+  Hash de senha            Pacote "argon2" (node-argon2, módulo nativo)
+  Logs                     Logger nativo do Fastify (pino)
+
+Nenhum outro framework HTTP, ORM, query builder, mecanismo de banco de dados ou
+implementação de Argon2 é admitido (ver RF028).
 
 0.3 Termos utilizados
 - "Endpoint de cadastro": a rota POST /api/v1/usuarios.
@@ -51,7 +62,7 @@ escolha, desde que todos os requisitos deste documento sejam atendidos.
 - Todas as respostas da API (rotas sob /api, respostas de erro e rotas
   inexistentes) possuem cabeçalho Content-Type "application/json; charset=utf-8"
   e corpo codificado em UTF-8. A exceção é a interface Swagger UI (RF024),
-  servida como HTML.
+  servida como HTML com seus recursos estáticos (CSS e JavaScript) sob /docs.
 - O cabeçalho Accept da requisição não altera o formato da resposta.
 - Nomes de campos JSON são sensíveis a maiúsculas e minúsculas.
 - Todas as mensagens textuais especificadas neste documento devem ser
@@ -131,7 +142,7 @@ Dimensões de especificação:
      (RF013). Em qualquer resposta diferente de 201, nenhum registro é criado
      ou alterado (RF014).
 7. Efeitos colaterais:
-   - Persistência do usuário no banco de dados, com a senha armazenada
+   - Persistência do usuário no banco PostgreSQL, com a senha armazenada
      exclusivamente como hash (RF011, RF013). Nenhuma interação com serviços
      externos (por exemplo, não há envio de e-mail).
 
@@ -279,6 +290,11 @@ Dimensões de especificação:
      do campo correspondente.
 4. Validação:
    - Avaliado antes das regras específicas de cada campo (RF005 a RF009).
+   - O esquema JSON declarado na rota do Fastify serve à documentação (RF026)
+     e não substitui as regras deste documento. A coerção de tipos e a remoção
+     de propriedades do Ajv não se aplicam ao corpo (por exemplo,
+     "senha": 12345678 resulta em TIPO_INVALIDO, e não na conversão para
+     "12345678").
 5. Autenticação e autorização:
    - Não aplicável — não há autenticação (ver RF023).
 6. Estado:
@@ -512,8 +528,9 @@ RF011 — Armazenamento da senha exclusivamente como hash seguro
 --------------------------------------------------------------------------------
 Descrição:
 A senha deve ser armazenada exclusivamente como hash produzido pelo algoritmo
-Argon2id, com sal aleatório por usuário, nunca em texto puro nem em forma
-reversível (codificação ou criptografia).
+Argon2id, calculado pelo pacote argon2 (node-argon2), com sal aleatório por
+usuário, nunca em texto puro nem em forma reversível (codificação ou
+criptografia).
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -525,6 +542,9 @@ Dimensões de especificação:
    - O valor armazenado está no formato de cadeia PHC do Argon2, iniciado por
      "$argon2id$v=19$", contendo os parâmetros m (memória, em KiB), t
      (iterações) e p (paralelismo) iguais aos configurados em RF029.
+   - O hash é calculado por argon2.hash, com a opção type igual a
+     argon2.argon2id e as opções memoryCost, timeCost e parallelism obtidas
+     de RF029. A verificação utiliza argon2.verify.
    - Sal de no mínimo 16 bytes, gerado por fonte criptograficamente segura,
      distinto para cada cadastro; hash resultante com no mínimo 32 bytes.
    - Dois usuários cadastrados com a mesma senha possuem hashes armazenados
@@ -578,24 +598,29 @@ Dimensões de especificação:
      senha nem o hash. Se o corpo da requisição for registrado, o valor de
      "senha" deve ser omitido ou substituído por máscara fixa (por exemplo,
      "***").
+   - O logger do Fastify (pino) é configurado com a opção redact, com censor
+     "***", cobrindo no mínimo os caminhos "senha", "*.senha",
+     "req.body.senha", "senha_hash" e "*.senha_hash".
 
 --------------------------------------------------------------------------------
 RF013 — Persistência do usuário cadastrado
 --------------------------------------------------------------------------------
 Descrição:
-Cada cadastro bem-sucedido deve criar um registro persistente de usuário em
-banco de dados configurado por variável de ambiente (RF029), contendo os
-atributos abaixo.
+Cada cadastro bem-sucedido deve criar um registro persistente na tabela
+"usuarios" do banco PostgreSQL indicado por DATABASE_URL (RF029), com as
+colunas abaixo.
 
-  Atributo          Conteúdo
-  ----------------  ------------------------------------------------------------
-  id                UUID v4 gerado pelo servidor (igual a usuario.id).
-  nome              Nome aparado.
-  data_nascimento   Data informada, sem horário.
-  email             E-mail normalizado, com restrição de unicidade no próprio
-                    armazenamento.
-  senha_hash        Hash Argon2id da senha (RF011).
-  criado_em         Instante do cadastro em UTC (igual a usuario.criado_em).
+  Coluna            Tipo PostgreSQL   Conteúdo
+  ----------------  ----------------  ------------------------------------------
+  id                UUID              Chave primária. UUID v4 gerado pelo
+                                      servidor (igual a usuario.id).
+  nome              TEXT NOT NULL     Nome aparado.
+  data_nascimento   DATE NOT NULL     Data informada, sem horário.
+  email             TEXT NOT NULL     E-mail normalizado, com restrição UNIQUE
+                                      no próprio banco.
+  senha_hash        TEXT NOT NULL     Hash Argon2id da senha (RF011).
+  criado_em         TIMESTAMPTZ       Instante do cadastro em UTC (igual a
+                    NOT NULL          usuario.criado_em).
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -607,17 +632,25 @@ Dimensões de especificação:
      servidor (RF015).
    - O registro permanece disponível após a reinicialização da aplicação:
      após reiniciar o processo com o mesmo DATABASE_URL, novo cadastro com o
-     mesmo e-mail resulta em 409.
+     mesmo e-mail resulta em 409. O mesmo vale após "docker compose down"
+     seguido de "docker compose up -d", sem a opção -v (RF032).
+   - A gravação utiliza o pacote pg com consulta parametrizada (marcadores
+     $1, $2, ...). Valores recebidos nunca são concatenados ao texto SQL.
+   - "data_nascimento" é lido e gravado como texto AAAA-MM-DD, sem conversão
+     para objeto Date do JavaScript. O parser do tipo DATE do pg (OID 1082) é
+     configurado para retornar a cadeia original, de modo que o fuso horário
+     do processo não altere a data (por exemplo, com TZ=America/Sao_Paulo,
+     "1990-05-20" permanece "1990-05-20").
 4. Validação:
-   - A restrição de unicidade do e-mail existe no armazenamento, e não apenas
-     na verificação da aplicação.
+   - A restrição UNIQUE sobre a coluna email existe no banco, e não apenas na
+     verificação da aplicação.
 5. Autenticação e autorização:
    - Não aplicável — não há autenticação (ver RF023).
 6. Estado:
    - Criação de exatamente um registro por cadastro bem-sucedido. Não há
      atualização nem remoção de registros pela API.
 7. Efeitos colaterais:
-   - Escrita no banco de dados. Nenhuma interação com outros serviços.
+   - Escrita no banco PostgreSQL. Nenhuma interação com outros serviços.
 
 --------------------------------------------------------------------------------
 RF014 — Atomicidade e concorrência do cadastro
@@ -635,8 +668,9 @@ Dimensões de especificação:
 2. Response Body:
    - As respostas 409 seguem RF010.
 3. Regras de negócio:
-   - A violação da restrição de unicidade do armazenamento é convertida em
-     409 EMAIL_JA_CADASTRADO.
+   - A violação da restrição UNIQUE sobre email, sinalizada pelo PostgreSQL
+     com SQLSTATE 23505 (unique_violation), é convertida em 409
+     EMAIL_JA_CADASTRADO.
    - Falha no cálculo do hash ou na gravação resulta em 500 (RF022) sem
      registro criado.
 4. Validação:
@@ -733,6 +767,12 @@ Dimensões de especificação:
    8º demais casos → 201 (RF001, RF002).
 4. Validação:
    - Nenhum código de erro fora do catálogo pode ser retornado.
+   - Os erros nativos do Fastify (por exemplo, FST_ERR_CTP_INVALID_MEDIA_TYPE,
+     FST_ERR_CTP_BODY_TOO_LARGE, FST_ERR_CTP_EMPTY_JSON_BODY e erros de
+     sintaxe do parser JSON) são convertidos para o catálogo acima por
+     manipulador registrado com setErrorHandler. Nenhuma resposta segue o
+     formato de erro padrão do Fastify (campos "statusCode", "error" e
+     "code").
 5. Autenticação e autorização:
    - Não aplicável — não há autenticação (ver RF023); portanto, os status 401 e
      403 nunca são retornados.
@@ -764,7 +804,9 @@ Dimensões de especificação:
      {nome:"Maria"} (chave sem aspas); {'nome':'Maria'} (aspas simples);
      {"nome":"Maria",} (vírgula final); texto livre "nome=Maria".
 4. Validação:
-   - Corpo vazio não é considerado malformado (ver RF004).
+   - Corpo vazio não é considerado malformado (ver RF004). O parser JSON do
+     Fastify é configurado (por exemplo, por addContentTypeParser) para que
+     corpo vazio ou composto apenas por espaços em branco siga RF004.
 5. Autenticação e autorização:
    - Não aplicável — não há autenticação (ver RF023).
 6. Estado:
@@ -793,6 +835,8 @@ Dimensões de especificação:
    - Não produzem este erro: "application/json",
      "application/json; charset=utf-8", "Application/JSON".
    - Tem precedência sobre todos os demais erros do endpoint (RF016).
+   - A ausência do cabeçalho Content-Type produz este erro independentemente
+     do comportamento padrão do Fastify para requisições sem Content-Type.
 4. Validação:
    - O corpo não é interpretado quando este erro ocorre.
 5. Autenticação e autorização:
@@ -845,6 +889,7 @@ Dimensões de especificação:
      bytes produz, mesmo que seja JSON válido.
    - O limite independe de o excesso estar nos campos de cadastro ou em campos
      adicionais.
+   - O limite é configurado pela opção bodyLimit do Fastify, igual a 102400.
 4. Validação:
    - O corpo excedente não é interpretado.
 5. Autenticação e autorização:
@@ -872,7 +917,10 @@ Dimensões de especificação:
    - Exemplos: GET /api/v1/usuarios; PUT /api/v1/usuarios;
      DELETE /api/v1/usuarios; GET /api/v1/usuarios/<id>;
      POST /api/v1/usuario; POST /api/v2/usuarios; GET /inexistente.
-   - As rotas /docs e /docs/openapi.json (RF024, RF025) não são afetadas.
+   - As rotas /docs e /docs/openapi.json (RF024, RF025) e as rotas
+     registradas sob /docs pelo @fastify/swagger-ui (por exemplo,
+     /docs/static/*) não são afetadas.
+   - O tratamento é registrado com setNotFoundHandler do Fastify.
 4. Validação:
    - Content-Type e corpo não são avaliados para rotas não mapeadas.
 5. Autenticação e autorização:
@@ -903,6 +951,13 @@ Dimensões de especificação:
    - Verificação: em ambiente de teste, substituir o repositório de usuários
      ou o componente de hash por dublê que lance erro genérico, enviar o
      payload de referência 0.6 e observar a resposta acima.
+   - Verificação com banco real: com a aplicação em execução, interromper o
+     contêiner do PostgreSQL ("docker compose stop postgres") e enviar
+     payload válido com e-mail ainda não cadastrado resulta na resposta
+     acima. Após "docker compose start postgres", novos cadastros voltam a ser
+     atendidos sem reiniciar a aplicação.
+   - Erros emitidos pelo Pool do pg (evento "error") são tratados e não
+     encerram o processo.
    - Violação da restrição de unicidade do e-mail não é falha inesperada e
      resulta em 409 (RF014).
    - Após uma falha, requisições subsequentes continuam sendo atendidas.
@@ -957,9 +1012,10 @@ RF024 — Documentação interativa Swagger UI na rota /docs
 --------------------------------------------------------------------------------
 Descrição:
 A aplicação deve, obrigatoriamente, disponibilizar documentação interativa da
-API por meio da interface Swagger UI, acessível pela rota /docs, construída a
-partir da especificação OpenAPI de RF025. A documentação não é opcional e deve
-estar disponível em todos os ambientes (development, test e production).
+API por meio da interface Swagger UI, servida pelo plugin @fastify/swagger-ui
+registrado com routePrefix "/docs" e construída a partir da especificação
+OpenAPI de RF025. A documentação não é opcional e deve estar disponível em
+todos os ambientes (development, test e production).
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -976,9 +1032,10 @@ Dimensões de especificação:
    - A funcionalidade "Try it out" está habilitada para POST; a execução a
      partir da interface envia a requisição à própria instância em execução e
      exibe status, cabeçalhos e corpo da resposta real.
-   - Os recursos da interface (HTML, CSS e JavaScript) são servidos pela
-     própria aplicação, sem dependência de CDN, de modo que a documentação
-     funcione sem acesso à internet.
+   - Os recursos da interface (HTML, CSS e JavaScript) são os empacotados
+     pelo @fastify/swagger-ui e servidos pela própria aplicação, sem
+     dependência de CDN, de modo que a documentação funcione sem acesso à
+     internet.
 4. Validação:
    - Não aplicável — a rota não recebe payload.
 5. Autenticação e autorização:
@@ -995,7 +1052,8 @@ RF025 — Especificação OpenAPI disponível e válida
 --------------------------------------------------------------------------------
 Descrição:
 A aplicação deve disponibilizar o documento de especificação da API no formato
-OpenAPI 3.0, em JSON, na rota GET /docs/openapi.json, utilizado pela interface
+OpenAPI 3.0, em JSON, na rota GET /docs/openapi.json, gerado pelo plugin
+@fastify/swagger a partir dos esquemas das rotas e utilizado pela interface
 Swagger UI (RF024).
 
 Dimensões de especificação:
@@ -1015,6 +1073,9 @@ Dimensões de especificação:
      seja a porta configurada (RF029).
    - Todas as referências internas ("$ref") são resolvíveis dentro do próprio
      documento.
+   - O documento servido em /docs/openapi.json é o retornado por
+     app.swagger(). As rotas de documentação não constam em "paths" (opção
+     hide do esquema da rota).
 4. Validação:
    - Não aplicável — a rota não recebe payload.
 5. Autenticação e autorização:
@@ -1132,9 +1193,19 @@ Dimensões de especificação:
      "test"    — executa a suíte de testes.
    - Após "npm install", "npm run build" conclui sem erros de compilação nem
      de tipos.
-   - Framework HTTP, biblioteca de acesso a dados e mecanismo de banco de dados
-     são de livre escolha. O cálculo de hash utiliza biblioteca que implemente
-     Argon2id (RF011).
+   - O package.json declara, em "dependencies", os pacotes fastify,
+     @fastify/swagger, @fastify/swagger-ui, pg e argon2, e, em
+     "devDependencies", typescript, @types/node e @types/pg.
+   - As versões principais de fastify, @fastify/swagger e @fastify/swagger-ui
+     são compatíveis entre si e com a versão de Node.js de "engines.node".
+     "npm install" conclui sem conflitos de peer dependency.
+   - Não são utilizados outro framework HTTP (por exemplo, Express ou Koa),
+     ORM ou query builder (por exemplo, Prisma, TypeORM, Sequelize ou Knex),
+     outro driver PostgreSQL nem outra implementação de Argon2 (por exemplo,
+     @node-rs/argon2).
+   - O pacote argon2 é módulo nativo. Na ausência de binário pré-compilado
+     para a plataforma, "npm install" requer as ferramentas de compilação
+     indicadas no README.md (RF033).
 4. Validação:
    - Não aplicável — requisito tecnológico.
 5. Autenticação e autorização:
@@ -1157,8 +1228,9 @@ ambiente. O conjunto de variáveis é:
   HOST                  Endereço de rede em que a aplicação escuta string não vazia (ex.: 0.0.0.0)
   PORT                  Porta HTTP                                 inteiro de 1 a 65535
   LOG_LEVEL             Nível de log                               error, warn, info, debug
-  DATABASE_URL          Conexão com o banco de dados               string não vazia, no formato exigido pelo
-                                                                   mecanismo de banco escolhido
+  DATABASE_URL          Conexão com o PostgreSQL                   URL no formato
+                                                                   postgres://usuario:senha@host:porta/banco
+                                                                   (esquema postgres ou postgresql)
   ARGON2_MEMORY_COST    Memória do Argon2id, em KiB                inteiro maior ou igual a 19456
   ARGON2_TIME_COST      Iterações do Argon2id                      inteiro maior ou igual a 2
   ARGON2_PARALLELISM    Paralelismo do Argon2id                    inteiro maior ou igual a 1
@@ -1179,23 +1251,29 @@ Dimensões de especificação:
      padrão definidos no código.
    - Os parâmetros do Argon2id registrados no hash (m, t, p) são iguais aos
      valores configurados (RF011).
+   - DATABASE_URL é fornecido ao Pool do pg (opção connectionString), e
+     LOG_LEVEL define o nível do logger do Fastify (pino).
 4. Validação:
    - Ausência de variável obrigatória (no ambiente e no .env), valor fora dos
      valores admitidos ou impossibilidade de conectar ao banco indicado por
-     DATABASE_URL impedem a inicialização: o processo encerra com código de
+     DATABASE_URL (verificada por consulta SELECT 1 antes da chamada de
+     listen) impedem a inicialização: o processo encerra com código de
      saída diferente de zero e emite mensagem que identifica a variável
      ausente ou inválida, ou informa a falha de conexão sem expor credenciais
      contidas em DATABASE_URL.
    - Exemplos de falha: PORT="abc", PORT="70000", LOG_LEVEL="verbose",
-     DATABASE_URL="", ARGON2_MEMORY_COST="1024", ARGON2_TIME_COST="1",
-     ARGON2_PARALLELISM="0", NODE_ENV="staging".
+     DATABASE_URL="", DATABASE_URL="mysql://u:s@localhost:3306/db",
+     ARGON2_MEMORY_COST="1024", ARGON2_TIME_COST="1", ARGON2_PARALLELISM="0",
+     NODE_ENV="staging", DATABASE_URL válido com o contêiner do PostgreSQL
+     parado.
 5. Autenticação e autorização:
    - Não aplicável — as variáveis não configuram autenticação (RF023).
 6. Estado:
    - Configuração lida na inicialização; não há alteração em tempo de
      execução. DATABASE_URL determina onde os usuários são persistidos.
 7. Efeitos colaterais:
-   - Conexão com o banco de dados na inicialização. Nenhum outro efeito.
+   - Criação do Pool do pg e conexão com o PostgreSQL na inicialização.
+     Nenhum outro efeito.
 
 --------------------------------------------------------------------------------
 RF030 — Arquivos .env e .env.example
@@ -1213,14 +1291,17 @@ Dimensões de especificação:
    - Ambos os arquivos declaram exatamente as oito variáveis de RF029, no
      formato CHAVE=valor, uma por linha.
    - O .env.example contém valores ilustrativos (por exemplo, NODE_ENV=
-     development, HOST=0.0.0.0, PORT=3000, LOG_LEVEL=info, um DATABASE_URL de
-     exemplo com credenciais fictícias, ARGON2_MEMORY_COST=19456,
-     ARGON2_TIME_COST=2, ARGON2_PARALLELISM=1) e um comentário ("#")
-     descrevendo cada variável.
+     development, HOST=0.0.0.0, PORT=3000, LOG_LEVEL=info,
+     DATABASE_URL=postgres://cadastro:cadastro@localhost:5432/cadastro,
+     ARGON2_MEMORY_COST=19456, ARGON2_TIME_COST=2, ARGON2_PARALLELISM=1) e um
+     comentário ("#") descrevendo cada variável. O usuário, a senha e o nome
+     do banco em DATABASE_URL coincidem com os definidos no docker-compose.yml
+     (RF032).
    - O .env.example não contém credenciais reais.
-   - Seguindo as instruções do README (RF033), copiar .env.example para .env,
-     executar "npm run migrate", "npm run build" e "npm start" resulta em
-     aplicação em execução.
+   - Seguindo as instruções do README (RF033), subir o banco com
+     "docker compose up -d", copiar .env.example para .env e executar
+     "npm run migrate", "npm run build" e "npm start" resulta em aplicação em
+     execução.
    - O .env é carregado automaticamente, sem necessidade de exportar as
      variáveis manualmente, respeitando a precedência de RF029.
 4. Validação:
@@ -1243,8 +1324,9 @@ infraestrutura, conforme o mapeamento obrigatório abaixo:
   -----------------  ------------------------------  ---------------------------------------------
   Configurações      src/config/                     Leitura e validação das variáveis de ambiente
                                                      (RF029, RF030).
-  Rotas              src/routes/                     Declaração de POST /api/v1/usuarios e das
-                                                     rotas de documentação.
+  Rotas              src/routes/                     Plugins Fastify que declaram
+                                                     POST /api/v1/usuarios e as rotas de
+                                                     documentação.
   Schemas            src/schemas/                    Validação e normalização do payload (RF003 a
                                                      RF009), sem acesso a banco de dados.
   Serviços           src/services/                   Regra de cadastro: unicidade (RF010),
@@ -1252,14 +1334,18 @@ infraestrutura, conforme o mapeamento obrigatório abaixo:
                                                      via repositório (RF013, RF014).
   Controladores      src/controllers/                Orquestração da requisição e montagem da
                                                      resposta.
-  Infraestrutura     src/infrastructure/             Acesso ao banco de dados (repositório,
-                                                     conexão e migrações), implementação do hash
-                                                     Argon2id, tratamento e formatação de erros
-                                                     (RF016 a RF022), logs e documentação
-                                                     OpenAPI.
-  Montagem da app    src/app.ts                      Criação da aplicação HTTP, sem abrir porta.
-  Inicialização      src/server.ts                   Carregamento da configuração, conexão ao
-                                                     banco e início da escuta em HOST:PORT.
+  Infraestrutura     src/infrastructure/             Pool do pg, repositório de usuários e
+                                                     migrações; hash com o pacote argon2;
+                                                     setErrorHandler, setNotFoundHandler e parser
+                                                     de conteúdo JSON (RF016 a RF022);
+                                                     configuração do logger (pino); registro de
+                                                     @fastify/swagger e @fastify/swagger-ui.
+  Montagem da app    src/app.ts                      Função que cria e retorna a instância
+                                                     Fastify com plugins e rotas registrados,
+                                                     sem chamar listen().
+  Inicialização      src/server.ts                   Carregamento da configuração, criação do
+                                                     Pool do pg, verificação da conexão e
+                                                     chamada de listen() em HOST:PORT.
   Testes             tests/                          Suíte de testes.
 
 Dimensões de especificação:
@@ -1271,11 +1357,16 @@ Dimensões de especificação:
    - O serviço de cadastro recebe suas dependências (repositório de usuários,
      componente de hash e fonte da data/hora atual) por injeção, podendo ser
      testado com dublês, sem banco de dados real.
-   - A aplicação exportada por src/app.ts pode ser exercitada por testes de
-     requisição sem abrir porta de rede.
+   - A instância Fastify criada por src/app.ts pode ser exercitada por
+     app.inject(), sem abrir porta de rede. O repositório de usuários e o
+     componente de hash podem ser fornecidos à função de montagem, de modo que
+     as rotas sejam exercitadas com dublês.
+   - O encerramento da instância (app.close()) encerra o Pool do pg, por meio
+     de hook onClose.
    - Controladores não acessam o banco de dados diretamente nem calculam
      hashes; schemas não acessam o banco de dados; serviços não dependem de
-     objetos de requisição/resposta HTTP.
+     objetos de requisição e resposta do Fastify (FastifyRequest e
+     FastifyReply).
 4. Validação:
    - Não aplicável — requisito estrutural.
 5. Autenticação e autorização:
@@ -1286,23 +1377,37 @@ Dimensões de especificação:
    - Não aplicável — requisito estrutural.
 
 --------------------------------------------------------------------------------
-RF032 — Preparação do esquema do banco de dados
+RF032 — Provisionamento do PostgreSQL e preparação do esquema
 --------------------------------------------------------------------------------
 Descrição:
-O projeto deve fornecer o comando "npm run migrate", que cria no banco de
-dados indicado por DATABASE_URL a estrutura necessária ao armazenamento de
-usuários (RF013).
+O projeto deve fornecer, na raiz, o arquivo docker-compose.yml, que provisiona
+o servidor PostgreSQL utilizado pela aplicação, e o comando "npm run migrate",
+que cria no banco indicado por DATABASE_URL a estrutura necessária ao
+armazenamento de usuários (RF013).
 
 Dimensões de especificação:
 1. HTTP Status:
-   - Não aplicável — comando de linha de comando, sem interação HTTP.
+   - Não aplicável — provisionamento e comando de linha de comando, sem
+     interação HTTP.
 2. Response Body:
-   - Não aplicável — comando de linha de comando.
+   - Não aplicável — provisionamento e comando de linha de comando.
 3. Regras de negócio:
-   - A estrutura criada contém os atributos de RF013 e restrição de
-     unicidade sobre o e-mail.
+   - O docker-compose.yml define o serviço "postgres" com a imagem oficial
+     postgres em versão principal fixada (por exemplo, postgres:16), as
+     variáveis POSTGRES_USER, POSTGRES_PASSWORD e POSTGRES_DB coerentes com o
+     DATABASE_URL do .env.example (RF030), a porta 5432 publicada no
+     hospedeiro, volume nomeado para os dados e verificação de saúde
+     (healthcheck) com pg_isready.
+   - "docker compose up -d" inicia o PostgreSQL. O banco deve estar em
+     execução antes de "npm run migrate", "npm start" e "npm test".
+   - Os dados persistem entre "docker compose down" e "docker compose up -d",
+     desde que a opção -v não seja utilizada.
+   - "npm run migrate" executa, por meio do pacote pg, instruções SQL que
+     criam a tabela "usuarios" com as colunas, os tipos e a restrição UNIQUE
+     sobre email definidos em RF013.
    - O comando é idempotente: executá-lo novamente sobre banco já preparado
-     termina com código de saída 0, sem erros e sem perda de registros.
+     termina com código de saída 0, sem erros e sem perda de registros (por
+     exemplo, com CREATE TABLE IF NOT EXISTS).
 4. Validação:
    - Com DATABASE_URL ausente ou banco inacessível, o comando termina com
      código de saída diferente de zero e mensagem de erro, sem expor
@@ -1313,7 +1418,9 @@ Dimensões de especificação:
    - Cria a estrutura de armazenamento quando inexistente; não altera
      registros de usuários existentes.
 7. Efeitos colaterais:
-   - Alteração de esquema no banco de dados indicado por DATABASE_URL.
+   - Criação do contêiner e do volume do PostgreSQL no hospedeiro, por
+     "docker compose up -d", e alteração de esquema no banco indicado por
+     DATABASE_URL, por "npm run migrate".
 
 --------------------------------------------------------------------------------
 RF033 — Documentação de instalação, configuração e execução
@@ -1328,12 +1435,17 @@ Dimensões de especificação:
 2. Response Body:
    - Não aplicável — requisito de documentação do projeto.
 3. Regras de negócio — o README.md contém, no mínimo:
-   - pré-requisitos: versões do Node.js e do npm, e o mecanismo de banco de
-     dados escolhido com instruções para disponibilizá-lo localmente;
+   - pré-requisitos: versões do Node.js e do npm, Docker com Docker Compose
+     e, para o caso de ausência de binário pré-compilado do pacote argon2, as
+     ferramentas de compilação de módulos nativos (Python, make e compilador
+     C++);
    - instalação: "npm install";
    - configuração: cópia de .env.example para .env e descrição de cada
      variável de RF029;
-   - preparação do banco: "npm run migrate";
+   - banco de dados: "docker compose up -d", seguido de "npm run migrate",
+     com a observação de que o PostgreSQL deve estar em execução antes de
+     "npm run migrate", "npm start" e "npm test", e encerramento com
+     "docker compose down";
    - execução: "npm run build" e "npm start", e porta utilizada;
    - testes: "npm test";
    - documentação da API: endereços /docs e /docs/openapi.json;
@@ -1342,9 +1454,10 @@ Dimensões de especificação:
    - menção explícita de que a senha é armazenada apenas como hash Argon2id e
      de que a API não possui autenticação.
 4. Validação:
-   - Seguindo exclusivamente as instruções do README.md, em ambiente limpo, é
-     possível instalar, configurar, preparar o banco, compilar, iniciar a
-     aplicação, acessar /docs e executar a suíte com sucesso.
+   - Seguindo exclusivamente as instruções do README.md, em ambiente limpo com
+     Node.js e Docker, é possível subir o PostgreSQL, instalar, configurar,
+     preparar o banco, compilar, iniciar a aplicação, acessar /docs e executar
+     a suíte com sucesso.
 5. Autenticação e autorização:
    - Não aplicável — requisito de documentação.
 6. Estado:
