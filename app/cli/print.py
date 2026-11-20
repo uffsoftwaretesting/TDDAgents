@@ -763,6 +763,12 @@ async def open_session_run(
                 model=config.model,
                 transcript_path=str(transcript.path),
             )
+        if not sandbox.is_sandboxing_enabled():
+            # Without the sandbox, an installation asks the user first (`app/tdd/install_gate.py`): upstream's
+            # `registerHookCallbacks` of a built-in hook (`setup.ts`, `sessionFileAccessHooks.ts`).
+            from app.tdd.install_gate import INSTALL_GATE_HOOKS
+
+            hook_dispatcher.register_hook_callbacks(INSTALL_GATE_HOOKS)
         session_mcp.hook_dispatcher = hook_dispatcher
 
         memory_store, memory_root = run_agent_memory_store(transcript_dir)
