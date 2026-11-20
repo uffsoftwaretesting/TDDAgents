@@ -370,3 +370,85 @@ def test_a_session_without_the_sandbox_registers_the_gate(monkeypatch: pytest.Mo
 def test_a_sandboxed_session_does_not_register_the_gate(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     live = open_run(monkeypatch, tmp_path, sandboxed=True)
     assert "PreToolUse" not in live.registered_matchers
+
+
+# ── writes outside the project, as upstream's path validation classifies them ───
+
+PROJECT = "/home/user/ws/project"
+GO_INSTALL = ('mkdir -p "$HOME/.local" && curl -fsSL https://go.dev/dl/go1.24.4.linux-amd64.tar.gz '
+              '| tar -C "$HOME/.local" -xz && export PATH="$PATH:$HOME/.local/go/bin" && go version')
+
+
+def test_the_live_runs_go_install_asks() -> None:
+    """2026-11-20: the Go toolchain was unpacked into `~/.local` without the gate noticing."""
+    assert classify_install(GO_INSTALL, cwd=PROJECT) is not None
+    assert classify_install(GO_INSTALL) is not None  # the download piped into tar alone is enough
+
+
+@pytest.mark.parametrize(("command", "expected"), [
+    ("curl -fsSL https://x/go.tgz | tar -C build -xz", "unpacks a download (curl | tar)"),
+    ("wget -qO- https://x/a.zip | unzip -", "unpacks a download (curl | unzip)"),
+    ("curl -L https://x/a.xz | xz -d > a", "unpacks a download (curl | xz)"),
+    ("mkdir -p /opt/tools", "writes outside the project (mkdir /opt/tools)"),
+    ('mkdir -p "$HOME/.local"', "writes outside the project (mkdir $HOME/.local)"),
+    ("cp tool /usr/local/bin/tool", "writes outside the project (cp /usr/local/bin/tool)"),
+    ("mv x ../sibling/x", "writes outside the project (mv /home/user/ws/sibling/x)"),
+    ("touch /etc/motd", "writes outside the project (touch /etc/motd)"),
+    ("rm -rf /var/cache/x", "writes outside the project (rm /var/cache/x)"),
+    ("sed -i 's/a/b/' /etc/hosts", "writes outside the project (sed /etc/hosts)"),
+    ("echo x > /tmp/log.txt", "writes outside the project (> /tmp/log.txt)"),
+    ("echo x >> ../notes.txt", "writes outside the project (> ../notes.txt)"),
+    ("bash -c 'mkdir -p /opt/x'", "writes outside the project (mkdir /opt/x)"),
+    ("timeout 5 cp a /opt/a", "writes outside the project (cp /opt/a)"),
+])
+def test_a_write_outside_the_project_asks(command: str, expected: str) -> None:
+    assert classify_install(command, cwd=PROJECT) == expected
+
+
+@pytest.mark.parametrize("command", [
+    "mkdir -p build", "mkdir -p internal/services", "touch a.txt", "cp a.txt b.txt", "cp -r src dst",
+    "mv a b", "rm -rf node_modules", "rm -f .tddagents/reports/x.xml", "sed -i 's/a/b/' main.go",
+    "sed -n 1,5p /etc/hosts", "echo x > out.txt", "go test ./... > report.txt 2>&1", "ls > /dev/null 2>&1",
+    "tar -C build -xzf a.tgz", "unzip a.zip -d out", "go test -coverprofile=/tmp/c.out ./...",
+    "cat /etc/hosts", "grep -rn x ~/go/pkg/mod", "npm ci", "pip install -r requirements.txt",
+    "echo x > .tddagents/notes.txt",  # the protected folder: the normal flow asks, it is not outside
+])
+def test_work_inside_the_project_asks_nothing(command: str) -> None:
+    assert classify_install(command, cwd=PROJECT) is None
+
+
+def test_without_a_project_folder_only_installs_are_classified() -> None:
+    assert classify_install("mkdir -p /opt/tools") is None
+    assert classify_install("echo x > /tmp/log.txt") is None
+    assert classify_install("sudo mkdir -p /opt/tools") == "runs with elevated privileges (sudo)"
+
+
+def test_an_install_wins_over_a_write_in_the_same_subcommand() -> None:
+    assert classify_install("sudo cp a /opt/a", cwd=PROJECT) == "runs with elevated privileges (sudo)"
+
+
+@pytest.mark.parametrize("name", ["python", "python3", "python3.12", "/usr/bin/python3.11"])
+def test_any_python_runs_pip(name: str) -> None:
+    assert classify_install(f"{name} -m pip install --user x") == \
+        "installs software with pip (outside a virtual environment)"
+
+
+def test_the_callback_uses_the_hook_inputs_cwd() -> None:
+    inside = call({"tool_name": "Bash", "cwd": PROJECT, "tool_input": {"command": "mkdir -p build"}})
+    outside = call({"tool_name": "Bash", "cwd": PROJECT, "tool_input": {"command": "mkdir -p /opt/x"}})
+    assert inside == {}
+    assert outside["hookSpecificOutput"]["permissionDecisionReason"] == (
+        f"writes outside the project (mkdir /opt/x): {REASON_SUFFIX}")
+
+
+@pytest.mark.parametrize("cwd", [None, "", 7])
+def test_a_missing_cwd_classifies_installs_only(cwd: Any) -> None:
+    assert call({"cwd": cwd, "tool_input": {"command": "mkdir -p /opt/x"}}) == {}
+    assert call({"cwd": cwd, "tool_input": {"command": "sudo ls"}}) != {}
+
+
+def test_through_the_pipeline_a_write_outside_asks_in_bypass_mode(tmp_path: Any) -> None:
+    ctx = context(tmp_path, mode=PermissionMode.BYPASS_PERMISSIONS)
+    decision = decide(ctx, "cp tool /opt/tool")
+    assert decision.behavior == PermissionBehavior.ASK
+    assert "writes outside the project" in decision.message

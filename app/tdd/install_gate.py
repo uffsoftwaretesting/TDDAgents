@@ -1,27 +1,30 @@
 """
-The install gate: a built-in PreToolUse hook that asks the user before the agent's Bash installs software
-on the machine (a runtime, a system or global package, `curl | sh`, `sudo`).
+The install gate: a built-in PreToolUse hook that asks the user before the agent's Bash changes the machine
+outside the project (installs software, elevates, unpacks a download, writes outside the project folder).
 
-TDDAgents-only; upstream has no install-specific gate, and an unlisted install is an ordinary
-non-allowlisted Bash command there. What it ports is the mechanism upstream gives a hook to start a user
-question, and the precedent for a hook that is code rather than settings:
+TDDAgents-only; upstream has no install-specific gate. Each part is upstream's own code or classification:
 
-- `reference/claude-code/src/utils/hooks.ts` `parseHookOutput` (PreToolUse `permissionDecision: "ask"` and
-  `permissionDecisionReason`), `services/tools/toolHooks.ts` `runPreToolUseHooks` / `resolveHookPermissionDecision`
-  (the ask becomes `forceDecision`, which `hooks/useCanUseTool.tsx` and `cli/structuredIO.ts` use instead of
-  `hasPermissionsToUseTool`, so `bypassPermissions` does not turn it into an allow);
-- `utils/sessionFileAccessHooks.ts` `registerSessionFileAccessHooks` and `setup.ts` (a `HookCallback` with
-  `internal: true`, registered through `bootstrap/state.ts` `registerHookCallbacks`), `types/hooks.ts`
-  `HookCallback` / `HookCallbackMatcher`;
-- `tools/BashTool/bashPermissions.ts` `stripSafeWrappers`, `stripAllLeadingEnvVars` and
-  `BARE_SHELL_PREFIXES` (wrappers and shells that run their arguments as a command) for seeing through
-  `timeout 5 sudo …`, `FOO=1 …`, `bash -c '…'`; `utils/bash/commands.ts` `splitCommand_DEPRECATED`.
+- the mechanism: a PreToolUse hook's `permissionDecision: "ask"` (`reference/claude-code/src/utils/hooks.ts`
+  `parseHookOutput`), turned by `services/tools/toolHooks.ts` `resolveHookPermissionDecision` into the
+  `forceDecision` that `hooks/useCanUseTool.tsx` and `cli/structuredIO.ts` use instead of
+  `hasPermissionsToUseTool`, so `bypassPermissions` cannot turn it into an allow;
+- the registration: a `HookCallback` with `internal: true` (`types/hooks.ts`), registered like
+  `utils/sessionFileAccessHooks.ts` `registerSessionFileAccessHooks` (`setup.ts`) through
+  `bootstrap/state.ts` `registerHookCallbacks`;
+- "writes outside the project": upstream's path validation, reused (`tools/BashTool/pathValidation.ts`
+  `COMMAND_OPERATION_TYPE`, `PATH_EXTRACTORS`, `validatePath` with `isPathAllowed`'s acceptEdits rule, and
+  `validateOutputRedirections` with `utils/bash/commands.ts` `extractOutputRedirections`); a path built from
+  shell expansion (`$HOME/.local`) counts as outside, as `validatePath` asks for it;
+- "Code from External" and "Security Weaken" (the auto-mode rules, `utils/permissions/yoloClassifier.ts`):
+  a download piped into a shell or an unpacker, elevation, and the system, global and runtime-manager
+  installs of `INSTALL_MANAGERS`, the one table of TDDAgents' own;
+- command analysis: `tools/BashTool/bashPermissions.ts` `stripSafeWrappers`, `stripAllLeadingEnvVars`,
+  `BARE_SHELL_PREFIXES` (shells and runners that run their arguments) and `utils/bash/commands.ts`
+  `splitCommand_DEPRECATED`.
 
-What counts as an installation (TDDAgents' own table, `INSTALL_MANAGERS` and the helpers): what changes the
-machine outside the project. Installing the project's own dependencies from its manifests (`pip install -r`,
-`npm ci`, `bundle install`, `composer install`, `.venv/bin/pip …`) is not one: every TDD cycle does it.
-`setup` and the final run run outside the hook pipeline and are not gated; the user's approval of the plan's
-project configuration is their consent.
+The project's own installs from its manifests (`pip install -r`, `npm ci`, `.venv/bin/pip …`) and writes inside
+it ask nothing. `setup` and the final run run outside the hook pipeline and are not gated; the user's approval
+of the plan's project configuration is their consent.
 """
 
 from __future__ import annotations
@@ -33,8 +36,20 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from app.schemas.hooks import CallbackHook, HookMatcher
-from app.tools.bash_tool.bash_permissions import BASH_TOOL_NAME, strip_all_leading_env_vars, strip_safe_wrappers
-from app.utils.bash.commands import split_command
+from app.tools.bash_tool.bash_permissions import (
+    BASH_TOOL_NAME,
+    strip_all_leading_env_vars,
+    strip_safe_wrappers,
+    validate_output_redirections,
+)
+from app.tools.bash_tool.path_validation import (
+    COMMAND_OPERATION_TYPE,
+    PATH_EXTRACTORS,
+    parse_command_arguments,
+    validate_path,
+)
+from app.types.permissions import PermissionBehavior, PermissionMode, ToolPermissionContext
+from app.utils.bash.commands import extract_output_redirections, split_command
 
 #: `HookCallback.timeout` (seconds): the callback only reads the command.
 INSTALL_GATE_TIMEOUT = 1
@@ -49,10 +64,13 @@ RUNNERS = frozenset({"env", "xargs", "command", "exec", "builtin", "setsid", "io
 #: Elevation: always asked, whatever follows.
 ELEVATORS = frozenset({"sudo", "su", "doas", "pkexec"})
 
-#: A download piped into a shell: `curl … | sh`, `wget -qO- … | sudo bash`.
-_PIPE_TO_SHELL = re.compile(
-    r"(?:^|[\s;&|(])(?:curl|wget|fetch)\b[^;&|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:/\S*/)?(?:"
-    + "|".join(sorted(SHELLS)) + r")\b")
+#: Unpackers: a download piped into one installs whatever it unpacks.
+EXTRACTORS = frozenset({"tar", "bsdtar", "unzip", "7z", "7za", "gunzip", "gzip", "xz", "unxz", "bunzip2",
+                        "zstd", "cpio", "unar"})
+
+#: A download piped into a program: `curl … | sh`, `wget -qO- … | sudo bash`, `curl … | tar -xz`.
+_PIPE_FROM_DOWNLOAD = re.compile(
+    r"(?:^|[\s;&|(])(?:curl|wget|fetch)\b[^;&|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:/\S*/)?(?P<program>[\w.+-]+)")
 
 #: Verbs that install, per package manager (the first argument that is not an option).
 _INSTALL_VERBS = frozenset({"install", "add", "upgrade", "dist-upgrade", "full-upgrade", "reinstall", "i"})
@@ -177,7 +195,11 @@ def _skip_runner_options(runner: str, args: list[str]) -> list[str]:
     return args[index:]
 
 
-def _classify_tokens(tokens: list[str], depth: int) -> str | None:
+#: `python`, `python3`, `python3.12`: an interpreter that can run `-m pip`.
+_PYTHON = re.compile(r"python(?:\d+(?:\.\d+)*)?")
+
+
+def _classify_tokens(tokens: list[str], depth: int, cwd: str | None) -> str | None:
     if not tokens or depth > 8:
         return None
     name = _name(tokens[0])
@@ -189,11 +211,11 @@ def _classify_tokens(tokens: list[str], depth: int) -> str | None:
             at = next((i for i, arg in enumerate(args) if arg == "-c" or (
                 arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:])), None)
             if at is not None and at + 1 < len(args):
-                return classify_install(args[at + 1], depth + 1)
+                return classify_install(args[at + 1], depth + 1, cwd=cwd)
         return None
     if name in RUNNERS:
-        return _classify_tokens(_skip_runner_options(name, args), depth + 1)
-    if name in ("python", "python3") and args[:2] == ["-m", "pip"]:
+        return _classify_tokens(_skip_runner_options(name, args), depth + 1, cwd)
+    if _PYTHON.fullmatch(name) and args[:2] == ["-m", "pip"]:
         label, installs = INSTALL_MANAGERS["pip"]
         return f"installs software with {label}" if installs(args[2:]) else None
     manager = INSTALL_MANAGERS.get(name)
@@ -202,19 +224,93 @@ def _classify_tokens(tokens: list[str], depth: int) -> str | None:
     return None
 
 
-def classify_install(command: str, depth: int = 0) -> str | None:
+#: The project's context for `validate_path`: in acceptEdits a write inside the working directory is
+#: allowed, so what is left is a write outside it (`isPathAllowed`).
+_PROJECT_WRITES = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
+
+
+def _outside(path: str, cwd: str) -> bool:
     """
-    What the command does that needs the user's permission, in a few words, or `None`. Compound commands
-    are split (`splitCommand_DEPRECATED`), wrappers and leading variables seen through (`stripSafeWrappers`,
-    `stripAllLeadingEnvVars`), and `bash -c '…'`, `env …`, `xargs …` classified by what they run.
+    `validate_path` refused `path` because it is not in the project, not for a safety check inside it (the
+    protected `.tddagents/`, which the normal permission flow already asks about). A path it could not place
+    (shell expansion such as `$HOME/.local`) is not absolute, so it counts as outside.
+    """
+    allowed, resolved, _reason = validate_path(path, cwd, _PROJECT_WRITES, "create")
+    if allowed:
+        return False
+    if not os.path.isabs(resolved):
+        return True
+    root = os.path.normpath(cwd)
+    return os.path.commonpath([root, os.path.normpath(resolved)]) != root
+
+
+def _write_outside_project(subcommand: str, cwd: str) -> str | None:
+    """
+    A create or write target outside the project, as upstream's path validation sees it
+    (`pathValidation.ts` `COMMAND_OPERATION_TYPE`, `PATH_EXTRACTORS`, `validatePath`): `mkdir`, `touch`,
+    `rm`, `rmdir`, `mv`, `cp`, `sed -i`. A path built from shell expansion (`$HOME/.local`) cannot be
+    placed, so it counts as outside, as `validatePath` asks for it. `COMMAND_VALIDATOR` (mv/cp flags) is
+    left out on purpose: it asks inside the project too.
+    """
+    args = parse_command_arguments(strip_safe_wrappers(subcommand))
+    if not args:
+        return None
+    base, rest = args[0], args[1:]
+    operation = COMMAND_OPERATION_TYPE.get(base)
+    if operation not in ("write", "create"):
+        return None
+    if base == "sed" and not any(a in ("-i", "--in-place") or a.startswith(("-i", "--in-place=")) for a in rest):
+        return None
+    for path in PATH_EXTRACTORS[base](rest):
+        if _outside(path, cwd):
+            resolved = validate_path(path, cwd, _PROJECT_WRITES, operation)[1]
+            return f"writes outside the project ({base} {resolved})"
+    return None
+
+
+def _redirect_outside_project(command: str, cwd: str) -> str | None:
+    """An output redirection outside the project (`validateOutputRedirections`, `extractOutputRedirections`)."""
+    extraction = extract_output_redirections(command)
+    if extraction.has_dangerous_redirection:
+        return "writes to a path built from shell expansion"
+    if validate_output_redirections(extraction.redirections, cwd, _PROJECT_WRITES).behavior \
+            == PermissionBehavior.PASSTHROUGH:
+        return None
+    target = next((r.target for r in extraction.redirections if r.target != "/dev/null" and _outside(r.target, cwd)),
+                  None)
+    return f"writes outside the project (> {target})" if target is not None else None
+
+
+def classify_install(command: str, depth: int = 0, *, cwd: str | None = None) -> str | None:
+    """
+    What the command does that needs the user's permission, in a few words, or `None`:
+
+    * a download piped into a shell or an unpacker ("Code from External" in the auto-mode rules);
+    * elevation, or an install by a system, global or runtime package manager (`INSTALL_MANAGERS`);
+    * with the project folder `cwd`: a create or write target, or an output redirection, outside it, as
+      upstream's path validation classifies it.
+
+    Compound commands are split (`splitCommand_DEPRECATED`), wrappers and leading variables seen through
+    (`stripSafeWrappers`, `stripAllLeadingEnvVars`), and `bash -c '…'`, `env …`, `xargs …` classified by
+    what they run. The project's own installs from its manifests (`pip install -r`, `npm ci`) ask nothing.
     """
     if not isinstance(command, str) or not command.strip() or depth > 8:
         return None
-    if _PIPE_TO_SHELL.search(command):
-        return "pipes a download into a shell (curl | sh)"
+    for match in _PIPE_FROM_DOWNLOAD.finditer(command):
+        program = match.group("program")
+        if program in SHELLS:
+            return "pipes a download into a shell (curl | sh)"
+        if program in EXTRACTORS:
+            return f"unpacks a download (curl | {program})"
+    if cwd is not None:
+        redirect = _redirect_outside_project(command, cwd)
+        if redirect is not None:
+            return redirect
     for subcommand in split_command(command):
         stripped = strip_safe_wrappers(strip_all_leading_env_vars(_NEW_LINE_PLACEHOLDER.sub(" ", subcommand).strip()))
-        found = _classify_tokens(_tokens(stripped), depth)
+        found = _classify_tokens(_tokens(stripped), depth, cwd)
+        if found is None and cwd is not None:
+            found = _write_outside_project(stripped, cwd)
         if found is not None:
             return found
     return None
@@ -229,7 +325,9 @@ async def install_gate_callback(
     """
     tool_input = hook_input.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, Mapping) else None
-    found = classify_install(command) if isinstance(command, str) else None
+    cwd = hook_input.get("cwd")
+    found = classify_install(command, cwd=cwd if isinstance(cwd, str) and cwd else None) \
+        if isinstance(command, str) else None
     if found is None:
         return {}
     return {"hookSpecificOutput": {
