@@ -371,6 +371,154 @@ def reorder_attachments_for_api(messages: Sequence[Message]) -> list[Message]:
     return out
 
 
+#: `SYNTHETIC_TOOL_RESULT_PLACEHOLDER`: the content of a tool result `ensure_tool_result_pairing` invents.
+SYNTHETIC_TOOL_RESULT_PLACEHOLDER = "[Tool result missing due to internal error]"
+#: What an assistant whose every tool call was a duplicate is left saying (`ensureToolResultPairing`).
+TOOL_USE_INTERRUPTED = "[Tool use interrupted]"
+#: What stands first when the history began with tool results nothing asked for (`ensureToolResultPairing`).
+ORPHANED_TOOL_RESULT_REMOVED = "[Orphaned tool result removed due to conversation resume]"
+
+
+def _call_ids(message: Any) -> list[str]:
+    if not isinstance(message, AIMessage):
+        return []
+    return [str(call.get("id")) for call in message.tool_calls if call.get("id")]
+
+
+def hoist_tool_results(messages: Sequence[Message]) -> list[Message]:
+    """
+    `mergeUserMessages` + `hoistToolResults`, for this message format.
+
+    Upstream folds every user message after an assistant into one and puts its `tool_result` blocks
+    first, so anything emitted between two results of one batch (a skill's meta prompt, an
+    attachment, the user's queued text) ends up after them. Here each result is its own
+    `ToolMessage` and the provider adapter groups the run of human and tool messages after an
+    assistant into one user message in order, so the results of an assistant's calls move to
+    directly after it, in their order, and the other messages of that window follow them. The
+    window ends at the next assistant message.
+    """
+    out: list[Message] = []
+    items = list(messages)
+    i = 0
+    while i < len(items):
+        message = items[i]
+        out.append(message)
+        i += 1
+        ids = set(_call_ids(message))
+        if not ids:
+            continue
+        results: list[Message] = []
+        others: list[Message] = []
+        while i < len(items) and not isinstance(items[i], AIMessage):
+            following = items[i]
+            if isinstance(following, ToolMessage) and following.tool_call_id in ids:
+                results.append(following)
+            else:
+                others.append(following)
+            i += 1
+        out.extend(results)
+        out.extend(others)
+    return out
+
+
+def _without_tool_use_blocks(content: Any, dropped: set[str]) -> Any:
+    if not isinstance(content, list):
+        return content
+    return [b for b in content
+            if not (isinstance(b, Mapping) and b.get("type") == "tool_use" and b.get("id") in dropped)]
+
+
+def _is_empty(content: Any) -> bool:
+    return not content if not isinstance(content, list) else not [b for b in content if b]
+
+
+def _synthetic_result(call_id: str) -> ToolMessage:
+    return ToolMessage(content=SYNTHETIC_TOOL_RESULT_PLACEHOLDER, tool_call_id=call_id, status="error",
+                       additional_kwargs={"is_error": True, "synthetic_repair": True})
+
+
+def ensure_tool_result_pairing(messages: Sequence[Message]) -> list[Message]:
+    """
+    `ensureToolResultPairing`, run on the request after `normalize_messages_for_api`: every tool call
+    has exactly one result directly after its assistant message, and no result stands without one.
+
+    * A tool call whose id an earlier assistant already used is dropped (with its `tool_use` block);
+      an assistant left with nothing says `TOOL_USE_INTERRUPTED`.
+    * A call with no result gets a synthetic error result (`SYNTHETIC_TOOL_RESULT_PLACEHOLDER`),
+      placed before the existing results, as upstream prepends its synthetic blocks.
+    * A result for another call, a second result for one call, and a result with no assistant
+      before it are dropped; a history that would then start with no user message starts with
+      `ORPHANED_TOOL_RESULT_REMOVED`.
+
+    Upstream's strict mode (`getStrictToolResultPairing`, for training data) is not ported. Without
+    a repair the same list is returned.
+    """
+    out: list[Message] = []
+    seen_calls: set[str] = set()
+    repaired = False
+    items = list(messages)
+    i = 0
+    while i < len(items):
+        message = items[i]
+        i += 1
+        if isinstance(message, ToolMessage):
+            # A result no assistant asked for right before it: orphaned.
+            repaired = True
+            if not out:
+                out.append(HumanMessage(content=ORPHANED_TOOL_RESULT_REMOVED, additional_kwargs={"is_meta": True}))
+            continue
+        if not isinstance(message, AIMessage) or not message.tool_calls:
+            out.append(message)
+            continue
+        kept = []
+        dropped: set[str] = set()
+        for tool_call in message.tool_calls:
+            call_id = str(tool_call.get("id"))
+            if call_id in seen_calls:
+                dropped.add(call_id)
+                continue
+            seen_calls.add(call_id)
+            kept.append(tool_call)
+        if dropped:
+            repaired = True
+            content = _without_tool_use_blocks(message.content, dropped)
+            if not kept and _is_empty(content):
+                content = TOOL_USE_INTERRUPTED
+            message = message.model_copy(update={"content": content, "tool_calls": kept})
+        out.append(message)
+        wanted = [str(c.get("id")) for c in kept]
+        results: dict[str, ToolMessage] = {}
+        while i < len(items) and isinstance(items[i], ToolMessage):
+            result = items[i]
+            assert isinstance(result, ToolMessage)
+            i += 1
+            if result.tool_call_id in wanted and result.tool_call_id not in results:
+                results[result.tool_call_id] = result
+            else:
+                repaired = True
+        missing = [cid for cid in wanted if cid not in results]
+        if missing:
+            repaired = True
+        out.extend(_synthetic_result(cid) for cid in missing)
+        out.extend(results[cid] for cid in wanted if cid in results)
+    if repaired:
+        logger.debug("ensure_tool_result_pairing: repaired the tool_use/tool_result pairing of the request")
+        return out
+    return list(messages)
+
+
+def normalize_messages_for_api(messages: Sequence[Message]) -> list[Message]:
+    """
+    `normalizeMessagesForAPI`, as far as this message format needs it: one assistant message per
+    response (`mergeAssistantMessages`), every batch's results directly after their calls
+    (`mergeUserMessages` / `hoistToolResults`), attachments after the batch
+    (`reorderAttachmentsForAPI`). The request then runs `ensure_tool_result_pairing`, as upstream's
+    `services/api/claude.ts` does; `/context` (`analyzeContext.ts`) counts this view alone. The input
+    is never changed.
+    """
+    return reorder_attachments_for_api(hoist_tool_results(merge_split_assistant_messages(messages)))
+
+
 def messages_for(attachments: Sequence[HookAttachment]) -> tuple[Message, ...]:
     """Every model-visible message among `attachments`, in order."""
     out: list[Message] = []

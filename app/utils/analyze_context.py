@@ -64,10 +64,9 @@ from app.utils.claudemd import get_memory_files
 from app.utils.messages import (
     ATTACHMENT_KEY,
     Message,
-    merge_split_assistant_messages,
-    reorder_attachments_for_api,
     tool_calls_in,
 )
+from app.utils.messages import normalize_messages_for_api as normalize_request_messages
 from app.utils.system_prompt import build_effective_system_prompt
 from app.utils.tokens import (
     get_context_window_for_model,
@@ -488,10 +487,9 @@ def process_attachment(attachment: Mapping[str, Any], breakdown: MessageBreakdow
 def normalize_messages_for_api(messages: Sequence[Message]) -> list[Message]:
     """
     `normalizeMessagesForAPI`, as this build's request makes it (`claude.py::build_request_messages`):
-    no `system` record, one assistant message per response, attachments after a batch's results.
+    no `system` record, then `app/utils/messages.py::normalize_messages_for_api`.
     """
-    sendable = [m for m in messages if m.type != "system"]
-    return reorder_attachments_for_api(merge_split_assistant_messages(sendable))
+    return normalize_request_messages([m for m in messages if m.type != "system"])
 
 
 async def approximate_message_tokens(messages: Sequence[Message], count_tokens: TokenCounter) -> MessageBreakdown:

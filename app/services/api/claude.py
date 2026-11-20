@@ -91,9 +91,9 @@ from app.tool import Tool
 from app.utils.chat_model_factory import get_chat_model
 from app.utils.messages import (
     Message,
-    merge_split_assistant_messages,
+    ensure_tool_result_pairing,
     move_tool_result_media_to_user,
-    reorder_attachments_for_api,
+    normalize_messages_for_api,
 )
 from app.utils.model.model import provider_for_model
 from app.utils.token_metrics import GlobalTokenTracker
@@ -189,10 +189,11 @@ def build_request_messages(state: LoopState, config: RunConfig) -> list[Message]
     # The compact boundary is a bookkeeping record (upstream's `system` message), never input.
     from app.utils.messages import is_signal_attachment_message
 
-    # `normalizeMessagesForAPI`: an attachment with no text for the model (a signal) is dropped.
+    # `normalizeMessagesForAPI` (then `ensureToolResultPairing`, as `services/api/claude.ts` runs it):
+    # an attachment with no text for the model (a signal) is dropped.
     sendable = [m for m in state.messages if not is_compact_boundary_message(m) and not is_signal_attachment_message(m)]
     history = prepend_user_context(
-        reorder_attachments_for_api(merge_split_assistant_messages(sendable)), request_user_context(state, config))
+        ensure_tool_result_pairing(normalize_messages_for_api(sendable)), request_user_context(state, config))
     return [system, *history]
 
 

@@ -40,6 +40,7 @@ from app.services.tools.tool_hooks import (
 )
 from app.tool import ContextModifier, Tool, ToolResult, find_tool_by_name
 from app.utils.messages import (
+    SYNTHETIC_TOOL_RESULT_PLACEHOLDER,
     HookAttachment,
     Message,
     ToolCall,
@@ -54,7 +55,6 @@ from app.utils.tool_result_storage import (
 if TYPE_CHECKING:
     from app.tool import ToolContext
 
-SYNTHETIC_TOOL_RESULT_PLACEHOLDER = "[Tool result missing due to internal error]"
 CANCEL_MESSAGE = (
     "The user doesn't want to take this action right now. STOP what you are doing and wait "
     "for the user to tell you how to proceed."

@@ -10,10 +10,10 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from app.services.tools.tool_execution import (
     CANCEL_MESSAGE,
-    SYNTHETIC_TOOL_RESULT_PLACEHOLDER,
     run_tool_use,
     yield_missing_tool_results,
 )
+from app.utils.messages import SYNTHETIC_TOOL_RESULT_PLACEHOLDER
 from app.state.app_state_store import AppStateStore
 from app.tool import (
     PermissionResult,
