@@ -113,8 +113,8 @@ def test_get_system_prompt_structure():
     with_tools = resolve_system_prompt_sections(
         get_system_prompt(Shell({}), "m-1", (), enabled_tools=frozenset({"Agent"}), has_skills=False))
     guidance = next(text for text in with_tools if text.startswith("# Session-specific guidance"))
-    # The verification contract follows the verifier's switch, off by default (2026-10-28).
-    assert 'subagent_type="verification"' not in guidance
+    # The verification contract follows the verifier's switch, on by default (user decision 2026-11-20).
+    assert 'subagent_type="verification"' in guidance
 
 
 def _mcp_server(name: str, instructions: str | None) -> Any:

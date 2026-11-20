@@ -163,12 +163,13 @@ class TestParseAgentFromMarkdown:
 class TestDefinitionsWithOverrides:
     def test_the_roster_comes_from_app_prompts_agents(self, tmp_path, monkeypatch):
         # Public Claude Code has no verification agent (`builtInAgents.ts`: its gate is off outside
-        # Anthropic); TDDAgents registers it only with `TDDAGENTS_VERIFICATION_AGENT` (2026-10-28).
+        # Anthropic); TDDAgents registers it by default (user decision 2026-11-20), `=0` turns it off.
         monkeypatch.delenv("TDDAGENTS_VERIFICATION_AGENT", raising=False)
         defs = get_agent_definitions_with_overrides(project_dir=tmp_path, user_home=tmp_path)
-        assert set(defs) == {"tester", "developer", "refactorer", "Explore", "Plan"}
+        assert set(defs) == {"tester", "developer", "refactorer", "Explore", "Plan", "verification"}
         assert all(d.source == "built-in" for d in defs.values())
-        for value, registered in (("1", True), ("true", True), ("on", True), ("0", False), ("", False)):
+        for value, registered in (("1", True), ("true", True), ("on", True), ("", True), ("0", False),
+                                  ("false", False), ("No", False), (" off ", False)):
             monkeypatch.setenv("TDDAGENTS_VERIFICATION_AGENT", value)
             defs = get_agent_definitions_with_overrides(project_dir=tmp_path, user_home=tmp_path)
             assert ("verification" in defs) is registered

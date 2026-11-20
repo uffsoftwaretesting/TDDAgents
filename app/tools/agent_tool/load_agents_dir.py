@@ -471,18 +471,21 @@ def parse_agents_from_json(agents_json: Any, source: str = "flagSettings") -> di
 BUILT_IN_AGENTS_DIR = Path(__file__).resolve().parents[2] / "prompts" / "agents"
 
 
-#: TDDAgents' switch for upstream's verification agent (user decision, 2026-10-28). Upstream registers
-#: it only behind the `VERIFICATION_AGENT` build flag and GrowthBook's `tengu_hive_evidence`, which
-#: defaults to false outside Anthropic (`builtInAgents.ts`), so public Claude Code has no verifier.
-#: Off by default here too; this one switch also governs its contract and the coordinator's role.
+#: TDDAgents' switch for upstream's verification agent. Upstream registers it only behind the
+#: `VERIFICATION_AGENT` build flag and GrowthBook's `tengu_hive_evidence`, which defaults to false outside
+#: Anthropic (`builtInAgents.ts:65-68`, `constants/prompts.ts:392-394`), so public Claude Code has no verifier.
+#: On by default here (user decision 2026-11-20, reversing 2026-10-28's opt-in): its adversarial probes
+#: (concurrency among them) find what a green suite missed, as the Go API's shared-translator race of the
+#: 2026-11-20 live run. `TDDAGENTS_VERIFICATION_AGENT=0` (or false/no/off) turns it off; this one switch also
+#: governs its contract and the coordinator's role.
 VERIFICATION_AGENT_ENV = "TDDAGENTS_VERIFICATION_AGENT"
 VERIFICATION_AGENT_TYPE = "verification"
-_TRUTHY = ("1", "true", "yes", "on")
+_FALSY = ("0", "false", "no", "off")
 
 
 def is_verification_agent_enabled() -> bool:
-    """`feature('VERIFICATION_AGENT') && tengu_hive_evidence`: the opt-in environment switch."""
-    return os.environ.get(VERIFICATION_AGENT_ENV, "").strip().lower() in _TRUTHY
+    """`feature('VERIFICATION_AGENT') && tengu_hive_evidence`: on unless the environment switch says off."""
+    return os.environ.get(VERIFICATION_AGENT_ENV, "").strip().lower() not in _FALSY
 
 
 def get_agent_definitions_with_overrides(

@@ -58,10 +58,10 @@ def test_the_system_prompt_is_rendered_with_no_placeholder_left(monkeypatch):
 
 
 def test_without_the_verification_agent_the_coordinator_never_names_it(monkeypatch):
-    """One switch for the verifier everywhere (user decision, 2026-10-28): off by default, as public Claude Code."""
-    monkeypatch.setenv("TDDAGENTS_VERIFICATION_AGENT", "1")
+    """One switch for the verifier everywhere: on by default (user decision 2026-11-20), `=0` turns it off."""
+    monkeypatch.delenv("TDDAGENTS_VERIFICATION_AGENT", raising=False)
     with_verifier = get_coordinator_system_prompt()
-    monkeypatch.delenv("TDDAGENTS_VERIFICATION_AGENT")
+    monkeypatch.setenv("TDDAGENTS_VERIFICATION_AGENT", "0")
     prompt = get_coordinator_system_prompt()
     assert "verification" not in prompt and "| Verification |" not in prompt
     assert not re.search(r"\{\{[A-Z_]+\}\}", prompt)

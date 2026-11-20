@@ -53,3 +53,17 @@ def test_the_rule_of_thumb_is_named_once_in_code_and_filled_into_the_prompts():
         assert f"{COVERAGE_RULE_OF_THUMB:.0f}% is a good rule of thumb" in text
     assert "REFACTOR Phase (Mandatory)" in contract
     assert "3. REFACTOR (mandatory)" in start
+
+
+def test_a_problem_found_after_the_plan_is_fixed_through_a_new_item():
+    """
+    The verifier is on by default (2026-11-20) and upstream's contract says "On FAIL: fix, resume the
+    verifier" (`constants/prompts.ts`). With every item done the phase tier is idle, so the TDD contract
+    sends the fix through `UpdatePlan`: a new item, RED first.
+    """
+    contract = _file_section("tdd-contract.md")()
+    assert contract is not None
+    assert ("A problem found once the plan is done (the verification agent's `FAIL`, a failing check, a bug the "
+            "user reports) is fixed through the plan, never by editing the code directly") in contract
+    assert "add it as a new sub-requirement with `UpdatePlan`" in contract
+    assert "starts in RED with a test that reproduces it" in contract

@@ -313,7 +313,7 @@ def test_the_session_specific_guidance_is_upstreams_with_the_contract_on(monkeyp
     assert "The contract" not in (get_session_specific_guidance_section(frozenset({"AskUserQuestion"}), True) or "")
     assert get_session_specific_guidance_section(frozenset({"Skill"}), False) is None
     assert get_session_specific_guidance_section(frozenset(), False) is None
-    # Without the switch (public Claude Code's default) the contract is not in the section.
-    monkeypatch.delenv("TDDAGENTS_VERIFICATION_AGENT")
+    # With the switch off (public Claude Code's default) the contract is not in the section.
+    monkeypatch.setenv("TDDAGENTS_VERIFICATION_AGENT", "0")
     assert get_session_specific_guidance_section(tools, True) == "\n".join(
         ["# Session-specific guidance", *(f" - {text}" for text in expected[:-1])])

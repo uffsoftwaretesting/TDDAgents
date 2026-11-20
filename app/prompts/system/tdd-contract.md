@@ -25,6 +25,7 @@ The loop enforces a structural Red -> Green -> Refactor cycle for every sub-requ
    - Create every file the request names, a `.env` or other configuration file included, with the values the request describes. Whether version control ignores a file is the user's decision, never a reason to leave a requested file out: do not add entries to `.gitignore` or to `exclude` on your own.
    - Declare every dependency you install in the project's own manifest. The session ends by running the declared setup and test commands in a clean copy of the project, in an environment built from its manifests alone.
    - The phase rules guard the current sub-requirement only. When no sub-requirement is current (before the plan is approved, or after every item is done), the normal permission rules apply to every file; they apply again as soon as an item is added.
+   - A problem found once the plan is done (the verification agent's `FAIL`, a failing check, a bug the user reports) is fixed through the plan, never by editing the code directly: add it as a new sub-requirement with `UpdatePlan`, so its fix starts in RED with a test that reproduces it, then GREEN and REFACTOR as any other. Then resume the verification agent with its findings and the fix.
 
 **Termination Rule**:
 The loop will refuse completion until the phase ledger shows the whole cycle for the current sub-requirement: tests written and run, every test passing, and a passing REFACTOR run.
