@@ -109,6 +109,11 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 - The model emits **one message per content block**. Blocks of one response share a response
   id, and the request builder merges them back into one assistant message
   (`merge_split_assistant_messages`), or OpenAI rejects parallel tool calls.
+- **The request is normalized, then repaired** (2026-11-20): `app/utils/messages.py`
+  `normalize_messages_for_api` (merge, then `hoist_tool_results`: a batch's results directly after their
+  calls, a skill's meta prompt or an attachment after them, upstream's `mergeUserMessages` /
+  `hoistToolResults`), then `ensure_tool_result_pairing` (synthetic error results, orphans dropped,
+  `services/api/claude.ts`). The stored history is never rewritten, so a broken transcript heals on resume.
 
 ## The TDD cycle: three barriers no model output can reach
 
@@ -202,9 +207,12 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   allowlist; an unknown host asks: the REPL's dialog, the SDK host headless, a closed `-p` denies),
   the socat bridge and the vendored seccomp binaries. **Opt-in, as upstream** (`sandbox.enabled` is
   false unless set; user decision 2026-11-20, reversing 2026-11-08's default): a run has no sandbox
-  unless `--sandbox` (the profile in `.tddagents/settings.sandbox.json`, as flag settings) or a
+  unless `--sandbox` (the profile in `.tddagents/settings.sandbox.json`) or a
   `sandbox.enabled: true` setting turns it on; `--no-sandbox` turns a seeded project's off, and the two
-  flags exclude each other. New projects are seeded from `.tddagents/settings.json`, which has no
+  flags exclude each other. Both are sugar over upstream's `--settings <file-or-json>`
+  (`main.tsx` `loadSettingsFromFlag`, `app/main.py` `load_settings_from_flag`): their fragment is merged over
+  the `--settings` document into one content-hash flag file (`app/utils/tempfile.py`), the session's
+  `settings_path`. New projects are seeded from `.tddagents/settings.json`, which has no
   `sandbox` block (a project seeded earlier keeps the settings it has). The profile: writes only in the project and `/tmp/tddagents-<uid>`, a private HOME
   (`denyRead ["~"]`, the project re-allowed), the package registries allowed, `failIfUnavailable`
   (the session does not open without bwrap and socat; a one-off bwrap probe). The agent's Bash (opt-in
@@ -220,7 +228,20 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   `@pytest.mark.sandbox`, skipped without bwrap and socat.
 - **Interactive asks** go through `ToolContext.can_use_tool`; the TDD tier and deny rules are
   decided before any question. Workers and the agent-hook verifier have `can_use_tool=None`
-  (headless deny), except a built-in `bubble` agent.
+  (headless deny), except a built-in `bubble` agent. Prompts queue one at a time (`Repl._asking`); when
+  one's turn comes it is rechecked (upstream's `recheckPermission`), so a parallel call an earlier answer
+  now allows ("allow reading from <dir> during this session") is not asked again; a hook's forced ask is
+  never rechecked away. An answer is applied through the root store (`root_set_app_state`, upstream's
+  `setAppStateForTasks ?? setAppState`), so a background agent's grant reaches the session. A Bash path
+  ask carries upstream's `blockedPath` and `createPathChecker`'s suggestions (read: `Read(//dir/**)` for the
+  session; write: the folder and acceptEdits). `sed -n 'N,Mp'` is read-only in acceptEdits too (divergence:
+  upstream's `sedCommandIsAllowedByAllowlist` skips the print pattern there; user request 2026-11-20).
+- **Notifications** (`app/services/notifier.py`, upstream's `services/notifier.ts`; 2026-11-20): the
+  Notification hooks, then the global config's `preferredNotifChannel` (`~/.tddagents.json`, default `auto`):
+  iTerm2 / Kitty / Ghostty OSC (`app/ink/`, wrapped for tmux and screen) or the bell, which `auto` rings on
+  any other terminal (divergence: upstream does nothing there). A question waiting 6 s with no input
+  (`useNotifyAfterTimeout`) and a turn followed by `messageIdleNotifThresholdMs` (60 s) of idleness
+  (`idle_prompt`, "TDDAgents is waiting for your input": the notice that the plan is done) notify.
 - **`AskUserQuestion`** is upstream's tool, main thread only. Headless denies it, and the
   session stops `stop_hook_prevented` with the questions; `--thread-id <id> "<answer>"`
   continues.
@@ -230,9 +251,11 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   only *add* blocks. `/hooks` lists them; the REPL shows "Ran N stop hooks".
   **The install gate** (`app/tdd/install_gate.py`, 2026-11-20): without the sandbox, a built-in internal
   `callback` PreToolUse hook on Bash (registered by `open_session_run` through `register_hook_callbacks`, as
-  upstream's `registerSessionFileAccessHooks`, `setup.ts`) returns `permissionDecision: "ask"` for an
-  installation that changes the machine (`sudo`, a system or global package, a runtime manager, `curl | sh`);
-  the project's own dependencies from its manifests ask nothing. It is upstream's way for a hook to start a
+  upstream's `registerSessionFileAccessHooks`, `setup.ts`) returns `permissionDecision: "ask"` for what
+  changes the machine outside the project: `sudo`, a system, global or runtime-manager install, a download
+  piped into a shell or an unpacker, and a create/write target or redirection outside the project folder
+  (upstream's path validation reused: `COMMAND_OPERATION_TYPE`, `validate_path`, `validate_output_redirections`;
+  `$HOME/...` counts as outside). The project's own installs and writes inside it ask nothing. It is upstream's way for a hook to start a
   user question (`toolHooks.ts` `resolveHookPermissionDecision` → `forceDecision`), so `bypassPermissions`
   does not skip it, a deny rule or the TDD tier still wins, and with nobody to ask (plain `-p`, workers)
   it is denied. `setup` and the final run run outside the hooks and are not gated: the user's approval of
@@ -281,8 +304,10 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
 - **Agents**: workers run a second `run_loop` sharing the parent's ledger (synchronous).
   Background agents are allowed **only without a TDD `phase`**, because an async worker's
   ledger writes are discarded. Coordinator workers run synchronously. There is no
-  general-purpose agent; `subagent_type` is required. The verification agent is opt-in
-  (`TDDAGENTS_VERIFICATION_AGENT`).
+  general-purpose agent; `subagent_type` is required. The verification agent and upstream's contract
+  ("adversarial verification before you report completion") are **on by default** (user decision
+  2026-11-20; `TDDAGENTS_VERIFICATION_AGENT=0` turns them off); `tdd-contract.md` sends a `FAIL` through a
+  new plan item (`UpdatePlan`, RED first), never a direct edit.
 - **Transcripts** are at `<config home>/projects/<sanitized cwd>/<run id>.jsonl`
   (`TDDAGENTS_CONFIG_DIR`, default `~/.tddagents`); events at `<run id>/events.jsonl`.
   Resume uses the transcript, `tdd-plan.json` and the plan slug; there is no checkpoint store.
@@ -451,7 +476,7 @@ python -m app.main --fresh                                       # new thread
 python -m app.main plugin list | install <p@m> | marketplace add <src> …   # [--thread-id <id>] for project/local scope
 python -m app.main doctor [--thread-id <id>]                    # /doctor without a session
 python -m app.main -v | --version                               # 0.1.0 (TDDAgents)
-# Flags: --permission-mode, --settings <file>, --dangerously-skip-permissions, --coordinator,
+# Flags: --permission-mode, --settings <file-or-json>, --sandbox | --no-sandbox, --dangerously-skip-permissions, --coordinator,
 # --system-prompt[-file], --append-system-prompt[-file], --agents <json>, --rewind-files <uuid>;
 # -p only: --max-turns, --max-budget-usd, --json-schema, --include-partial-messages,
 # --replay-user-messages, --include-hook-events, --permission-prompt-tool <mcp tool|stdio>

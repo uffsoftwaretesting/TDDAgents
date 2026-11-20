@@ -3213,6 +3213,35 @@ is `utils/sessionFileAccessHooks.ts` (`registerHookCallbacks`, `internal: true`)
   are not made `bubble`, so a worker's install is denied with the ask message, as any unanswerable ask.
 - The no-sandbox `references/nosandbox/shared.md` says an installation asks first and a refusal is final.
 
+*Live-run fixes and the redo of the 2026-11-20 work (2026-11-20, user decisions; Opus 5.5):* a Go MD→PDF run
+exposed TDDAgents faults, each fixed on claude-code's own code:
+- **API 400 on parallel `Skill` + `Bash`**: the skill's meta prompt sat between two tool results. Ported
+  `utils/messages.ts` `hoistToolResults` (as `hoist_tool_results`, inside `normalize_messages_for_api`) and
+  `ensureToolResultPairing` (`ensure_tool_result_pairing`, run by the request as `services/api/claude.ts`
+  does; `/context` counts the normalized view alone, as `analyzeContext.ts`).
+- **A parallel read asked twice**: both asks were queued before the first answer applied. Ported
+  `recheckPermission` (`hooks/toolPermission/handlers/interactiveHandler.ts`, `screens/REPL.tsx`): a queued
+  prompt is rechecked when its turn comes if the permission context changed; a hook's forced ask never is.
+  Also `setAppStateForTasks` (`ToolContext.set_app_state_for_tasks`, `root_set_app_state`) so an answer reaches
+  the root store whoever asked (`PermissionContext.persistPermissions`), and `createPathChecker`'s suggestions
+  with `blockedPath` in `app/tools/bash_tool/path_validation.py`.
+- **`sed -n 'N,Mp'` asked in acceptEdits**: upstream's own bug (`sedValidation.ts:247-279`); the print pattern
+  is checked in both modes (divergence, user request).
+- **The install gate missed `curl … | tar -C "$HOME/.local"`**: it now asks for a download piped into an
+  unpacker and for any create/write target or redirection outside the project, reusing upstream's path
+  validation (`pathValidation.ts`) rather than a list.
+- **No notice when the work was done**: ported `services/notifier.ts`, `ink/useTerminalNotification.ts`,
+  `ink/termio/osc.ts`, `utils/env.ts` `detectTerminal`, `hooks/useNotifyAfterTimeout.ts`,
+  `PermissionRequest.tsx` `getNotificationMessage` and the REPL's `idle_prompt`; `auto` rings the bell where
+  upstream has no method (divergence, user decision).
+- **A concurrency 500 no test caught**: upstream's verification agent and contract are on by default
+  (divergence from the public build, user decision); `tdd-contract.md` fixes a `FAIL` through a new plan item.
+- **Redo of the Sonnet work**: `--no-sandbox` / `--sandbox` no longer use an invented settings holder; they are
+  sugar over the ported `loadSettingsFromFlag` (`--settings <file-or-json>`, content-hash temp file,
+  `setFlagSettingsPath`). Tests: `tests/test_messages_tool_result_pairing.py`, `tests/test_settings_flag.py`,
+  `tests/test_notifier.py`, and additions to the install-gate, sed, path-validation, interactive-permission,
+  REPL and agent tests.
+
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)
