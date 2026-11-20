@@ -84,7 +84,13 @@ def _parse(document: Any) -> tuple[Any, list[tuple[str, str]]]:
 def test_the_shipped_settings_are_valid() -> None:
     parsed, errors = parse_settings_file_with_errors(REPO / ".tddagents" / "settings.json")
     assert errors == [] and parsed is not None
-    assert parsed["permissions"] == {"defaultMode": "acceptEdits"} and parsed["sandbox"]["enabled"] is True
+    assert parsed == {"permissions": {"defaultMode": "acceptEdits"}}  # no sandbox: it is opt-in (2026-11-20)
+
+
+def test_the_shipped_sandbox_profile_is_valid() -> None:
+    parsed, errors = parse_settings_file_with_errors(REPO / ".tddagents" / "settings.sandbox.json")
+    assert errors == [] and parsed is not None
+    assert parsed["sandbox"]["enabled"] is True and parsed["sandbox"]["failIfUnavailable"] is True
 
 
 def test_a_valid_file_is_the_parsed_document_unknown_keys_as_zod() -> None:

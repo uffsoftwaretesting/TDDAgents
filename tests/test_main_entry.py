@@ -377,6 +377,8 @@ def test_parser_help_and_metadata() -> None:
         "rewind_files": argparse.SUPPRESS,
         "plugin_dir": "Load plugins from a directory for this session only "
                       "(repeatable: --plugin-dir A --plugin-dir B)",
+        "sandbox": "Run this session in the sandbox (flag settings: the profile in "
+                   ".tddagents/settings.sandbox.json).",
         "no_sandbox": "Run this session without the sandbox (flag settings: sandbox.enabled false).",
     }
     flags = {action.dest: tuple(action.option_strings) for action in parser._actions}

@@ -20,6 +20,11 @@ directories. Its prompt is built in code at each invocation, as upstream's `clau
   placeholders rendered from `PROJECT_CONFIG_PROMPT_VARS` (upstream's `SKILL_MODEL_VARS`) and
   `TDD_PROMPT_VARS` (the coverage rule of thumb); an
   unknown placeholder stays visible.
+- **The mode.** `references/` is the sandbox's text (every command runs in the sandbox). Without the
+  sandbox, the default, `references/nosandbox/<name>.md` replaces the reference of the same name,
+  shown under the same `references/<name>.md` path. The mode is the effective `sandbox.enabled` of the
+  settings (`sandbox_enabled`), the one the sandbox adapter reads, so `--sandbox`, `--no-sandbox` and a
+  managed policy all reach the prompt. Divergence: upstream's `claude-api` has no such variants.
 - **No language.** The prompt lists the available ecosystems and inlines only `shared.md`.
 
 The Markdown lives in `app/prompts/skills/tdd-project-config/`: `prompt.md` (upstream's
@@ -37,6 +42,7 @@ which a headless Analyst would be denied.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -46,10 +52,14 @@ from app.tdd.plan import PROJECT_CONFIG_HEADING
 from app.tdd.project_config import PROJECT_CONFIG_FILE
 from app.tdd.prompt_vars import PROJECT_CONFIG_PROMPT_VARS, TDD_PROMPT_VARS
 
+logger = logging.getLogger(__name__)
+
 SKILL_NAME = "tdd-project-config"
 SKILL_DIR = Path(__file__).resolve().parents[1] / "prompts" / "skills" / SKILL_NAME
 PROMPT_FILE = "prompt.md"
 REFERENCES_DIR = "references"
+#: The references' text for a run without the sandbox, by the name of the reference it replaces.
+NOSANDBOX_DIR = "nosandbox"
 SHARED_REFERENCE = f"{REFERENCES_DIR}/shared.md"
 
 READING_GUIDE_HEADING = "## Reading Guide"
@@ -126,12 +136,35 @@ def language_from_args(args: str) -> str | None:
     return LANGUAGE_ALIASES.get(words[0].lower()) if words else None
 
 
-def skill_files() -> dict[str, str]:
-    """`SKILL_FILES`: every reference, by its path relative to the skill directory."""
-    return {
+def skill_files(sandboxed: bool = True) -> dict[str, str]:
+    """
+    `SKILL_FILES`: every reference, by its path relative to the skill directory. Without the sandbox,
+    each `references/nosandbox/<name>.md` replaces `references/<name>.md`.
+    """
+    files = {
         f"{REFERENCES_DIR}/{path.name}": path.read_text(encoding="utf-8")
         for path in sorted((SKILL_DIR / REFERENCES_DIR).glob("*.md"))
     }
+    if not sandboxed:
+        for path in sorted((SKILL_DIR / REFERENCES_DIR / NOSANDBOX_DIR).glob("*.md")):
+            files[f"{REFERENCES_DIR}/{path.name}"] = path.read_text(encoding="utf-8")
+    return files
+
+
+def sandbox_enabled(cwd: str) -> bool:
+    """`sandbox.enabled` in the project's effective settings, false by default and when they cannot be read."""
+    from app.bootstrap.state import get_flag_settings_path
+    from app.utils.settings.settings import MANAGED_DIR, SettingsLocations, load_settings
+
+    flag_path = get_flag_settings_path()
+    try:
+        locations = SettingsLocations(project_root=Path(cwd), managed_dir=Path(MANAGED_DIR),
+                                      flag_settings_path=Path(flag_path) if flag_path else None)
+        sandbox = load_settings(locations).get("sandbox")
+    except Exception as error:  # noqa: BLE001 - as upstream, unreadable settings mean no sandbox
+        logger.debug("Failed to read the sandbox setting for the skill: %s", error)
+        return False
+    return isinstance(sandbox, dict) and sandbox.get("enabled") is True
 
 
 def get_files_for_language(language: str, files: dict[str, str]) -> list[str]:
@@ -199,7 +232,7 @@ def get_prompt_for_command(args: str, context: BundledSkillContext) -> str:
     """The skill's `getPromptForCommand`: the argument's language, else the detected one."""
     language = language_from_args(args) or detect_language(context.cwd)
     prompt = (SKILL_DIR / PROMPT_FILE).read_text(encoding="utf-8")
-    return build_prompt(language, args.strip(), prompt, skill_files())
+    return build_prompt(language, args.strip(), prompt, skill_files(sandboxed=sandbox_enabled(context.cwd)))
 
 
 def tdd_project_config_skill() -> BundledSkillDefinition:

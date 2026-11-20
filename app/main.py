@@ -69,7 +69,8 @@ from dotenv import load_dotenv
 from app.cli.print import DevelopmentOutcome, HeadlessOptions
 from app.constants.product import CLI_COMMAND, VERSION
 from app.components.trust_dialog.trust_dialog import TrustDialogExit
-from app.bootstrap.state import set_cli_flag_settings
+from app.bootstrap.state import set_cli_flag_settings, set_flag_settings_path
+from app.workspace.project import load_sandbox_profile
 from app.utils.sandbox.sandbox_adapter import SandboxUnavailableError
 from app.query.transitions import Terminal
 from app.session.driver import (
@@ -146,8 +147,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--permission-mode", choices=[str(m) for m in PERMISSION_MODES], default=None)
     parser.add_argument("--settings", default=None, help="A settings file (upstream's flag settings).")
     parser.add_argument("--dangerously-skip-permissions", action="store_true")
-    parser.add_argument("--no-sandbox", action="store_true",
-                        help="Run this session without the sandbox (flag settings: sandbox.enabled false).")
+    sandbox_mode = parser.add_mutually_exclusive_group()
+    sandbox_mode.add_argument("--sandbox", action="store_true",
+                              help="Run this session in the sandbox (flag settings: the profile in "
+                                   ".tddagents/settings.sandbox.json).")
+    sandbox_mode.add_argument("--no-sandbox", action="store_true",
+                              help="Run this session without the sandbox (flag settings: sandbox.enabled false).")
     parser.add_argument("--coordinator", action="store_true", help="Run development in coordinator mode.")
     # `main.tsx`'s debug options (`app/utils/debug.py`).
     parser.add_argument("-d", "--debug", nargs="?", const=True, default=None, metavar="filter",
@@ -829,8 +834,11 @@ def main(argv: list[str] | None = None) -> int:
         print(error, file=sys.stderr)
         return 1
     debug_handler = apply_debug_flags(args)
+    set_flag_settings_path(args.settings)
     if args.no_sandbox:
         set_cli_flag_settings({"sandbox": {"enabled": False}})
+    elif args.sandbox:
+        set_cli_flag_settings(load_sandbox_profile())
     try:
         return run_entry(args)
     finally:

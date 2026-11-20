@@ -50,6 +50,18 @@ def set_flag_settings_inline(settings: Mapping[str, Any] | None) -> None:
 _CLI_FLAG_SETTINGS: list[dict[str, Any] | None] = [None]
 
 
+#: `--settings <file>`: the flag settings file the process was started with, `None` without one.
+_FLAG_SETTINGS_PATH: list[str | None] = [None]
+
+
+def set_flag_settings_path(path: str | None) -> None:
+    _FLAG_SETTINGS_PATH[0] = path
+
+
+def get_flag_settings_path() -> str | None:
+    return _FLAG_SETTINGS_PATH[0]
+
+
 def set_cli_flag_settings(settings: Mapping[str, Any] | None) -> None:
     """The settings implied by command-line flags, merged beneath the inline flag settings."""
     _CLI_FLAG_SETTINGS[0] = dict(settings) if settings is not None else None

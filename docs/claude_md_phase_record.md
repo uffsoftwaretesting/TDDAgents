@@ -3177,6 +3177,42 @@ snapshotted once into `RunConfig` (`app/query/config.py`).
 There is no checkpoint store: a session resumes from its transcript and sidecars, as upstream's
 `--resume` does (since 2026-10-30).
 
+*No sandbox by default, the sandbox as an opt-in mode (2026-11-20, user decision):* upstream's
+`getSandboxEnabledSetting` is `settings?.sandbox?.enabled ?? false`, so claude-code runs commands without a
+sandbox unless it is turned on. TDDAgents had inverted that on 2026-11-08; it now follows upstream again:
+- `.tddagents/settings.json` ships only `permissions` (no `sandbox` block); the 2026-11-08 block is kept,
+  byte for byte, as `.tddagents/settings.sandbox.json` (`SHIPPED_SANDBOX_PROFILE`, `load_sandbox_profile`).
+  A project seeded earlier keeps the settings it has (no migration).
+- `--sandbox` applies that profile as command-line flag settings (`set_cli_flag_settings`, merged beneath the
+  SDK's inline settings and above every file, below managed policy); `--no-sandbox` is its mirror, and the
+  two are a mutually exclusive group.
+- The `tdd-project-config` skill has two texts. `references/` stays the sandbox's, untouched;
+  `references/nosandbox/{shared,python,javascript-typescript}.md` replace the same-named files (shown under
+  the same `references/<name>.md` path) when `sandbox.enabled` is not true in the effective settings
+  (`sandbox_enabled`, which also reads `--settings`, kept by `set_flag_settings_path`). The default text says
+  the commands run on the host with the user's home, caches and network, lets the model install the runtime
+  the project needs, and keeps the manifest and final-run rules.
+- Divergence from upstream's `claude-api` skill: it has no per-mode references. Tests: `tests/test_sandbox_flag.py`,
+  `tests/test_no_sandbox_flag.py`, `tests/test_tdd_project_config_skill.py` (`TestReferencesByMode`).
+
+*The install gate (2026-11-20, user decision):* with the sandbox off by default, the no-sandbox prompt lets
+the model install runtimes and tools, so an installation now asks the user first. Upstream has no
+install-specific gate (nothing in `tools/BashTool/` or `utils/permissions/`); what it gives a hook for starting
+a user question is a PreToolUse `permissionDecision: "ask"` (`utils/hooks.ts` `parseHookOutput`,
+`services/tools/toolHooks.ts` `runPreToolUseHooks` / `resolveHookPermissionDecision`, whose ask is the
+`forceDecision` of `hooks/useCanUseTool.tsx` and `cli/structuredIO.ts`), and its precedent for a built-in hook
+is `utils/sessionFileAccessHooks.ts` (`registerHookCallbacks`, `internal: true`), registered once from `setup.ts`.
+- `app/tdd/install_gate.py`: `classify_install` (`splitCommand_DEPRECATED`, `stripSafeWrappers`,
+  `stripAllLeadingEnvVars`, `BARE_SHELL_PREFIXES`' shells and runners) over TDDAgents' own table of managers,
+  `install_gate_callback`, `INSTALL_GATE_HOOKS`; registered in `open_session_run` after the dispatcher is built.
+- Scope (assumption approved with the plan): what changes the machine outside the project. `pip install -r`,
+  `npm ci`, `composer install`, `.venv/bin/pip …` ask nothing, since every cycle does them.
+- Divergence from upstream: its built-in hooks register unconditionally; this one only when the run has no
+  sandbox (in the sandbox, installs are confined to the project and the allowlisted network).
+- Not gated: `setup` and the final run (outside the hook pipeline; the plan's approval is the consent); workers
+  are not made `bubble`, so a worker's install is denied with the ask message, as any unanswerable ask.
+- The no-sandbox `references/nosandbox/shared.md` says an installation asks first and a refusal is final.
+
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)

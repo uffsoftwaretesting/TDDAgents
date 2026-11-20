@@ -26,7 +26,9 @@ from app.tdd.project_config_skill import (
     get_files_for_language,
     get_prompt_for_command,
     language_from_args,
+    NOSANDBOX_DIR,
     process_content,
+    sandbox_enabled,
     skill_files,
     tdd_project_config_skill,
 )
@@ -366,3 +368,198 @@ def test_the_skill_is_offered_ahead_of_the_file_roster():
                              managed_dir=Path("/nonexistent"))
     assert [c.name for c in reg.get_skill_tool_commands()] == [
         "update-config", "tdd-project-config", "tdd-mutation-defense", "tdd-refactor-clean", "tdd-test-design"]
+
+
+# ── the two modes: the sandbox's references and the default's ────────────────────────
+
+#: The references that carry text about the sandbox, and so have a no-sandbox equivalent.
+VARIANTS = ["javascript-typescript", "python", "shared"]
+REFERENCES = SKILL_DIR / "references"
+
+
+def _project(tmp_path: Path, settings: dict[str, object] | None, name: str = "settings.json") -> str:
+    project = tmp_path / "project"
+    (project / ".tddagents").mkdir(parents=True)
+    (project / "pyproject.toml").write_text("")
+    if settings is not None:
+        (project / ".tddagents" / name).write_text(json.dumps(settings))
+    return str(project)
+
+
+class TestReferencesByMode:
+    def test_the_variants_are_exactly_the_references_with_sandbox_text(self) -> None:
+        assert sorted(p.stem for p in (REFERENCES / NOSANDBOX_DIR).glob("*.md")) == VARIANTS
+        with_text = sorted(p.stem for p in REFERENCES.glob("*.md") if "sandbox" in p.read_text().lower())
+        assert with_text == VARIANTS
+
+    def test_the_sandbox_references_are_the_base_files_untouched(self) -> None:
+        files = skill_files(sandboxed=True)
+        assert files == skill_files()
+        assert sorted(files) == sorted([*LANGUAGE_FILES, "references/shared.md"])
+        for path, text in files.items():
+            assert text == (SKILL_DIR / path).read_text(encoding="utf-8")
+        assert "runs in a sandbox" in files["references/shared.md"]
+
+    def test_without_the_sandbox_the_variants_replace_the_same_named_references(self) -> None:
+        files = skill_files(sandboxed=False)
+        assert sorted(files) == sorted(skill_files(sandboxed=True))
+        for name in VARIANTS:
+            assert files[f"references/{name}.md"] == (REFERENCES / NOSANDBOX_DIR / f"{name}.md").read_text()
+            assert files[f"references/{name}.md"] != skill_files()[f"references/{name}.md"]
+
+    def test_the_other_references_are_the_same_in_both_modes(self) -> None:
+        on, off = skill_files(sandboxed=True), skill_files(sandboxed=False)
+        for name in LANGUAGES:
+            if name not in VARIANTS:
+                assert on[f"references/{name}.md"] == off[f"references/{name}.md"]
+
+    def test_no_sandbox_variant_is_listed_as_a_reference_of_its_own(self) -> None:
+        assert not any(NOSANDBOX_DIR in path for path in skill_files(sandboxed=False))
+
+    def test_the_default_text_does_not_tell_the_model_it_is_sandboxed(self) -> None:
+        shared = skill_files(sandboxed=False)["references/shared.md"]
+        assert "runs in a sandbox" not in shared
+        assert "private home directory" not in shared
+        assert "## The environment" in shared
+        assert "## The sandbox" not in shared
+        for name in VARIANTS:
+            text = skill_files(sandboxed=False)[f"references/{name}.md"]
+            assert "the sandbox makes" not in text
+            assert "In the sandbox only" not in text
+
+    def test_the_default_text_lets_the_model_install_the_runtime(self) -> None:
+        shared = skill_files(sandboxed=False)["references/shared.md"]
+        for word in ("install it", "pyenv", "nvm", "sdkman", "rustup", "no administrator password"):
+            assert word in shared
+
+    def test_the_default_text_says_an_installation_asks_the_user_first(self) -> None:
+        shared = skill_files(sandboxed=False)["references/shared.md"]
+        assert "asks the user for permission first" in shared
+        assert "If the user declines, do not look for another way around it" in shared
+        assert "asks nothing" in shared
+        assert "only when the permission flow lets the command through" not in shared
+        assert "asks the user for permission" not in skill_files(sandboxed=True)["references/shared.md"]
+
+    def test_the_default_text_keeps_what_is_not_about_the_sandbox(self) -> None:
+        on, off = skill_files(sandboxed=True), skill_files(sandboxed=False)
+        assert "## The final run" in off["references/shared.md"]
+        assert "declare every dependency" in off["references/shared.md"]
+        assert "`exclude`" in off["references/shared.md"]
+        # Every section but the sandbox's is the same text in both modes.
+
+        def sections(text: str) -> dict[str, str]:
+            return {part.split("\n", 1)[0]: part for part in text.split("\n## ")}
+        base, nosandbox = sections(on["references/shared.md"]), sections(off["references/shared.md"])
+        assert {k: v for k, v in base.items() if "sandbox" not in k} == \
+            {k: v for k, v in nosandbox.items() if k != "The environment"}
+
+    def test_the_sandbox_text_keeps_its_rules(self) -> None:
+        shared = skill_files(sandboxed=True)["references/shared.md"]
+        assert "## The sandbox" in shared
+        assert "private home directory" in shared
+        assert "`exclude`" in shared
+        assert "In the sandbox only the system's Python is visible" in skill_files()["references/python.md"]
+        assert "which the sandbox makes new for every command" in \
+            skill_files()["references/javascript-typescript.md"]
+
+    def test_the_variants_are_valid_for_the_coverage_and_json_rules(self) -> None:
+        for name in VARIANTS:
+            text = (REFERENCES / NOSANDBOX_DIR / f"{name}.md").read_text()
+            assert "{{COVERAGE_RULE_OF_THUMB}}" in text or name != "shared"
+            for block in _JSON_BLOCK.findall(process_content(text, {**PROJECT_CONFIG_PROMPT_VARS, **TDD_PROMPT_VARS})):
+                json.loads(block)
+
+
+class TestBuildPromptByMode:
+    def test_the_doc_paths_are_the_same_in_both_modes(self) -> None:
+        for sandboxed in (True, False):
+            prompt = build_prompt("python", "", "# P\n", skill_files(sandboxed=sandboxed))
+            assert _DOC.findall(prompt) == ["references/python.md", "references/shared.md"]
+
+    def test_a_language_with_no_variant_inlines_its_own_reference_in_both_modes(self) -> None:
+        for sandboxed in (True, False):
+            prompt = build_prompt("go", "", "# P\n", skill_files(sandboxed=sandboxed))
+            assert _DOC.findall(prompt) == ["references/go.md", "references/shared.md"]
+            assert "go test" in prompt
+
+    def test_the_prompt_says_the_sandbox_only_in_the_sandbox_mode(self) -> None:
+        on = build_prompt("python", "", "# P\n", skill_files(sandboxed=True))
+        off = build_prompt("python", "", "# P\n", skill_files(sandboxed=False))
+        assert "runs in a sandbox" in on
+        assert "In the sandbox only" in on
+        assert "runs in a sandbox" not in off
+        assert "In the sandbox only" not in off
+        assert "pyenv" in off
+
+    def test_with_no_language_only_the_shared_reference_is_inlined_per_mode(self) -> None:
+        on = build_prompt(None, "", "# P\n", skill_files(sandboxed=True))
+        off = build_prompt(None, "", "# P\n", skill_files(sandboxed=False))
+        assert _DOC.findall(on) == _DOC.findall(off) == ["references/shared.md"]
+        assert "## The sandbox" in on
+        assert "## The environment" in off
+
+
+class TestTheModeComesFromTheSettings:
+    def test_the_default_is_without_the_sandbox(self, tmp_path: Path) -> None:
+        cwd = _project(tmp_path, None)
+        assert sandbox_enabled(cwd) is False
+        prompt = _prompt(cwd=cwd)
+        assert "runs in a sandbox" not in prompt
+        assert "## The environment" in prompt
+
+    def test_a_project_with_the_sandbox_on_gets_the_sandbox_text(self, tmp_path: Path) -> None:
+        cwd = _project(tmp_path, {"sandbox": {"enabled": True}})
+        assert sandbox_enabled(cwd) is True
+        prompt = _prompt(cwd=cwd)
+        assert "runs in a sandbox" in prompt
+        assert "In the sandbox only the system's Python is visible" in prompt
+
+    def test_a_project_with_the_sandbox_off_gets_the_default_text(self, tmp_path: Path) -> None:
+        cwd = _project(tmp_path, {"sandbox": {"enabled": False}})
+        assert sandbox_enabled(cwd) is False
+        assert "runs in a sandbox" not in _prompt(cwd=cwd)
+
+    @pytest.mark.parametrize("value", ["yes", 1, None, {}])
+    def test_only_true_turns_the_sandbox_on(self, tmp_path: Path, value: object) -> None:
+        assert sandbox_enabled(_project(tmp_path, {"sandbox": {"enabled": value}})) is False
+
+    def test_the_local_settings_count(self, tmp_path: Path) -> None:
+        assert sandbox_enabled(_project(tmp_path, {"sandbox": {"enabled": True}}, "settings.local.json")) is True
+
+    def test_the_sandbox_flag_turns_it_on(self, tmp_path: Path) -> None:
+        from app.bootstrap.state import set_cli_flag_settings
+        from app.workspace.project import load_sandbox_profile
+
+        cwd = _project(tmp_path, None)
+        set_cli_flag_settings(load_sandbox_profile())
+        assert sandbox_enabled(cwd) is True
+        assert "runs in a sandbox" in _prompt(cwd=cwd)
+
+    def test_the_no_sandbox_flag_turns_it_off_over_a_sandboxed_project(self, tmp_path: Path) -> None:
+        from app.bootstrap.state import set_cli_flag_settings
+
+        cwd = _project(tmp_path, {"sandbox": {"enabled": True}})
+        set_cli_flag_settings({"sandbox": {"enabled": False}})
+        assert sandbox_enabled(cwd) is False
+        assert "runs in a sandbox" not in _prompt(cwd=cwd)
+
+    def test_the_settings_file_flag_counts(self, tmp_path: Path) -> None:
+        from app.bootstrap.state import set_flag_settings_path
+
+        flag = tmp_path / "flag.json"
+        flag.write_text(json.dumps({"sandbox": {"enabled": True}}))
+        cwd = _project(tmp_path, None)
+        set_flag_settings_path(str(flag))
+        assert sandbox_enabled(cwd) is True
+
+    def test_unreadable_settings_mean_no_sandbox(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        import app.utils.settings.settings as settings_module
+
+        def broken(_locations: object) -> dict[str, object]:
+            raise OSError("unreadable")
+
+        monkeypatch.setattr(settings_module, "load_settings", broken)
+        assert sandbox_enabled(_project(tmp_path, {"sandbox": {"enabled": True}})) is False
+
+    def test_a_missing_project_means_no_sandbox(self) -> None:
+        assert sandbox_enabled("/nonexistent/project") is False

@@ -117,7 +117,7 @@ def _process_wide_session_state(monkeypatch: Any) -> Any:
     starts clean: the debug flags (`app/utils/debug.py`; `DEBUG` / `DEBUG_SDK` unset) and the SDK's
     inline flag settings (`app/bootstrap/state.py`).
     """
-    from app.bootstrap.state import set_cli_flag_settings, set_flag_settings_inline
+    from app.bootstrap.state import set_cli_flag_settings, set_flag_settings_inline, set_flag_settings_path
     from app.utils.debug import reset_debug_state
 
     monkeypatch.delenv("DEBUG", raising=False)
@@ -125,10 +125,12 @@ def _process_wide_session_state(monkeypatch: Any) -> Any:
     reset_debug_state()
     set_flag_settings_inline(None)
     set_cli_flag_settings(None)
+    set_flag_settings_path(None)
     yield
     reset_debug_state()
     set_flag_settings_inline(None)
     set_cli_flag_settings(None)
+    set_flag_settings_path(None)
 
 
 def read_dotenv_key(name: str) -> str | None:

@@ -8,22 +8,37 @@ section says which it is (`Is a git repository`). TDDAgents creates the folder f
 session, outside its own repository (`app/workspace/local.py::workspaces_root`), and only:
 * seeds `.tddagents/settings.json` from TDDAgents' shipped defaults (`acceptEdits`, and no allow
   rules since 2026-11-03, as claude-code ships none), only if the project has none, so each
-  project can be adjusted on its own (user decision, 2026-10-28). Since 2026-11-08 the defaults turn
-  on upstream's sandbox (`app/utils/sandbox/`): required (`failIfUnavailable`), never bypassed
-  (`allowUnsandboxedCommands: false`), a private home with the project readable, `project.json`
-  read-only to commands, and the package registries allowed. A project seeded earlier keeps the
-  settings it was seeded with.
+  project can be adjusted on its own (user decision, 2026-10-28). The defaults carry no `sandbox`
+  block, so commands run without one, as upstream's default (`sandbox.enabled` is `false` unless set;
+  user decision 2026-11-20, which reverses 2026-11-08's default). The sandbox is opt-in: `--sandbox`
+  applies the profile in `.tddagents/settings.sandbox.json` (`app/utils/sandbox/`): required
+  (`failIfUnavailable`), never bypassed (`allowUnsandboxedCommands: false`), a private home with the
+  project readable, `project.json` read-only to commands, and the package registries allowed. A project
+  seeded earlier keeps the settings it was seeded with.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 #: TDDAgents' shipped project settings, the seed of every new project's.
 SHIPPED_SETTINGS = Path(__file__).resolve().parents[2] / ".tddagents" / "settings.json"
 
+#: The sandbox's settings (`sandbox.enabled` and the rules around it), applied by `--sandbox`.
+SHIPPED_SANDBOX_PROFILE = SHIPPED_SETTINGS.with_name("settings.sandbox.json")
+
 PROJECT_SETTINGS = Path(".tddagents") / "settings.json"
+
+
+def load_sandbox_profile(path: Path = SHIPPED_SANDBOX_PROFILE) -> dict[str, Any]:
+    """The sandbox profile's settings document (`{"sandbox": {...}}`)."""
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"{path} is not a settings object")
+    return document
 
 
 def prepare_project(project_dir: Path | str, shipped_settings: Path = SHIPPED_SETTINGS) -> Path:
@@ -37,4 +52,5 @@ def prepare_project(project_dir: Path | str, shipped_settings: Path = SHIPPED_SE
     return root
 
 
-__all__ = ["PROJECT_SETTINGS", "SHIPPED_SETTINGS", "prepare_project"]
+__all__ = ["PROJECT_SETTINGS", "SHIPPED_SANDBOX_PROFILE", "SHIPPED_SETTINGS", "load_sandbox_profile",
+           "prepare_project"]

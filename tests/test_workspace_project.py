@@ -20,7 +20,9 @@ from app.tdd.run_tests_tool.run_tests_tool import PHASE_RULES, SuiteExecutionRes
 from app.tool import tool_context_for
 from app.types.permissions import PermissionMode
 from app.workspace.local import LocalWorkspace, workspaces_root
-from app.workspace.project import SHIPPED_SETTINGS, prepare_project
+from app.workspace.project import (
+    SHIPPED_SANDBOX_PROFILE, SHIPPED_SETTINGS, load_sandbox_profile, prepare_project,
+)
 from tests.conftest import FakeWorkspace
 from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 
@@ -62,24 +64,64 @@ def test_without_shipped_settings_none_are_seeded(tmp_path):
     assert not (project / ".tddagents").exists()
 
 
-def test_the_shipped_settings_hold_no_allow_rules_and_the_sandbox():
+SANDBOX_PROFILE = {
+    "sandbox": {
+        "enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+        "filesystem": {"denyRead": ["~"], "allowRead": ["."], "denyWrite": [".tddagents/project.json"]},
+        "network": {"allowedDomains": [
+            "pypi.org", "files.pythonhosted.org", "registry.npmjs.org", "storage.googleapis.com",
+            "proxy.golang.org", "sum.golang.org", "index.crates.io", "static.crates.io",
+            "repo.maven.apache.org", "repo1.maven.org", "services.gradle.org", "plugins.gradle.org",
+            "api.nuget.org", "rubygems.org", "index.rubygems.org", "repo.packagist.org"]},
+    },
+}
+
+
+def test_the_shipped_settings_hold_no_allow_rules_and_no_sandbox():
     """
-    As upstream, which ships no allow rules (user decision 2026-11-03): the default mode; and since
-    2026-11-08 the sandbox (plan section 4): on, required, never bypassed, a private HOME with the project
-    readable, `project.json` written only through an approved edit, and the registries' hosts.
+    As upstream, which ships no allow rules (user decision 2026-11-03) and no sandbox (`sandbox.enabled`
+    is false unless set; user decision 2026-11-20): only the default mode.
     """
-    assert json.loads(SHIPPED_SETTINGS.read_text()) == {
-        "permissions": {"defaultMode": "acceptEdits"},
-        "sandbox": {
-            "enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
-            "filesystem": {"denyRead": ["~"], "allowRead": ["."], "denyWrite": [".tddagents/project.json"]},
-            "network": {"allowedDomains": [
-                "pypi.org", "files.pythonhosted.org", "registry.npmjs.org", "storage.googleapis.com",
-                "proxy.golang.org", "sum.golang.org", "index.crates.io", "static.crates.io",
-                "repo.maven.apache.org", "repo1.maven.org", "services.gradle.org", "plugins.gradle.org",
-                "api.nuget.org", "rubygems.org", "index.rubygems.org", "repo.packagist.org"]},
-        },
-    }
+    assert json.loads(SHIPPED_SETTINGS.read_text()) == {"permissions": {"defaultMode": "acceptEdits"}}
+
+
+def test_the_sandbox_profile_is_the_sandbox_the_defaults_used_to_ship():
+    """Plan section 4 (2026-11-08): on, required, never bypassed, a private HOME with the project readable,
+    `project.json` written only through an approved edit, and the registries' hosts."""
+    assert SHIPPED_SANDBOX_PROFILE == REPO / ".tddagents" / "settings.sandbox.json"
+    assert load_sandbox_profile() == SANDBOX_PROFILE
+    assert json.loads(SHIPPED_SANDBOX_PROFILE.read_text()) == SANDBOX_PROFILE
+
+
+def test_the_sandbox_profile_is_a_valid_settings_document():
+    from app.utils.settings.schema_validator import safe_parse_settings
+
+    parsed, errors = safe_parse_settings(load_sandbox_profile())
+    assert parsed == SANDBOX_PROFILE
+    assert not errors
+
+
+def test_a_new_project_is_seeded_without_the_sandbox_profile(tmp_path):
+    project = prepare_project(tmp_path / "p")
+    assert json.loads((project / ".tddagents" / "settings.json").read_text()) == {
+        "permissions": {"defaultMode": "acceptEdits"}}
+    assert not (project / ".tddagents" / "settings.sandbox.json").exists()
+
+
+def test_a_project_seeded_with_the_sandbox_keeps_it(tmp_path):
+    project = tmp_path / "p"
+    (project / ".tddagents").mkdir(parents=True)
+    old = json.dumps({"permissions": {"defaultMode": "acceptEdits"}, **SANDBOX_PROFILE})
+    (project / ".tddagents" / "settings.json").write_text(old)
+    prepare_project(project)
+    assert (project / ".tddagents" / "settings.json").read_text() == old
+
+
+def test_the_sandbox_profile_must_be_an_object(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("[1]")
+    with pytest.raises(ValueError, match="not a settings object"):
+        load_sandbox_profile(bad)
 
 
 def test_an_external_environment_script_runs_after_the_profile(tmp_path):

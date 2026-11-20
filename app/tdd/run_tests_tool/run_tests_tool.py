@@ -242,7 +242,7 @@ def sandbox_for_tests(context: Any) -> bool:
     """
     Whether the suite runs sandboxed: whenever the run's sandbox is on. Unlike Bash's `shouldUseSandbox`,
     neither `sandbox.excludedCommands` nor `dangerouslyDisableSandbox` applies, so a test run never escapes
-    the sandbox (TDDAgents; user decision 2026-11-08).
+    the sandbox (TDDAgents; user decision 2026-11-08). The sandbox is off unless enabled (2026-11-20).
     """
     sandbox = getattr(context, "sandbox_manager", None)
     return sandbox is not None and bool(sandbox.is_sandboxing_enabled())

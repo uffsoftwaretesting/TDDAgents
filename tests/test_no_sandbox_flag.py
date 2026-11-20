@@ -47,7 +47,7 @@ def locations(layout: dict[str, Path], *, flag: bool = False) -> SettingsLocatio
                              flag_settings_path=layout["flag"] if flag else None)
 
 
-def shipped_project(layout: dict[str, Path]) -> None:
+def sandboxed_project(layout: dict[str, Path]) -> None:
     write(layout["project"] / ".tddagents" / "settings.json", SHIPPED)
 
 
@@ -193,20 +193,20 @@ def test_a_document_the_schema_rejects_is_ignored() -> None:
 # ── what the settings sources load ──────────────────────────────────────────────
 
 
-def test_the_shipped_project_settings_keep_the_sandbox_on_without_the_flag(layout: dict[str, Path]) -> None:
-    shipped_project(layout)
+def test_a_project_seeded_with_the_sandbox_keeps_it_on_without_the_flag(layout: dict[str, Path]) -> None:
+    sandboxed_project(layout)
     assert load_settings(locations(layout))["sandbox"]["enabled"] is True
 
 
 def test_the_flag_turns_the_projects_sandbox_off(layout: dict[str, Path]) -> None:
-    shipped_project(layout)
+    sandboxed_project(layout)
     set_cli_flag_settings(OFF)
     sandbox = load_settings(locations(layout))["sandbox"]
     assert sandbox["enabled"] is False
 
 
 def test_the_flag_changes_nothing_else_in_the_sandbox_section(layout: dict[str, Path]) -> None:
-    shipped_project(layout)
+    sandboxed_project(layout)
     set_cli_flag_settings(OFF)
     sandbox = load_settings(locations(layout))["sandbox"]
     assert sandbox["failIfUnavailable"] is True
@@ -215,7 +215,7 @@ def test_the_flag_changes_nothing_else_in_the_sandbox_section(layout: dict[str, 
 
 def test_the_flag_wins_over_user_and_project_files(layout: dict[str, Path]) -> None:
     write(layout["home"] / ".tddagents" / "settings.json", {"sandbox": {"enabled": True}})
-    shipped_project(layout)
+    sandboxed_project(layout)
     write(layout["project"] / ".tddagents" / "settings.local.json", {"sandbox": {"enabled": True}})
     set_cli_flag_settings(OFF)
     assert load_settings(locations(layout))["sandbox"]["enabled"] is False
@@ -236,7 +236,7 @@ def test_the_flag_leaves_other_settings_files_content(layout: dict[str, Path]) -
 
 def test_the_flag_cannot_override_a_managed_policy(layout: dict[str, Path]) -> None:
     write(layout["managed"] / "managed-settings.json", {"sandbox": {"enabled": True}})
-    shipped_project(layout)
+    sandboxed_project(layout)
     set_cli_flag_settings(OFF)
     assert load_settings(locations(layout))["sandbox"]["enabled"] is True
 
@@ -249,8 +249,8 @@ def test_without_any_file_the_flag_alone_is_the_sandbox_setting(layout: dict[str
 # ── what the sandbox adapter reports ────────────────────────────────────────────
 
 
-def test_the_adapter_is_on_and_required_with_the_shipped_settings(layout: dict[str, Path]) -> None:
-    shipped_project(layout)
+def test_the_adapter_is_on_and_required_with_the_sandbox_profile(layout: dict[str, Path]) -> None:
+    sandboxed_project(layout)
     adapter = sandbox_adapter(layout)
     assert adapter.is_sandbox_enabled_in_settings() is True
     assert adapter.is_sandbox_required() is True
@@ -258,7 +258,7 @@ def test_the_adapter_is_on_and_required_with_the_shipped_settings(layout: dict[s
 
 
 def test_the_flag_disables_and_unrequires_the_sandbox(layout: dict[str, Path]) -> None:
-    shipped_project(layout)
+    sandboxed_project(layout)
     set_cli_flag_settings(OFF)
     adapter = sandbox_adapter(layout)
     assert adapter.is_sandbox_enabled_in_settings() is False
@@ -268,7 +268,7 @@ def test_the_flag_disables_and_unrequires_the_sandbox(layout: dict[str, Path]) -
 
 
 def test_the_flag_removes_the_requirement_even_without_the_dependencies(layout: dict[str, Path]) -> None:
-    shipped_project(layout)
+    sandboxed_project(layout)
     set_cli_flag_settings(OFF)
     adapter = SandboxAdapter(
         locations(layout), home=str(layout["home"]), platform="linux",
@@ -280,7 +280,7 @@ def test_the_flag_removes_the_requirement_even_without_the_dependencies(layout: 
 
 
 def test_without_the_flag_missing_dependencies_make_the_session_unavailable(layout: dict[str, Path]) -> None:
-    shipped_project(layout)
+    sandboxed_project(layout)
     adapter = SandboxAdapter(
         locations(layout), home=str(layout["home"]), platform="linux",
         which=lambda name: None, temp_dir="/tmp/tddagents-1000",
@@ -291,7 +291,7 @@ def test_without_the_flag_missing_dependencies_make_the_session_unavailable(layo
 
 
 def test_the_adapter_reads_the_flag_live(layout: dict[str, Path]) -> None:
-    shipped_project(layout)
+    sandboxed_project(layout)
     adapter = sandbox_adapter(layout)
     assert adapter.is_sandboxing_enabled() is True
     set_cli_flag_settings(OFF)
@@ -348,3 +348,27 @@ def test_the_plugin_and_doctor_subcommands_never_apply_it(monkeypatch: pytest.Mo
     assert entry.main(["plugin", "list"]) == 0
     assert entry.main(["doctor"]) == 0
     assert get_cli_flag_settings() is None
+
+
+# ── the default: no sandbox ─────────────────────────────────────────────────────
+
+
+def test_the_shipped_defaults_run_without_the_sandbox(layout: dict[str, Path]) -> None:
+    from app.workspace.project import prepare_project
+
+    prepare_project(layout["project"])
+    adapter = sandbox_adapter(layout)
+    assert "sandbox" not in load_settings(locations(layout))
+    assert adapter.is_sandbox_enabled_in_settings() is False
+    assert adapter.is_sandbox_required() is False
+    assert adapter.is_sandboxing_enabled() is False
+    assert adapter.get_sandbox_unavailable_reason() is None
+
+
+def test_the_default_opens_without_the_sandbox_dependencies(layout: dict[str, Path]) -> None:
+    adapter = SandboxAdapter(
+        locations(layout), home=str(layout["home"]), platform="linux",
+        which=lambda name: None, temp_dir="/tmp/tddagents-1000",
+        run_ripgrep=RecordingRipgrep(), ripgrep_command="/opt/rg", probe=lambda: "bwrap cannot run")
+    assert adapter.is_sandbox_required() is False
+    assert adapter.get_sandbox_unavailable_reason() is None

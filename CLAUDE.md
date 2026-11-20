@@ -169,7 +169,7 @@ and leave the ledger untouched. A written report that does not parse is stated a
 one ("written, but not readable as a JUnit report (…)", `junit_report_problem`); neither is evidence.
 A test file the report does not name did not run (a report that
 names no files is not a pass in GREEN and REFACTOR). A background worker's RunTests writes nothing.
-RunTests, the agent's Bash and the final run run in the sandbox (below).
+RunTests, the agent's Bash and the final run run in the sandbox when it is on (below; off by default).
 
 **The plan advances only through the ledger.** `TddPlan` lives on `AppState` and in
 `<session dir>/tdd-plan.json`. `plan_advance` runs between tool batches on the main thread and
@@ -200,14 +200,22 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   `@anthropic-ai/sandbox-runtime` 0.0.46's Linux path under `runtime/`; reference in
   `reference/sandbox-runtime/`): bubblewrap with upstream's HTTP + SOCKS network proxy (domain
   allowlist; an unknown host asks: the REPL's dialog, the SDK host headless, a closed `-p` denies),
-  the socat bridge and the vendored seccomp binaries. New projects ship it on
-  (`.tddagents/settings.json`): writes only in the project and `/tmp/tddagents-<uid>`, a private HOME
+  the socat bridge and the vendored seccomp binaries. **Opt-in, as upstream** (`sandbox.enabled` is
+  false unless set; user decision 2026-11-20, reversing 2026-11-08's default): a run has no sandbox
+  unless `--sandbox` (the profile in `.tddagents/settings.sandbox.json`, as flag settings) or a
+  `sandbox.enabled: true` setting turns it on; `--no-sandbox` turns a seeded project's off, and the two
+  flags exclude each other. New projects are seeded from `.tddagents/settings.json`, which has no
+  `sandbox` block (a project seeded earlier keeps the settings it has). The profile: writes only in the project and `/tmp/tddagents-<uid>`, a private HOME
   (`denyRead ["~"]`, the project re-allowed), the package registries allowed, `failIfUnavailable`
   (the session does not open without bwrap and socat; a one-off bwrap probe). The agent's Bash (opt-in
   through `should_use_sandbox`, `dangerouslyDisableSandbox` asks), every RunTests and the final run
   (its own sandbox over the clean copy) go through one wrap point, `LocalWorkspace._argv`; TDDAgents'
   internals (ripgrep, git, Grep) are never wrapped. Sandboxed commands run with plain `bash -c`.
-  `autoAllowBashIfSandboxed` is upstream's true, below the TDD tier. The suite stays unsandboxed:
+  `autoAllowBashIfSandboxed` is upstream's true, below the TDD tier. **The `tdd-project-config` skill
+  has two texts**: `references/` is the sandbox's (every command runs in the sandbox, install into the
+  project) and `references/nosandbox/` replaces `shared`, `python` and `javascript-typescript` without it
+  (the host's runtimes, home and network; install the runtime it needs); the mode is the effective
+  `sandbox.enabled` (`project_config_skill.sandbox_enabled`). The suite stays unsandboxed:
   tests open sessions with flag settings `{"sandbox":{"enabled":false}}`; real-bwrap tests are
   `@pytest.mark.sandbox`, skipped without bwrap and socat.
 - **Interactive asks** go through `ToolContext.can_use_tool`; the TDD tier and deny rules are
@@ -220,6 +228,15 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   upstream's `callback` hooks (an SDK host's, `initialize.hooks`) and `function` hooks
   (`--json-schema`'s Stop enforcement). Hook output becomes messages. Configured stop hooks can
   only *add* blocks. `/hooks` lists them; the REPL shows "Ran N stop hooks".
+  **The install gate** (`app/tdd/install_gate.py`, 2026-11-20): without the sandbox, a built-in internal
+  `callback` PreToolUse hook on Bash (registered by `open_session_run` through `register_hook_callbacks`, as
+  upstream's `registerSessionFileAccessHooks`, `setup.ts`) returns `permissionDecision: "ask"` for an
+  installation that changes the machine (`sudo`, a system or global package, a runtime manager, `curl | sh`);
+  the project's own dependencies from its manifests ask nothing. It is upstream's way for a hook to start a
+  user question (`toolHooks.ts` `resolveHookPermissionDecision` → `forceDecision`), so `bypassPermissions`
+  does not skip it, a deny rule or the TDD tier still wins, and with nobody to ask (plain `-p`, workers)
+  it is denied. `setup` and the final run run outside the hooks and are not gated: the user's approval of
+  the plan's project configuration is their consent.
 - **Settings** are watched during the session (`app/utils/settings/change_detector.py`): a changed
   file runs the ConfigChange hooks and reloads the permission rules and the hooks snapshot
   (dangerous allows stripped again, the TDD tier unaffected). Each file is validated against the
@@ -414,11 +431,13 @@ package) **and an end-to-end pipeline run**. Code layered above them is not exem
 ```bash
 # Setup
 cp .env.example .env          # then fill ANTHROPIC_API_KEY, OPENAI_API_KEY (E2B_API_KEY optional)
-sudo apt install bubblewrap socat python3.14-venv   # the sandbox (fail closed without them); the venv module for Python projects
+sudo apt install python3.14-venv                    # the venv module for Python projects
+sudo apt install bubblewrap socat                   # only for --sandbox (fail closed without them)
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # also vendors rg, types-PyYAML
 
 # Interactive: straight to the titled prompt; the first message typed is the request
 python -m app.main                                   # or: python -m app.main "<request>" | --spec <file>
+python -m app.main --sandbox                         # the sandbox is opt-in (--no-sandbox: the default, explicit)
 
 # Headless (upstream `claude -p`): ExitPlanMode is denied, so a new session plans and stops.
 # stdout carries only the result; the exit code is the result's is_error

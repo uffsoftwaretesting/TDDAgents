@@ -27,11 +27,12 @@ installed. The final run now does what a fresh checkout does:
    are unknown (which is not a pass: strict collection, 2026-11-08), the coverage, and the raw output;
 6. the copy is deleted.
 
-The sandbox (2026-11-08, user decision): `setup` and `test` run in the sandbox whenever the project's
-settings enable it, as every RunTests run does. The session has closed by then, so the final run builds its
-own sandbox (`SandboxAdapter`) over the copy: the project's `.tddagents/settings.json` and
-`settings.local.json` are copied in, the session's `--settings` file still applies, and no one is asked
-about a host the allowlist does not settle (it is denied). A required sandbox that cannot run means the
+The sandbox (2026-11-08, user decision; opt-in since 2026-11-20): `setup` and `test` run in the sandbox
+whenever the project's settings enable it (they do not by default), as every RunTests run does. The
+session has closed by then, so the final run builds its own sandbox (`SandboxAdapter`) over the copy:
+the project's `.tddagents/settings.json` and `settings.local.json` are copied in, the session's
+`--settings` file still applies, and no one is asked about a host the allowlist does not settle (it is
+denied). A required sandbox that cannot run means the
 final run does not run ("NOT passing"); the sandbox is reset afterwards.
 
 An E2B workspace has no host folder to copy, so its final run is reported as unsupported, and so is
