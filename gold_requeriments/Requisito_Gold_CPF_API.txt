@@ -16,11 +16,11 @@ de testes automatizados independentes. Não constitui implementação nem tutori
 
 0.2 Tecnologia
 A aplicação deve ser implementada exclusivamente em TypeScript, executada sobre
-o runtime Node.js (ver RF026). Nenhuma outra linguagem é admitida. O framework
+o runtime Node.js (ver RF027). Nenhuma outra linguagem é admitida. O framework
 HTTP obrigatório é o Fastify (pacote "fastify"), com os pacotes
 "@fastify/swagger" e "@fastify/swagger-ui" para a documentação da API e o
 logger nativo do Fastify (pino). Nenhum outro framework HTTP é admitido (ver
-RF026).
+RF027).
 
 0.3 Termos utilizados
 - "Endpoint de validação": a rota POST /api/v1/cpf/validacao.
@@ -49,7 +49,7 @@ RF026).
 0.4 Convenções gerais aplicáveis a todos os requisitos
 - Todas as respostas da API (rotas sob /api, respostas de erro e rotas
   inexistentes) possuem cabeçalho Content-Type "application/json; charset=utf-8"
-  e corpo codificado em UTF-8. As exceções são a interface Swagger UI (RF022),
+  e corpo codificado em UTF-8. As exceções são a interface Swagger UI (RF023),
   servida como HTML, e seus recursos estáticos (CSS e JavaScript) sob /docs.
 - O cabeçalho Accept da requisição não altera o formato da resposta.
 - Nomes de campos JSON são sensíveis a maiúsculas e minúsculas.
@@ -97,8 +97,8 @@ Dimensões de especificação:
    - 200 OK quando a requisição é bem-formada (Content-Type JSON, corpo JSON
      sintaticamente válido, objeto JSON com campo "cpf" do tipo string não em
      branco), independentemente de o CPF ser válido ou inválido.
-   - Os demais códigos (400, 415, 422, 404, 500) são definidos em RF014 a
-     RF019.
+   - Os demais códigos (400, 413, 415, 422, 404, 500) são definidos em RF014 a
+     RF020.
 2. Response Body:
    - Para status 200, o corpo segue integralmente a estrutura de RF002.
 3. Regras de negócio:
@@ -108,16 +108,16 @@ Dimensões de especificação:
    - O CPF a ser validado é lido exclusivamente do campo "cpf" do objeto JSON
      no corpo da requisição.
 4. Validação:
-   - A validação estrutural da requisição é especificada em RF011 a RF017. A
+   - A validação estrutural da requisição é especificada em RF011 a RF018. A
      validação do conteúdo do CPF é especificada em RF003 a RF009.
 5. Autenticação e autorização:
-   - Não aplicável — o endpoint é público e não exige credenciais (ver RF020).
+   - Não aplicável — o endpoint é público e não exige credenciais (ver RF021).
 6. Estado:
    - Não aplicável — a operação é uma consulta sem persistência; nenhum recurso
-     é criado, alterado ou removido (ver RF021).
+     é criado, alterado ou removido (ver RF022).
 7. Efeitos colaterais:
    - Não aplicável — a operação não persiste dados nem interage com serviços
-     externos (ver RF021).
+     externos (ver RF022).
 
 --------------------------------------------------------------------------------
 RF002 — Estrutura padronizada da resposta de validação
@@ -172,12 +172,12 @@ Dimensões de especificação:
      combinação é admitida.
 4. Validação:
    - Não aplicável — este requisito define o formato da saída; a validação da
-     entrada é tratada em RF003 a RF017.
+     entrada é tratada em RF003 a RF018.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — a resposta é calculada a partir da entrada, sem
-     consulta ou alteração de estado (ver RF021).
+     consulta ou alteração de estado (ver RF022).
 7. Efeitos colaterais:
    - Não aplicável — a produção da resposta não gera efeitos observáveis além do
      próprio retorno HTTP.
@@ -210,7 +210,7 @@ Dimensões de especificação:
    - Apenas as duas formas definidas na seção 0.3 são aceitas. Qualquer outra
      forma é tratada em RF004.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — a normalização não persiste nem altera dados.
 7. Efeitos colaterais:
@@ -246,11 +246,11 @@ Dimensões de especificação:
    - dígitos não ASCII: "５２９９８２２４７２５";
    - cadeia de comprimento arbitrário que não atenda aos formatos aceitos
      (não há limite de comprimento que gere erro 422; cadeias longas resultam
-     em FORMATO_INVALIDO).
+     em FORMATO_INVALIDO, desde que o corpo não exceda o limite de RF016).
    - Espaços em branco não são removidos antes da verificação de formato.
    - Cadeias em branco não pertencem a este requisito (ver RF012).
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -283,7 +283,7 @@ Dimensões de especificação:
 4. Validação:
    - Aplica-se somente a entradas aprovadas na verificação de formato (RF003).
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -318,7 +318,7 @@ Dimensões de especificação:
 4. Validação:
    - Aplica-se somente a entradas aprovadas nas verificações de RF003 e RF005.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — cálculo puro, sem persistência.
 7. Efeitos colaterais:
@@ -356,7 +356,7 @@ Dimensões de especificação:
 4. Validação:
    - Aplica-se somente a entradas aprovadas nas verificações de RF003 e RF005.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — cálculo puro, sem persistência.
 7. Efeitos colaterais:
@@ -385,9 +385,9 @@ Dimensões de especificação:
      cadastral.
 4. Validação:
    - Pressupõe requisição bem-formada (RF001); entradas malformadas seguem
-     RF011 a RF017.
+     RF011 a RF018.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -417,10 +417,10 @@ Dimensões de especificação:
      "SEQUENCIA_REPETIDA").
    - "52998224715" → "DIGITO_VERIFICADOR_INVALIDO".
 4. Validação:
-   - A precedência entre erros estruturais da requisição (415, 400, 422) é
+   - A precedência entre erros estruturais da requisição (415, 413, 400, 422) é
      definida em RF010.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -434,8 +434,8 @@ Dimensões de especificação:
 RF010 — Estrutura padronizada de resposta de erro e precedência entre erros
 --------------------------------------------------------------------------------
 Descrição:
-Toda resposta de erro da API (status 400, 404, 415, 422 e 500) deve seguir a
-estrutura abaixo, sem campos adicionais:
+Toda resposta de erro da API (status 400, 404, 413, 415, 422 e 500) deve
+seguir a estrutura abaixo, sem campos adicionais:
   {
     "erro": {
       "codigo":   string,
@@ -454,6 +454,7 @@ Catálogo fechado de códigos de erro:
   ------  ----------------------------  -------------------------------------------------
   400     "JSON_MALFORMADO"             "O corpo da requisição não é um JSON válido."
   404     "ROTA_NAO_ENCONTRADA"         "Rota não encontrada."
+  413     "PAYLOAD_MUITO_GRANDE"        "O corpo da requisição excede o tamanho máximo de 1 MiB."
   415     "CONTENT_TYPE_NAO_SUPORTADO"  "O cabeçalho Content-Type deve ser application/json."
   422     "PAYLOAD_INVALIDO"            "O corpo da requisição deve ser um objeto JSON."
   422     "CAMPO_OBRIGATORIO"           "O campo cpf é obrigatório."
@@ -470,22 +471,36 @@ Dimensões de especificação:
      (RF002), e respostas de validação nunca contêm o campo "erro".
 3. Regras de negócio — precedência no endpoint de validação, avaliada nesta
    ordem; o primeiro erro encontrado é o único retornado:
-   1º Content-Type não JSON → 415 (RF016);
-   2º corpo não vazio e sintaticamente inválido como JSON → 400 (RF015);
-   3º corpo JSON válido que não é objeto → 422 PAYLOAD_INVALIDO (RF014);
-   4º campo "cpf" ausente ou null → 422 CAMPO_OBRIGATORIO (RF011);
-   5º campo "cpf" com tipo diferente de string → 422 TIPO_INVALIDO (RF013);
-   6º campo "cpf" string em branco → 422 CAMPO_VAZIO (RF012);
-   7º demais casos → processamento do CPF com status 200 (RF001 a RF009).
+   1º Content-Type não JSON → 415 (RF017);
+   2º corpo maior que 1048576 bytes → 413 PAYLOAD_MUITO_GRANDE (RF016);
+   3º corpo não vazio e sintaticamente inválido como JSON, ou outro erro de
+      corpo ou de protocolo com status 4xx nativo → 400 (RF015);
+   4º corpo JSON válido que não é objeto → 422 PAYLOAD_INVALIDO (RF014);
+   5º campo "cpf" ausente ou null → 422 CAMPO_OBRIGATORIO (RF011);
+   6º campo "cpf" com tipo diferente de string → 422 TIPO_INVALIDO (RF013);
+   7º campo "cpf" string em branco → 422 CAMPO_VAZIO (RF012);
+   8º demais casos → processamento do CPF com status 200 (RF001 a RF009).
 4. Validação:
    - Nenhum outro código de erro além dos do catálogo pode ser retornado.
-   - Os erros nativos do Fastify (por exemplo, FST_ERR_CTP_INVALID_MEDIA_TYPE,
-     FST_ERR_CTP_EMPTY_JSON_BODY e erros de sintaxe do parser JSON) são
-     convertidos para o catálogo acima por manipulador registrado com
-     setErrorHandler. Nenhuma resposta segue o formato de erro padrão do
-     Fastify (campos "statusCode", "error" e "code").
+   - Os erros nativos do Fastify e do Node.js são convertidos para o catálogo
+     acima por setErrorHandler, setNotFoundHandler e pelas opções
+     frameworkErrors e clientErrorHandler do Fastify, segundo as regras abaixo,
+     aplicadas nesta ordem.
+     a) FST_ERR_CTP_INVALID_MEDIA_TYPE e ausência de Content-Type → 415
+        CONTENT_TYPE_NAO_SUPORTADO (RF017).
+     b) FST_ERR_CTP_BODY_TOO_LARGE → 413 PAYLOAD_MUITO_GRANDE (RF016).
+     c) FST_ERR_CTP_EMPTY_JSON_BODY → 422 CAMPO_OBRIGATORIO (RF011).
+     d) URL malformada (FST_ERR_BAD_URL) → 404 ROTA_NAO_ENCONTRADA (RF019).
+     e) Qualquer outro erro com status 4xx originado no Fastify ou no Node.js
+        em razão do corpo ou do protocolo da requisição (por exemplo, erro de
+        sintaxe do parser JSON, FST_ERR_CTP_INVALID_CONTENT_LENGTH e erros de
+        análise do protocolo HTTP) → 400 JSON_MALFORMADO (RF015).
+     f) Erros com status 5xx e exceções sem status HTTP associado → 500
+        ERRO_INTERNO (RF020).
+   - Nenhuma resposta segue o formato de erro padrão do Fastify (campos
+     "statusCode", "error" e "code").
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020); portanto, os status 401 e
+   - Não aplicável — não há autenticação (ver RF021); portanto, os status 401 e
      403 nunca são retornados.
 6. Estado:
    - Não aplicável — erros não alteram estado algum.
@@ -517,7 +532,7 @@ Dimensões de especificação:
 4. Validação:
    - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -546,7 +561,7 @@ Dimensões de especificação:
 4. Validação:
    - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -574,13 +589,13 @@ Dimensões de especificação:
      {"cpf":false}, {"cpf":["52998224725"]}, {"cpf":{"numero":"52998224725"}}.
 4. Validação:
    - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
-   - O esquema JSON declarado na rota do Fastify serve à documentação (RF024)
+   - O esquema JSON declarado na rota do Fastify serve à documentação (RF025)
      e não substitui as regras de RF011 a RF014. A coerção de tipos do Ajv não
      se aplica ao corpo (por exemplo, {"cpf":52998224725} resulta em
      TIPO_INVALIDO, e não na conversão para "52998224725" seguida de status
      200).
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -604,22 +619,25 @@ Dimensões de especificação:
    - Exemplos de corpo que produzem este erro: [], ["52998224725"],
      [{"cpf":"52998224725"}], "52998224725", 52998224725, true, null.
 4. Validação:
-   - Avaliado após a verificação de Content-Type (RF016) e de sintaxe JSON
-     (RF015), e antes das verificações do campo "cpf" (RF011 a RF013).
+   - Avaliado após as verificações de Content-Type (RF017), de tamanho do
+     corpo (RF016) e de sintaxe JSON (RF015), e antes das verificações do
+     campo "cpf" (RF011 a RF013).
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF015 — Corpo JSON malformado
+RF015 — Corpo JSON malformado e demais erros de corpo ou de protocolo
 --------------------------------------------------------------------------------
 Descrição:
 Quando a requisição ao endpoint de validação possui Content-Type JSON e corpo
 não vazio que não pode ser interpretado como JSON sintaticamente válido, o
-sistema deve rejeitar a requisição.
+sistema deve rejeitar a requisição. O mesmo erro é retornado para os demais
+erros com status 4xx gerados pelo Fastify ou pelo Node.js em razão do corpo ou
+do protocolo da requisição, exceto os tratados em RF011, RF016, RF017 e RF019.
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -635,19 +653,62 @@ Dimensões de especificação:
      (chave de fechamento ausente), {cpf: "52998224725"} (chave sem aspas),
      {'cpf':'52998224725'} (aspas simples), {"cpf":"52998224725",} (vírgula
      final), texto livre "cpf=52998224725".
+   - Exemplos de erros de corpo ou de protocolo que produzem este erro:
+     cabeçalho Content-Length com valor não numérico, corpo com
+     Transfer-Encoding chunked malformado e cabeçalhos que excedem o limite de
+     tamanho do Node.js (cujo status nativo é 431). Em todos os casos, o status
+     é 400 e o corpo é o indicado acima.
+   - Erros de análise do protocolo HTTP detectados antes do roteamento são
+     tratados pela opção clientErrorHandler do Fastify, que escreve no socket,
+     quando ainda gravável, resposta 400 com o corpo acima e Content-Type
+     "application/json; charset=utf-8".
 4. Validação:
    - Corpo vazio não é considerado malformado (ver RF011). O parser JSON do
      Fastify é configurado (por exemplo, por addContentTypeParser) para que
      corpo vazio ou composto apenas por espaços em branco siga RF011.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF016 — Content-Type não suportado
+RF016 — Limite de tamanho do corpo da requisição
+--------------------------------------------------------------------------------
+Descrição:
+O endpoint de validação deve rejeitar requisições cujo corpo exceda o limite
+padrão do Fastify, de 1048576 bytes (1 MiB). A aplicação mantém esse padrão e
+não configura a opção bodyLimit.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 413 Content Too Large (Payload Too Large).
+2. Response Body:
+   - {"erro":{"codigo":"PAYLOAD_MUITO_GRANDE","mensagem":"O corpo da requisição
+     excede o tamanho máximo de 1 MiB.","detalhes":[]}}
+   - A resposta segue a estrutura de RF010, e não o formato de erro padrão do
+     Fastify.
+3. Regras de negócio:
+   - Corpo com exatamente 1048576 bytes não produz este erro. Corpo com
+     1048577 bytes produz este erro, mesmo que seja JSON válido (por exemplo,
+     {"cpf":"<cadeia longa>"}).
+   - O limite se aplica tanto a corpo com cabeçalho Content-Length quanto a
+     corpo enviado com Transfer-Encoding chunked.
+   - O erro nativo FST_ERR_CTP_BODY_TOO_LARGE é convertido nesta resposta por
+     setErrorHandler (RF010).
+4. Validação:
+   - Avaliado após RF017 e antes de RF015. O corpo excedente não é
+     interpretado.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF021).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF017 — Content-Type não suportado
 --------------------------------------------------------------------------------
 Descrição:
 Quando a requisição ao endpoint de validação não possui Content-Type JSON
@@ -673,14 +734,14 @@ Dimensões de especificação:
 4. Validação:
    - O corpo não é interpretado quando este erro ocorre.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF017 — Desconsideração de campos adicionais e de parâmetros de consulta
+RF018 — Desconsideração de campos adicionais e de parâmetros de consulta
 --------------------------------------------------------------------------------
 Descrição:
 Campos do objeto JSON diferentes de "cpf" e parâmetros de query string não
@@ -702,18 +763,19 @@ Dimensões de especificação:
 4. Validação:
    - Campos adicionais não são validados quanto a tipo ou formato.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF018 — Rotas e métodos não mapeados
+RF019 — Rotas e métodos não mapeados e URL malformada
 --------------------------------------------------------------------------------
 Descrição:
-Requisições a rotas inexistentes, ou à rota /api/v1/cpf/validacao com método
-diferente de POST, devem receber resposta de erro padronizada em JSON.
+Requisições a rotas inexistentes, à rota /api/v1/cpf/validacao com método
+diferente de POST ou com URL malformada devem receber resposta de erro
+padronizada em JSON.
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -726,26 +788,33 @@ Dimensões de especificação:
    - Exemplos: GET /api/v1/cpf/validacao; PUT /api/v1/cpf/validacao;
      DELETE /api/v1/cpf/validacao; POST /api/v1/cpf; GET /inexistente;
      POST /api/v2/cpf/validacao.
-   - As rotas de documentação (/docs e /docs/openapi.json, RF022 e RF023) e
+   - As rotas de documentação (/docs e /docs/openapi.json, RF023 e RF024) e
      as rotas registradas sob /docs pelo @fastify/swagger-ui (por exemplo,
      /docs/static/*) não são afetadas por este requisito.
    - O tratamento é registrado com setNotFoundHandler do Fastify.
+   - URL malformada é aquela cujo caminho contém sequência de percent-encoding
+     inválida (por exemplo, GET /%E0%A4%A e POST /api/v1/cpf/validacao%ZZ),
+     sinalizada pelo Fastify como FST_ERR_BAD_URL. Ela resulta em 404, e não
+     em 400, por meio da opção frameworkErrors do Fastify.
+   - Requisições rejeitadas pelo analisador HTTP do Node.js antes do
+     roteamento não pertencem a este requisito e seguem RF015.
 4. Validação:
    - Content-Type e corpo não são avaliados para rotas não mapeadas.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF019 — Tratamento de falhas inesperadas
+RF020 — Tratamento de falhas inesperadas
 --------------------------------------------------------------------------------
 Descrição:
 Qualquer exceção não prevista ocorrida durante o processamento de uma
-requisição da API deve ser capturada e convertida em resposta de erro
-padronizada, em todos os ambientes (development, test e production).
+requisição da API, e qualquer erro com status 5xx, deve ser capturado e
+convertido em resposta de erro padronizada, em todos os ambientes
+(development, test e production).
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -762,11 +831,14 @@ Dimensões de especificação:
    - Após uma falha inesperada, requisições subsequentes continuam sendo
      atendidas normalmente.
    - O tratamento é registrado com setErrorHandler do Fastify.
+   - Somente erros com status 5xx e exceções sem status HTTP associado
+     resultam em ERRO_INTERNO. Erros com status 4xx originados no Fastify ou no
+     Node.js seguem as regras de conversão de RF010 e nunca resultam em 500.
 4. Validação:
    - Não aplicável — trata-se de falha interna, não de entrada inválida;
      entradas inválidas nunca resultam em 500.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência; a falha não deixa estado residual.
 7. Efeitos colaterais:
@@ -778,7 +850,7 @@ Dimensões de especificação:
 ================================================================================
 
 --------------------------------------------------------------------------------
-RF020 — Ausência de autenticação e autorização
+RF021 — Ausência de autenticação e autorização
 --------------------------------------------------------------------------------
 Descrição:
 A API não possui mecanismo de autenticação nem de autorização. Todos os
@@ -804,7 +876,7 @@ Dimensões de especificação:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF021 — Operação sem estado e determinística
+RF022 — Operação sem estado e determinística
 --------------------------------------------------------------------------------
 Descrição:
 A validação de CPF é uma operação de consulta sem persistência: a aplicação
@@ -823,7 +895,7 @@ Dimensões de especificação:
 4. Validação:
    - Não aplicável — este requisito não introduz validações de entrada.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Nenhum recurso é criado, atualizado ou removido. Não há endpoints de
      criação, consulta por identificador, atualização ou remoção de CPFs.
@@ -840,13 +912,13 @@ Dimensões de especificação:
 ================================================================================
 
 --------------------------------------------------------------------------------
-RF022 — Documentação interativa Swagger UI na rota /docs
+RF023 — Documentação interativa Swagger UI na rota /docs
 --------------------------------------------------------------------------------
 Descrição:
 A aplicação deve, obrigatoriamente, disponibilizar documentação interativa da
 API por meio da interface Swagger UI, servida pelo plugin @fastify/swagger-ui
 registrado com routePrefix "/docs" e construída a partir da especificação
-OpenAPI definida em RF023. A documentação não é opcional e deve estar
+OpenAPI definida em RF024. A documentação não é opcional e deve estar
 disponível em todos os ambientes (development, test e production).
 
 Dimensões de especificação:
@@ -861,7 +933,7 @@ Dimensões de especificação:
    - A interface carrega a especificação a partir de /docs/openapi.json.
 3. Regras de negócio:
    - A interface exibe a operação POST /api/v1/cpf/validacao, com seu resumo,
-     esquema de requisição, exemplos e respostas documentadas (RF024 e RF025).
+     esquema de requisição, exemplos e respostas documentadas (RF025 e RF026).
    - A interface permite interagir com o endpoint: a funcionalidade "Try it
      out" está habilitada para POST, e a execução a partir da interface envia
      a requisição à própria instância em execução e exibe status, cabeçalhos e
@@ -873,22 +945,22 @@ Dimensões de especificação:
 4. Validação:
    - Não aplicável — a rota não recebe payload.
 5. Autenticação e autorização:
-   - Acesso público, sem credenciais (ver RF020).
+   - Acesso público, sem credenciais (ver RF021).
 6. Estado:
    - Não aplicável — a consulta à documentação não altera estado.
 7. Efeitos colaterais:
    - Não aplicável — a exibição da documentação não produz efeitos colaterais.
      Requisições executadas pela interface produzem exatamente os mesmos
-     efeitos de requisições diretas ao endpoint (ou seja, nenhum, ver RF021).
+     efeitos de requisições diretas ao endpoint (ou seja, nenhum, ver RF022).
 
 --------------------------------------------------------------------------------
-RF023 — Especificação OpenAPI disponível e válida
+RF024 — Especificação OpenAPI disponível e válida
 --------------------------------------------------------------------------------
 Descrição:
 A aplicação deve disponibilizar o documento de especificação da API no formato
 OpenAPI 3.0, em JSON, na rota GET /docs/openapi.json, gerado pelo plugin
 @fastify/swagger a partir dos esquemas das rotas. Esse documento é a fonte
-utilizada pela interface Swagger UI (RF022).
+utilizada pela interface Swagger UI (RF023).
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -906,7 +978,7 @@ Dimensões de especificação:
      OpenAPI.
    - Se o campo "servers" estiver presente, deve conter apenas URL relativa
      ("/"), de modo que a interface utilize a mesma origem em que a aplicação
-     está em execução, qualquer que seja a porta configurada (RF027).
+     está em execução, qualquer que seja a porta configurada (RF028).
    - Todas as referências internas ("$ref") devem ser resolvíveis dentro do
      próprio documento.
    - O documento servido em /docs/openapi.json é o retornado por
@@ -915,7 +987,7 @@ Dimensões de especificação:
 4. Validação:
    - Não aplicável — a rota não recebe payload.
 5. Autenticação e autorização:
-   - Acesso público, sem credenciais (ver RF020). O documento não declara
+   - Acesso público, sem credenciais (ver RF021). O documento não declara
      esquemas de segurança ("securitySchemes") nem requisitos "security".
 6. Estado:
    - Não aplicável — documento estático em relação às requisições; não é
@@ -924,7 +996,7 @@ Dimensões de especificação:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF024 — Documentação do endpoint, parâmetros e payloads
+RF025 — Documentação do endpoint, parâmetros e payloads
 --------------------------------------------------------------------------------
 Descrição:
 A especificação OpenAPI deve descrever o endpoint de validação, seu corpo de
@@ -932,7 +1004,7 @@ requisição e os tipos de dados correspondentes.
 
 Dimensões de especificação:
 1. HTTP Status:
-   - Não aplicável — requisito sobre o conteúdo do documento servido em RF023.
+   - Não aplicável — requisito sobre o conteúdo do documento servido em RF024.
 2. Response Body:
    - Em "paths./api/v1/cpf/validacao" deve existir a operação "post" (e
      nenhuma outra operação), com "summary" e "description" não vazios.
@@ -943,21 +1015,21 @@ Dimensões de especificação:
      aceitos (11 dígitos sem máscara e máscara 000.000.000-00) e exemplos de
      ambos os formatos (por exemplo, "52998224725" e "529.982.247-25").
 3. Regras de negócio:
-   - O documento é consistente com RF001 a RF017: não declara campos de
+   - O documento é consistente com RF001 a RF018: não declara campos de
      requisição inexistentes, não declara parâmetros de query string ou de
      cabeçalho além de Content-Type e não declara outros métodos para a rota.
 4. Validação:
    - O esquema de requisição documentado deve corresponder às regras de
      validação de RF011 a RF014 (campo obrigatório, tipo string).
 5. Autenticação e autorização:
-   - Não aplicável — a operação não declara requisitos de segurança (RF020).
+   - Não aplicável — a operação não declara requisitos de segurança (RF021).
 6. Estado:
    - Não aplicável — documentação descritiva.
 7. Efeitos colaterais:
    - Não aplicável — documentação descritiva.
 
 --------------------------------------------------------------------------------
-RF025 — Documentação dos códigos HTTP e das estruturas de resposta
+RF026 — Documentação dos códigos HTTP e das estruturas de resposta
 --------------------------------------------------------------------------------
 Descrição:
 A especificação OpenAPI deve documentar, para a operação POST
@@ -966,8 +1038,8 @@ de cada resposta.
 
 Dimensões de especificação:
 1. HTTP Status:
-   - A operação documenta as respostas 200, 400, 415, 422 e 500, cada uma com
-     "description" não vazia. A resposta 404 (RF018) refere-se a rotas não
+   - A operação documenta as respostas 200, 400, 413, 415, 422 e 500, cada
+     uma com "description" não vazia. A resposta 404 (RF019) refere-se a rotas não
      mapeadas e não precisa constar na operação.
 2. Response Body:
    - Resposta 200: esquema "object" com "required" contendo "cpf",
@@ -975,23 +1047,23 @@ Dimensões de especificação:
      "cpf_normalizado" e "motivo" anuláveis ("nullable": true); "motivo" com
      "enum" contendo exatamente "FORMATO_INVALIDO", "SEQUENCIA_REPETIDA",
      "DIGITO_VERIFICADOR_INVALIDO" (além de null).
-   - Respostas 400, 415, 422 e 500: esquema de erro de RF010 (objeto "erro"
+   - Respostas 400, 413, 415, 422 e 500: esquema de erro de RF010 (objeto "erro"
      com "codigo", "mensagem" e "detalhes", sendo "detalhes" um array de
      objetos com "campo" e "mensagem").
    - Exemplos documentados: ao menos um CPF válido, um FORMATO_INVALIDO, um
      SEQUENCIA_REPETIDA e um DIGITO_VERIFICADOR_INVALIDO na resposta 200; ao
      menos um exemplo para cada código de erro do catálogo de RF010 associado
-     às respostas 400, 415, 422 e 500.
+     às respostas 400, 413, 415, 422 e 500.
 3. Regras de negócio:
    - As respostas reais da API devem ser válidas segundo os esquemas
      documentados (verificável por teste de contrato que compare respostas
      reais ao documento /docs/openapi.json).
 4. Validação:
    - Não aplicável — documentação descritiva; a validação de entrada está em
-     RF011 a RF017.
+     RF011 a RF018.
 5. Autenticação e autorização:
    - Não aplicável — sem autenticação; as respostas 401 e 403 não são
-     documentadas por não existirem (RF020).
+     documentadas por não existirem (RF021).
 6. Estado:
    - Não aplicável — documentação descritiva.
 7. Efeitos colaterais:
@@ -1002,7 +1074,7 @@ Dimensões de especificação:
 ================================================================================
 
 --------------------------------------------------------------------------------
-RF026 — Uso obrigatório de TypeScript e arquivo de dependências
+RF027 — Uso obrigatório de TypeScript e arquivo de dependências
 --------------------------------------------------------------------------------
 Descrição:
 A aplicação deve ser implementada obrigatoriamente em TypeScript, executada
@@ -1033,7 +1105,7 @@ Dimensões de especificação:
      "test"  — executa a suíte de testes.
    - Após "npm install", o comando "npm run build" conclui sem erros de
      compilação nem de tipos, e o comando "npm start" inicia a aplicação sem
-     erros, utilizando as variáveis de RF027.
+     erros, utilizando as variáveis de RF028.
    - O package.json declara, em "dependencies", os pacotes fastify,
      @fastify/swagger e @fastify/swagger-ui, e, em "devDependencies",
      typescript e @types/node.
@@ -1052,7 +1124,7 @@ Dimensões de especificação:
    - Não aplicável — requisito tecnológico.
 
 --------------------------------------------------------------------------------
-RF027 — Configuração externalizada por variáveis de ambiente
+RF028 — Configuração externalizada por variáveis de ambiente
 --------------------------------------------------------------------------------
 Descrição:
 Todas as configurações da aplicação devem ser obtidas de variáveis de
@@ -1075,9 +1147,9 @@ Dimensões de especificação:
 3. Regras de negócio:
    - Os valores de configuração listados acima não são fixados no
      código-fonte; são lidos das variáveis de ambiente, em um único módulo de
-     configuração (RF029).
+     configuração (RF030).
    - Variáveis definidas no ambiente do processo têm precedência sobre os
-     valores do arquivo .env (RF028).
+     valores do arquivo .env (RF029).
    - As quatro variáveis são obrigatórias em todos os ambientes; não há
      valores padrão definidos no código.
    - HOST e PORT são os argumentos de listen() do Fastify, e LOG_LEVEL define
@@ -1091,7 +1163,7 @@ Dimensões de especificação:
      NODE_ENV="staging", LOG_LEVEL="verbose", HOST="" → falha de
      inicialização.
 5. Autenticação e autorização:
-   - Não aplicável — as variáveis não configuram autenticação (RF020).
+   - Não aplicável — as variáveis não configuram autenticação (RF021).
 6. Estado:
    - Não aplicável — configuração lida na inicialização; não há alteração de
      estado em tempo de execução.
@@ -1100,7 +1172,7 @@ Dimensões de especificação:
      própria configuração do processo.
 
 --------------------------------------------------------------------------------
-RF028 — Arquivos .env e .env.example
+RF029 — Arquivos .env e .env.example
 --------------------------------------------------------------------------------
 Descrição:
 O projeto deve conter, na raiz, o arquivo .env, carregado automaticamente na
@@ -1113,7 +1185,7 @@ Dimensões de especificação:
 2. Response Body:
    - Não aplicável — requisito de configuração do projeto.
 3. Regras de negócio:
-   - Ambos os arquivos declaram exatamente as quatro variáveis de RF027, no
+   - Ambos os arquivos declaram exatamente as quatro variáveis de RF028, no
      formato CHAVE=valor, uma por linha.
    - O arquivo .env.example contém valores ilustrativos (por exemplo,
      NODE_ENV=development, HOST=0.0.0.0, PORT=3000 e LOG_LEVEL=info) e um
@@ -1122,10 +1194,10 @@ Dimensões de especificação:
      inicia com sucesso por meio de "npm run build" seguido de "npm start".
    - O arquivo .env é carregado automaticamente na inicialização, sem
      necessidade de exportar as variáveis manualmente, respeitando a
-     precedência definida em RF027.
+     precedência definida em RF028.
 4. Validação:
    - Valores inválidos no .env produzem o comportamento de falha de
-     inicialização descrito em RF027.
+     inicialização descrito em RF028.
 5. Autenticação e autorização:
    - Não aplicável — requisito de configuração do projeto.
 6. Estado:
@@ -1134,7 +1206,7 @@ Dimensões de especificação:
    - Não aplicável — a leitura dos arquivos não produz efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF029 — Organização do projeto com separação de responsabilidades
+RF030 — Organização do projeto com separação de responsabilidades
 --------------------------------------------------------------------------------
 Descrição:
 O projeto deve separar configurações, schemas, rotas, serviços e
@@ -1143,18 +1215,19 @@ infraestrutura, conforme o mapeamento obrigatório abaixo:
   Responsabilidade      Localização           Conteúdo
   --------------------  --------------------  ------------------------------------------------
   Configurações         src/config/           Leitura e validação das variáveis de ambiente
-                                              (RF027, RF028).
+                                              (RF028, RF029).
   Rotas                 src/routes/           Plugins Fastify que declaram
                                               POST /api/v1/cpf/validacao e as rotas de
-                                              documentação (RF022, RF023).
+                                              documentação (RF023, RF024).
   Schemas               src/schemas/          Validação estrutural do payload (RF011 a RF014),
                                               sem lógica do algoritmo de CPF.
   Serviços              src/services/         Regras de CPF (RF003 a RF009).
   Controladores         src/controllers/      Orquestração: recebe a requisição, aciona schema
                                               e serviço e monta a resposta.
-  Infraestrutura        src/infrastructure/   setErrorHandler, setNotFoundHandler e parser de
-                                              conteúdo JSON (RF010, RF015, RF016, RF018,
-                                              RF019); configuração do logger (pino); registro
+  Infraestrutura        src/infrastructure/   setErrorHandler, setNotFoundHandler, opções
+                                              frameworkErrors e clientErrorHandler e parser
+                                              de conteúdo JSON (RF010, RF015 a RF017, RF019,
+                                              RF020); configuração do logger (pino); registro
                                               de @fastify/swagger e @fastify/swagger-ui.
   Montagem da app       src/app.ts            Função que cria e retorna a instância Fastify
                                               com plugins e rotas registrados, sem chamar
@@ -1177,7 +1250,7 @@ Dimensões de especificação:
    - A instância Fastify criada por src/app.ts pode ser exercitada por
      app.inject(), sem que uma porta de rede seja aberta. O serviço de
      validação de CPF pode ser fornecido à função de montagem, de modo que a
-     verificação de RF019 utilize dublê.
+     verificação de RF020 utilize dublê.
    - O controlador não contém o cálculo de dígitos verificadores nem a
      detecção de sequências repetidas.
    - O schema de entrada não contém o algoritmo de CPF, e o serviço não
@@ -1194,7 +1267,7 @@ Dimensões de especificação:
    - Não aplicável — requisito estrutural.
 
 --------------------------------------------------------------------------------
-RF030 — Documentação de instalação, configuração e execução
+RF031 — Documentação de instalação, configuração e execução
 --------------------------------------------------------------------------------
 Descrição:
 O projeto deve conter, na raiz, o arquivo README.md com instruções de
@@ -1209,7 +1282,7 @@ Dimensões de especificação:
    - pré-requisitos: versões do Node.js e do npm;
    - instalação: comando de instalação das dependências ("npm install");
    - configuração: cópia de .env.example para .env e descrição de cada
-     variável de RF027;
+     variável de RF028;
    - execução: comandos de compilação ("npm run build") e de inicialização
      ("npm start"), e porta utilizada;
    - testes: comando de execução da suíte ("npm test");
@@ -1223,7 +1296,7 @@ Dimensões de especificação:
      testes com sucesso.
 5. Autenticação e autorização:
    - Não aplicável — requisito de documentação; a API não possui
-     autenticação (RF020), o que deve constar no README.md.
+     autenticação (RF021), o que deve constar no README.md.
 6. Estado:
    - Não aplicável — requisito de documentação.
 7. Efeitos colaterais:
@@ -1248,27 +1321,27 @@ implementados como comportamento da API:
   Especificação original                                      Requisitos
   ----------------------------------------------------------  ---------------------
   API HTTP para validação de CPF                              RF001
-  Receber CPF por meio de requisição                          RF001, RF003, RF017
+  Receber CPF por meio de requisição                          RF001, RF003, RF018
   Validar formato                                             RF003, RF004
   Verificar dígitos verificadores (algoritmo oficial)         RF006, RF007, RF008
   Identificar números inválidos e sequências repetidas        RF004, RF005, RF009
   Respostas padronizadas (válido/inválido), mensagens claras  RF002, RF010
-  Códigos HTTP apropriados                                    RF001, RF010–RF019
-  Validação dos dados de entrada                              RF011–RF017
-  Tratamento de erros                                         RF010, RF015, RF016, RF018, RF019
-  Documentação dos endpoints (obrigatória em /docs)           RF022, RF023, RF024, RF025
-  Separação: configurações, schemas, rotas, serviços, infra   RF029
-  Configuração por variáveis de ambiente                      RF027
-  Arquivos .env e .env.example                                RF028
-  Arquivo de dependências (package.json)                      RF026
-  Instruções de instalação, configuração e execução           RF030
-  Tecnologia obrigatória: TypeScript                          RF026
-  Framework HTTP obrigatório: Fastify                         RF026, RF029
-  Ausência de autenticação (explicitada)                      RF020
-  Ausência de estado/persistência (explicitada)               RF021
+  Códigos HTTP apropriados                                    RF001, RF010–RF020
+  Validação dos dados de entrada                              RF011–RF018
+  Tratamento de erros                                         RF010, RF015–RF017, RF019, RF020
+  Documentação dos endpoints (obrigatória em /docs)           RF023, RF024, RF025, RF026
+  Separação: configurações, schemas, rotas, serviços, infra   RF030
+  Configuração por variáveis de ambiente                      RF028
+  Arquivos .env e .env.example                                RF029
+  Arquivo de dependências (package.json)                      RF027
+  Instruções de instalação, configuração e execução           RF031
+  Tecnologia obrigatória: TypeScript                          RF027
+  Framework HTTP obrigatório: Fastify                         RF027, RF030
+  Ausência de autenticação (explicitada)                      RF021
+  Ausência de estado/persistência (explicitada)               RF022
 
 ================================================================================
-FIM DO DOCUMENTO — 30 requisitos (RF001 a RF030)
+FIM DO DOCUMENTO — 31 requisitos (RF001 a RF031)
 ================================================================================================================================================================
 REQUISITOS_GOLD_CPF
 Especificação Gold de Requisitos — API HTTP de Validação de CPF
@@ -1287,11 +1360,11 @@ de testes automatizados independentes. Não constitui implementação nem tutori
 
 0.2 Tecnologia
 A aplicação deve ser implementada exclusivamente em TypeScript, executada sobre
-o runtime Node.js (ver RF026). Nenhuma outra linguagem é admitida. O framework
+o runtime Node.js (ver RF027). Nenhuma outra linguagem é admitida. O framework
 HTTP obrigatório é o Fastify (pacote "fastify"), com os pacotes
 "@fastify/swagger" e "@fastify/swagger-ui" para a documentação da API e o
 logger nativo do Fastify (pino). Nenhum outro framework HTTP é admitido (ver
-RF026).
+RF027).
 
 0.3 Termos utilizados
 - "Endpoint de validação": a rota POST /api/v1/cpf/validacao.
@@ -1320,7 +1393,7 @@ RF026).
 0.4 Convenções gerais aplicáveis a todos os requisitos
 - Todas as respostas da API (rotas sob /api, respostas de erro e rotas
   inexistentes) possuem cabeçalho Content-Type "application/json; charset=utf-8"
-  e corpo codificado em UTF-8. As exceções são a interface Swagger UI (RF022),
+  e corpo codificado em UTF-8. As exceções são a interface Swagger UI (RF023),
   servida como HTML, e seus recursos estáticos (CSS e JavaScript) sob /docs.
 - O cabeçalho Accept da requisição não altera o formato da resposta.
 - Nomes de campos JSON são sensíveis a maiúsculas e minúsculas.
@@ -1368,8 +1441,8 @@ Dimensões de especificação:
    - 200 OK quando a requisição é bem-formada (Content-Type JSON, corpo JSON
      sintaticamente válido, objeto JSON com campo "cpf" do tipo string não em
      branco), independentemente de o CPF ser válido ou inválido.
-   - Os demais códigos (400, 415, 422, 404, 500) são definidos em RF014 a
-     RF019.
+   - Os demais códigos (400, 413, 415, 422, 404, 500) são definidos em RF014 a
+     RF020.
 2. Response Body:
    - Para status 200, o corpo segue integralmente a estrutura de RF002.
 3. Regras de negócio:
@@ -1379,16 +1452,16 @@ Dimensões de especificação:
    - O CPF a ser validado é lido exclusivamente do campo "cpf" do objeto JSON
      no corpo da requisição.
 4. Validação:
-   - A validação estrutural da requisição é especificada em RF011 a RF017. A
+   - A validação estrutural da requisição é especificada em RF011 a RF018. A
      validação do conteúdo do CPF é especificada em RF003 a RF009.
 5. Autenticação e autorização:
-   - Não aplicável — o endpoint é público e não exige credenciais (ver RF020).
+   - Não aplicável — o endpoint é público e não exige credenciais (ver RF021).
 6. Estado:
    - Não aplicável — a operação é uma consulta sem persistência; nenhum recurso
-     é criado, alterado ou removido (ver RF021).
+     é criado, alterado ou removido (ver RF022).
 7. Efeitos colaterais:
    - Não aplicável — a operação não persiste dados nem interage com serviços
-     externos (ver RF021).
+     externos (ver RF022).
 
 --------------------------------------------------------------------------------
 RF002 — Estrutura padronizada da resposta de validação
@@ -1443,12 +1516,12 @@ Dimensões de especificação:
      combinação é admitida.
 4. Validação:
    - Não aplicável — este requisito define o formato da saída; a validação da
-     entrada é tratada em RF003 a RF017.
+     entrada é tratada em RF003 a RF018.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — a resposta é calculada a partir da entrada, sem
-     consulta ou alteração de estado (ver RF021).
+     consulta ou alteração de estado (ver RF022).
 7. Efeitos colaterais:
    - Não aplicável — a produção da resposta não gera efeitos observáveis além do
      próprio retorno HTTP.
@@ -1481,7 +1554,7 @@ Dimensões de especificação:
    - Apenas as duas formas definidas na seção 0.3 são aceitas. Qualquer outra
      forma é tratada em RF004.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — a normalização não persiste nem altera dados.
 7. Efeitos colaterais:
@@ -1517,11 +1590,11 @@ Dimensões de especificação:
    - dígitos não ASCII: "５２９９８２２４７２５";
    - cadeia de comprimento arbitrário que não atenda aos formatos aceitos
      (não há limite de comprimento que gere erro 422; cadeias longas resultam
-     em FORMATO_INVALIDO).
+     em FORMATO_INVALIDO, desde que o corpo não exceda o limite de RF016).
    - Espaços em branco não são removidos antes da verificação de formato.
    - Cadeias em branco não pertencem a este requisito (ver RF012).
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -1554,7 +1627,7 @@ Dimensões de especificação:
 4. Validação:
    - Aplica-se somente a entradas aprovadas na verificação de formato (RF003).
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -1589,7 +1662,7 @@ Dimensões de especificação:
 4. Validação:
    - Aplica-se somente a entradas aprovadas nas verificações de RF003 e RF005.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — cálculo puro, sem persistência.
 7. Efeitos colaterais:
@@ -1627,7 +1700,7 @@ Dimensões de especificação:
 4. Validação:
    - Aplica-se somente a entradas aprovadas nas verificações de RF003 e RF005.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — cálculo puro, sem persistência.
 7. Efeitos colaterais:
@@ -1656,9 +1729,9 @@ Dimensões de especificação:
      cadastral.
 4. Validação:
    - Pressupõe requisição bem-formada (RF001); entradas malformadas seguem
-     RF011 a RF017.
+     RF011 a RF018.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -1688,10 +1761,10 @@ Dimensões de especificação:
      "SEQUENCIA_REPETIDA").
    - "52998224715" → "DIGITO_VERIFICADOR_INVALIDO".
 4. Validação:
-   - A precedência entre erros estruturais da requisição (415, 400, 422) é
+   - A precedência entre erros estruturais da requisição (415, 413, 400, 422) é
      definida em RF010.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -1705,8 +1778,8 @@ Dimensões de especificação:
 RF010 — Estrutura padronizada de resposta de erro e precedência entre erros
 --------------------------------------------------------------------------------
 Descrição:
-Toda resposta de erro da API (status 400, 404, 415, 422 e 500) deve seguir a
-estrutura abaixo, sem campos adicionais:
+Toda resposta de erro da API (status 400, 404, 413, 415, 422 e 500) deve
+seguir a estrutura abaixo, sem campos adicionais:
   {
     "erro": {
       "codigo":   string,
@@ -1725,6 +1798,7 @@ Catálogo fechado de códigos de erro:
   ------  ----------------------------  -------------------------------------------------
   400     "JSON_MALFORMADO"             "O corpo da requisição não é um JSON válido."
   404     "ROTA_NAO_ENCONTRADA"         "Rota não encontrada."
+  413     "PAYLOAD_MUITO_GRANDE"        "O corpo da requisição excede o tamanho máximo de 1 MiB."
   415     "CONTENT_TYPE_NAO_SUPORTADO"  "O cabeçalho Content-Type deve ser application/json."
   422     "PAYLOAD_INVALIDO"            "O corpo da requisição deve ser um objeto JSON."
   422     "CAMPO_OBRIGATORIO"           "O campo cpf é obrigatório."
@@ -1741,22 +1815,36 @@ Dimensões de especificação:
      (RF002), e respostas de validação nunca contêm o campo "erro".
 3. Regras de negócio — precedência no endpoint de validação, avaliada nesta
    ordem; o primeiro erro encontrado é o único retornado:
-   1º Content-Type não JSON → 415 (RF016);
-   2º corpo não vazio e sintaticamente inválido como JSON → 400 (RF015);
-   3º corpo JSON válido que não é objeto → 422 PAYLOAD_INVALIDO (RF014);
-   4º campo "cpf" ausente ou null → 422 CAMPO_OBRIGATORIO (RF011);
-   5º campo "cpf" com tipo diferente de string → 422 TIPO_INVALIDO (RF013);
-   6º campo "cpf" string em branco → 422 CAMPO_VAZIO (RF012);
-   7º demais casos → processamento do CPF com status 200 (RF001 a RF009).
+   1º Content-Type não JSON → 415 (RF017);
+   2º corpo maior que 1048576 bytes → 413 PAYLOAD_MUITO_GRANDE (RF016);
+   3º corpo não vazio e sintaticamente inválido como JSON, ou outro erro de
+      corpo ou de protocolo com status 4xx nativo → 400 (RF015);
+   4º corpo JSON válido que não é objeto → 422 PAYLOAD_INVALIDO (RF014);
+   5º campo "cpf" ausente ou null → 422 CAMPO_OBRIGATORIO (RF011);
+   6º campo "cpf" com tipo diferente de string → 422 TIPO_INVALIDO (RF013);
+   7º campo "cpf" string em branco → 422 CAMPO_VAZIO (RF012);
+   8º demais casos → processamento do CPF com status 200 (RF001 a RF009).
 4. Validação:
    - Nenhum outro código de erro além dos do catálogo pode ser retornado.
-   - Os erros nativos do Fastify (por exemplo, FST_ERR_CTP_INVALID_MEDIA_TYPE,
-     FST_ERR_CTP_EMPTY_JSON_BODY e erros de sintaxe do parser JSON) são
-     convertidos para o catálogo acima por manipulador registrado com
-     setErrorHandler. Nenhuma resposta segue o formato de erro padrão do
-     Fastify (campos "statusCode", "error" e "code").
+   - Os erros nativos do Fastify e do Node.js são convertidos para o catálogo
+     acima por setErrorHandler, setNotFoundHandler e pelas opções
+     frameworkErrors e clientErrorHandler do Fastify, segundo as regras abaixo,
+     aplicadas nesta ordem.
+     a) FST_ERR_CTP_INVALID_MEDIA_TYPE e ausência de Content-Type → 415
+        CONTENT_TYPE_NAO_SUPORTADO (RF017).
+     b) FST_ERR_CTP_BODY_TOO_LARGE → 413 PAYLOAD_MUITO_GRANDE (RF016).
+     c) FST_ERR_CTP_EMPTY_JSON_BODY → 422 CAMPO_OBRIGATORIO (RF011).
+     d) URL malformada (FST_ERR_BAD_URL) → 404 ROTA_NAO_ENCONTRADA (RF019).
+     e) Qualquer outro erro com status 4xx originado no Fastify ou no Node.js
+        em razão do corpo ou do protocolo da requisição (por exemplo, erro de
+        sintaxe do parser JSON, FST_ERR_CTP_INVALID_CONTENT_LENGTH e erros de
+        análise do protocolo HTTP) → 400 JSON_MALFORMADO (RF015).
+     f) Erros com status 5xx e exceções sem status HTTP associado → 500
+        ERRO_INTERNO (RF020).
+   - Nenhuma resposta segue o formato de erro padrão do Fastify (campos
+     "statusCode", "error" e "code").
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020); portanto, os status 401 e
+   - Não aplicável — não há autenticação (ver RF021); portanto, os status 401 e
      403 nunca são retornados.
 6. Estado:
    - Não aplicável — erros não alteram estado algum.
@@ -1788,7 +1876,7 @@ Dimensões de especificação:
 4. Validação:
    - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -1817,7 +1905,7 @@ Dimensões de especificação:
 4. Validação:
    - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -1845,13 +1933,13 @@ Dimensões de especificação:
      {"cpf":false}, {"cpf":["52998224725"]}, {"cpf":{"numero":"52998224725"}}.
 4. Validação:
    - O CPF não é processado; nenhuma resposta de validação (RF002) é emitida.
-   - O esquema JSON declarado na rota do Fastify serve à documentação (RF024)
+   - O esquema JSON declarado na rota do Fastify serve à documentação (RF025)
      e não substitui as regras de RF011 a RF014. A coerção de tipos do Ajv não
      se aplica ao corpo (por exemplo, {"cpf":52998224725} resulta em
      TIPO_INVALIDO, e não na conversão para "52998224725" seguida de status
      200).
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
@@ -1875,22 +1963,25 @@ Dimensões de especificação:
    - Exemplos de corpo que produzem este erro: [], ["52998224725"],
      [{"cpf":"52998224725"}], "52998224725", 52998224725, true, null.
 4. Validação:
-   - Avaliado após a verificação de Content-Type (RF016) e de sintaxe JSON
-     (RF015), e antes das verificações do campo "cpf" (RF011 a RF013).
+   - Avaliado após as verificações de Content-Type (RF017), de tamanho do
+     corpo (RF016) e de sintaxe JSON (RF015), e antes das verificações do
+     campo "cpf" (RF011 a RF013).
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF015 — Corpo JSON malformado
+RF015 — Corpo JSON malformado e demais erros de corpo ou de protocolo
 --------------------------------------------------------------------------------
 Descrição:
 Quando a requisição ao endpoint de validação possui Content-Type JSON e corpo
 não vazio que não pode ser interpretado como JSON sintaticamente válido, o
-sistema deve rejeitar a requisição.
+sistema deve rejeitar a requisição. O mesmo erro é retornado para os demais
+erros com status 4xx gerados pelo Fastify ou pelo Node.js em razão do corpo ou
+do protocolo da requisição, exceto os tratados em RF011, RF016, RF017 e RF019.
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -1906,19 +1997,62 @@ Dimensões de especificação:
      (chave de fechamento ausente), {cpf: "52998224725"} (chave sem aspas),
      {'cpf':'52998224725'} (aspas simples), {"cpf":"52998224725",} (vírgula
      final), texto livre "cpf=52998224725".
+   - Exemplos de erros de corpo ou de protocolo que produzem este erro:
+     cabeçalho Content-Length com valor não numérico, corpo com
+     Transfer-Encoding chunked malformado e cabeçalhos que excedem o limite de
+     tamanho do Node.js (cujo status nativo é 431). Em todos os casos, o status
+     é 400 e o corpo é o indicado acima.
+   - Erros de análise do protocolo HTTP detectados antes do roteamento são
+     tratados pela opção clientErrorHandler do Fastify, que escreve no socket,
+     quando ainda gravável, resposta 400 com o corpo acima e Content-Type
+     "application/json; charset=utf-8".
 4. Validação:
    - Corpo vazio não é considerado malformado (ver RF011). O parser JSON do
      Fastify é configurado (por exemplo, por addContentTypeParser) para que
      corpo vazio ou composto apenas por espaços em branco siga RF011.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF016 — Content-Type não suportado
+RF016 — Limite de tamanho do corpo da requisição
+--------------------------------------------------------------------------------
+Descrição:
+O endpoint de validação deve rejeitar requisições cujo corpo exceda o limite
+padrão do Fastify, de 1048576 bytes (1 MiB). A aplicação mantém esse padrão e
+não configura a opção bodyLimit.
+
+Dimensões de especificação:
+1. HTTP Status:
+   - 413 Content Too Large (Payload Too Large).
+2. Response Body:
+   - {"erro":{"codigo":"PAYLOAD_MUITO_GRANDE","mensagem":"O corpo da requisição
+     excede o tamanho máximo de 1 MiB.","detalhes":[]}}
+   - A resposta segue a estrutura de RF010, e não o formato de erro padrão do
+     Fastify.
+3. Regras de negócio:
+   - Corpo com exatamente 1048576 bytes não produz este erro. Corpo com
+     1048577 bytes produz este erro, mesmo que seja JSON válido (por exemplo,
+     {"cpf":"<cadeia longa>"}).
+   - O limite se aplica tanto a corpo com cabeçalho Content-Length quanto a
+     corpo enviado com Transfer-Encoding chunked.
+   - O erro nativo FST_ERR_CTP_BODY_TOO_LARGE é convertido nesta resposta por
+     setErrorHandler (RF010).
+4. Validação:
+   - Avaliado após RF017 e antes de RF015. O corpo excedente não é
+     interpretado.
+5. Autenticação e autorização:
+   - Não aplicável — não há autenticação (ver RF021).
+6. Estado:
+   - Não aplicável — sem persistência.
+7. Efeitos colaterais:
+   - Não aplicável — sem efeitos colaterais.
+
+--------------------------------------------------------------------------------
+RF017 — Content-Type não suportado
 --------------------------------------------------------------------------------
 Descrição:
 Quando a requisição ao endpoint de validação não possui Content-Type JSON
@@ -1944,14 +2078,14 @@ Dimensões de especificação:
 4. Validação:
    - O corpo não é interpretado quando este erro ocorre.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF017 — Desconsideração de campos adicionais e de parâmetros de consulta
+RF018 — Desconsideração de campos adicionais e de parâmetros de consulta
 --------------------------------------------------------------------------------
 Descrição:
 Campos do objeto JSON diferentes de "cpf" e parâmetros de query string não
@@ -1973,18 +2107,19 @@ Dimensões de especificação:
 4. Validação:
    - Campos adicionais não são validados quanto a tipo ou formato.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF018 — Rotas e métodos não mapeados
+RF019 — Rotas e métodos não mapeados e URL malformada
 --------------------------------------------------------------------------------
 Descrição:
-Requisições a rotas inexistentes, ou à rota /api/v1/cpf/validacao com método
-diferente de POST, devem receber resposta de erro padronizada em JSON.
+Requisições a rotas inexistentes, à rota /api/v1/cpf/validacao com método
+diferente de POST ou com URL malformada devem receber resposta de erro
+padronizada em JSON.
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -1997,26 +2132,33 @@ Dimensões de especificação:
    - Exemplos: GET /api/v1/cpf/validacao; PUT /api/v1/cpf/validacao;
      DELETE /api/v1/cpf/validacao; POST /api/v1/cpf; GET /inexistente;
      POST /api/v2/cpf/validacao.
-   - As rotas de documentação (/docs e /docs/openapi.json, RF022 e RF023) e
+   - As rotas de documentação (/docs e /docs/openapi.json, RF023 e RF024) e
      as rotas registradas sob /docs pelo @fastify/swagger-ui (por exemplo,
      /docs/static/*) não são afetadas por este requisito.
    - O tratamento é registrado com setNotFoundHandler do Fastify.
+   - URL malformada é aquela cujo caminho contém sequência de percent-encoding
+     inválida (por exemplo, GET /%E0%A4%A e POST /api/v1/cpf/validacao%ZZ),
+     sinalizada pelo Fastify como FST_ERR_BAD_URL. Ela resulta em 404, e não
+     em 400, por meio da opção frameworkErrors do Fastify.
+   - Requisições rejeitadas pelo analisador HTTP do Node.js antes do
+     roteamento não pertencem a este requisito e seguem RF015.
 4. Validação:
    - Content-Type e corpo não são avaliados para rotas não mapeadas.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência.
 7. Efeitos colaterais:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF019 — Tratamento de falhas inesperadas
+RF020 — Tratamento de falhas inesperadas
 --------------------------------------------------------------------------------
 Descrição:
 Qualquer exceção não prevista ocorrida durante o processamento de uma
-requisição da API deve ser capturada e convertida em resposta de erro
-padronizada, em todos os ambientes (development, test e production).
+requisição da API, e qualquer erro com status 5xx, deve ser capturado e
+convertido em resposta de erro padronizada, em todos os ambientes
+(development, test e production).
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -2033,11 +2175,14 @@ Dimensões de especificação:
    - Após uma falha inesperada, requisições subsequentes continuam sendo
      atendidas normalmente.
    - O tratamento é registrado com setErrorHandler do Fastify.
+   - Somente erros com status 5xx e exceções sem status HTTP associado
+     resultam em ERRO_INTERNO. Erros com status 4xx originados no Fastify ou no
+     Node.js seguem as regras de conversão de RF010 e nunca resultam em 500.
 4. Validação:
    - Não aplicável — trata-se de falha interna, não de entrada inválida;
      entradas inválidas nunca resultam em 500.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Não aplicável — sem persistência; a falha não deixa estado residual.
 7. Efeitos colaterais:
@@ -2049,7 +2194,7 @@ Dimensões de especificação:
 ================================================================================
 
 --------------------------------------------------------------------------------
-RF020 — Ausência de autenticação e autorização
+RF021 — Ausência de autenticação e autorização
 --------------------------------------------------------------------------------
 Descrição:
 A API não possui mecanismo de autenticação nem de autorização. Todos os
@@ -2075,7 +2220,7 @@ Dimensões de especificação:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF021 — Operação sem estado e determinística
+RF022 — Operação sem estado e determinística
 --------------------------------------------------------------------------------
 Descrição:
 A validação de CPF é uma operação de consulta sem persistência: a aplicação
@@ -2094,7 +2239,7 @@ Dimensões de especificação:
 4. Validação:
    - Não aplicável — este requisito não introduz validações de entrada.
 5. Autenticação e autorização:
-   - Não aplicável — não há autenticação (ver RF020).
+   - Não aplicável — não há autenticação (ver RF021).
 6. Estado:
    - Nenhum recurso é criado, atualizado ou removido. Não há endpoints de
      criação, consulta por identificador, atualização ou remoção de CPFs.
@@ -2111,13 +2256,13 @@ Dimensões de especificação:
 ================================================================================
 
 --------------------------------------------------------------------------------
-RF022 — Documentação interativa Swagger UI na rota /docs
+RF023 — Documentação interativa Swagger UI na rota /docs
 --------------------------------------------------------------------------------
 Descrição:
 A aplicação deve, obrigatoriamente, disponibilizar documentação interativa da
 API por meio da interface Swagger UI, servida pelo plugin @fastify/swagger-ui
 registrado com routePrefix "/docs" e construída a partir da especificação
-OpenAPI definida em RF023. A documentação não é opcional e deve estar
+OpenAPI definida em RF024. A documentação não é opcional e deve estar
 disponível em todos os ambientes (development, test e production).
 
 Dimensões de especificação:
@@ -2132,7 +2277,7 @@ Dimensões de especificação:
    - A interface carrega a especificação a partir de /docs/openapi.json.
 3. Regras de negócio:
    - A interface exibe a operação POST /api/v1/cpf/validacao, com seu resumo,
-     esquema de requisição, exemplos e respostas documentadas (RF024 e RF025).
+     esquema de requisição, exemplos e respostas documentadas (RF025 e RF026).
    - A interface permite interagir com o endpoint: a funcionalidade "Try it
      out" está habilitada para POST, e a execução a partir da interface envia
      a requisição à própria instância em execução e exibe status, cabeçalhos e
@@ -2144,22 +2289,22 @@ Dimensões de especificação:
 4. Validação:
    - Não aplicável — a rota não recebe payload.
 5. Autenticação e autorização:
-   - Acesso público, sem credenciais (ver RF020).
+   - Acesso público, sem credenciais (ver RF021).
 6. Estado:
    - Não aplicável — a consulta à documentação não altera estado.
 7. Efeitos colaterais:
    - Não aplicável — a exibição da documentação não produz efeitos colaterais.
      Requisições executadas pela interface produzem exatamente os mesmos
-     efeitos de requisições diretas ao endpoint (ou seja, nenhum, ver RF021).
+     efeitos de requisições diretas ao endpoint (ou seja, nenhum, ver RF022).
 
 --------------------------------------------------------------------------------
-RF023 — Especificação OpenAPI disponível e válida
+RF024 — Especificação OpenAPI disponível e válida
 --------------------------------------------------------------------------------
 Descrição:
 A aplicação deve disponibilizar o documento de especificação da API no formato
 OpenAPI 3.0, em JSON, na rota GET /docs/openapi.json, gerado pelo plugin
 @fastify/swagger a partir dos esquemas das rotas. Esse documento é a fonte
-utilizada pela interface Swagger UI (RF022).
+utilizada pela interface Swagger UI (RF023).
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -2177,7 +2322,7 @@ Dimensões de especificação:
      OpenAPI.
    - Se o campo "servers" estiver presente, deve conter apenas URL relativa
      ("/"), de modo que a interface utilize a mesma origem em que a aplicação
-     está em execução, qualquer que seja a porta configurada (RF027).
+     está em execução, qualquer que seja a porta configurada (RF028).
    - Todas as referências internas ("$ref") devem ser resolvíveis dentro do
      próprio documento.
    - O documento servido em /docs/openapi.json é o retornado por
@@ -2186,7 +2331,7 @@ Dimensões de especificação:
 4. Validação:
    - Não aplicável — a rota não recebe payload.
 5. Autenticação e autorização:
-   - Acesso público, sem credenciais (ver RF020). O documento não declara
+   - Acesso público, sem credenciais (ver RF021). O documento não declara
      esquemas de segurança ("securitySchemes") nem requisitos "security".
 6. Estado:
    - Não aplicável — documento estático em relação às requisições; não é
@@ -2195,7 +2340,7 @@ Dimensões de especificação:
    - Não aplicável — sem efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF024 — Documentação do endpoint, parâmetros e payloads
+RF025 — Documentação do endpoint, parâmetros e payloads
 --------------------------------------------------------------------------------
 Descrição:
 A especificação OpenAPI deve descrever o endpoint de validação, seu corpo de
@@ -2203,7 +2348,7 @@ requisição e os tipos de dados correspondentes.
 
 Dimensões de especificação:
 1. HTTP Status:
-   - Não aplicável — requisito sobre o conteúdo do documento servido em RF023.
+   - Não aplicável — requisito sobre o conteúdo do documento servido em RF024.
 2. Response Body:
    - Em "paths./api/v1/cpf/validacao" deve existir a operação "post" (e
      nenhuma outra operação), com "summary" e "description" não vazios.
@@ -2214,21 +2359,21 @@ Dimensões de especificação:
      aceitos (11 dígitos sem máscara e máscara 000.000.000-00) e exemplos de
      ambos os formatos (por exemplo, "52998224725" e "529.982.247-25").
 3. Regras de negócio:
-   - O documento é consistente com RF001 a RF017: não declara campos de
+   - O documento é consistente com RF001 a RF018: não declara campos de
      requisição inexistentes, não declara parâmetros de query string ou de
      cabeçalho além de Content-Type e não declara outros métodos para a rota.
 4. Validação:
    - O esquema de requisição documentado deve corresponder às regras de
      validação de RF011 a RF014 (campo obrigatório, tipo string).
 5. Autenticação e autorização:
-   - Não aplicável — a operação não declara requisitos de segurança (RF020).
+   - Não aplicável — a operação não declara requisitos de segurança (RF021).
 6. Estado:
    - Não aplicável — documentação descritiva.
 7. Efeitos colaterais:
    - Não aplicável — documentação descritiva.
 
 --------------------------------------------------------------------------------
-RF025 — Documentação dos códigos HTTP e das estruturas de resposta
+RF026 — Documentação dos códigos HTTP e das estruturas de resposta
 --------------------------------------------------------------------------------
 Descrição:
 A especificação OpenAPI deve documentar, para a operação POST
@@ -2237,8 +2382,8 @@ de cada resposta.
 
 Dimensões de especificação:
 1. HTTP Status:
-   - A operação documenta as respostas 200, 400, 415, 422 e 500, cada uma com
-     "description" não vazia. A resposta 404 (RF018) refere-se a rotas não
+   - A operação documenta as respostas 200, 400, 413, 415, 422 e 500, cada
+     uma com "description" não vazia. A resposta 404 (RF019) refere-se a rotas não
      mapeadas e não precisa constar na operação.
 2. Response Body:
    - Resposta 200: esquema "object" com "required" contendo "cpf",
@@ -2246,23 +2391,23 @@ Dimensões de especificação:
      "cpf_normalizado" e "motivo" anuláveis ("nullable": true); "motivo" com
      "enum" contendo exatamente "FORMATO_INVALIDO", "SEQUENCIA_REPETIDA",
      "DIGITO_VERIFICADOR_INVALIDO" (além de null).
-   - Respostas 400, 415, 422 e 500: esquema de erro de RF010 (objeto "erro"
+   - Respostas 400, 413, 415, 422 e 500: esquema de erro de RF010 (objeto "erro"
      com "codigo", "mensagem" e "detalhes", sendo "detalhes" um array de
      objetos com "campo" e "mensagem").
    - Exemplos documentados: ao menos um CPF válido, um FORMATO_INVALIDO, um
      SEQUENCIA_REPETIDA e um DIGITO_VERIFICADOR_INVALIDO na resposta 200; ao
      menos um exemplo para cada código de erro do catálogo de RF010 associado
-     às respostas 400, 415, 422 e 500.
+     às respostas 400, 413, 415, 422 e 500.
 3. Regras de negócio:
    - As respostas reais da API devem ser válidas segundo os esquemas
      documentados (verificável por teste de contrato que compare respostas
      reais ao documento /docs/openapi.json).
 4. Validação:
    - Não aplicável — documentação descritiva; a validação de entrada está em
-     RF011 a RF017.
+     RF011 a RF018.
 5. Autenticação e autorização:
    - Não aplicável — sem autenticação; as respostas 401 e 403 não são
-     documentadas por não existirem (RF020).
+     documentadas por não existirem (RF021).
 6. Estado:
    - Não aplicável — documentação descritiva.
 7. Efeitos colaterais:
@@ -2273,7 +2418,7 @@ Dimensões de especificação:
 ================================================================================
 
 --------------------------------------------------------------------------------
-RF026 — Uso obrigatório de TypeScript e arquivo de dependências
+RF027 — Uso obrigatório de TypeScript e arquivo de dependências
 --------------------------------------------------------------------------------
 Descrição:
 A aplicação deve ser implementada obrigatoriamente em TypeScript, executada
@@ -2304,7 +2449,7 @@ Dimensões de especificação:
      "test"  — executa a suíte de testes.
    - Após "npm install", o comando "npm run build" conclui sem erros de
      compilação nem de tipos, e o comando "npm start" inicia a aplicação sem
-     erros, utilizando as variáveis de RF027.
+     erros, utilizando as variáveis de RF028.
    - O package.json declara, em "dependencies", os pacotes fastify,
      @fastify/swagger e @fastify/swagger-ui, e, em "devDependencies",
      typescript e @types/node.
@@ -2323,7 +2468,7 @@ Dimensões de especificação:
    - Não aplicável — requisito tecnológico.
 
 --------------------------------------------------------------------------------
-RF027 — Configuração externalizada por variáveis de ambiente
+RF028 — Configuração externalizada por variáveis de ambiente
 --------------------------------------------------------------------------------
 Descrição:
 Todas as configurações da aplicação devem ser obtidas de variáveis de
@@ -2346,9 +2491,9 @@ Dimensões de especificação:
 3. Regras de negócio:
    - Os valores de configuração listados acima não são fixados no
      código-fonte; são lidos das variáveis de ambiente, em um único módulo de
-     configuração (RF029).
+     configuração (RF030).
    - Variáveis definidas no ambiente do processo têm precedência sobre os
-     valores do arquivo .env (RF028).
+     valores do arquivo .env (RF029).
    - As quatro variáveis são obrigatórias em todos os ambientes; não há
      valores padrão definidos no código.
    - HOST e PORT são os argumentos de listen() do Fastify, e LOG_LEVEL define
@@ -2362,7 +2507,7 @@ Dimensões de especificação:
      NODE_ENV="staging", LOG_LEVEL="verbose", HOST="" → falha de
      inicialização.
 5. Autenticação e autorização:
-   - Não aplicável — as variáveis não configuram autenticação (RF020).
+   - Não aplicável — as variáveis não configuram autenticação (RF021).
 6. Estado:
    - Não aplicável — configuração lida na inicialização; não há alteração de
      estado em tempo de execução.
@@ -2371,7 +2516,7 @@ Dimensões de especificação:
      própria configuração do processo.
 
 --------------------------------------------------------------------------------
-RF028 — Arquivos .env e .env.example
+RF029 — Arquivos .env e .env.example
 --------------------------------------------------------------------------------
 Descrição:
 O projeto deve conter, na raiz, o arquivo .env, carregado automaticamente na
@@ -2384,7 +2529,7 @@ Dimensões de especificação:
 2. Response Body:
    - Não aplicável — requisito de configuração do projeto.
 3. Regras de negócio:
-   - Ambos os arquivos declaram exatamente as quatro variáveis de RF027, no
+   - Ambos os arquivos declaram exatamente as quatro variáveis de RF028, no
      formato CHAVE=valor, uma por linha.
    - O arquivo .env.example contém valores ilustrativos (por exemplo,
      NODE_ENV=development, HOST=0.0.0.0, PORT=3000 e LOG_LEVEL=info) e um
@@ -2393,10 +2538,10 @@ Dimensões de especificação:
      inicia com sucesso por meio de "npm run build" seguido de "npm start".
    - O arquivo .env é carregado automaticamente na inicialização, sem
      necessidade de exportar as variáveis manualmente, respeitando a
-     precedência definida em RF027.
+     precedência definida em RF028.
 4. Validação:
    - Valores inválidos no .env produzem o comportamento de falha de
-     inicialização descrito em RF027.
+     inicialização descrito em RF028.
 5. Autenticação e autorização:
    - Não aplicável — requisito de configuração do projeto.
 6. Estado:
@@ -2405,7 +2550,7 @@ Dimensões de especificação:
    - Não aplicável — a leitura dos arquivos não produz efeitos colaterais.
 
 --------------------------------------------------------------------------------
-RF029 — Organização do projeto com separação de responsabilidades
+RF030 — Organização do projeto com separação de responsabilidades
 --------------------------------------------------------------------------------
 Descrição:
 O projeto deve separar configurações, schemas, rotas, serviços e
@@ -2414,18 +2559,19 @@ infraestrutura, conforme o mapeamento obrigatório abaixo:
   Responsabilidade      Localização           Conteúdo
   --------------------  --------------------  ------------------------------------------------
   Configurações         src/config/           Leitura e validação das variáveis de ambiente
-                                              (RF027, RF028).
+                                              (RF028, RF029).
   Rotas                 src/routes/           Plugins Fastify que declaram
                                               POST /api/v1/cpf/validacao e as rotas de
-                                              documentação (RF022, RF023).
+                                              documentação (RF023, RF024).
   Schemas               src/schemas/          Validação estrutural do payload (RF011 a RF014),
                                               sem lógica do algoritmo de CPF.
   Serviços              src/services/         Regras de CPF (RF003 a RF009).
   Controladores         src/controllers/      Orquestração: recebe a requisição, aciona schema
                                               e serviço e monta a resposta.
-  Infraestrutura        src/infrastructure/   setErrorHandler, setNotFoundHandler e parser de
-                                              conteúdo JSON (RF010, RF015, RF016, RF018,
-                                              RF019); configuração do logger (pino); registro
+  Infraestrutura        src/infrastructure/   setErrorHandler, setNotFoundHandler, opções
+                                              frameworkErrors e clientErrorHandler e parser
+                                              de conteúdo JSON (RF010, RF015 a RF017, RF019,
+                                              RF020); configuração do logger (pino); registro
                                               de @fastify/swagger e @fastify/swagger-ui.
   Montagem da app       src/app.ts            Função que cria e retorna a instância Fastify
                                               com plugins e rotas registrados, sem chamar
@@ -2448,7 +2594,7 @@ Dimensões de especificação:
    - A instância Fastify criada por src/app.ts pode ser exercitada por
      app.inject(), sem que uma porta de rede seja aberta. O serviço de
      validação de CPF pode ser fornecido à função de montagem, de modo que a
-     verificação de RF019 utilize dublê.
+     verificação de RF020 utilize dublê.
    - O controlador não contém o cálculo de dígitos verificadores nem a
      detecção de sequências repetidas.
    - O schema de entrada não contém o algoritmo de CPF, e o serviço não
@@ -2465,7 +2611,7 @@ Dimensões de especificação:
    - Não aplicável — requisito estrutural.
 
 --------------------------------------------------------------------------------
-RF030 — Documentação de instalação, configuração e execução
+RF031 — Documentação de instalação, configuração e execução
 --------------------------------------------------------------------------------
 Descrição:
 O projeto deve conter, na raiz, o arquivo README.md com instruções de
@@ -2480,7 +2626,7 @@ Dimensões de especificação:
    - pré-requisitos: versões do Node.js e do npm;
    - instalação: comando de instalação das dependências ("npm install");
    - configuração: cópia de .env.example para .env e descrição de cada
-     variável de RF027;
+     variável de RF028;
    - execução: comandos de compilação ("npm run build") e de inicialização
      ("npm start"), e porta utilizada;
    - testes: comando de execução da suíte ("npm test");
@@ -2494,12 +2640,12 @@ Dimensões de especificação:
      testes com sucesso.
 5. Autenticação e autorização:
    - Não aplicável — requisito de documentação; a API não possui
-     autenticação (RF020), o que deve constar no README.md.
+     autenticação (RF021), o que deve constar no README.md.
 6. Estado:
    - Não aplicável — requisito de documentação.
 7. Efeitos colaterais:
    - Não aplicável — requisito de documentação.
 
 ================================================================================
-FIM DO DOCUMENTO — 30 requisitos (RF001 a RF030)
+FIM DO DOCUMENTO — 31 requisitos (RF001 a RF031)
 ================================================================================
