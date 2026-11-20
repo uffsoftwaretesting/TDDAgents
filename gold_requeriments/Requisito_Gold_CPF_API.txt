@@ -1004,7 +1004,7 @@ Dimensões de especificação:
    - O package.json define, no mínimo, os scripts:
      "build" — compila o projeto com o compilador TypeScript;
      "start" — inicia a aplicação a partir do código compilado;
-     "test"  — executa a suíte de testes (RF030).
+     "test"  — executa a suíte de testes.
    - Após "npm install", o comando "npm run build" conclui sem erros de
      compilação nem de tipos, e o comando "npm start" inicia a aplicação sem
      erros, utilizando as variáveis de RF027.
@@ -1124,7 +1124,7 @@ infraestrutura, conforme o mapeamento obrigatório abaixo:
                                               abrir porta de rede.
   Inicialização         src/server.ts         Carregamento da configuração e início da escuta
                                               em HOST:PORT.
-  Testes                tests/                Suíte de testes automatizados (RF030).
+  Testes                tests/                Suíte de testes automatizados.
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -1153,47 +1153,7 @@ Dimensões de especificação:
    - Não aplicável — requisito estrutural.
 
 --------------------------------------------------------------------------------
-RF030 — Testes automatizados
---------------------------------------------------------------------------------
-Descrição:
-O projeto deve conter suíte de testes automatizados, escrita em TypeScript no
-diretório tests/, executável pelo comando "npm test", que cubra casos válidos,
-inválidos e situações excepcionais.
-
-Dimensões de especificação:
-1. HTTP Status:
-   - Os testes de requisição verificam os status 200, 400, 404, 415, 422 e 500
-     nos cenários definidos neste documento.
-2. Response Body:
-   - Os testes verificam os campos e valores exatos das respostas de RF002 e
-     RF010, incluindo mensagens literais.
-3. Regras de negócio — a suíte cobre, no mínimo:
-   - todos os CPFs válidos da tabela 0.5, nos formatos sem e com máscara;
-   - as dez sequências repetidas, ao menos no formato sem máscara, e ao menos
-     uma no formato com máscara;
-   - erro apenas no primeiro dígito verificador e erro apenas no segundo;
-   - cada categoria de FORMATO_INVALIDO listada em RF004;
-   - cada código de erro do catálogo de RF010, incluindo ERRO_INTERNO
-     simulado por dublê de teste (RF019);
-   - a precedência entre verificações (RF009) e entre erros (RF010);
-   - as rotas /docs e /docs/openapi.json (RF022 e RF023);
-   - testes unitários do serviço de CPF invocado sem HTTP (RF029).
-4. Validação:
-   - A execução de "npm test" termina com código de saída 0 e nenhuma falha.
-   - A suíte não depende de acesso à internet, de banco de dados nem de
-     serviços externos.
-5. Autenticação e autorização:
-   - Não aplicável — não há autenticação a testar; os testes não utilizam
-     credenciais (RF020).
-6. Estado:
-   - Os testes são independentes entre si e podem ser executados em qualquer
-     ordem com o mesmo resultado.
-7. Efeitos colaterais:
-   - Não aplicável — a execução dos testes não altera arquivos versionados do
-     projeto nem dados externos.
-
---------------------------------------------------------------------------------
-RF031 — Documentação de instalação, configuração e execução
+RF030 — Documentação de instalação, configuração e execução
 --------------------------------------------------------------------------------
 Descrição:
 O projeto deve conter, na raiz, o arquivo README.md com instruções de
@@ -1257,17 +1217,16 @@ implementados como comportamento da API:
   Tratamento de erros                                         RF010, RF015, RF016, RF018, RF019
   Documentação dos endpoints (obrigatória em /docs)           RF022, RF023, RF024, RF025
   Separação: configurações, schemas, rotas, serviços, infra   RF029
-  Testes automatizados (válidos, inválidos, excepcionais)     RF030
   Configuração por variáveis de ambiente                      RF027
   Arquivos .env e .env.example                                RF028
   Arquivo de dependências (package.json)                      RF026
-  Instruções de instalação, configuração e execução           RF031
+  Instruções de instalação, configuração e execução           RF030
   Tecnologia obrigatória: TypeScript                          RF026
   Ausência de autenticação (explicitada)                      RF020
   Ausência de estado/persistência (explicitada)               RF021
 
 ================================================================================
-FIM DO DOCUMENTO — 31 requisitos (RF001 a RF031)
+FIM DO DOCUMENTO — 30 requisitos (RF001 a RF030)
 ================================================================================================================================================================
 REQUISITOS_GOLD_CPF
 Especificação Gold de Requisitos — API HTTP de Validação de CPF
@@ -2274,7 +2233,7 @@ Dimensões de especificação:
    - O package.json define, no mínimo, os scripts:
      "build" — compila o projeto com o compilador TypeScript;
      "start" — inicia a aplicação a partir do código compilado;
-     "test"  — executa a suíte de testes (RF030).
+     "test"  — executa a suíte de testes.
    - Após "npm install", o comando "npm run build" conclui sem erros de
      compilação nem de tipos, e o comando "npm start" inicia a aplicação sem
      erros, utilizando as variáveis de RF027.
@@ -2394,7 +2353,7 @@ infraestrutura, conforme o mapeamento obrigatório abaixo:
                                               abrir porta de rede.
   Inicialização         src/server.ts         Carregamento da configuração e início da escuta
                                               em HOST:PORT.
-  Testes                tests/                Suíte de testes automatizados (RF030).
+  Testes                tests/                Suíte de testes automatizados.
 
 Dimensões de especificação:
 1. HTTP Status:
@@ -2423,47 +2382,7 @@ Dimensões de especificação:
    - Não aplicável — requisito estrutural.
 
 --------------------------------------------------------------------------------
-RF030 — Testes automatizados
---------------------------------------------------------------------------------
-Descrição:
-O projeto deve conter suíte de testes automatizados, escrita em TypeScript no
-diretório tests/, executável pelo comando "npm test", que cubra casos válidos,
-inválidos e situações excepcionais.
-
-Dimensões de especificação:
-1. HTTP Status:
-   - Os testes de requisição verificam os status 200, 400, 404, 415, 422 e 500
-     nos cenários definidos neste documento.
-2. Response Body:
-   - Os testes verificam os campos e valores exatos das respostas de RF002 e
-     RF010, incluindo mensagens literais.
-3. Regras de negócio — a suíte cobre, no mínimo:
-   - todos os CPFs válidos da tabela 0.5, nos formatos sem e com máscara;
-   - as dez sequências repetidas, ao menos no formato sem máscara, e ao menos
-     uma no formato com máscara;
-   - erro apenas no primeiro dígito verificador e erro apenas no segundo;
-   - cada categoria de FORMATO_INVALIDO listada em RF004;
-   - cada código de erro do catálogo de RF010, incluindo ERRO_INTERNO
-     simulado por dublê de teste (RF019);
-   - a precedência entre verificações (RF009) e entre erros (RF010);
-   - as rotas /docs e /docs/openapi.json (RF022 e RF023);
-   - testes unitários do serviço de CPF invocado sem HTTP (RF029).
-4. Validação:
-   - A execução de "npm test" termina com código de saída 0 e nenhuma falha.
-   - A suíte não depende de acesso à internet, de banco de dados nem de
-     serviços externos.
-5. Autenticação e autorização:
-   - Não aplicável — não há autenticação a testar; os testes não utilizam
-     credenciais (RF020).
-6. Estado:
-   - Os testes são independentes entre si e podem ser executados em qualquer
-     ordem com o mesmo resultado.
-7. Efeitos colaterais:
-   - Não aplicável — a execução dos testes não altera arquivos versionados do
-     projeto nem dados externos.
-
---------------------------------------------------------------------------------
-RF031 — Documentação de instalação, configuração e execução
+RF030 — Documentação de instalação, configuração e execução
 --------------------------------------------------------------------------------
 Descrição:
 O projeto deve conter, na raiz, o arquivo README.md com instruções de
@@ -2499,5 +2418,5 @@ Dimensões de especificação:
    - Não aplicável — requisito de documentação.
 
 ================================================================================
-FIM DO DOCUMENTO — 31 requisitos (RF001 a RF031)
+FIM DO DOCUMENTO — 30 requisitos (RF001 a RF030)
 ================================================================================
