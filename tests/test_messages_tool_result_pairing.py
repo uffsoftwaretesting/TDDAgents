@@ -365,25 +365,69 @@ def test_a_session_with_a_parallel_skill_and_bash_sends_a_valid_request(python_w
         assert following[:len(uses)] == results  # every result before any text
 
 
-# ── resume: a transcript stored in the broken order ─────────────────────────────
+# ── resume: a transcript stored in the broken order, as upstream reads it back ──
+# `utils/sessionStorage.ts` `insertMessageChain` (l.1027-1036: a result's parent is its own assistant,
+# `sourceToolAssistantUUID`), `buildConversationChain` (l.2069), `recoverOrphanedParallelToolResults`
+# (l.2118-2200: off-chain siblings and results spliced after the last on-chain sibling, by timestamp);
+# `utils/conversationRecovery.ts` `loadMessagesFromJsonlPath` (l.420-430: the tip is the newest leaf, a tie keeps
+# the first) and the `NO_RESPONSE_REQUESTED` sentinel after a trailing user message (l.230-247).
 
 
-def test_a_transcript_stored_in_the_broken_order_resumes_into_a_valid_request(tmp_path: Any) -> None:
-    from langchain_anthropic.chat_models import _format_messages
-
+def _resume(tmp_path: Any, now: Any) -> list[Any]:
     from app.utils.conversation_recovery import load_conversation_for_resume
     from app.utils.session_storage import TranscriptStore
 
-    store = TranscriptStore("loop-resume-broken", str(tmp_path))
+    store = TranscriptStore("loop-resume-broken", str(tmp_path), now=now)
     store.record_transcript(live_run_history())
     resumed = load_conversation_for_resume(store.path)
     assert resumed is not None
-    loaded = list(resumed.messages)
-    request = ensure_tool_result_pairing(normalize_messages_for_api(loaded))
-    _system, payload = _format_messages(request)
-    uses = [b["id"] for b in payload[1]["content"] if b.get("type") == "tool_use"]
-    blocks = payload[2]["content"]
-    assert sorted(uses) == ["b", "s"]
-    assert sorted(b["tool_use_id"] for b in blocks[:2]) == ["b", "s"]  # both results first, any order
-    assert all(b["type"] == "tool_result" for b in blocks[:2])
-    assert all(b["type"] != "tool_result" for b in blocks[2:])
+    return list(resumed.messages)
+
+
+def _resumed_kinds(messages: list[Any]) -> list[str]:
+    return [f"AI({m.content})" if isinstance(m, AIMessage) and not m.tool_calls else k
+            for m, k in zip(messages, kinds(messages))]
+
+
+def _assert_valid_request(messages: list[Any]) -> None:
+    from langchain_anthropic.chat_models import _format_messages
+
+    _system, payload = _format_messages(ensure_tool_result_pairing(normalize_messages_for_api(messages)))
+    for index, message in enumerate(payload):
+        if message["role"] != "assistant" or not isinstance(message["content"], list):
+            continue
+        uses = [b["id"] for b in message["content"] if b.get("type") == "tool_use"]
+        if uses:
+            following = payload[index + 1]["content"]
+            results = [b["tool_use_id"] for b in following[:len(uses)] if b.get("type") == "tool_result"]
+            assert sorted(results) == sorted(uses)
+
+
+def test_a_real_sessions_broken_transcript_resumes_as_upstream(tmp_path: Any) -> None:
+    """
+    Distinct timestamps, as a real session writes them: the newest leaf is `Tool(b)`; the chain back from it is
+    go → AI(s) → AI(b) → Tool(b); `Tool(s)` (its parent is `AI(s)`) is recovered after the anchor `AI(b)`. The
+    skill's meta message hangs off `Tool(s)` and is no tool result, so upstream does not recover it. The chain
+    ends in a tool result, a turn cut mid-way (`detectTurnInterruption` → `interrupted_turn`), so upstream adds
+    its meta "Continue from where you left off." (`conversationRecovery.ts:205-222`), then the sentinel.
+    """
+    clock = iter(float(n) for n in range(1000, 2000))
+    messages = _resume(tmp_path, lambda: next(clock))
+    assert _resumed_kinds(messages) == [
+        "Human(go)", "AI(s)", "AI(b)", "Tool(s)", "Tool(b)", "Human(Continue from where you left off.)",
+        "AI(No response requested.)"]
+    continuation = messages[5]
+    assert isinstance(continuation, HumanMessage) and continuation.additional_kwargs.get("is_meta") is True
+    _assert_valid_request(messages)
+
+
+def test_a_transcript_written_in_one_instant_resumes_as_upstream(tmp_path: Any) -> None:
+    """
+    Equal timestamps: no leaf is newer, so the first in file order wins (strict `>`): the meta message. The chain
+    back from it is go → AI(s) → Tool(s) → meta; the sibling `AI(b)` and its `Tool(b)` are recovered after the
+    anchor `AI(s)`, before the rest of the chain; the sentinel follows the trailing meta message.
+    """
+    messages = _resume(tmp_path, lambda: 1000.0)
+    assert _resumed_kinds(messages) == [
+        "Human(go)", "AI(s)", "AI(b)", "Tool(b)", "Tool(s)", "Human(skill prompt)", "AI(No response requested.)"]
+    _assert_valid_request(messages)
