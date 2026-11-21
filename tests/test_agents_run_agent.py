@@ -299,12 +299,16 @@ def test_a_worker_never_inherits_the_custom_system_prompts():
     assert (ctx.custom_system_prompt, ctx.append_system_prompt, ctx.thinking_config) == (None, None, None)
 
 
-def test_a_worker_never_inherits_the_interactive_can_use_tool():
-    """Phase 11: a worker avoids permission prompts, so the REPL's `canUseTool` is not handed down."""
+def test_a_worker_inherits_the_parents_can_use_tool():
+    """
+    Upstream hands every agent the parent's `canUseTool` (`AgentTool.tsx` l.603-608 -> `runAgent.ts` l.748-756):
+    a synchronous worker's asks reach the user's terminal (2026-11-21; it was `None` before, which denied a
+    tester's `go vet` without a question).
+    """
     parent = _parent()
     parent.can_use_tool = lambda *a: None
     model, _ = _run(parent=parent)
-    assert model.seen[0].tool_context.can_use_tool is None
+    assert model.seen[0].tool_context.can_use_tool is parent.can_use_tool
 
 
 def test_denial_tracking_is_shared_only_by_a_sync_worker():
@@ -562,7 +566,68 @@ def test_a_bubble_agent_in_the_background_asks_through_the_parents_terminal():
     ctx = model.seen[0].tool_context
     assert ctx.can_use_tool is ask
     assert ctx.get_app_state().tool_permission_context.should_avoid_permission_prompts is False
-    # Any other worker, background or not, never gets the parent's prompt.
+    # Every worker gets the parent's `canUseTool`; only a background non-`bubble` one avoids prompts
+    # (`agentGetAppState`'s `shouldAvoidPermissionPrompts` = `isAsync`), so the pipeline denies before asking.
     for definition, is_async in ((TESTER, True), (TESTER, False), (bubble, False)):
         model, _ = _run(definition=definition, parent=parent, is_async=is_async)
-        assert (model.seen[0].tool_context.can_use_tool is ask) is (definition is bubble)
+        worker = model.seen[0].tool_context
+        assert worker.can_use_tool is ask
+        avoids = worker.get_app_state().tool_permission_context.should_avoid_permission_prompts
+        assert avoids is (is_async and definition is not bubble)
+
+
+# ── a worker's asks reach the user's terminal, as upstream's (2026-11-21) ─────────────────────────────────
+
+def _worker_bash(is_async: bool, answer: str, *, permission_mode: str | None = None):
+    """A worker whose model runs `make build` (an ask in default mode) through the real tool pipeline."""
+    from langchain_core.messages import ToolCall as Call
+
+    from app.hooks.use_can_use_tool import (
+        PermissionAnswer,
+        build_interactive_can_use_tool,
+    )
+    from app.services.tools.tool_orchestration import run_tools
+    from app.tools.bash_tool.bash_tool import build_bash_tool
+    from tests.conftest import FakeWorkspace
+
+    asked: list[Any] = []
+
+    async def ask(prompt: Any) -> Any:
+        asked.append(prompt)
+        return PermissionAnswer(answer)
+
+    ws = FakeWorkspace()
+    store = AppStateStore(AppState(tool_permission_context=ToolPermissionContext(mode=PermissionMode.DEFAULT)))
+    parent = _parent(store, workspace=ws)
+    parent.can_use_tool = build_interactive_can_use_tool(ask)
+    bash = build_bash_tool()
+    call = AIMessage(content="", tool_calls=[Call(name="Bash", args={"command": "make build"}, id="b1")])
+    model = FakeModel([[call], [AIMessage(content="done")]])
+    deps = dataclasses.replace(make_fake_deps(model), run_tools=run_tools)
+    definition = dataclasses.replace(TESTER, phase=None, permission_mode=permission_mode)
+    _model, events = _run(definition=definition, model=model, tools=(bash,), parent=parent, deps=deps,
+                          is_async=is_async)
+    result = next(m for m in events if getattr(m, "tool_call_id", None) == "b1")
+    return asked, ws.command_log, result
+
+
+def test_a_synchronous_workers_ask_reaches_the_users_question_and_runs_on_yes():
+    asked, ran, result = _worker_bash(False, "yes")
+    assert [(p.tool_name, p.input["command"]) for p in asked] == [("Bash", "make build")]
+    assert ran == ["make build"] and result.status != "error"
+
+
+def test_a_synchronous_workers_ask_refused_by_the_user_does_not_run():
+    asked, ran, result = _worker_bash(False, "no")
+    assert len(asked) == 1 and ran == [] and result.status == "error"
+
+
+def test_a_background_worker_never_asks_and_is_denied():
+    """`agentGetAppState`: `shouldAvoidPermissionPrompts` for an async agent, so the pipeline denies first."""
+    asked, ran, result = _worker_bash(True, "yes")
+    assert asked == [] and ran == [] and result.status == "error"
+
+
+def test_a_background_bubble_worker_asks():
+    asked, ran, _result = _worker_bash(True, "yes", permission_mode="bubble")
+    assert len(asked) == 1 and ran == ["make build"]

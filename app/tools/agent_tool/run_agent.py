@@ -256,10 +256,11 @@ def run_agent(
             read_file_state={},
             nested_memory_attachment_triggers=set(),
             loaded_nested_memory_paths=set(),
-            # A worker never prompts, as upstream's outside swarm mode, so the parent's interactive
-            # `canUseTool` is not inherited, except by a `bubble` agent, whose prompts surface to the
-            # parent's terminal (`runAgent.ts`; the verification agent, user decision 2026-10-28).
-            can_use_tool=parent.can_use_tool if agent_definition.permission_mode == PermissionMode.BUBBLE else None,
+            # Upstream hands every agent the parent's `canUseTool` (`AgentTool.tsx` l.603-608 -> `runAgent.ts`
+            # l.748-756): a synchronous worker's asks reach the user's terminal. A background one cannot show
+            # them: `_agent_get_app_state` sets `should_avoid_permission_prompts` (`agentGetAppState`), so the
+            # pipeline denies before asking, unless the agent is `bubble` (2026-11-21).
+            can_use_tool=parent.can_use_tool,
             # `createSubagentContext` copies neither `requestPrompt` nor the REPL's progress hooks. It
             # stubs `updateFileHistoryState` (`() => {}`); here a synchronous worker, which shares the
             # parent's state (and ledger), keeps the parent's, so a rewind reverts its edits too (user
