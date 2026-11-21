@@ -5,8 +5,15 @@ it applies; the REPL renders and reads them.
 
 Ported from `reference/claude-code/src/components/permissions/`:
 
+* `PermissionRequest.tsx` -> `permissionComponentForTool` — which dialog a tool gets: Bash, the file tools,
+  WebFetch, Skill and ExitPlanMode their own, every other tool the fallback.
 * `FallbackPermissionRequest.tsx` — Yes / Yes, and don't ask again for <tool> commands in
   <cwd> (an allow rule for the whole tool, `localSettings`) / No.
+* `WebFetchPermissionRequest/WebFetchPermissionRequest.tsx` — Yes / Yes, and don't ask again for
+  <hostname> (an allow rule `domain:<hostname>`, `localSettings`) / No.
+* `SkillPermissionRequest/SkillPermissionRequest.tsx` — Yes / Yes, and don't ask again for <skill> in
+  <originalCwd> / Yes, and don't ask again for <prefix>:* commands in <originalCwd> (when the skill has
+  arguments) / No, each an allow rule on the skill in `localSettings`.
 * `BashPermissionRequest/bashToolUseOptions.tsx` — Yes / the result's suggestions, labelled
   by `shellPermissionHelpers.tsx` -> `generateShellSuggestionsLabel` / No.
 * `FilePermissionDialog/permissionOptions.tsx` -> `getFilePermissionOptions` — Yes / Yes,
@@ -34,6 +41,9 @@ from typing import Any, Literal
 
 from app.tdd.tdd_plan_tool.tdd_plan_tool import UPDATE_PLAN_TOOL_NAME
 from app.tools.bash_tool.bash_permissions import BASH_TOOL_NAME
+from app.tools.skill_tool.prompt import SKILL_TOOL_NAME
+from app.tools.web_fetch_tool.utils import parse_url
+from app.tools.web_fetch_tool.web_fetch_tool import WEB_FETCH_TOOL_NAME, permission_rule_content
 from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,
@@ -112,6 +122,50 @@ def fallback_permission_options(tool_name: str, cwd: str, show_always: bool) -> 
                                   behavior=PermissionBehavior.ALLOW)
         options.append(PermissionOption(
             "yes-dont-ask-again", f"Yes, and don't ask again for {tool_name} commands in {cwd}", (update,)))
+    return [*options, NO]
+
+
+def _local_allow(tool_name: str, rule_content: str) -> tuple[PermissionUpdate, ...]:
+    """`{type: 'addRules', rules: [{toolName, ruleContent}], behavior: 'allow', destination: 'localSettings'}`."""
+    return (PermissionUpdate("addRules", PermissionRuleSource.LOCAL_SETTINGS, rules=((tool_name, rule_content),),
+                             behavior=PermissionBehavior.ALLOW),)
+
+
+def web_fetch_permission_options(input_args: dict[str, Any], show_always: bool) -> list[PermissionOption]:
+    """
+    `WebFetchPermissionRequest`'s options (`components/permissions/WebFetchPermissionRequest/
+    WebFetchPermissionRequest.tsx`): Yes; "Yes, and don't ask again for <hostname>" (l.91), which adds the rule
+    `inputToPermissionRuleContent` builds (l.12: `domain:<hostname>`), shown only with
+    `shouldShowAlwaysAllowOptions` (l.67); No.
+    """
+    options = [YES]
+    if show_always:
+        rule_content = permission_rule_content(input_args)
+        parsed = parse_url(str(input_args.get("url") or ""))
+        hostname = parsed.hostname if parsed is not None else rule_content
+        options.append(PermissionOption("yes-dont-ask-again-domain", f"Yes, and don't ask again for {hostname}",
+                                        _local_allow(WEB_FETCH_TOOL_NAME, rule_content)))
+    return [*options, NO]
+
+
+def skill_permission_options(input_args: dict[str, Any], show_always: bool, cwd: str) -> list[PermissionOption]:
+    """
+    `SkillPermissionRequest`'s options (`components/permissions/SkillPermissionRequest/
+    SkillPermissionRequest.tsx`): Yes; "Yes, and don't ask again for <skill> in <originalCwd>" (l.94, the rule
+    is the input's `skill`, l.220); when the skill has arguments, "Yes, and don't ask again for <prefix>:*
+    commands in <originalCwd>" (l.125, the rule `<prefix>:*`, l.245); No. The remembered choices only with
+    `shouldShowAlwaysAllowOptions`.
+    """
+    options = [YES]
+    if show_always:
+        skill = str(input_args.get("skill") or "")
+        options.append(PermissionOption("yes-exact", f"Yes, and don't ask again for {skill} in {cwd}",
+                                        _local_allow(SKILL_TOOL_NAME, skill)))
+        space_index = skill.find(" ")
+        if space_index > 0:
+            prefix = f"{skill[:space_index]}:*"
+            options.append(PermissionOption("yes-prefix", f"Yes, and don't ask again for {prefix} commands in {cwd}",
+                                            _local_allow(SKILL_TOOL_NAME, prefix)))
     return [*options, NO]
 
 
@@ -206,6 +260,10 @@ def permission_options(
         return exit_plan_mode_options(context)
     if tool_name == BASH_TOOL_NAME:
         return bash_tool_use_options(suggestions, show_always, cwd)
+    if tool_name == WEB_FETCH_TOOL_NAME:
+        return web_fetch_permission_options(input_args, show_always)
+    if tool_name == SKILL_TOOL_NAME:
+        return skill_permission_options(input_args, show_always, cwd)
     operation = FILE_TOOL_OPERATIONS.get(tool_name)
     if operation is not None:
         path = str(input_args.get("file_path") or input_args.get("path") or "")

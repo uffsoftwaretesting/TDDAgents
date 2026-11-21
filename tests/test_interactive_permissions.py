@@ -24,6 +24,8 @@ from app.components.permissions.permission_options import (
     generate_shell_suggestions_label,
     permission_options,
     should_show_always_allow_options,
+    skill_permission_options,
+    web_fetch_permission_options,
 )
 from app.hooks.use_can_use_tool import (
     PermissionAnswer,
@@ -171,6 +173,34 @@ def test_fallback_options():
     assert options[1].updates == (rule_update(("mcp__s__t", None)),)
     assert [o.value for o in fallback_permission_options("t", "/w", False)] == ["yes", "no"]
     assert options[0] == YES and options[-1] == NO and NO.reject and not YES.reject
+
+
+def test_web_fetch_options_remember_the_domain():
+    """`WebFetchPermissionRequest.tsx`: Yes / "Yes, and don't ask again for <hostname>" (l.91, an allow rule
+    `domain:<hostname>` in the local settings) / No; the remembered choice only with `shouldShowAlwaysAllowOptions`."""
+    args = {"url": "https://docs.example.com/guide?x=1", "prompt": "p"}
+    options = permission_options("WebFetch", args, None, ToolPermissionContext(), "/w")
+    assert [o.value for o in options] == ["yes", "yes-dont-ask-again-domain", "no"]
+    assert options[1].label == "Yes, and don't ask again for docs.example.com"
+    assert options[1].updates == (rule_update(("WebFetch", "domain:docs.example.com")),)
+    assert options[0] == YES and options[-1] == NO
+    assert [o.value for o in web_fetch_permission_options(args, False)] == ["yes", "no"]
+
+
+@pytest.mark.parametrize(("skill", "values", "labels", "rules"), [
+    ("commit", ["yes", "yes-exact", "no"], ["Yes, and don't ask again for commit in /w"], [("Skill", "commit")]),
+    ("review-pr 123", ["yes", "yes-exact", "yes-prefix", "no"],
+     ["Yes, and don't ask again for review-pr 123 in /w", "Yes, and don't ask again for review-pr:* commands in /w"],
+     [("Skill", "review-pr 123"), ("Skill", "review-pr:*")]),
+])
+def test_skill_options_remember_the_skill_or_its_prefix(skill, values, labels, rules):
+    """`SkillPermissionRequest.tsx`: Yes / "… for <skill> in <originalCwd>" (l.94, ruleContent the skill) /
+    "… for <prefix>:* commands in <originalCwd>" when the skill has arguments (l.125) / No."""
+    options = permission_options("Skill", {"skill": skill}, None, ToolPermissionContext(), "/w")
+    assert [o.value for o in options] == values
+    assert [o.label for o in options[1:-1]] == labels
+    assert [o.updates for o in options[1:-1]] == [(rule_update(r),) for r in rules]
+    assert [o.value for o in skill_permission_options({"skill": skill}, False, "/w")] == ["yes", "no"]
 
 
 @pytest.mark.parametrize("rules, directories, label", [
@@ -614,3 +644,32 @@ def test_a_write_outside_suggests_the_folder_and_the_grant_allows_the_next_write
     assert perm.mode == PermissionMode.ACCEPT_EDITS
     assert call(bash, {"command": f"mkdir {outside}/b"}, ctx).message.status == "success"
     assert len(asker.prompts) == 1
+
+
+def test_dont_ask_again_for_a_domain_allows_that_host_only(tmp_path: Path):
+    """`WebFetchPermissionRequest.tsx` `yes-dont-ask-again-domain`: the `WebFetch(domain:<host>)` rule is persisted
+    to the local settings, so the same host runs without a question and another host still asks."""
+    import httpx
+
+    from app.tools.web_fetch_tool.web_fetch_tool import build_web_fetch_tool
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="# Doc\n\nbody", headers={"content-type": "text/markdown"})
+
+    def model_for(context: Any) -> Any:
+        async def ask(prompt: str) -> str:
+            return "ANSWER"
+        return ask
+
+    asker = Asker(PermissionAnswer("yes-dont-ask-again-domain"), PermissionAnswer("no", "not that one"))
+    ctx = interactive_context(tmp_path, asker)
+    tool = build_web_fetch_tool(model_for=model_for, transport=httpx.MockTransport(handle))
+    first = call(tool, {"url": "https://docs.example.org/a", "prompt": "p"}, ctx)
+    assert first.message.status == "success"
+    assert [o.value for o in asker.prompts[0].options] == ["yes", "yes-dont-ask-again-domain", "no"]
+    local = json.loads((tmp_path / ".tddagents" / "settings.local.json").read_text())
+    assert local["permissions"]["allow"] == ["WebFetch(domain:docs.example.org)"]
+    assert call(tool, {"url": "https://docs.example.org/b", "prompt": "p"}, ctx).message.status == "success"
+    assert len(asker.prompts) == 1
+    assert call(tool, {"url": "https://other.example.org/a", "prompt": "p"}, ctx).message.status == "error"
+    assert len(asker.prompts) == 2
