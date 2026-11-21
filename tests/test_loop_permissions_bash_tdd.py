@@ -298,3 +298,70 @@ def test_in_red_a_write_outside_the_project_reaches_upstreams_ask(tmp_path, tool
               for key, value in args.items()}
     denied = asyncio.run(has_permissions_to_use_tool(tool, inside, ctx))
     assert denied.behavior == "deny" and (denied.decision_reason or {}).get("type") == "phase_rule"
+
+
+# ── a `cd` in the command: relative targets are upstream's to ask about (2026-11-21) ──────────────────────
+
+@pytest.mark.parametrize(("command", "ledger"), [
+    ("mkdir -p /tmp/spike && cd /tmp/spike && cat > main.go", RED),   # the Go live run's command
+    ("cd /tmp/spike && echo x >> calculator.py", RED),
+    ("pushd build && echo x > app.py", RED),
+    ("cd tests && echo 'assert 1' > test_calc.py", GREEN),
+    ("cd src; popd; echo x > calculator.py", RED),
+])
+def test_after_a_cd_a_relative_target_is_left_to_upstreams_ask(command, ledger):
+    """
+    `compoundCommandHasCd` (`bashPermissions.ts` l.2181-2200): after a `cd`, `pushd` or `popd` the final working
+    directory cannot be determined, so `validateOutputRedirections` (`pathValidation.ts` l.930-945) asks for every
+    redirection. The tier cannot place a relative target either: it is left to that ask, never refused as if it
+    were in the project.
+    """
+    assert check_bash_tdd_phase(command, ledger, rules=TEST_PROJECT_CONFIG.rules, root="/proj") == (True, "")
+
+
+def test_a_cd_to_the_shells_own_directory_is_no_cd():
+    """`filterCdCwdSubcommands` (`bashPermissions.ts` l.1362-1377): the `cd <cwd>` models prepend is dropped."""
+    assert check_bash_tdd_phase("cd /proj && echo x > calculator.py", RED, rules=TEST_PROJECT_CONFIG.rules,
+                                root="/proj") == (False, RED_PRODUCTION)
+    assert check_bash_tdd_phase("cd /proj/tests && echo x > calculator.py", RED, "tests",
+                                rules=TEST_PROJECT_CONFIG.rules, root="/proj")[0] is True  # tests/calculator.py
+
+
+def test_after_a_cd_an_absolute_target_is_still_judged():
+    """A `cd` does not move an absolute path: a production file of the project is still refused in RED."""
+    permitted, reason = check_bash_tdd_phase("cd /tmp && echo x > /proj/calculator.py", RED,
+                                             rules=TEST_PROJECT_CONFIG.rules, root="/proj")
+    assert permitted is False and "RED denies writing to production file '/proj/calculator.py'" in reason
+    permitted, reason = check_bash_tdd_phase("cd tests && echo x > /proj/tests/test_a.py", GREEN,
+                                             rules=TEST_PROJECT_CONFIG.rules, root="/proj")
+    assert permitted is False and "denies modifying test file" in reason
+
+
+def test_after_a_cd_with_no_declaration_a_redirect_is_still_refused():
+    from app.tdd.phase_permissions import NO_PROJECT_CONFIG
+
+    assert check_bash_tdd_phase("cd /tmp && echo x > a.py", RED, rules=None) == (
+        False, f"TDD phase RED denies this command's redirection: {NO_PROJECT_CONFIG}")
+
+
+def test_in_red_the_live_runs_cd_command_asks_with_upstreams_message(tmp_path):
+    import asyncio
+
+    from app.state.app_state_store import AppState, AppStateStore
+    from app.tool import tool_context_for
+    from app.tools.bash_tool.bash_tool import build_bash_tool
+    from app.types.permissions import PermissionMode, ToolPermissionContext
+    from app.utils.permissions.permissions import has_permissions_to_use_tool
+    from app.workspace.local import LocalWorkspace
+    from tests.plan_helpers import CURRENT_ITEM_PLAN
+
+    project = tmp_path / "project"
+    project.mkdir()
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG,
+                                   phase_ledger=PhaseLedger()))
+    ctx = tool_context_for(store, workspace=LocalWorkspace(str(project)),
+                           permission_context=ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS))
+    res = asyncio.run(has_permissions_to_use_tool(
+        build_bash_tool(), {"command": "mkdir -p /tmp/spike && cd /tmp/spike && cat > main.go"}, ctx))
+    assert res.behavior == "ask"
+    assert (res.decision_reason or {}).get("type") != "phase_rule"

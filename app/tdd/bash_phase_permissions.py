@@ -31,6 +31,12 @@ Two details carried over deliberately:
   manual approval" (l.1052), and without the sandbox the install gate asks the same, an ask
   `bypassPermissions` cannot skip. The user decides; with nobody to ask (headless, workers) it is
   denied. With no project declaration every redirect is still refused.
+* **After a `cd` in the command, a relative target cannot be placed either** (2026-11-21). Any `cd`,
+  `pushd` or `popd` other than the `cd <cwd>` models prepend (`compoundCommandHasCd`,
+  `filterCdCwdSubcommands`, `bashPermissions.ts`) moves where the shell writes, so the tier judges only
+  the absolute targets and leaves the relative ones to upstream's ask ("Compound command contains cd with
+  output redirection", `validateOutputRedirections`, `pathValidation.ts` l.930-945). Before, `cd /tmp/spike
+  && cat > main.go` in RED was refused as if `main.go` were the project's.
 
 What this does **not** do, because upstream does not either: `tee`, `dd` and `truncate` get
 no special handling. They are not read-only, so they still reach the permission gate on
@@ -46,7 +52,7 @@ import posixpath
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_permissions import BACK_TO_RED, NO_PROJECT_CONFIG, classify_path
 from app.tdd.project_config import TestFileRules
-from app.utils.bash.commands import extract_output_redirections
+from app.utils.bash.commands import extract_output_redirections, split_command
 
 #: Redirecting here writes nothing, so no phase can object. Upstream short-circuits it too.
 DEV_NULL = "/dev/null"
@@ -67,6 +73,25 @@ def redirect_targets(command: str) -> tuple[tuple[str, ...], bool]:
     return targets, extraction.has_dangerous_redirection
 
 
+def shell_directory(root: str | None, cwd_offset: str | None) -> str | None:
+    """The shell's directory as an absolute path: the project `root` joined with the tracked `cwd_offset`."""
+    if root is None:
+        return None
+    return posixpath.normpath(posixpath.join(root, cwd_offset or "."))
+
+
+def changes_directory(command: str, cwd: str | None) -> bool:
+    """
+    `compoundCommandHasCd` (`reference/claude-code/src/tools/BashTool/bashPermissions.ts` l.2181-2200): any
+    subcommand that is a `cd`, `pushd` or `popd` (`isNormalizedCdCommand`, l.2603), once the `cd <cwd>` models
+    prepend is dropped (`filterCdCwdSubcommands`, l.1362-1377, called at l.2144-2157).
+    """
+    from app.tools.bash_tool.bash_permissions import is_normalized_cd_command
+
+    own = f"cd {cwd}" if cwd is not None else None
+    return any(is_normalized_cd_command(sub) for sub in split_command(command) if sub != own)
+
+
 def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | None = None, *,
                          rules: TestFileRules | None, root: str | None = None) -> tuple[bool, str]:
     """
@@ -79,13 +104,17 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | No
     """
     targets, dangerous = redirect_targets(command)
     # `dangerous` is upstream's to ask about (see the module docstring); with no declaration it is refused.
-    if cwd_offset is not None:
-        targets = tuple(t if os.path.isabs(t) or t.startswith("~")
-                        else posixpath.normpath(posixpath.join(cwd_offset, t)) for t in targets)
     if not targets and not dangerous:
         return True, ""
     if rules is None:
         return False, f"TDD phase {ledger.phase} denies this command's redirection: {NO_PROJECT_CONFIG}"
+    if changes_directory(command, shell_directory(root, cwd_offset)):
+        # After a `cd` the final directory is unknown (`compoundCommandHasCd`), so a relative target cannot be
+        # placed: it is left to upstream's ask (`validateOutputRedirections`), as a shell-expansion target is.
+        targets = tuple(t for t in targets if os.path.isabs(t))
+    elif cwd_offset is not None:
+        targets = tuple(t if os.path.isabs(t) or t.startswith("~")
+                        else posixpath.normpath(posixpath.join(cwd_offset, t)) for t in targets)
     kinds = {target: classify_path(target, rules, root) for target in targets}
 
     if ledger.phase == TddPhase.RED:
