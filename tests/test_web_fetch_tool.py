@@ -141,8 +141,8 @@ def rule(behavior: PermissionBehavior, content: str = "domain:example.com") -> P
 
 
 def test_rule_content_is_the_domain():
-    assert permission_rule_content({"url": "https://a.example.com/x"}) == "domain:a.example.com"
-    assert permission_rule_content({"url": "nonsense"}).startswith("input:")
+    assert permission_rule_content({"url": "https://a.example.com/x", "prompt": "q"}) == "domain:a.example.com"
+    assert permission_rule_content({"url": "nonsense", "prompt": "q"}) == "input:[object Object]"
 
 
 def test_a_preapproved_host_is_allowed_without_a_rule():
@@ -157,7 +157,7 @@ def test_a_preapproved_host_is_allowed_without_a_rule():
     (PermissionBehavior.ALLOW, PermissionBehavior.ALLOW),
 ])
 def test_domain_rules_decide(behavior: PermissionBehavior, expected: PermissionBehavior):
-    result = check_web_fetch_permissions({"url": "https://example.com/a"}, ctx_with(rule(behavior)))
+    result = check_web_fetch_permissions({"url": "https://example.com/a", "prompt": "q"}, ctx_with(rule(behavior)))
     assert result.behavior == expected
     if expected == PermissionBehavior.DENY:
         assert result.message == "WebFetch denied access to domain:example.com."
@@ -165,7 +165,7 @@ def test_domain_rules_decide(behavior: PermissionBehavior, expected: PermissionB
 
 def test_with_no_rule_it_asks_and_suggests_allowing_the_domain():
     other_domain = ctx_with(rule(PermissionBehavior.ALLOW, "domain:other.com"))
-    result = check_web_fetch_permissions({"url": "https://example.com/a"}, other_domain)
+    result = check_web_fetch_permissions({"url": "https://example.com/a", "prompt": "q"}, other_domain)
     assert result.behavior == PermissionBehavior.ASK
     assert result.message == "TDDAgents requested permissions to use WebFetch, but you haven't granted it yet."
     assert result.suggestions == build_suggestions("domain:example.com")

@@ -17,8 +17,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
-
 import httpx
 
 from app.tool import BuiltTool, ToolContext, ToolResult, ValidationResult, build_tool
@@ -33,6 +31,7 @@ from app.tools.web_fetch_tool.utils import (
     apply_prompt_to_markdown,
     get_url_markdown_content,
     is_preapproved_url,
+    parse_url,
 )
 from app.types.permissions import (
     PermissionBehavior,
@@ -55,13 +54,25 @@ _REDIRECT_TEXT = {301: "Moved Permanently", 308: "Permanent Redirect", 307: "Tem
 ModelFor = Callable[[ToolContext], SecondaryModel]
 
 
+#: `input:${input.toString()}`: a plain object's `toString()` is `[object Object]`, so upstream's fallback rule
+#: content is this literal, whatever the input.
+INPUT_RULE_CONTENT = "input:[object Object]"
+
+#: `inputSchema`: a strict object of `url` and `prompt`.
+_INPUT_KEYS = frozenset({"url", "prompt"})
+
+
 def permission_rule_content(input_args: dict[str, Any]) -> str:
-    """`webFetchToolInputToPermissionRuleContent`: `domain:<host>`, or `input:<…>` when unparseable."""
-    try:
-        hostname = urlsplit(str(input_args["url"])).hostname
-    except (KeyError, ValueError):
-        hostname = None
-    return f"domain:{hostname}" if hostname else f"input:{input_args}"
+    """
+    `webFetchToolInputToPermissionRuleContent` (`WebFetchTool.ts` l.50): `domain:<new URL(url).hostname>` when the
+    input parses against the strict schema (`url` and `prompt` strings, nothing else) and the URL parses, else
+    `INPUT_RULE_CONTENT`.
+    """
+    url, prompt = input_args.get("url"), input_args.get("prompt")
+    if not isinstance(url, str) or not isinstance(prompt, str) or set(input_args) - _INPUT_KEYS:
+        return INPUT_RULE_CONTENT
+    parsed = parse_url(url)
+    return f"domain:{parsed.hostname}" if parsed is not None else INPUT_RULE_CONTENT
 
 
 def _rule(rules: tuple[PermissionRule, ...], content: str) -> PermissionRule | None:
@@ -83,14 +94,14 @@ def _asked(rule_content: str, reason: dict[str, Any] | None = None) -> Permissio
 
 
 def check_web_fetch_permissions(input_args: dict[str, Any], context: ToolContext) -> PermissionResult:
-    """`WebFetchTool.checkPermissions`."""
-    try:
-        parts = urlsplit(str(input_args.get("url") or ""))
-        if parts.hostname and is_preapproved_host(parts.hostname, parts.path or "/"):
-            return PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input=input_args,
-                                    decision_reason={"type": "other", "reason": "Preapproved host"})
-    except ValueError:
-        pass
+    """
+    `WebFetchTool.checkPermissions` (`WebFetchTool.ts` l.106): a preapproved host is allowed before any rule;
+    then a `WebFetch(<rule content>)` deny, ask or allow rule; else an ask suggesting the domain.
+    """
+    parsed = parse_url(str(input_args.get("url") or ""))
+    if parsed is not None and is_preapproved_host(parsed.hostname, parsed.pathname):
+        return PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input=input_args,
+                                decision_reason={"type": "other", "reason": "Preapproved host"})
     content = permission_rule_content(input_args)
     perm = extract_permission_context(context)
     deny = _rule(perm.always_deny_rules, content)
@@ -109,10 +120,9 @@ def check_web_fetch_permissions(input_args: dict[str, Any], context: ToolContext
 
 
 def validate_web_fetch(input_args: dict[str, Any], context: ToolContext) -> ValidationResult:
-    """`WebFetchTool.validateInput`: the URL must parse."""
+    """`WebFetchTool.validateInput` (l.190): the URL must parse (`new URL(url)`)."""
     url = str(input_args.get("url") or "")
-    parts = urlsplit(url)
-    if not parts.scheme or not parts.netloc:
+    if parse_url(url) is None:
         return ValidationResult(valid=False, error_code=1,
                                 message=f'Error: Invalid URL "{url}". The URL provided could not be parsed.')
     return ValidationResult(valid=True)
@@ -177,8 +187,10 @@ def build_web_fetch_tool(*, model_for: ModelFor = default_model_for,
             return ToolResult(content=f"Error fetching {url}: {exc}", is_error=True)
         if isinstance(response, RedirectInfo):
             message = redirect_message(response, prompt)
-            return ToolResult(content=message, metadata={"code": response.status_code, "url": url,
-                                                         "bytes": len(message.encode("utf-8"))})
+            return ToolResult(content=message, metadata={
+                "bytes": len(message.encode("utf-8")), "code": response.status_code,
+                "codeText": _REDIRECT_TEXT.get(response.status_code, "Found"),
+                "durationMs": int((now() - start) * 1000), "url": url})
         fetched: FetchedContent = response
         preapproved = is_preapproved_url(url)
         if preapproved and "text/markdown" in fetched.content_type and len(fetched.content) < MAX_MARKDOWN_LENGTH:
@@ -194,8 +206,9 @@ def build_web_fetch_tool(*, model_for: ModelFor = default_model_for,
             "durationMs": int((now() - start) * 1000), "url": url})
 
     def describe(input_args: dict[str, Any]) -> str:
-        hostname = urlsplit(str(input_args.get("url") or "")).hostname
-        return f"TDDAgents wants to fetch content from {hostname}" if hostname else \
+        """`description` (l.73): the URL's hostname, or "this URL" when it does not parse."""
+        parsed = parse_url(str(input_args.get("url") or ""))
+        return f"TDDAgents wants to fetch content from {parsed.hostname}" if parsed is not None else \
             "TDDAgents wants to fetch content from this URL"
 
     return build_tool(
@@ -226,6 +239,7 @@ def build_web_fetch_tool(*, model_for: ModelFor = default_model_for,
 
 
 __all__ = [
+    "INPUT_RULE_CONTENT",
     "WEB_FETCH_TOOL_NAME",
     "build_suggestions",
     "build_web_fetch_tool",

@@ -3,8 +3,9 @@ Fetching a URL as markdown and applying a prompt to it.
 
 Ported from `reference/claude-code/src/tools/WebFetchTool/utils.ts`: `validateURL`,
 `isPermittedRedirect`, `getWithPermittedRedirects`, `getURLMarkdownContent`, `isPreapprovedUrl`,
-`applyPromptToMarkdown`, the URL cache and its limits; `prompt.ts` -> `makeSecondaryModelPrompt`;
-`utils/mcpOutputStorage.ts` -> `isBinaryContentType`.
+`applyPromptToMarkdown`, `EgressBlockedError`, the URL cache and its limits; `prompt.ts` ->
+`makeSecondaryModelPrompt`; `utils/mcpOutputStorage.ts` -> `isBinaryContentType`. `parse_url` stands in for
+the WHATWG `new URL(url)` every one of them starts from.
 
 httpx stands in for axios (no automatic redirects, a timeout, a byte cap) and markdownify for
 turndown. *Divergence:* the domain-blocklist preflight to Anthropic's `domain_info` service is not
@@ -13,6 +14,8 @@ ported (user decision 2026-10-28); `skipWebFetchPreflight` therefore has nothing
 
 from __future__ import annotations
 
+import json
+import re
 import time
 import uuid
 from collections import OrderedDict
@@ -42,6 +45,72 @@ USER_AGENT = f"TDDAgents-User ({get_tddagents_user_agent()})"
 
 #: `(user prompt, model) -> text`: the small, fast model's answer (`queryHaiku`).
 SecondaryModel = Callable[[str], Awaitable[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedUrl:
+    """The parts of a WHATWG `URL` WebFetch reads: `protocol` without its colon, `hostname`, `port` ('' for the
+    scheme's default), `username`, `password` and `pathname`."""
+
+    scheme: str
+    hostname: str
+    port: str
+    username: str
+    password: str
+    pathname: str
+
+
+#: The WHATWG special schemes and their default ports (`URL.port` is '' for them).
+_SPECIAL_SCHEMES: dict[str, int | None] = {"http": 80, "https": 443, "ws": 80, "wss": 443, "ftp": 21, "file": None}
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
+
+
+def _whatwg_hostname(host: str) -> str | None:
+    """`URL.hostname`: lower case, an IPv6 address in brackets, a non-ASCII name in punycode (IDNA)."""
+    if ":" in host:
+        return f"[{host}]"
+    try:
+        return host.encode("idna").decode("ascii").lower() if host else ""
+    except UnicodeError:
+        return None
+
+
+def parse_url(url: str) -> ParsedUrl | None:
+    """
+    `new URL(url)` as WebFetch reads it, `None` where it throws: a scheme is required, a special scheme other
+    than `file` needs a host, the port must be a number, and the hostname must encode. Leading and trailing
+    spaces are trimmed, as the URL parser does.
+    """
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+    except (ValueError, TypeError, AttributeError):
+        return None
+    scheme = parts.scheme.lower()
+    if not scheme or not _SCHEME.fullmatch(scheme):
+        return None
+    special = scheme in _SPECIAL_SCHEMES
+    raw_host = parts.hostname or ""
+    if special and scheme != "file" and not raw_host:
+        return None
+    hostname = _whatwg_hostname(raw_host)
+    if hostname is None:
+        return None
+    default_port = _SPECIAL_SCHEMES.get(scheme)
+    return ParsedUrl(scheme=scheme, hostname=hostname,
+                     port="" if port is None or port == default_port else str(port),
+                     username=parts.username or "", password=parts.password or "",
+                     pathname=parts.path or ("/" if special else ""))
+
+
+class EgressBlockedError(RuntimeError):
+    """`EgressBlockedError`: the egress proxy refused the host (`403` with `X-Proxy-Error: blocked-by-allowlist`)."""
+
+    def __init__(self, domain: str) -> None:
+        super().__init__(json.dumps({"error_type": "EGRESS_BLOCKED", "domain": domain,
+                                     "message": f"Access to {domain} is blocked by the network egress proxy."},
+                                    separators=(",", ":"), ensure_ascii=False))
+        self.domain = domain
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,45 +171,34 @@ def clear_web_fetch_cache() -> None:
 
 
 def is_preapproved_url(url: str) -> bool:
-    """`isPreapprovedUrl`."""
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return False
-    return is_preapproved_host(parts.hostname or "", parts.path or "/")
+    """`isPreapprovedUrl`: `isPreapprovedHost(hostname, pathname)`, false when the URL does not parse."""
+    parsed = parse_url(url)
+    return parsed is not None and is_preapproved_host(parsed.hostname, parsed.pathname)
 
 
 def validate_url(url: str) -> bool:
     """`validateURL`: parseable, not too long, no credentials, and a dotted (public) hostname."""
     if len(url) > MAX_URL_LENGTH:
         return False
-    try:
-        parts = urlsplit(url)
-    except ValueError:
+    parsed = parse_url(url)
+    if parsed is None:
         return False
-    if not parts.scheme or not parts.netloc:
+    if parsed.username or parsed.password:
         return False
-    if parts.username or parts.password:
-        return False
-    return len((parts.hostname or "").split(".")) >= 2
+    return len(parsed.hostname.split(".")) >= 2
 
 
 def is_permitted_redirect(original_url: str, redirect_url: str) -> bool:
-    """`isPermittedRedirect`: same protocol, port and host, `www.` added or removed allowed."""
-    try:
-        original, redirect = urlsplit(original_url), urlsplit(redirect_url)
-        if redirect.scheme != original.scheme or redirect.port != original.port:
-            return False
-        if redirect.username or redirect.password:
-            return False
-
-        def strip_www(hostname: str | None) -> str:
-            host = hostname or ""
-            return host.removeprefix("www.")
-
-        return strip_www(original.hostname) == strip_www(redirect.hostname)
-    except ValueError:
+    """`isPermittedRedirect`: same protocol, port (a default port is '') and host, `www.` added or removed
+    allowed, no credentials in the redirect."""
+    original, redirect = parse_url(original_url), parse_url(redirect_url)
+    if original is None or redirect is None:
         return False
+    if redirect.scheme != original.scheme or redirect.port != original.port:
+        return False
+    if redirect.username or redirect.password:
+        return False
+    return original.hostname.removeprefix("www.") == redirect.hostname.removeprefix("www.")
 
 
 def is_binary_content_type(content_type: str) -> bool:
@@ -174,6 +232,9 @@ async def get_with_permitted_redirects(client: httpx.AsyncClient, url: str,
         if redirect_checker(url, redirect_url):
             return await get_with_permitted_redirects(client, redirect_url, redirect_checker, depth + 1)
         return RedirectInfo(url, redirect_url, response.status_code)
+    if response.status_code == 403 and response.headers.get("x-proxy-error") == "blocked-by-allowlist":
+        parsed = parse_url(url)
+        raise EgressBlockedError(parsed.hostname if parsed is not None else url)
     response.raise_for_status()
     if len(response.content) > MAX_HTTP_CONTENT_LENGTH:
         raise RuntimeError(f"Response exceeds the maximum content length of {MAX_HTTP_CONTENT_LENGTH} bytes")
@@ -261,6 +322,8 @@ __all__ = [
     "MAX_MARKDOWN_LENGTH",
     "URL_CACHE",
     "FetchedContent",
+    "EgressBlockedError",
+    "ParsedUrl",
     "RedirectInfo",
     "SecondaryModel",
     "apply_prompt_to_markdown",
@@ -271,5 +334,6 @@ __all__ = [
     "is_permitted_redirect",
     "is_preapproved_url",
     "make_secondary_model_prompt",
+    "parse_url",
     "validate_url",
 ]
