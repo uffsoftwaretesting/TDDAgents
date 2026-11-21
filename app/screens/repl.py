@@ -96,7 +96,7 @@ from app.components.permissions.ask_user_question_permission_request.preview_box
 )
 from app.components.design_system.question_box import style_question
 from app.components.messages.system_text_message import NoticeLevel, notice
-from app.bootstrap.state import get_last_interaction_time, update_last_interaction_time
+from app.bootstrap.state import flush_interaction_time, get_last_interaction_time, update_last_interaction_time
 from app.components.permissions.permission_options import PermissionOption
 from app.components.permissions.permission_request import get_notification_message
 from app.components.spinner.spinner import pick_spinner_verb, spinner_message, spinner_status_line
@@ -365,6 +365,8 @@ class Repl:
         self._asking = asyncio.Lock()
         #: The armed `idle_prompt` notification (`_notify_when_idle`), if any.
         self._idle_notice: asyncio.Task[None] | None = None
+        #: Notifications in flight (`_notify`).
+        self._notifications: set[asyncio.Task[str]] = set()
         self.last_terminal: Terminal | None = None
         #: The first message typed in a session opened with no request (`open_fresh_session`).
         self.first_request: str | None = None
@@ -523,22 +525,31 @@ class Repl:
         name = detect_terminal()
         write_raw = getattr(self.io, "write_raw", None)
         terminal = TerminalNotification(write_raw if callable(write_raw) else (lambda _data: None), terminal=name)
-        return asyncio.ensure_future(send_notification(
+        task = asyncio.ensure_future(send_notification(
             NotificationOptions(message=message, notification_type=notification_type), terminal,
             dispatcher=getattr(self.run.ctx, "hook_dispatcher", None), terminal_name=name))
+        # Held until done (an unreferenced task may be collected mid-flight), cancelled at session end.
+        self._notifications.add(task)
+        task.add_done_callback(self._notifications.discard)
+        return task
 
     def _notify_after_timeout(self, message: str, notification_type: str, seconds: float) -> asyncio.Task[None]:
         """
-        `useNotifyAfterTimeout`: the interaction clock is stamped now (a long request does not notify at
-        once), and the notification goes out after `seconds` unless the user typed meanwhile.
+        `useNotifyAfterTimeout`: the clock is stamped now (a long request does not notify at once), then checked
+        every `seconds` (upstream's `setInterval`) until the user has been idle that long (`shouldNotify`, every
+        keystroke counts), and the notification goes out once.
         """
-        update_last_interaction_time()
-        started = get_last_interaction_time()
+        from app.hooks.use_notify_after_timeout import should_notify
+
+        update_last_interaction_time(immediate=True)
 
         async def wait() -> None:
-            await asyncio.sleep(seconds)
-            if get_last_interaction_time() <= started:
-                await self._notify(message, notification_type)
+            while True:
+                await asyncio.sleep(seconds)
+                flush_interaction_time()  # a keystroke not yet stamped still counts
+                if should_notify(seconds * 1000):
+                    await self._notify(message, notification_type)
+                    return
 
         return asyncio.ensure_future(wait())
 
@@ -562,6 +573,7 @@ class Repl:
 
         async def wait() -> None:
             await asyncio.sleep(seconds)
+            flush_interaction_time()
             if get_last_interaction_time() > completed or self.busy or self.pending is not None:
                 return
             await self._notify("TDDAgents is waiting for your input", "idle_prompt")
@@ -581,7 +593,11 @@ class Repl:
         """
         async with self._asking:
             if prompt.recheck is not None:
-                fresh = await prompt.recheck()
+                try:
+                    fresh = await prompt.recheck()
+                except Exception as error:  # noqa: BLE001 - upstream's `void recheckPermission()`: the prompt stays
+                    logger.debug("recheckPermission failed: %s", error)
+                    fresh = None
                 if fresh is not None:
                     return PermissionAnswer("yes", rechecked=fresh)
             answer: PermissionAnswer = await self.prompt(
@@ -729,7 +745,7 @@ class Repl:
 
     async def handle_line(self, line: str) -> None:
         """One line from the user: an answer, a command, or a message to the agents."""
-        update_last_interaction_time()
+        update_last_interaction_time(immediate=True)
         if self.pending is not None:
             await self._answer_pending(self.pending, line)
             return
@@ -1192,6 +1208,8 @@ class Repl:
         finally:
             if self._idle_notice is not None:
                 self._idle_notice.cancel()
+            for notification in list(self._notifications):
+                notification.cancel()
             unsubscribe()
             unsubscribe_settings_errors()
         return self.last_terminal

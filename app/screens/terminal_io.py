@@ -24,7 +24,7 @@ import asyncio
 import sys
 from collections.abc import Callable, Iterable
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import History, InMemoryHistory
@@ -32,7 +32,9 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.patch_stdout import patch_stdout
 
+from app.bootstrap.state import flush_interaction_time
 from app.history import PromptHistory
+from app.ink.components.app import process_keys_in_batch
 from app.utils.debug import route_terminal_logs
 
 #: How often the status line is looked at (a redraw follows only when it changed).
@@ -59,7 +61,8 @@ class TerminalIO:
     #: The REPL may write ANSI styles (the title panel): `patch_stdout(raw=True)` passes them through.
     supports_color = True
 
-    def __init__(self, on_interrupt: Callable[[], None], history: PromptHistory | None = None) -> None:
+    def __init__(self, on_interrupt: Callable[[], None], history: PromptHistory | None = None, *,
+                 input: Any = None, output: Any = None) -> None:
         self._on_interrupt = on_interrupt
         bindings = KeyBindings()
 
@@ -69,11 +72,28 @@ class TerminalIO:
 
         self._session: PromptSession[str] = PromptSession(
             key_bindings=bindings,
-            history=PromptToolkitHistory(history) if history is not None else InMemoryHistory())
+            history=PromptToolkitHistory(history) if history is not None else InMemoryHistory(),
+            input=input, output=output)
+        self._count_keystrokes()
         self._patch = patch_stdout(raw=True)
         self._restore_logs: Callable[[], None] = lambda: None
         self._status: Callable[[], str | None] = lambda: None
         self._ticker: asyncio.Task[None] | None = None
+
+    def _count_keystrokes(self) -> None:
+        """
+        `App.tsx` `processKeysInBatch`: prompt_toolkit's input reader hands every batch of keys to the key
+        processor's `feed_multiple` (Ink's one stdin handler), so each batch marks the interaction clock first;
+        typing without Enter defers a notification as upstream's per-keystroke clock does.
+        """
+        processor = self._session.app.key_processor
+        feed = processor.feed_multiple
+
+        def feed_multiple(key_presses: list[Any], first: bool = False) -> None:
+            process_keys_in_batch(key_presses)
+            feed(key_presses, first=first)
+
+        processor.feed_multiple = feed_multiple  # type: ignore[method-assign]
 
     def set_status(self, status: Callable[[], str | None]) -> None:
         """The line to show above the input while the agents work; `None` shows none."""
@@ -89,6 +109,8 @@ class TerminalIO:
         shown = self._status()
         while True:
             await asyncio.sleep(STATUS_REFRESH_SECONDS)
+            # `ink.tsx`: the clock is stamped once per frame, before the render.
+            flush_interaction_time()
             current = self._status()
             if current != shown:
                 shown = current

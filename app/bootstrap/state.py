@@ -65,15 +65,35 @@ def get_flag_settings_inline() -> dict[str, Any] | None:
     return dict(value) if value is not None else None
 
 
-#: `STATE.lastInteractionTime` (seconds since the epoch): the user's last input.
+#: `STATE.lastInteractionTime` (seconds since the epoch): the user's last input, as last flushed.
 _LAST_INTERACTION_TIME: list[float] = [0.0]
+#: `interactionTimeDirty`: a keystroke arrived since the last flush.
+_INTERACTION_TIME_DIRTY: list[bool] = [False]
 
 
-def update_last_interaction_time(now: float | None = None) -> None:
-    """`updateLastInteractionTime(true)`: the user just typed (the REPL reads lines, so there is no batching)."""
+def update_last_interaction_time(immediate: bool = False) -> None:
+    """
+    `updateLastInteractionTime`: a keystroke marks the clock dirty and the next flush stamps it, so a batch of
+    keys costs one clock read (`App.tsx` `processKeysInBatch`). `immediate` stamps at once, for a caller that runs
+    after the frame flushed (`useNotifyAfterTimeout` on mount).
+    """
+    if immediate:
+        _flush_interaction_time_inner()
+    else:
+        _INTERACTION_TIME_DIRTY[0] = True
+
+
+def flush_interaction_time() -> None:
+    """`flushInteractionTime`: stamp the clock if a keystroke arrived since the last flush (`ink.tsx`, each frame)."""
+    if _INTERACTION_TIME_DIRTY[0]:
+        _flush_interaction_time_inner()
+
+
+def _flush_interaction_time_inner() -> None:
     import time
 
-    _LAST_INTERACTION_TIME[0] = time.time() if now is None else now
+    _LAST_INTERACTION_TIME[0] = time.time()
+    _INTERACTION_TIME_DIRTY[0] = False
 
 
 def get_last_interaction_time() -> float:

@@ -433,3 +433,170 @@ def test_handle_line_stamps_the_interaction_clock() -> None:
         return get_last_interaction_time() - before
 
     assert asyncio.run(go()) > 0
+
+
+def test_a_notification_in_flight_is_held_until_done() -> None:
+    async def go() -> tuple[int, int]:
+        r = repl(IO())
+        task = r._notify("m", "idle_prompt")
+        held = len(r._notifications)
+        await task
+        return held, len(r._notifications)
+
+    assert asyncio.run(go()) == (1, 0)
+
+
+def test_a_finished_plan_reaches_a_notification_hook_and_the_bell(python_workspace: Any, tmp_path: Path) -> None:
+    """
+    Integration: a real session completes its plan; the user stays idle; `idle_prompt` runs the project's
+    Notification command hook (`executeNotificationHooks`) and rings the bell; `/exit` cancels what is left.
+    """
+    from app.tdd.plan import TddPlan
+    from tests.test_repl import FakeIO, Model, cycle_turns, session, until
+
+    _set_idle_threshold(20)
+    marker = tmp_path / "notified.json"
+    script_file = tmp_path / "hook.sh"
+    script_file.write_text(f"cat > {marker}\n")
+    settings = tmp_path / ".tddagents" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"hooks": {"Notification": [
+        {"matcher": "idle_prompt", "hooks": [{"type": "command", "command": f"sh {script_file}"}]}]}}))
+
+    class RawIO(FakeIO):
+        def __init__(self) -> None:
+            super().__init__()
+            self.raw: list[str] = []
+
+        def write_raw(self, data: str) -> None:
+            self.raw.append(data)
+
+    async def script(repl: Any, io: Any) -> None:
+        repl.io = RawIO.__new__(RawIO)
+        repl.io.__dict__.update(io.__dict__)
+        repl.io.raw = []
+        await until(lambda: "Every sub-requirement is done" in io.text())
+        await until(lambda: marker.exists() and marker.read_text().strip() != "")
+        io.lines.put_nowait("/exit")
+
+    terminal, repl, io = asyncio.run(session(python_workspace, tmp_path, Model(cycle_turns()),
+                                             TddPlan.from_texts(["add"]), script))
+    payload = json.loads(marker.read_text())
+    assert (payload["hook_event_name"], payload["notification_type"], payload["message"]) == (
+        "Notification", "idle_prompt", "TDDAgents is waiting for your input")
+    assert BEL in getattr(repl.io, "raw")
+    assert repl._idle_notice is None or repl._idle_notice.done()
+
+
+# ── more edge cases ─────────────────────────────────────────────────────────────
+
+
+def test_terminal_io_write_raw_writes_and_flushes(capsys: pytest.CaptureFixture[str]) -> None:
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    from app.screens.terminal_io import TerminalIO
+
+    with create_pipe_input() as pipe:
+        TerminalIO(lambda: None, input=pipe, output=DummyOutput()).write_raw(BEL)
+    assert capsys.readouterr().out == BEL
+
+
+@pytest.mark.parametrize("channel", ["", "AUTO", "bell", "system"])
+def test_an_unknown_channel_sends_nothing(channel: str) -> None:
+    recorder = Recorder()
+    assert send_to_channel(channel, OPTS, recorder, "iTerm.app") == "none"
+    assert recorder.calls == []
+
+
+def _prompt_notification(monkeypatch: pytest.MonkeyPatch, prompt: Any) -> list[dict[str, Any]]:
+    import app.screens.repl as screen
+    from app.hooks.use_can_use_tool import PermissionAnswer
+
+    monkeypatch.setattr(screen, "DEFAULT_INTERACTION_THRESHOLD_MS", 20)
+    dispatcher = Dispatcher()
+
+    async def go() -> None:
+        r = repl(IO())
+        r.run.ctx.hook_dispatcher = dispatcher
+        task = asyncio.create_task(r.ask_permission(prompt))
+        await asyncio.sleep(0.12)
+        r.pending.future.set_result(PermissionAnswer("yes"))
+        await task
+
+    asyncio.run(go())
+    return dispatcher.inputs
+
+
+@pytest.mark.parametrize(("tool", "message"), [
+    ("Bash", "TDDAgents needs your permission to use Bash"),
+    ("ExitPlanMode", "TDDAgents needs your approval for the plan"),
+    ("EnterPlanMode", "TDDAgents wants to enter plan mode"),
+])
+def test_each_prompt_tells_the_notification_hook_what_it_waits_for(
+        monkeypatch: pytest.MonkeyPatch, tool: str, message: str) -> None:
+    from app.hooks.use_can_use_tool import PermissionPrompt
+    from tests.test_repl import OPTIONS
+
+    [hook_input] = _prompt_notification(monkeypatch, PermissionPrompt(tool, "x", "", {}, OPTIONS))
+    assert (hook_input["notification_type"], hook_input["message"]) == ("permission_prompt", message)
+
+
+def test_a_question_from_the_model_notifies_that_it_needs_attention(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.screens.repl as screen
+
+    monkeypatch.setattr(screen, "DEFAULT_INTERACTION_THRESHOLD_MS", 20)
+    dispatcher = Dispatcher()
+    question = {"question": "Which?", "header": "Pick", "options": [{"label": "A"}, {"label": "B"}],
+                "multiSelect": False}
+
+    async def go() -> Any:
+        r = repl(IO())
+        r.run.ctx.hook_dispatcher = dispatcher
+        task = asyncio.create_task(r.ask_questions([question]))
+        await asyncio.sleep(0.12)
+        r.pending.future.set_result("A")
+        return await task
+
+    assert asyncio.run(go()) == {"Which?": "A"}
+    [hook_input] = dispatcher.inputs
+    assert hook_input["message"] == "TDDAgents needs your attention"
+
+
+def test_a_notification_fires_once_per_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.hooks.use_can_use_tool import PermissionPrompt
+    from tests.test_repl import OPTIONS
+
+    import app.screens.repl as screen
+
+    monkeypatch.setattr(screen, "DEFAULT_INTERACTION_THRESHOLD_MS", 20)
+    dispatcher = Dispatcher()
+
+    async def go() -> None:
+        r = repl(IO())
+        r.run.ctx.hook_dispatcher = dispatcher
+        task = asyncio.create_task(r.ask_permission(PermissionPrompt("Bash", "x", "", {}, OPTIONS)))
+        await asyncio.sleep(0.2)  # ten thresholds of silence
+        from app.hooks.use_can_use_tool import PermissionAnswer
+
+        r.pending.future.set_result(PermissionAnswer("yes"))
+        await task
+
+    asyncio.run(go())
+    assert len(dispatcher.inputs) == 1
+
+
+def test_no_idle_notice_while_a_turn_runs_or_a_question_waits() -> None:
+    from app.query.transitions import Terminal
+
+    _set_idle_threshold(10)
+
+    async def go() -> IO:
+        io = IO()
+        r = repl(io)
+        r.pending = object()  # a question is on screen
+        r._turn_end(Terminal.COMPLETED)
+        await asyncio.sleep(0.08)
+        return io
+
+    assert asyncio.run(go()).raw == []

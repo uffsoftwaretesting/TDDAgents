@@ -747,3 +747,37 @@ def test_develop_interactive_plans_then_develops_the_approved_plan(python_worksp
     assert [(i.text, i.status) for i in outcome.plan.items] == [("first", ItemStatus.DONE)]
     assert outcome.planned and outcome.plan_file is not None
     assert model.seen[0].messages[0].content == "build a calculator"
+
+
+def test_a_recheck_that_fails_shows_the_prompt():
+    """Upstream fires `recheckPermission` with `void` (`REPL.tsx`): a failing recheck leaves the prompt up."""
+    async def recheck() -> None:
+        raise RuntimeError("settings unreadable")
+
+    async def go() -> tuple[str, list[str]]:
+        io = FakeIO()
+        repl = Repl(SimpleNamespace(on_message=None, ctx=SimpleNamespace()), io)  # type: ignore[arg-type]
+        task = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "two", "", {}, OPTIONS,
+                                                                        recheck=recheck)))
+        await asyncio.sleep(0.01)
+        repl.pending.future.set_result(PermissionAnswer("yes"))  # type: ignore[union-attr]
+        answer = await task
+        return answer.value, [t.splitlines()[0] for t in io.out if "Permission needed" in t]
+
+    assert asyncio.run(go()) == ("yes", ["⚠ Permission needed: Bash — two"])
+
+
+def test_esc_on_the_prompt_shown_leaves_the_queued_one_to_its_turn():
+    async def go() -> tuple[bool, str]:
+        io = FakeIO()
+        repl = Repl(SimpleNamespace(on_message=None, ctx=SimpleNamespace()), io)  # type: ignore[arg-type]
+        first = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "one", "", {}, OPTIONS)))
+        second = asyncio.create_task(repl.ask_permission(PermissionPrompt("Bash", "two", "", {}, OPTIONS)))
+        await asyncio.sleep(0.01)
+        repl.pending.future.set_result(PermissionAnswer("no", cancelled=True))  # type: ignore[union-attr]
+        cancelled = (await first).cancelled
+        await asyncio.sleep(0.01)
+        repl.pending.future.set_result(PermissionAnswer("yes"))  # type: ignore[union-attr]
+        return cancelled, (await second).value
+
+    assert asyncio.run(go()) == (True, "yes")

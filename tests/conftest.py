@@ -125,10 +125,19 @@ def _process_wide_session_state(monkeypatch: Any) -> Any:
     reset_debug_state()
     set_flag_settings_inline(None)
     set_flag_settings_path(None)
+    _reset_interaction_clock()
     yield
     reset_debug_state()
     set_flag_settings_inline(None)
     set_flag_settings_path(None)
+
+
+def _reset_interaction_clock() -> None:
+    """`STATE.lastInteractionTime` and its dirty mark (`app/bootstrap/state.py`), as a new process starts."""
+    import app.bootstrap.state as state
+
+    state._LAST_INTERACTION_TIME[0] = 0.0
+    state._INTERACTION_TIME_DIRTY[0] = False
 
 
 def read_dotenv_key(name: str) -> str | None:
