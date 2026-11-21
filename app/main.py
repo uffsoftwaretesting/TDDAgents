@@ -839,7 +839,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args.settings = load_settings_from_flag(args.settings, sandbox_flag_settings(args))
     except FlagSettingsError as error:
-        print(f"Error: {error}", file=sys.stderr)
+        print(error, file=sys.stderr)
         return 1
     set_flag_settings_path(args.settings)
     debug_handler = apply_debug_flags(args)
@@ -896,15 +896,18 @@ def load_settings_from_flag(settings: str | None, overlay: Mapping[str, Any] | N
             try:
                 document = json.loads(trimmed)
             except ValueError as error:
-                raise FlagSettingsError("Invalid JSON provided to --settings") from error
+                raise FlagSettingsError("Error: Invalid JSON provided to --settings") from error
             if overlay is None:
-                return _write_flag_settings(trimmed)
+                return _write_flag_settings_or_fail(trimmed)
         else:
             path = Path(settings).expanduser().resolve()
             try:
                 text = path.read_text(encoding="utf-8")
             except FileNotFoundError as error:
-                raise FlagSettingsError(f"Settings file not found: {path}") from error
+                raise FlagSettingsError(f"Error: Settings file not found: {path}") from error
+            except (OSError, UnicodeDecodeError) as error:
+                # `loadSettingsFromFlag`'s outer catch: a directory, an unreadable file, bytes that are not text.
+                raise FlagSettingsError(f"Error processing settings: {error}") from error
             if overlay is None:
                 return str(path)
             try:
@@ -912,11 +915,19 @@ def load_settings_from_flag(settings: str | None, overlay: Mapping[str, Any] | N
             except ValueError:
                 document = None
     if not isinstance(document, dict):
-        raise FlagSettingsError("--settings must hold a JSON object to combine it with --sandbox or --no-sandbox")
+        raise FlagSettingsError(
+            "Error: --settings must hold a JSON object to combine it with --sandbox or --no-sandbox")
     from app.utils.settings.settings import merge_settings
 
     merged = merge_settings(document, overlay or {})
-    return _write_flag_settings(json.dumps(merged, sort_keys=True, separators=(",", ":")))
+    return _write_flag_settings_or_fail(json.dumps(merged, sort_keys=True, separators=(",", ":")))
+
+
+def _write_flag_settings_or_fail(text: str) -> str:
+    try:
+        return _write_flag_settings(text)
+    except OSError as error:
+        raise FlagSettingsError(f"Error processing settings: {error}") from error
 
 
 def apply_debug_flags(args: argparse.Namespace) -> Any:

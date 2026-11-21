@@ -268,3 +268,154 @@ def test_the_default_runs_without_the_sandbox(layout: dict[str, Path]) -> None:
     plain = adapter(layout, None, missing=True)
     assert "sandbox" not in load_settings(locations(layout, None))
     assert (plain.is_sandboxing_enabled(), plain.is_sandbox_required()) == (False, False)
+
+
+# ── more edge cases (main.tsx loadSettingsFromFlag) ─────────────────────────────
+
+
+def test_a_tilde_path_is_the_home_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "mine.json").write_text("{}")
+    assert entry.load_settings_from_flag("~/mine.json", None) == str((tmp_path / "mine.json").resolve())
+
+
+def test_a_directory_is_an_error_processing_settings(tmp_path: Path) -> None:
+    with pytest.raises(entry.FlagSettingsError, match=r"^Error processing settings: "):
+        entry.load_settings_from_flag(str(tmp_path), None)
+
+
+def test_an_unreadable_file_is_an_error_processing_settings(tmp_path: Path) -> None:
+    import os
+
+    file = tmp_path / "secret.json"
+    file.write_text("{}")
+    file.chmod(0)
+    try:
+        if os.access(file, os.R_OK):  # running as root: permissions do not apply
+            pytest.skip("the file stays readable")
+        with pytest.raises(entry.FlagSettingsError, match=r"^Error processing settings: "):
+            entry.load_settings_from_flag(str(file), None)
+    finally:
+        file.chmod(0o600)
+
+
+def test_a_file_that_is_not_text_is_an_error_processing_settings(tmp_path: Path) -> None:
+    file = tmp_path / "bin.json"
+    file.write_bytes(b"\xff\xfe\x00")
+    with pytest.raises(entry.FlagSettingsError, match=r"^Error processing settings: "):
+        entry.load_settings_from_flag(str(file), None)
+
+
+def test_a_missing_file_says_not_found_as_upstream(tmp_path: Path) -> None:
+    with pytest.raises(entry.FlagSettingsError, match=r"^Error: Settings file not found: "):
+        entry.load_settings_from_flag(str(tmp_path / "gone.json"), None)
+
+
+def test_json_with_newlines_and_spaces_is_kept_as_trimmed() -> None:
+    text = '\n  {\n  "model": "m"\n}\n  '
+    path = entry.load_settings_from_flag(text, None)
+    assert Path(path).read_text() == text.strip()  # type: ignore[arg-type]
+
+
+def test_a_file_whose_json_is_not_an_object_takes_no_sandbox_flag(tmp_path: Path) -> None:
+    for content in ("[1]", "not json", '"text"', "3"):
+        file = tmp_path / "f.json"
+        file.write_text(content)
+        with pytest.raises(entry.FlagSettingsError, match="must hold a JSON object"):
+            entry.load_settings_from_flag(str(file), OFF)
+        assert entry.load_settings_from_flag(str(file), None) == str(file.resolve())  # alone it is passed on
+
+
+def test_arrays_merge_concatenated_and_deduplicated() -> None:
+    """`merge_settings` (lodash `mergeWith` + `mergeArrays`): the profile's domains after the user's."""
+    path = entry.load_settings_from_flag('{"sandbox": {"network": {"allowedDomains": ["a.example", "pypi.org"]}}}',
+                                         PROFILE)
+    domains = read(path)["sandbox"]["network"]["allowedDomains"]
+    assert domains[:2] == ["a.example", "pypi.org"]
+    assert domains.count("pypi.org") == 1
+    assert set(PROFILE["sandbox"]["network"]["allowedDomains"]) <= set(domains)
+
+
+def test_sandbox_over_a_settings_document_that_turns_it_off_turns_it_on() -> None:
+    merged = read(entry.load_settings_from_flag('{"sandbox": {"enabled": false, "failIfUnavailable": false}}', PROFILE))
+    assert (merged["sandbox"]["enabled"], merged["sandbox"]["failIfUnavailable"]) == (True, True)
+
+
+def test_a_temp_folder_that_cannot_be_written_is_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path / "missing" / "dir"))
+    with pytest.raises(entry.FlagSettingsError, match=r"^Error processing settings: "):
+        entry.load_settings_from_flag('{"a": 1}', None)
+
+
+def test_main_prints_upstreams_messages(seen: list[argparse.Namespace], tmp_path: Path,
+                                        capsys: pytest.CaptureFixture[str]) -> None:
+    assert entry.main(["--settings", str(tmp_path / "gone.json")]) == 1
+    assert capsys.readouterr().err.startswith("Error: Settings file not found: ")
+    assert entry.main(["--settings", str(tmp_path)]) == 1
+    assert capsys.readouterr().err.startswith("Error processing settings: ")
+    assert seen == []
+
+
+# ── integration: main() → the session's options and the final run ─────────────
+
+
+def test_the_session_and_the_final_run_get_the_flag_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`main()` with the real `run_entry`: the develop path and the final run receive one settings path."""
+    from tests.test_main_entry import DONE
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TDDAGENTS_COORDINATOR_MODE", "")
+    monkeypatch.delenv("TDDAGENTS_COORDINATOR_MODE")
+    seen_options: list[Any] = []
+    final_paths: list[Any] = []
+
+    class Workspace:
+        root = tmp_path / "s" / "project"
+        run_dir = tmp_path / "s"
+
+    Workspace.root.mkdir(parents=True)
+    monkeypatch.setattr("app.cli.print.session_workspace", lambda thread_id: Workspace())
+    monkeypatch.setattr(entry, "session_exists", lambda thread_id, workspace: False)
+
+    def develop(thread_id: str, request: Any, workspace: Any, options: Any, **kw: Any) -> Any:
+        seen_options.append(options)
+        return DONE
+
+    monkeypatch.setattr(entry, "develop_interactive", develop)
+    monkeypatch.setattr(entry, "develop_headless", develop)
+
+    def final_run(artifacts: Any, workspace: Any, settings_path: Any = None) -> None:
+        final_paths.append(settings_path)
+
+    monkeypatch.setattr(entry, "write_final_test_run", final_run)
+    assert entry.main(["--no-sandbox", "-p", "Build X"]) in (0, 1)
+    [options] = seen_options
+    assert read(options.settings_path) == OFF
+    assert final_paths == [options.settings_path]
+
+
+def test_a_resumed_thread_with_no_sandbox_gets_the_flag_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from tests.test_main_entry import DONE
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TDDAGENTS_COORDINATOR_MODE", "")
+    monkeypatch.delenv("TDDAGENTS_COORDINATOR_MODE")
+    seen: list[tuple[Any, Any]] = []
+
+    class Workspace:
+        root = tmp_path / "s" / "project"
+        run_dir = tmp_path / "s"
+
+    Workspace.root.mkdir(parents=True)
+    monkeypatch.setattr("app.cli.print.session_workspace", lambda thread_id: Workspace())
+    monkeypatch.setattr(entry, "session_exists", lambda thread_id, workspace: True)
+    monkeypatch.setattr(entry, "write_final_test_run", lambda *a, **k: None)
+
+    def develop(thread_id: str, request: Any, workspace: Any, options: Any, prompt: Any = None, **kw: Any) -> Any:
+        seen.append((thread_id, options.settings_path))
+        return DONE
+
+    monkeypatch.setattr(entry, "develop_interactive", develop)
+    entry.main(["--thread-id", "tdd-abc", "--no-sandbox", "continue"])
+    [(thread, path)] = seen
+    assert thread == "tdd-abc" and read(path) == OFF
