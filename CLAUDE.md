@@ -260,10 +260,11 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   upstream's `registerSessionFileAccessHooks`, `setup.ts`) returns `permissionDecision: "ask"` for what
   changes the machine outside the project: `sudo`, a system, global or runtime-manager install, a download
   piped into a shell or an unpacker, and a create/write target or redirection outside the project folder
-  (upstream's path validation reused: `COMMAND_OPERATION_TYPE`, `validate_path`, `validate_output_redirections`;
-  `$HOME/...` counts as outside). A `cd` out of the project, or to a folder it cannot know (`~`, `-`, `$X`, none),
-  makes every later write and redirection outside (`compoundCommandHasCd`; an in-project `cd` is followed, a
-  divergence: the gate knows the project root). The project's own installs and writes inside it ask nothing. It is upstream's way for a hook to start a
+  (upstream's own verdict, through the ported `validate_single_path_command` / `validate_output_redirections`
+  with `compoundCommandHasCd`: any `cd`, `pushd` or `popd` other than the `cd <cwd>` prefix models prepend
+  (`filterCdCwdSubcommands`) makes every write and redirection ask; the reason is upstream's own message). A
+  safety check inside the project and `cp`/`mv` with flags are left to the normal flow. The project's own
+  installs and writes inside it ask nothing. It is upstream's way for a hook to start a
   user question (`toolHooks.ts` `resolveHookPermissionDecision` → `forceDecision`), so `bypassPermissions`
   does not skip it, a deny rule or the TDD tier still wins, and with nobody to ask (plain `-p`, workers)
   it is denied. `setup` and the final run run outside the hooks and are not gated: the user's approval of

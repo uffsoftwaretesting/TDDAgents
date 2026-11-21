@@ -3251,9 +3251,16 @@ normalization, settings-flag, install-gate, interactive-permission, REPL, sed an
   `key_processor.feed_multiple`, the analogue of Ink's one stdin handler.
 - **A waiting question checked once and gave up** if a key arrived first. Ported `useNotifyAfterTimeout`'s
   `setInterval` + `shouldNotify`: it checks every threshold until the user is idle that long, then notifies once.
-- **`cd /opt && mkdir x` escaped the install gate.** It now follows upstream's `compoundCommandHasCd`
-  (`bashPermissions.ts`, `pathValidation.ts:645`), resolving an in-project `cd` instead of always asking
-  (divergence: the gate knows the project root). `curl … | busybox unzip -` is now seen as an unpack too.
+- **`cd /opt && mkdir x` escaped the install gate.** The gate's path checks now run through upstream's own
+  functions: `bashToolHasPermission`'s subcommands without the `cd <cwd>` prefix (`filterCdCwdSubcommands`),
+  `compoundCommandHasCd` from `isNormalizedCdCommand` (cd, pushd, popd), then `validateOutputRedirections` and
+  `validateSinglePathCommand` → `createPathChecker` → `validateCommandPaths`, whose messages are the gate's
+  reasons. A first version followed an in-project `cd`; the user asked for upstream's rule (any cd with a write
+  or redirection asks), so that divergence was removed. `curl … | busybox unzip -` is seen as an unpack too.
+- **Resume of a broken transcript** is upstream's, unchanged: the tests pin its exact result for distinct and
+  equal timestamps (`loadMessagesFromJsonlPath`'s newest leaf, `recoverOrphanedParallelToolResults`, the
+  "Continue from where you left off." continuation and the `NO_RESPONSE_REQUESTED` sentinel); the skill's meta
+  message off the chain is not recovered, as upstream.
 - **`--settings <directory>` crashed** with an uncaught `IsADirectoryError`. It now follows `loadSettingsFromFlag`'s
   outer catch ("Error processing settings: …", exit 1), with upstream's exact messages.
 - **A failing `recheckPermission` crashed the tool call**; upstream fires it with `void`, so the prompt now stays.
