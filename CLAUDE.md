@@ -105,7 +105,10 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 - **`run_loop` yields `Terminated` last** instead of returning it (PEP 525 forbids a value in
   an async generator's `return`). `drain` stands in for JS's `yield*` return.
 - The **API-error guard** skips stop hooks and terminates `model_error`, never `completed`: a
-  provider outage must never be recorded as an observed TDD cycle.
+  provider outage must never be recorded as an observed TDD cycle. A failed request is upstream's assistant
+  message (`app/services/api/errors.py` `get_assistant_message_from_error`, yielded by `stream_call_model` as
+  `queryModel` does: "Request timed out", "Credit balance is too low", "API Error: …"); a mid-stream failure
+  is the loop's catch (`query.ts`: the error's message, `(no content)` when empty, logged with its stack).
 - The model emits **one message per content block**. Blocks of one response share a response
   id, and the request builder merges them back into one assistant message
   (`merge_split_assistant_messages`), or OpenAI rejects parallel tool calls.
@@ -130,7 +133,9 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
    (`$`, `~`, globs: upstream's `hasDangerousExpansion`) is not the tier's to refuse: it reaches upstream's
    "Shell expansion syntax in paths requires manual approval" ask and the user decides (2026-11-21). Nor is a
    file **outside the project** (`classify_path` → `"outside"`, with a known root): upstream's path validation
-   asks for a write outside the working directory, by any path or tool (2026-11-21). Agent memory, the session plan file,
+   asks for a write outside the working directory, by any path or tool (2026-11-21). After a `cd`, `pushd` or
+   `popd` in the command (other than `cd <cwd>`), a relative redirect target is unresolvable too, left to
+   upstream's "Compound command contains cd with output redirection" ask (2026-11-21). Agent memory, the session plan file,
    the declared manifests (`manifestFiles`) and `.tddagents/project.json` itself (file tools; the
    protected folder still asks) are exempt in every phase. With no declared
    configuration while an item is current, every write is denied (fail closed). A PreToolUse hook's `allow`, a hook `ask`, an
@@ -233,8 +238,10 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   tests open sessions with flag settings `{"sandbox":{"enabled":false}}`; real-bwrap tests are
   `@pytest.mark.sandbox`, skipped without bwrap and socat.
 - **Interactive asks** go through `ToolContext.can_use_tool`; the TDD tier and deny rules are
-  decided before any question. Workers and the agent-hook verifier have `can_use_tool=None`
-  (headless deny), except a built-in `bubble` agent. Prompts queue one at a time (`Repl._asking`); when
+  decided before any question. A synchronous worker asks through the parent's `can_use_tool`, as upstream
+  hands every agent its `canUseTool` (`AgentTool.tsx` → `runAgent.ts`; 2026-11-21); a background one avoids
+  prompts (`should_avoid_permission_prompts`, denied before any question) unless it is `bubble`. The agent-hook
+  verifier has `can_use_tool=None` (headless deny). Prompts queue one at a time (`Repl._asking`); when
   one's turn comes it is rechecked (upstream's `recheckPermission`), so a parallel call an earlier answer
   now allows ("allow reading from <dir> during this session") is not asked again; a hook's forced ask is
   never rechecked away; a recheck that fails leaves the prompt up (upstream fires it with `void`). An answer is applied through the root store (`root_set_app_state`, upstream's

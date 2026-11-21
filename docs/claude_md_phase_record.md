@@ -3317,6 +3317,23 @@ on the user's request found a fifth. Each fix reuses the cited upstream code:
   `skills/bundled/claudeApi.ts` `buildPrompt` (l.155-165), with no language every reference is inlined in that
   one call and the model uses the language the request names (or asks); the recorded divergence is gone. The
   verifier and the contract stay as upstream has them (user decision).
+- **The Go live run took 65 minutes** (the CPF/Django one 14). The transcripts show where: 23 minutes waiting on the
+  model, 15 in five tester agents, 6 in Bash. Four TDDAgents defects, fixed from upstream (user decisions
+  2026-11-21):
+  - **A synchronous worker never asked the user.** `run_agent` gave every non-`bubble` worker `can_use_tool=None`,
+    so a tester's `gofmt` / `go vet` was denied and it wrote tests it never compiled. Upstream hands every agent the
+    parent's `canUseTool` (`tools/AgentTool/AgentTool.tsx` l.603-608 → `runAgent.ts` l.748-756) and only an async one
+    avoids prompts (`agentGetAppState`, l.436-450). Ported.
+  - **The tier resolved a target as if a `cd` in the command had not run** (`cd /tmp/spike && cat > main.go` was
+    "production" in RED). After a `cd`/`pushd`/`popd` other than `cd <cwd>` (`compoundCommandHasCd`,
+    `filterCdCwdSubcommands`), a relative target is left to upstream's ask (`validateOutputRedirections`).
+  - **A failed model call showed only "Stopped (model_error)".** Ported `services/api/errors.ts`
+    `getAssistantMessageFromError` (the branches the Anthropic / OpenAI SDKs reach; non-interactive texts where the
+    interactive ones name `/login`, `/rewind`, `/model` or "esc") into `app/services/api/errors.py`, yielded by
+    `stream_call_model` as `claude.ts` `queryModel`'s catch does, and `query.ts`'s own catch
+    (`createAssistantAPIErrorMessage`, `(no content)` for an empty message, strict upstream by user decision).
+  - **The log line was empty.** Both catches log with `exc_info` (`logError` writes `err.stack`): type, message and
+    traceback.
 - `tests/test_notifier.py`'s idle-prompt integration test raced the bell (the hook's marker can exist before the
   channel runs, upstream's order); it now waits for the bell.
 
