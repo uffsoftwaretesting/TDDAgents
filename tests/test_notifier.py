@@ -477,6 +477,8 @@ def test_a_finished_plan_reaches_a_notification_hook_and_the_bell(python_workspa
         repl.io.raw = []
         await until(lambda: "Every sub-requirement is done" in io.text())
         await until(lambda: marker.exists() and marker.read_text().strip() != "")
+        # The channel comes after the hooks (`sendNotification`): the marker can exist before the bell rings.
+        await until(lambda: BEL in repl.io.raw)
         io.lines.put_nowait("/exit")
 
     terminal, repl, io = asyncio.run(session(python_workspace, tmp_path, Model(cycle_turns()),

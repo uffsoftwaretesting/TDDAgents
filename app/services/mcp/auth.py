@@ -1201,46 +1201,54 @@ class McpTransportAuth(httpx2.Auth):
             return False
         return True
 
-    async def async_auth_flow(self, request: httpx2.Request) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
-        # Upstream spreads `requestInit.headers` after the provider's header, so a configured
-        # Authorization header (already on the request here) wins over the stored token.
-        configured_authorization = "Authorization" in request.headers
-        await self._authorize(request, configured_authorization)
-        response = yield request
-        while True:
-            mark_step_up_from_response(response, self.provider)
-            if response.status_code == 401:
-                if self._has_completed_auth_flow:
-                    self.failure = RuntimeError("Server returned 401 after successful authentication")
-                    return
-                params = extract_www_authenticate_params(response)
-                self._resource_metadata_url = params.resource_metadata_url
-                self._scope = params.scope
-                if not await self._run_auth():
-                    return
-                self._has_completed_auth_flow = True
-            elif response.status_code == 403:
-                params = extract_www_authenticate_params(response)
-                if params.error != "insufficient_scope":
-                    return
-                header = response.headers.get("WWW-Authenticate")
-                if self._last_upscoping_header == header:
-                    self.failure = RuntimeError("Server returned 403 after trying upscoping")
-                    return
-                if params.scope:
-                    self._scope = params.scope
-                if params.resource_metadata_url:
-                    self._resource_metadata_url = params.resource_metadata_url
-                self._last_upscoping_header = header
-                if not await self._run_auth():
-                    return
-            else:
-                if response.is_success:
-                    self._has_completed_auth_flow = False
-                    self._last_upscoping_header = None
-                return
+    def async_auth_flow(self, request: httpx2.Request) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
+        """
+        httpx's auth flow: a plain method returning the generator, because mutmut's trampoline forwards neither
+        `asend()` (the response httpx sends back) nor `aclose()` into a trampolined generator (CLAUDE.md,
+        gotchas; the same shape as `run_agent`).
+        """
+        async def flow() -> AsyncGenerator[httpx2.Request, httpx2.Response]:
+            # Upstream spreads `requestInit.headers` after the provider's header, so a configured
+            # Authorization header (already on the request here) wins over the stored token.
+            configured_authorization = "Authorization" in request.headers
             await self._authorize(request, configured_authorization)
             response = yield request
+            while True:
+                mark_step_up_from_response(response, self.provider)
+                if response.status_code == 401:
+                    if self._has_completed_auth_flow:
+                        self.failure = RuntimeError("Server returned 401 after successful authentication")
+                        return
+                    params = extract_www_authenticate_params(response)
+                    self._resource_metadata_url = params.resource_metadata_url
+                    self._scope = params.scope
+                    if not await self._run_auth():
+                        return
+                    self._has_completed_auth_flow = True
+                elif response.status_code == 403:
+                    params = extract_www_authenticate_params(response)
+                    if params.error != "insufficient_scope":
+                        return
+                    header = response.headers.get("WWW-Authenticate")
+                    if self._last_upscoping_header == header:
+                        self.failure = RuntimeError("Server returned 403 after trying upscoping")
+                        return
+                    if params.scope:
+                        self._scope = params.scope
+                    if params.resource_metadata_url:
+                        self._resource_metadata_url = params.resource_metadata_url
+                    self._last_upscoping_header = header
+                    if not await self._run_auth():
+                        return
+                else:
+                    if response.is_success:
+                        self._has_completed_auth_flow = False
+                        self._last_upscoping_header = None
+                    return
+                await self._authorize(request, configured_authorization)
+                response = yield request
+
+        return flow()
 
 
 # ── client secrets ────────────────────────────────────────────────────────────

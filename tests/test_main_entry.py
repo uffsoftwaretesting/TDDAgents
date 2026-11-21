@@ -669,8 +669,12 @@ def test_main_s_terminal_log_lines_are_the_message_alone():
               "logging.getLogger('TDDOrchestrator.REPL').warning('hidden-app-warning')\n"
               "logging.getLogger('app.x').warning('shown-on-purpose', extra={'terminal': True})\n"
               "logging.getLogger('httpx').error('library-error')\n")
+    import os as _os
+
+    # Under mutmut the child must run the unmutated code (CLAUDE.md, gotchas).
+    env = {**_os.environ, "MUTANT_UNDER_TEST": ""}
     done = subprocess.run([_sys.executable, "-c", script], cwd=_Path(__file__).resolve().parents[1],
-                          capture_output=True, text=True, timeout=120, check=False)
+                          capture_output=True, text=True, timeout=120, check=False, env=env)
     assert done.returncode == 0, done.stderr
     lines = [line for line in done.stderr.splitlines() if "Pydantic" not in line and "pydantic" not in line]
     assert lines == ["hello-main", "shown-on-purpose", "library-error"]

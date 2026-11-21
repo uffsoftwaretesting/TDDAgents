@@ -554,16 +554,17 @@ def test_apply_flag_settings_notifies_the_run(tmp_path):
     detector = SettingsChangeDetector(loc)
     detector.subscribe(lambda source: apply_settings_change(source, store.update, loc))
     responses: list[Any] = []
-    fake = SimpleNamespace(run_=SimpleNamespace(settings_change_detector=detector, user_specified_model=None),
-                           respond=lambda message, response=None: responses.append((message, response)))
+    # A real instance, built without `__init__`: mutmut's method trampoline finds the original on `self`'s class.
+    fake: Any = object.__new__(HeadlessStreaming)
+    fake.run_ = SimpleNamespace(settings_change_detector=detector, user_specified_model=None)
+    fake.respond = lambda message, response=None: responses.append((message, response))
     request = {"settings": {"permissions": {"deny": ["Bash(rm:*)"]}, "model": "claude-x", "z": None}}
-    asyncio.run(HeadlessStreaming._control_apply_flag_settings(fake, {"id": 1}, request))  # type: ignore[arg-type]
+    asyncio.run(fake._control_apply_flag_settings({"id": 1}, request))
     assert get_flag_settings_inline() == {"permissions": {"deny": ["Bash(rm:*)"]}, "model": "claude-x"}
     assert [(r.tool_name, r.rule_content, r.source) for r in store.get().tool_permission_context.always_deny_rules] == [
         ("Bash", "rm:*", S.FLAG_SETTINGS)]
     assert fake.run_.user_specified_model == "claude-x" and responses == [({"id": 1}, None)]
-    asyncio.run(HeadlessStreaming._control_apply_flag_settings(
-        fake, {"id": 2}, {"settings": {"permissions": None, "model": None}}))  # type: ignore[arg-type]
+    asyncio.run(fake._control_apply_flag_settings({"id": 2}, {"settings": {"permissions": None, "model": None}}))
     assert get_flag_settings_inline() == {}
     # As upstream's `syncPermissionRulesFromDisk`: only the user, project and local groups are cleared
     # first, so a `flagSettings` group emptied mid-session keeps its rules (a replaced one is replaced).
