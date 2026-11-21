@@ -68,9 +68,11 @@ ELEVATORS = frozenset({"sudo", "su", "doas", "pkexec"})
 EXTRACTORS = frozenset({"tar", "bsdtar", "unzip", "7z", "7za", "gunzip", "gzip", "xz", "unxz", "bunzip2",
                         "zstd", "cpio", "unar"})
 
-#: A download piped into a program: `curl … | sh`, `wget -qO- … | sudo bash`, `curl … | tar -xz`.
+#: A download piped into a program: `curl … | sh`, `wget -qO- … | sudo bash`, `curl … | tar -xz`, and the same
+#: through `busybox` (`… | busybox unzip -`).
 _PIPE_FROM_DOWNLOAD = re.compile(
-    r"(?:^|[\s;&|(])(?:curl|wget|fetch)\b[^;&|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:/\S*/)?(?P<program>[\w.+-]+)")
+    r"(?:^|[\s;&|(])(?:curl|wget|fetch)\b[^;&|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:(?:/\S*/)?busybox\s+)?"
+    r"(?:/\S*/)?(?P<program>[\w.+-]+)")
 
 #: Verbs that install, per package manager (the first argument that is not an option).
 _INSTALL_VERBS = frozenset({"install", "add", "upgrade", "dist-upgrade", "full-upgrade", "reinstall", "i"})
@@ -229,22 +231,60 @@ def _classify_tokens(tokens: list[str], depth: int, cwd: str | None) -> str | No
 _PROJECT_WRITES = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
 
 
-def _outside(path: str, cwd: str) -> bool:
+def _inside(path: str, root: str) -> bool:
+    root = os.path.normpath(root)
+    return os.path.commonpath([root, os.path.normpath(path)]) == root
+
+
+def _outside(path: str, cwd: str, root: str | None = None) -> bool:
     """
-    `validate_path` refused `path` because it is not in the project, not for a safety check inside it (the
-    protected `.tddagents/`, which the normal permission flow already asks about). A path it could not place
-    (shell expansion such as `$HOME/.local`) is not absolute, so it counts as outside.
+    `validate_path` refused `path` (resolved from `cwd`) because it is not in the project `root` (default `cwd`),
+    not for a safety check inside it (the protected `.tddagents/`, which the normal permission flow already
+    asks about). A path it could not place (shell expansion such as `$HOME/.local`) is not absolute, so it
+    counts as outside.
     """
     allowed, resolved, _reason = validate_path(path, cwd, _PROJECT_WRITES, "create")
     if allowed:
         return False
     if not os.path.isabs(resolved):
         return True
-    root = os.path.normpath(cwd)
-    return os.path.commonpath([root, os.path.normpath(resolved)]) != root
+    return not _inside(resolved, root if root is not None else cwd)
 
 
-def _write_outside_project(subcommand: str, cwd: str) -> str | None:
+def _write_command(subcommand: str) -> tuple[str, list[str]] | None:
+    """The command and its arguments when it creates or writes (`COMMAND_OPERATION_TYPE`; `sed` only with `-i`)."""
+    args = parse_command_arguments(strip_safe_wrappers(subcommand))
+    if not args:
+        return None
+    base, rest = args[0], args[1:]
+    if COMMAND_OPERATION_TYPE.get(base) not in ("write", "create"):
+        return None
+    if base == "sed" and not any(a in ("-i", "--in-place") or a.startswith(("-i", "--in-place=")) for a in rest):
+        return None
+    return base, rest
+
+
+def _cd_target(tokens: list[str]) -> str | None:
+    """The folder a `cd` goes to (`~` with no argument, as the shell does); `None` when it is not a `cd`."""
+    if not tokens or tokens[0] != "cd":
+        return None
+    targets = [t for t in tokens[1:] if t not in ("-L", "-P", "-e", "-@", "--")]
+    return targets[0] if targets else "~"
+
+
+def _cd_leaves(target: str, current: str, root: str) -> tuple[str | None, str]:
+    """
+    Where a `cd` lands: `(None, folder)` inside the project, or `(target, current)` when it leaves it or its
+    folder cannot be known (`~`, `-`, shell expansion), as `compoundCommandHasCd` gives up on any `cd`
+    (`bashPermissions.ts`; here the project folder is known, so an in-project `cd` is followed instead).
+    """
+    if target == "-" or target.startswith("~") or any(c in target for c in "$`%"):
+        return target, current
+    landed = os.path.normpath(target if os.path.isabs(target) else os.path.join(current, target))
+    return (None, landed) if _inside(landed, root) else (target, current)
+
+
+def _write_outside_project(subcommand: str, cwd: str, root: str | None = None) -> str | None:
     """
     A create or write target outside the project, as upstream's path validation sees it
     (`pathValidation.ts` `COMMAND_OPERATION_TYPE`, `PATH_EXTRACTORS`, `validatePath`): `mkdir`, `touch`,
@@ -252,17 +292,13 @@ def _write_outside_project(subcommand: str, cwd: str) -> str | None:
     placed, so it counts as outside, as `validatePath` asks for it. `COMMAND_VALIDATOR` (mv/cp flags) is
     left out on purpose: it asks inside the project too.
     """
-    args = parse_command_arguments(strip_safe_wrappers(subcommand))
-    if not args:
+    write = _write_command(subcommand)
+    if write is None:
         return None
-    base, rest = args[0], args[1:]
-    operation = COMMAND_OPERATION_TYPE.get(base)
-    if operation not in ("write", "create"):
-        return None
-    if base == "sed" and not any(a in ("-i", "--in-place") or a.startswith(("-i", "--in-place=")) for a in rest):
-        return None
+    base, rest = write
+    operation = COMMAND_OPERATION_TYPE[base]
     for path in PATH_EXTRACTORS[base](rest):
-        if _outside(path, cwd):
+        if _outside(path, cwd, root):
             resolved = validate_path(path, cwd, _PROJECT_WRITES, operation)[1]
             return f"writes outside the project ({base} {resolved})"
     return None
@@ -302,17 +338,28 @@ def classify_install(command: str, depth: int = 0, *, cwd: str | None = None) ->
             return "pipes a download into a shell (curl | sh)"
         if program in EXTRACTORS:
             return f"unpacks a download (curl | {program})"
-    if cwd is not None:
-        redirect = _redirect_outside_project(command, cwd)
-        if redirect is not None:
-            return redirect
+    current = cwd
+    left: str | None = None
     for subcommand in split_command(command):
         stripped = strip_safe_wrappers(strip_all_leading_env_vars(_NEW_LINE_PLACEHOLDER.sub(" ", subcommand).strip()))
-        found = _classify_tokens(_tokens(stripped), depth, cwd)
-        if found is None and cwd is not None:
-            found = _write_outside_project(stripped, cwd)
+        tokens = _tokens(stripped)
+        target = _cd_target(tokens) if cwd is not None and current is not None else None
+        if target is not None and cwd is not None and current is not None:
+            if left is None:
+                left, current = _cd_leaves(target, current, cwd)
+            continue
+        found = _classify_tokens(tokens, depth, cwd)
+        if found is None and cwd is not None and current is not None:
+            write = _write_command(stripped) if left is not None else None
+            found = (f"writes outside the project (cd {left}, then {write[0]})" if write is not None
+                     else None if left is not None else _write_outside_project(stripped, current, cwd))
         if found is not None:
             return found
+    if cwd is not None:
+        if left is not None and any(r.target != "/dev/null"
+                                    for r in extract_output_redirections(command).redirections):
+            return f"writes outside the project (cd {left}, then >)"
+        return _redirect_outside_project(command, cwd)
     return None
 
 
