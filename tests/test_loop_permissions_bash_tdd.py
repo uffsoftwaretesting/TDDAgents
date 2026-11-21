@@ -77,11 +77,35 @@ def test_red_does_not_object_to_commands_that_write_nothing(command):
     assert allowed(command, RED) is True
 
 
-def test_red_refuses_a_write_it_cannot_locate():
-    """Fail closed: in a phase that forbids the write, 'I cannot tell' is a refusal."""
-    permitted, reason = check_bash_tdd_phase("echo x > $TARGET", RED, rules=TEST_PROJECT_CONFIG.rules)
-    assert permitted is False
-    assert "cannot verify where this command writes" in reason
+UNRESOLVABLE = ["echo x > $TARGET", "printf '#!/bin/sh' > ~/.local/bin/composer", "echo x > `pwd`/a.py",
+                "echo x > src/*.py", "echo x > {a,b}.py"]
+
+
+@pytest.mark.parametrize("ledger", [RED, GREEN])
+@pytest.mark.parametrize("command", UNRESOLVABLE)
+def test_a_target_the_tier_cannot_resolve_is_left_to_upstreams_ask(command, ledger):
+    """
+    User decision 2026-11-21: a target built from shell expansion (`hasDangerousExpansion`, `utils/bash/commands.ts`
+    l.830, every `~` included) is not the tier's to refuse; upstream's `checkPathConstraints` asks for it
+    (`pathValidation.ts` l.1052), so the user decides.
+    """
+    assert check_bash_tdd_phase(command, ledger, rules=TEST_PROJECT_CONFIG.rules) == (True, "")
+
+
+def test_a_resolvable_target_beside_an_unresolvable_one_is_still_judged():
+    permitted, reason = check_bash_tdd_phase("echo a > $OUT && echo b > calculator.py", RED,
+                                             rules=TEST_PROJECT_CONFIG.rules)
+    assert (permitted, reason) == (False, RED_PRODUCTION)
+    permitted, reason = check_bash_tdd_phase("echo a > ~/x && echo b > tests/test_calc.py", GREEN,
+                                             rules=TEST_PROJECT_CONFIG.rules)
+    assert permitted is False and "denies modifying test file 'tests/test_calc.py'" in reason
+
+
+def test_with_no_declaration_an_unresolvable_redirection_is_still_refused():
+    from app.tdd.phase_permissions import NO_PROJECT_CONFIG
+
+    assert check_bash_tdd_phase("echo x > $OUT", RED, rules=None) == (
+        False, f"TDD phase RED denies this command's redirection: {NO_PROJECT_CONFIG}")
 
 
 def test_the_refusal_names_the_file_and_the_alternative():
@@ -111,12 +135,6 @@ def test_refactor_may_write_tests_and_code_alike(command):
 @pytest.mark.parametrize("ledger", [GREEN, REFACTOR])
 def test_the_implementing_phases_allow_writing_production_code(ledger):
     assert allowed("echo 'def add(a,b): return a+b' > calculator.py", ledger) is True
-
-
-def test_green_also_refuses_an_unverifiable_target():
-    permitted, reason = check_bash_tdd_phase("echo x > $TARGET", GREEN, rules=TEST_PROJECT_CONFIG.rules)
-    assert permitted is False
-    assert "cannot verify where this command writes" in reason
 
 
 # ── through the gate, which is where it actually matters ────────────────────
@@ -156,20 +174,12 @@ RED_PRODUCTION = (
     "redirection. Only test files may be written before this sub-requirement's tests are "
     "written and run."
 )
-RED_UNVERIFIABLE = (
-    "TDD phase RED cannot verify where this command writes: its redirection target uses "
-    "shell expansion or could not be parsed. Write the test file with WriteFile instead."
-)
 GREEN_TEST_FILE = (
     "TDD phase GREEN denies modifying test file 'tests/test_calc.py' through a shell "
     "redirection. The tests are what pins the behaviour being implemented; they can be "
     "improved in REFACTOR. If a test is wrong (it contradicts the specification), go back to RED: "
     "spawn the tester agent (Agent with subagent_type 'tester') to fix it. That restarts this "
     "sub-requirement at RED; then implement again."
-)
-GREEN_UNVERIFIABLE = (
-    "TDD phase GREEN cannot verify where this command writes: its redirection target uses "
-    "shell expansion or could not be parsed."
 )
 
 
@@ -178,17 +188,9 @@ def test_the_red_production_refusal_reads_exactly_this():
                                 rules=TEST_PROJECT_CONFIG.rules) == (False, RED_PRODUCTION)
 
 
-def test_the_red_unverifiable_refusal_reads_exactly_this():
-    assert check_bash_tdd_phase("echo x > $OUT", RED, rules=TEST_PROJECT_CONFIG.rules) == (False, RED_UNVERIFIABLE)
-
-
 def test_the_green_test_file_refusal_reads_exactly_this():
     assert check_bash_tdd_phase("echo x > tests/test_calc.py", GREEN,
                                 rules=TEST_PROJECT_CONFIG.rules) == (False, GREEN_TEST_FILE)
-
-
-def test_the_green_unverifiable_refusal_reads_exactly_this():
-    assert check_bash_tdd_phase("echo x > $OUT", GREEN, rules=TEST_PROJECT_CONFIG.rules) == (False, GREEN_UNVERIFIABLE)
 
 
 def test_a_permitted_command_returns_an_empty_reason():
@@ -218,5 +220,81 @@ def test_targets_are_matched_from_the_project_root():
     red = PhaseLedger()
     assert check_bash_tdd_phase("echo x > /proj/tests/test_a.py", red, rules=TEST_PROJECT_CONFIG.rules,
                                 root="/proj") == (True, "")
+    # Outside the project the phase has nothing to say: upstream's path validation asks (2026-11-21).
     assert check_bash_tdd_phase("echo x > /other/tests/test_a.py", red, rules=TEST_PROJECT_CONFIG.rules,
-                                root="/proj")[0] is False
+                                root="/proj") == (True, "")
+    assert check_bash_tdd_phase("printf x > /home/u/.local/bin/composer", red, rules=TEST_PROJECT_CONFIG.rules,
+                                root="/proj") == (True, "")
+
+
+# ── through the whole permission pipeline: upstream's ask, the user decides ────
+
+SHELL_EXPANSION = "Shell expansion syntax in paths requires manual approval"
+
+
+@pytest.mark.parametrize("mode", ["acceptEdits", "default"])
+@pytest.mark.parametrize(("command", "reason"), [
+    # `checkPathConstraints` (pathValidation.ts l.1052)
+    ("printf x > ~/.local/bin/tool", SHELL_EXPANSION),
+    # `bashSecurity.ts` asks first for a variable in a redirection, upstream's order
+    ("echo x > $HOME/a.py", "Command contains variables in dangerous contexts (redirections or pipes)"),
+])
+def test_in_red_an_unresolvable_target_asks_with_upstreams_reason(command, reason, mode):
+    import asyncio
+
+    from app.state.app_state_store import AppState, AppStateStore
+    from app.tool import tool_context_for
+    from app.tools.bash_tool.bash_tool import build_bash_tool
+    from app.types.permissions import PermissionMode, ToolPermissionContext
+    from app.utils.permissions.permissions import has_permissions_to_use_tool
+    from tests.plan_helpers import CURRENT_ITEM_PLAN
+
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG,
+                                   phase_ledger=PhaseLedger()))
+    ctx = tool_context_for(store, permission_context=ToolPermissionContext(mode=PermissionMode(mode)))
+    res = asyncio.run(has_permissions_to_use_tool(build_bash_tool(), {"command": command}, ctx))
+    assert res.behavior == "ask"
+    assert res.message == reason
+    assert (res.decision_reason or {}).get("type") != "phase_rule"
+    # A production target the tier can resolve is still the tier's refusal, before any ask.
+    denied = asyncio.run(has_permissions_to_use_tool(build_bash_tool(), {"command": "echo x > calculator.py"}, ctx))
+    assert denied.behavior == "deny" and (denied.decision_reason or {}).get("type") == "phase_rule"
+
+
+@pytest.mark.parametrize(("tool_name", "args"), [
+    ("Bash", {"command": "printf x > {home}/.local/bin/composer"}),
+    ("WriteFile", {"file_path": "{home}/.local/bin/composer", "content": "x"}),
+])
+def test_in_red_a_write_outside_the_project_reaches_upstreams_ask(tmp_path, tool_name, args):
+    """
+    The live run's case by absolute path: no phase judges a file outside the project (2026-11-21), so the call
+    reaches upstream's own outside-the-working-directory ask (`validateOutputRedirections` for Bash,
+    `checkWritePermissionForTool` for the file tool), never the tier's refusal.
+    """
+    import asyncio
+
+    from app.state.app_state_store import AppState, AppStateStore
+    from app.tool import tool_context_for
+    from app.tools.bash_tool.bash_tool import build_bash_tool
+    from app.tools.file_write_tool.file_write_tool import build_write_file_tool
+    from app.types.permissions import PermissionMode, ToolPermissionContext
+    from app.utils.permissions.permissions import has_permissions_to_use_tool
+    from app.workspace.local import LocalWorkspace
+    from tests.plan_helpers import CURRENT_ITEM_PLAN
+
+    project, home = tmp_path / "project", tmp_path / "home"
+    project.mkdir()
+    store = AppStateStore(AppState(tdd_plan=CURRENT_ITEM_PLAN, project_config=TEST_PROJECT_CONFIG,
+                                   phase_ledger=PhaseLedger()))
+    ctx = tool_context_for(store, workspace=LocalWorkspace(str(project)),
+                           permission_context=ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS))
+    tool = build_bash_tool() if tool_name == "Bash" else build_write_file_tool()
+    call = {key: value.format(home=home) for key, value in args.items()}
+    res = asyncio.run(has_permissions_to_use_tool(tool, call, ctx))
+    assert res.behavior == "ask"
+    assert (res.decision_reason or {}).get("type") != "phase_rule"
+    # The same write inside the project is still the phase's refusal.
+    inside = {key: value.format(home=project).replace("/.local/bin/composer", "/src/app.py")
+              for key, value in args.items()}
+    denied = asyncio.run(has_permissions_to_use_tool(tool, inside, ctx))
+    assert denied.behavior == "deny" and (denied.decision_reason or {}).get("type") == "phase_rule"

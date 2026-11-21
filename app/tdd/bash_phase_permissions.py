@@ -21,9 +21,16 @@ Two details carried over deliberately:
 * **The original command is checked, never the split subcommands.** The splitter strips
   redirections, so a per-subcommand check cannot see them —
   `bashPermissions.ts` keeps a standing comment about exactly this bug class.
-* **Unparseable targets fail closed.** `extract_output_redirections` reports
-  `has_dangerous_redirection` when a command cannot be parsed or a target uses expansion,
-  and in a phase that forbids the write that is a refusal, not a shrug.
+* **A target the tier cannot resolve is upstream's to ask about** (user decision 2026-11-21; it
+  replaced "unparseable targets fail closed"). `extract_output_redirections` reports
+  `has_dangerous_redirection` for a target built from shell expansion (`hasDangerousExpansion`,
+  `reference/claude-code/src/utils/bash/commands.ts` l.830: `$`, `%`, backticks, globs, `{`, `!`,
+  `=` and every `~`). Which file it lands on is not known here, so the tier judges only the targets it
+  can resolve; the unresolvable one reaches upstream's `checkPathConstraints`
+  (`tools/BashTool/pathValidation.ts` l.1013), which asks "Shell expansion syntax in paths requires
+  manual approval" (l.1052), and without the sandbox the install gate asks the same, an ask
+  `bypassPermissions` cannot skip. The user decides; with nobody to ask (headless, workers) it is
+  denied. With no project declaration every redirect is still refused.
 
 What this does **not** do, because upstream does not either: `tee`, `dd` and `truncate` get
 no special handling. They are not read-only, so they still reach the permission gate on
@@ -71,6 +78,7 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | No
     (`app/utils/path.py::tracked_cwd_offset`): a relative target is judged where it lands.
     """
     targets, dangerous = redirect_targets(command)
+    # `dangerous` is upstream's to ask about (see the module docstring); with no declaration it is refused.
     if cwd_offset is not None:
         targets = tuple(t if os.path.isabs(t) or t.startswith("~")
                         else posixpath.normpath(posixpath.join(cwd_offset, t)) for t in targets)
@@ -81,13 +89,6 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | No
     kinds = {target: classify_path(target, rules, root) for target in targets}
 
     if ledger.phase == TddPhase.RED:
-        if dangerous:
-            return (
-                False,
-                ("TDD phase RED cannot verify where this command writes: its redirection "
-                 "target uses shell expansion or could not be parsed. Write the test file "
-                 "with WriteFile instead."),
-            )
         for target in targets:
             if kinds[target] == "production":
                 return (
@@ -98,12 +99,6 @@ def check_bash_tdd_phase(command: str, ledger: PhaseLedger, cwd_offset: str | No
                 )
     elif ledger.phase == TddPhase.GREEN:
         # REFACTOR may write both code and tests (Phase 12), so only GREEN guards the tests.
-        if dangerous:
-            return (
-                False,
-                (f"TDD phase {ledger.phase} cannot verify where this command writes: its "
-                 "redirection target uses shell expansion or could not be parsed."),
-            )
         for target in targets:
             if kinds[target] == "test":
                 return (

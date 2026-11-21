@@ -16,6 +16,7 @@ memory and the session's plan file. With no declaration the tier fails closed.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 from app.tdd.ledger import PhaseLedger, TddPhase
@@ -106,12 +107,17 @@ NO_PROJECT_CONFIG = (
 def classify_path(path: str, rules: TestFileRules, root: str | None) -> str:
     """
     `"manifest"`, `"test"` or `"production"`, by the project's declared patterns
-    (`app/tdd/project_config.py`). A path outside the project is production: it is neither a test
-    file nor a manifest the project declares.
+    (`app/tdd/project_config.py`), or `"outside"` for a path outside the project, which no phase judges
+    (user request 2026-11-21): upstream has no phase, and a write outside the working directory is its path
+    validation's to ask about (`reference/claude-code/src/tools/BashTool/pathValidation.ts` `validatePath`,
+    `utils/permissions/filesystem.ts` `isPathAllowed`, `checkWritePermissionForTool`). With no known root an
+    absolute path cannot be placed, so it stays production (fail closed); a relative one that climbs out with
+    `..` is outside whatever the root.
     """
     relative = project_relative_path(path, root)
     if relative is None:
-        return "production"
+        placeable = root is not None or not os.path.isabs(os.path.expanduser(str(path).strip()))
+        return "outside" if placeable else "production"
     if rules.is_manifest(relative):
         return "manifest"
     return "test" if rules.is_test_code(relative) else "production"
@@ -196,7 +202,7 @@ def check_tdd_phase_permission(
         if tool.name in GENERIC_WRITER_TOOL_NAMES:
             if raw_path:
                 path = str(raw_path)
-                if kind != "test":
+                if kind == "production":
                     return (
                         False,
                         (f"TDD phase RED denies writing to production file '{path}'. "

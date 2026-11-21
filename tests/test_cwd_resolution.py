@@ -121,7 +121,8 @@ def test_a_redirect_is_judged_where_it_lands():
                                 rules=TEST_PROJECT_CONFIG.rules)[0] is True  # tests/a.py is a test path
     assert check_bash_tdd_phase("echo x > a.py", red, None, rules=TEST_PROJECT_CONFIG.rules)[0] is False
     assert check_bash_tdd_phase("echo x > /tmp/log", red, "tests", rules=TEST_PROJECT_CONFIG.rules)[0] is False
-    assert check_bash_tdd_phase("echo x > ~/log", red, "tests", rules=TEST_PROJECT_CONFIG.rules)[0] is False
+    # A `~` target is upstream's to ask about, not the tier's to refuse (user decision 2026-11-21).
+    assert check_bash_tdd_phase("echo x > ~/log", red, "tests", rules=TEST_PROJECT_CONFIG.rules)[0] is True
 
 
 def test_the_tdd_tier_uses_the_shell_directory_for_bash():

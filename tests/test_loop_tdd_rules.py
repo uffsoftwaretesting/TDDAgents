@@ -67,8 +67,11 @@ def make_dummy_tool(
     ("tests_extended/util.py", "production"),
     ("src/sub/mytests/foo.py", "production"),
     (".venv/lib/tests/test_x.py", "production"),
-    ("/elsewhere/tests/test_x.py", "production"),
-    ("../tests/test_x.py", "production"),
+    # Outside the project root: no phase's to judge (upstream's path validation asks; 2026-11-21).
+    ("/elsewhere/tests/test_x.py", "outside"),
+    ("../tests/test_x.py", "outside"),
+    ("/home/u/.local/bin/composer", "outside"),
+    ("/proj/../etc/x", "outside"),
     ("pyproject.toml", "manifest"),
     ("tests/requirements.txt", "manifest"),
     ("/proj/requirements.txt", "manifest"),
@@ -539,3 +542,30 @@ class TestRuntimePermissionGatePhaseRules:
                 assert res.behavior == "allow"
 
         asyncio.run(go())
+
+
+@pytest.mark.parametrize("path", ["/home/u/.local/bin/composer", "/tmp/x.py", "../sibling/a.py"])
+def test_without_a_known_root_a_path_is_never_called_outside(path: str):
+    """Fail closed: with no project root a path cannot be placed, so it stays production, not outside."""
+    kind = classify_path(path, TEST_PROJECT_CONFIG.rules, None)
+    assert kind == ("production" if path.startswith("/") else "outside")
+
+
+@pytest.mark.parametrize("phase", [TddPhase.RED, TddPhase.GREEN])
+def test_a_file_tool_writing_outside_the_project_is_not_judged_by_the_phase(phase: TddPhase):
+    """
+    Upstream has no phase: a write outside the working directory is `pathValidation.ts` / `filesystem.ts`
+    `isPathAllowed`'s to ask about. The tier judges the project's own files only (user request 2026-11-21).
+    """
+    ledger = PhaseLedger(phase=phase, tests_written=phase != TddPhase.RED)
+    write = make_dummy_tool("WriteFile")
+    for path in ("/home/u/.local/bin/composer", "/tmp/scratch.py"):
+        assert check_tdd_phase_permission(write, {"file_path": path}, ledger, rules=TEST_PROJECT_CONFIG.rules,
+                                          root="/proj") == (True, "")
+    inside = check_tdd_phase_permission(write, {"file_path": "/proj/src/a.py" if phase == TddPhase.RED
+                                                else "/proj/tests/test_a.py"}, ledger,
+                                        rules=TEST_PROJECT_CONFIG.rules, root="/proj")
+    assert inside[0] is False
+    # With no declaration every write is still refused, outside too (fail closed).
+    assert check_tdd_phase_permission(write, {"file_path": "/tmp/scratch.py"}, ledger, rules=None,
+                                      root="/proj")[0] is False
