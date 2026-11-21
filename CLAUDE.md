@@ -212,7 +212,9 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   flags exclude each other. Both are sugar over upstream's `--settings <file-or-json>`
   (`main.tsx` `loadSettingsFromFlag`, `app/main.py` `load_settings_from_flag`): their fragment is merged over
   the `--settings` document into one content-hash flag file (`app/utils/tempfile.py`), the session's
-  `settings_path`. New projects are seeded from `.tddagents/settings.json`, which has no
+  `settings_path`. Upstream's messages and exit code 1: "Error: Invalid JSON provided to --settings",
+  "Error: Settings file not found: …", and "Error processing settings: …" for anything else (a directory, an
+  unreadable file, a temp folder that cannot be written). New projects are seeded from `.tddagents/settings.json`, which has no
   `sandbox` block (a project seeded earlier keeps the settings it has). The profile: writes only in the project and `/tmp/tddagents-<uid>`, a private HOME
   (`denyRead ["~"]`, the project re-allowed), the package registries allowed, `failIfUnavailable`
   (the session does not open without bwrap and socat; a one-off bwrap probe). The agent's Bash (opt-in
@@ -231,7 +233,7 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   (headless deny), except a built-in `bubble` agent. Prompts queue one at a time (`Repl._asking`); when
   one's turn comes it is rechecked (upstream's `recheckPermission`), so a parallel call an earlier answer
   now allows ("allow reading from <dir> during this session") is not asked again; a hook's forced ask is
-  never rechecked away. An answer is applied through the root store (`root_set_app_state`, upstream's
+  never rechecked away; a recheck that fails leaves the prompt up (upstream fires it with `void`). An answer is applied through the root store (`root_set_app_state`, upstream's
   `setAppStateForTasks ?? setAppState`), so a background agent's grant reaches the session. A Bash path
   ask carries upstream's `blockedPath` and `createPathChecker`'s suggestions (read: `Read(//dir/**)` for the
   session; write: the folder and acceptEdits). `sed -n 'N,Mp'` is read-only in acceptEdits too (divergence:
@@ -239,9 +241,13 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
 - **Notifications** (`app/services/notifier.py`, upstream's `services/notifier.ts`; 2026-11-20): the
   Notification hooks, then the global config's `preferredNotifChannel` (`~/.tddagents.json`, default `auto`):
   iTerm2 / Kitty / Ghostty OSC (`app/ink/`, wrapped for tmux and screen) or the bell, which `auto` rings on
-  any other terminal (divergence: upstream does nothing there). A question waiting 6 s with no input
-  (`useNotifyAfterTimeout`) and a turn followed by `messageIdleNotifThresholdMs` (60 s) of idleness
-  (`idle_prompt`, "TDDAgents is waiting for your input": the notice that the plan is done) notify.
+  any other terminal (divergence: upstream does nothing there). A question checked every 6 s until the user
+  has been idle that long (`useNotifyAfterTimeout` `shouldNotify`, `app/hooks/use_notify_after_timeout.py`) and a
+  turn followed by `messageIdleNotifThresholdMs` (60 s) of idleness (`idle_prompt`, "TDDAgents is waiting for your
+  input": the notice that the plan is done) notify. **Every keystroke counts**, typed or not submitted
+  (`App.tsx` `processKeysInBatch` → `app/ink/components/app.py`, fed by `TerminalIO`'s wrap of prompt_toolkit's
+  `key_processor.feed_multiple`; cursor-position replies and mouse motion without a button do not); the clock is
+  marked dirty and stamped once per tick (`bootstrap/state.ts` `updateLastInteractionTime` / `flushInteractionTime`).
 - **`AskUserQuestion`** is upstream's tool, main thread only. Headless denies it, and the
   session stops `stop_hook_prevented` with the questions; `--thread-id <id> "<answer>"`
   continues.
@@ -255,7 +261,9 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   changes the machine outside the project: `sudo`, a system, global or runtime-manager install, a download
   piped into a shell or an unpacker, and a create/write target or redirection outside the project folder
   (upstream's path validation reused: `COMMAND_OPERATION_TYPE`, `validate_path`, `validate_output_redirections`;
-  `$HOME/...` counts as outside). The project's own installs and writes inside it ask nothing. It is upstream's way for a hook to start a
+  `$HOME/...` counts as outside). A `cd` out of the project, or to a folder it cannot know (`~`, `-`, `$X`, none),
+  makes every later write and redirection outside (`compoundCommandHasCd`; an in-project `cd` is followed, a
+  divergence: the gate knows the project root). The project's own installs and writes inside it ask nothing. It is upstream's way for a hook to start a
   user question (`toolHooks.ts` `resolveHookPermissionDecision` → `forceDecision`), so `bypassPermissions`
   does not skip it, a deny rule or the TDD tier still wins, and with nobody to ask (plain `-p`, workers)
   it is denied. `setup` and the final run run outside the hooks and are not gated: the user's approval of

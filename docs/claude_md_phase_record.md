@@ -3242,6 +3242,23 @@ exposed TDDAgents faults, each fixed on claude-code's own code:
   `tests/test_notifier.py`, and additions to the install-gate, sed, path-validation, interactive-permission,
   REPL and agent tests.
 
+*More tests, and what they found (2026-11-20, user request; Opus 5.5):* unit and integration tests for the day's
+features (`tests/test_interaction_clock.py`, `tests/test_verification_agent_default.py`, and additions to the
+normalization, settings-flag, install-gate, interactive-permission, REPL, sed and notifier tests) found and fixed:
+- **The interaction clock counted only submitted lines.** Ported `bootstrap/state.ts` `updateLastInteractionTime`
+  (dirty mark) / `flushInteractionTime` (stamp per tick), `ink/components/App.tsx` `processKeysInBatch` and
+  `ink/parse-keypress.ts` `parseMouseEvent` (`app/ink/`); `TerminalIO` wraps prompt_toolkit's
+  `key_processor.feed_multiple`, the analogue of Ink's one stdin handler.
+- **A waiting question checked once and gave up** if a key arrived first. Ported `useNotifyAfterTimeout`'s
+  `setInterval` + `shouldNotify`: it checks every threshold until the user is idle that long, then notifies once.
+- **`cd /opt && mkdir x` escaped the install gate.** It now follows upstream's `compoundCommandHasCd`
+  (`bashPermissions.ts`, `pathValidation.ts:645`), resolving an in-project `cd` instead of always asking
+  (divergence: the gate knows the project root). `curl … | busybox unzip -` is now seen as an unpack too.
+- **`--settings <directory>` crashed** with an uncaught `IsADirectoryError`. It now follows `loadSettingsFromFlag`'s
+  outer catch ("Error processing settings: …", exit 1), with upstream's exact messages.
+- **A failing `recheckPermission` crashed the tool call**; upstream fires it with `void`, so the prompt now stays.
+- **Notification tasks were not held**; `Repl._notify` keeps them until done and the session end cancels them.
+
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)
