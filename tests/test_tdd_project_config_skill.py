@@ -153,9 +153,11 @@ class TestBuildPrompt:
         )
 
     def test_without_a_language(self):
+        """`buildPrompt` with no language (`claudeApi.ts` l.155-165): every file is inlined, in one call."""
         assert build_prompt(None, "", self.PROMPT, self.FILES) == (
             f"# T\nintro {PROJECT_CONFIG_HEADING}\n\n## No Language Detected\npick one:\n{ecosystem_listing()}\n\n"
             "---\n\n## Included Documentation\n\n"
+            '<doc path="references/go.md">\nGO\n</doc>\n\n<doc path="references/rust.md">\nRUST\n</doc>\n\n'
             '<doc path="references/shared.md">\nSHARED\n</doc>\n\n## Common Pitfalls\n- p'
         )
 
@@ -184,13 +186,28 @@ class TestShippedPrompt:
         assert "The documentation for the `python` ecosystem" in text
         assert "## User Request" not in text and "## No Language Detected" not in text
 
-    def test_with_nothing_detected_it_lists_the_ecosystems(self):
+    def test_with_nothing_detected_it_includes_every_ecosystem_in_one_call(self):
+        """Upstream's `claude-api` (`claudeApi.ts` l.155-165): with no language, every reference is inlined and the
+        model picks the matching one; it is never told to invoke the skill again (user decision 2026-11-21)."""
         text = _prompt("make it fast")
-        assert _DOC.findall(text) == ["references/shared.md"]
+        assert _DOC.findall(text) == sorted([*LANGUAGE_FILES, "references/shared.md"])
         assert "## No Language Detected" in text and "## Reading Guide" not in text
+        assert "invoke this skill again" not in text and "again" not in text.split("## No Language Detected")[1][:400]
+        assert "Use the language the user's request names" in text
         for language in LANGUAGES:
             assert f"- `{language}`: {LANGUAGES[language]}" in text
         assert text.endswith("## User Request\n\nmake it fast")
+
+    def test_an_empty_project_without_the_sandbox_gets_the_no_sandbox_texts(self, tmp_path):
+        """Planning starts in an empty folder: the one call carries the default (no sandbox) references."""
+        from app.tdd.project_config_skill import skill_files
+
+        files = skill_files(sandboxed=False)
+        text = _prompt("", str(tmp_path))
+        assert len(_DOC.findall(text)) == len(files) == len(LANGUAGES) + 1
+        for path in ("references/python.md", "references/shared.md", "references/go.md"):
+            body = files[path].split("-->", 1)[-1].strip()[:120]
+            assert body and body.split("{{")[0][:60] in text, path
 
     @pytest.mark.parametrize("language", list(LANGUAGES))
     def test_every_reference_renders_and_its_examples_parse(self, language):
@@ -350,6 +367,19 @@ def test_the_skill_tool_launches_it(tmp_path):
     assert result.context_modifier is None
 
 
+def test_one_skill_call_in_an_empty_project_carries_every_ecosystem(tmp_path):
+    """The live run's case: an empty project and no argument. One launch holds every reference."""
+    from tests.test_skills_tool import _call, _ctx, _tool
+
+    init_bundled_skills()
+    reg = get_skill_registry(tmp_path, tmp_path / "home", tmp_path / "etc", bundled_dir=tmp_path / "none")
+    command = reg.find_command("tdd-project-config")
+    assert command is not None
+    result = _call(_tool(command), {"skill": "tdd-project-config"}, _ctx())
+    (message,) = result.new_messages
+    assert _DOC.findall(str(message.content)) == sorted([*LANGUAGE_FILES, "references/shared.md"])
+
+
 def test_a_typed_slash_command_takes_the_language(tmp_path):
     init_bundled_skills()
     reg = get_skill_registry(tmp_path, tmp_path / "home", tmp_path / "etc", bundled_dir=tmp_path / "none")
@@ -491,12 +521,15 @@ class TestBuildPromptByMode:
         assert "In the sandbox only" not in off
         assert "pyenv" in off
 
-    def test_with_no_language_only_the_shared_reference_is_inlined_per_mode(self) -> None:
+    def test_with_no_language_every_reference_of_the_mode_is_inlined(self) -> None:
         on = build_prompt(None, "", "# P\n", skill_files(sandboxed=True))
         off = build_prompt(None, "", "# P\n", skill_files(sandboxed=False))
-        assert _DOC.findall(on) == _DOC.findall(off) == ["references/shared.md"]
-        assert "## The sandbox" in on
+        assert _DOC.findall(on) == _DOC.findall(off) == sorted([*LANGUAGE_FILES, "references/shared.md"])
+        assert "## The sandbox" in on and "## The sandbox" not in off
         assert "## The environment" in off
+        # Each mode's own text for the references the no-sandbox variants replace.
+        for name in ("python", "javascript-typescript"):
+            assert skill_files(sandboxed=False)[f"references/{name}.md"].split("-->")[-1].strip()[:80] in off
 
 
 class TestTheModeComesFromTheSettings:

@@ -26,11 +26,9 @@ Start from the example, adapt the paths and package names to this project, and k
 
 ## No Language Detected
 
-No project language was given or detected (the project may still be empty). Use the language the user's request names; if it names none, ask the user which one to use. Then invoke this skill again with that ecosystem as its argument. The available ecosystems:
+No project language was given or detected (the project may still be empty). Use the language the user's request names; if it names none, ask the user which one to use. Then refer to that ecosystem's reference below: every ecosystem's reference is included, with `references/shared.md`, whose schema and rules hold for all of them. The ecosystems (each one's reference is `references/<name>.md`):
 
 {{ECOSYSTEMS}}
-
-The schema and TDDAgents' rules, which hold for every ecosystem, are included below.
 
 ## Common Pitfalls
 

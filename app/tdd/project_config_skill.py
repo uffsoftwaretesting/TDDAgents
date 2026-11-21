@@ -25,7 +25,9 @@ directories. Its prompt is built in code at each invocation, as upstream's `clau
   shown under the same `references/<name>.md` path. The mode is the effective `sandbox.enabled` of the
   settings (`sandbox_enabled`), the one the sandbox adapter reads, so `--sandbox`, `--no-sandbox` and a
   managed policy all reach the prompt. Divergence: upstream's `claude-api` has no such variants.
-- **No language.** The prompt lists the available ecosystems and inlines only `shared.md`.
+- **No language.** As upstream's (`claudeApi.ts` l.155-165), every reference is inlined, `shared.md` included,
+  and the prompt tells the model to use the language the user's request names (or ask) and read the matching
+  reference: planning, which starts in an empty project, needs one call (user decision 2026-11-21).
 
 The Markdown lives in `app/prompts/skills/tdd-project-config/`: `prompt.md` (upstream's
 `SKILL.md`; not named `SKILL.md`, so the file-based roster does not load it a second time) and
@@ -33,9 +35,7 @@ The Markdown lives in `app/prompts/skills/tdd-project-config/`: `prompt.md` (ups
 Pitfalls` are cut and assembled as `buildPrompt` cuts upstream's.
 
 Divergences from `claudeApi.ts`: the argument may name the language (upstream only appends it as
-the user request, which this skill also does); with no language detected the prompt lists the
-ecosystems and inlines only the shared reference, where upstream inlines every document (eight
-ecosystems' examples would only crowd the plan's context); `allowedTools` is empty, because the
+the user request, which this skill also does); `allowedTools` is empty, because the
 documentation is inlined and an `allowedTools` list makes the Skill tool ask (`skillHasOnlySafeProperties`),
 which a headless Analyst would be denied.
 """
@@ -217,8 +217,10 @@ def build_prompt(language: str | None, args: str, prompt: str, files: dict[str, 
         parts.append(_between(clean, READING_GUIDE_HEADING, NO_LANGUAGE_HEADING))
         paths = get_files_for_language(language, files)
     else:
+        # `claudeApi.ts` l.155-165: no language detected, so every document is inlined and the model picks the
+        # matching one; one call, never a second one with the language as its argument.
         parts.append(_between(clean, NO_LANGUAGE_HEADING, PITFALLS_HEADING))
-        paths = [SHARED_REFERENCE]
+        paths = sorted(files)
     parts.append("---\n\n## Included Documentation\n\n" + build_inline_reference(paths, files, variables))
     pitfalls = _between(clean, PITFALLS_HEADING, None)
     if pitfalls:

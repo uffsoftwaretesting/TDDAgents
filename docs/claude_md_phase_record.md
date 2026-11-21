@@ -3310,6 +3310,13 @@ on the user's request found a fifth. Each fix reuses the cited upstream code:
 - **Mutation-run blockers fixed** (each failed only inside `mutants/`): a stale `mutants/` copy; a subprocess test
   without `MUTANT_UNDER_TEST=""`; `McpTransportAuth.async_auth_flow`, now a plain method returning its generator
   (mutmut's trampoline forwards no `asend()`); a test calling a method with a `SimpleNamespace` as `self`.
+- **`Skill(tdd-project-config)` ran twice at the start of planning** (CPF/Django run). The transcript shows two model
+  responses, the first without an argument and the second with `python`: the model repeated it because the
+  skill's own `## No Language Detected` text said "invoke this skill again with that ecosystem as its argument",
+  and planning starts in an empty folder, where no language is detected. User decision: as upstream's
+  `skills/bundled/claudeApi.ts` `buildPrompt` (l.155-165), with no language every reference is inlined in that
+  one call and the model uses the language the request names (or asks); the recorded divergence is gone. The
+  verifier and the contract stay as upstream has them (user decision).
 - `tests/test_notifier.py`'s idle-prompt integration test raced the bell (the hook's marker can exist before the
   channel runs, upstream's order); it now waits for the bell.
 

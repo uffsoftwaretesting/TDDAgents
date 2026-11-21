@@ -354,7 +354,9 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   contract tells the model to create every file the request names, never to add `.gitignore` /
   `exclude` entries on its own, and to declare every
   dependency it installs in the project's own manifest. The `tdd-project-config` skill (claude-api
-  pattern) injects the reference for the project's ecosystem.
+  pattern) injects the reference for the project's ecosystem; with no language given or detected (planning
+  starts in an empty folder) it inlines every ecosystem's reference, as upstream's `claudeApi.ts`
+  `buildPrompt`, so planning needs one call (2026-11-21).
 - **The final run** (`app/tdd/final_run.py`) copies the project into a clean folder (upstream's
   ripgrep listing with `--follow`, so every `.gitignore` applies and links are recreated as links;
   broken or looping links are left out), runs the
