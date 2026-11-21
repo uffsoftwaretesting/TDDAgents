@@ -31,7 +31,11 @@ from app.components.permissions.permission_options import NO, YES, permission_op
 from app.components.permissions.web_fetch_permission_request.web_fetch_permission_request import (
     web_fetch_permission_request,
 )
-from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt, build_interactive_can_use_tool
+from app.hooks.use_can_use_tool import (
+    PermissionAnswer,
+    PermissionPrompt,
+    build_interactive_can_use_tool,
+)
 from app.services.tools.tool_execution import run_tool_use
 from app.state.app_state_store import AppState, AppStateStore
 from app.tool import tool_context_for

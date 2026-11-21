@@ -29,6 +29,7 @@ of the plan's project configuration is their consent.
 
 from __future__ import annotations
 
+import itertools
 import os
 import re
 import shlex
@@ -316,7 +317,7 @@ def _download_pipe(command: str) -> str | None:
     last subcommand of a segment, the program the first subcommand of the next.
     """
     segments = get_pipe_segments(command)
-    for left, right in zip(segments, segments[1:]):
+    for left, right in itertools.pairwise(segments):
         left_subcommands, right_subcommands = split_command(left), split_command(right)
         if not left_subcommands or not right_subcommands:
             continue

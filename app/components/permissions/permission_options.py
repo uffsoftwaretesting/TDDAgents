@@ -43,7 +43,10 @@ from app.tdd.tdd_plan_tool.tdd_plan_tool import UPDATE_PLAN_TOOL_NAME
 from app.tools.bash_tool.bash_permissions import BASH_TOOL_NAME
 from app.tools.skill_tool.prompt import SKILL_TOOL_NAME
 from app.tools.web_fetch_tool.utils import parse_url
-from app.tools.web_fetch_tool.web_fetch_tool import WEB_FETCH_TOOL_NAME, permission_rule_content
+from app.tools.web_fetch_tool.web_fetch_tool import (
+    WEB_FETCH_TOOL_NAME,
+    permission_rule_content,
+)
 from app.types.permissions import (
     PermissionBehavior,
     PermissionMode,

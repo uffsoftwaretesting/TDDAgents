@@ -405,7 +405,11 @@ def test_an_allowed_call_keeps_every_field_of_its_input(mode, command):
 
 def test_an_exact_allow_rule_keeps_every_field_of_its_input():
     """`bashToolCheckExactMatchPermission` (bashPermissions.ts l.991): `updatedInput: input`."""
-    from app.types.permissions import PermissionBehavior, PermissionRule, PermissionRuleSource
+    from app.types.permissions import (
+        PermissionBehavior,
+        PermissionRule,
+        PermissionRuleSource,
+    )
     rule = PermissionRule(tool_name="Bash", rule_behavior=PermissionBehavior.ALLOW, rule_content="make build",
                           source=PermissionRuleSource.PROJECT_SETTINGS)
     perm = ToolPermissionContext(mode=PermissionMode.DEFAULT, always_allow_rules=(rule,))
