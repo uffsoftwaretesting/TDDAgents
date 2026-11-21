@@ -51,7 +51,7 @@ from app.tools.bash_tool.path_validation import (
 )
 from app.tools.bash_tool.sed_validation import sed_command_is_allowed_by_allowlist
 from app.types.permissions import PermissionBehavior, PermissionMode, PermissionResult, ToolPermissionContext
-from app.utils.bash.commands import extract_output_redirections, split_command
+from app.utils.bash.commands import extract_output_redirections, get_pipe_segments, split_command
 
 #: `HookCallback.timeout` (seconds): the callback only reads the command.
 INSTALL_GATE_TIMEOUT = 1
@@ -70,11 +70,8 @@ ELEVATORS = frozenset({"sudo", "su", "doas", "pkexec"})
 EXTRACTORS = frozenset({"tar", "bsdtar", "unzip", "7z", "7za", "gunzip", "gzip", "xz", "unxz", "bunzip2",
                         "zstd", "cpio", "unar"})
 
-#: A download piped into a program: `curl … | sh`, `wget -qO- … | sudo bash`, `curl … | tar -xz`, and the same
-#: through `busybox` (`… | busybox unzip -`).
-_PIPE_FROM_DOWNLOAD = re.compile(
-    r"(?:^|[\s;&|(])(?:curl|wget|fetch)\b[^;&|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:(?:/\S*/)?busybox\s+)?"
-    r"(?:/\S*/)?(?P<program>[\w.+-]+)")
+#: The programs that download: the left side of a download pipe.
+DOWNLOADERS = frozenset({"curl", "wget", "fetch"})
 
 #: Verbs that install, per package manager (the first argument that is not an option).
 _INSTALL_VERBS = frozenset({"install", "add", "upgrade", "dist-upgrade", "full-upgrade", "reinstall", "i"})
@@ -289,6 +286,51 @@ def _path_verdict(command: str, cwd: str) -> str | None:
     return None
 
 
+def _words(subcommand: str) -> list[str]:
+    """A subcommand's words, its leading variables and safe wrappers stripped (`stripAllLeadingEnvVars`,
+    `stripSafeWrappers`) and `splitCommand_DEPRECATED`'s newline placeholder removed."""
+    return _tokens(strip_safe_wrappers(strip_all_leading_env_vars(_NEW_LINE_PLACEHOLDER.sub(" ", subcommand).strip())))
+
+
+def _piped_program(words: list[str]) -> str | None:
+    """What the right side of a pipe runs: through `sudo [options]`, `busybox` and the runners (`env`, `xargs`)."""
+    while words:
+        name = _name(words[0])
+        if name in ELEVATORS or name == "busybox":
+            words = words[1:]
+            while words and words[0].startswith("-"):
+                words = words[1:]
+        elif name in RUNNERS:
+            words = _skip_runner_options(name, words[1:])
+        else:
+            return name
+    return None
+
+
+def _download_pipe(command: str) -> str | None:
+    """
+    A download piped into a shell or an unpacker, read the way upstream reads a pipe: `getPipeSegments`
+    (`utils/bash/ParsedCommand.ts` l.53, over `utils/bash/commands.ts` `splitCommandWithOperators` l.85, which
+    keeps a quoted word whole, so `grep -E "a|curl|sh"` is no pipe), each segment split into its subcommands as
+    `segmentedCommandPermissionResult` does (`tools/BashTool/bashCommandHelpers.ts` l.59). The download is the
+    last subcommand of a segment, the program the first subcommand of the next.
+    """
+    segments = get_pipe_segments(command)
+    for left, right in zip(segments, segments[1:]):
+        left_subcommands, right_subcommands = split_command(left), split_command(right)
+        if not left_subcommands or not right_subcommands:
+            continue
+        downloader = _words(left_subcommands[-1])
+        if not downloader or _name(downloader[0]) not in DOWNLOADERS:
+            continue
+        program = _piped_program(_words(right_subcommands[0]))
+        if program in SHELLS:
+            return "pipes a download into a shell (curl | sh)"
+        if program in EXTRACTORS:
+            return f"unpacks a download (curl | {program})"
+    return None
+
+
 def classify_install(command: str, depth: int = 0, *, cwd: str | None = None) -> str | None:
     """
     What the command does that needs the user's permission, in a few words, or `None`:
@@ -304,18 +346,28 @@ def classify_install(command: str, depth: int = 0, *, cwd: str | None = None) ->
     """
     if not isinstance(command, str) or not command.strip() or depth > 8:
         return None
-    for match in _PIPE_FROM_DOWNLOAD.finditer(command):
-        program = match.group("program")
-        if program in SHELLS:
-            return "pipes a download into a shell (curl | sh)"
-        if program in EXTRACTORS:
-            return f"unpacks a download (curl | {program})"
+    found = _download_pipe(command)
+    if found is not None:
+        return found
     for subcommand in split_command(command):
-        stripped = strip_safe_wrappers(strip_all_leading_env_vars(_NEW_LINE_PLACEHOLDER.sub(" ", subcommand).strip()))
-        found = _classify_tokens(_tokens(stripped), depth, cwd)
+        found = _classify_tokens(_words(subcommand), depth, cwd)
         if found is not None:
             return found
     return _path_verdict(command, cwd) if cwd is not None else None
+
+
+def install_gate_reason(command: str, cwd: str | None) -> str | None:
+    """
+    The `permissionDecisionReason` the gate asks with, or `None`. The gate's own classifications (an install,
+    elevation, a download pipe) read "<what it does>: this changes the machine outside the project". A write
+    found by upstream's path validation is upstream's own message, verbatim, as a hook's reason is shown
+    (`services/tools/toolHooks.ts` `resolveHookPermissionDecision`): it is a full sentence already, and its
+    cd rule fires inside the project too.
+    """
+    own = classify_install(command)
+    if own is not None:
+        return f"{own}: {REASON_SUFFIX}"
+    return classify_install(command, cwd=cwd) if cwd is not None else None
 
 
 async def install_gate_callback(
@@ -328,14 +380,14 @@ async def install_gate_callback(
     tool_input = hook_input.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, Mapping) else None
     cwd = hook_input.get("cwd")
-    found = classify_install(command, cwd=cwd if isinstance(cwd, str) and cwd else None) \
+    reason = install_gate_reason(command, cwd if isinstance(cwd, str) and cwd else None) \
         if isinstance(command, str) else None
-    if found is None:
+    if reason is None:
         return {}
     return {"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "ask",
-        "permissionDecisionReason": f"{found}: {REASON_SUFFIX}",
+        "permissionDecisionReason": reason,
     }}
 
 
@@ -348,4 +400,4 @@ INSTALL_GATE_HOOKS: dict[str, tuple[HookMatcher, ...]] = {
 }
 
 
-__all__ = ["INSTALL_GATE_HOOKS", "INSTALL_MANAGERS", "classify_install", "install_gate_callback"]
+__all__ = ["INSTALL_GATE_HOOKS", "INSTALL_MANAGERS", "classify_install", "install_gate_callback", "install_gate_reason"]

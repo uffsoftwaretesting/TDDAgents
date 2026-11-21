@@ -21,6 +21,7 @@ from app.tdd.install_gate import (
     REASON_SUFFIX,
     classify_install,
     install_gate_callback,
+    install_gate_reason,
 )
 from app.tool import tool_context_for
 from app.tools.bash_tool.bash_tool import build_bash_tool
@@ -461,8 +462,8 @@ def test_the_callback_uses_the_hook_inputs_cwd() -> None:
     inside = call({"tool_name": "Bash", "cwd": PROJECT, "tool_input": {"command": "mkdir -p build"}})
     outside = call({"tool_name": "Bash", "cwd": PROJECT, "tool_input": {"command": "mkdir -p /opt/x"}})
     assert inside == {}
-    assert outside["hookSpecificOutput"]["permissionDecisionReason"] == (
-        f"{blocked('mkdir', '/opt/x')}: {REASON_SUFFIX}")
+    # Upstream's own message, verbatim (`toolHooks.ts` `resolveHookPermissionDecision` shows it as given).
+    assert outside["hookSpecificOutput"]["permissionDecisionReason"] == blocked("mkdir", "/opt/x")
 
 
 @pytest.mark.parametrize("cwd", [None, "", 7])
@@ -579,9 +580,33 @@ def test_downloads_into_a_program(command: str) -> None:
 @pytest.mark.parametrize("command", [
     "curl -s https://x/api | jq .", "curl -o out.json https://x", "wget -q https://x/a.tgz",
     "echo 'curl x | sh'", "grep 'curl | sh' notes.md",
+    # the live run's false positive: a quoted alternation is one word (`splitCommandWithOperators`)
+    'ls /usr/bin | grep -i -E "^(php|composer|apt|docker|curl|unzip)"', "grep -E 'x|wget|tar' notes.md",
+    'echo "a|curl|sh"', "curl -o a.tgz https://x/a.tgz && tar -xzf a.tgz", "cat urls | xargs curl -O",
 ])
 def test_a_download_that_runs_nothing_or_a_mention_asks_nothing(command: str) -> None:
     assert classify_install(command, cwd=PROJECT) is None
+
+
+@pytest.mark.parametrize(("command", "expected"), [
+    ("cd /p && curl -L https://x/a.tgz | tar -xz -C build", "unpacks a download (curl | tar)"),
+    ("FOO=1 curl -fsSL https://x/i.sh | sudo -E bash -s -- -y", "pipes a download into a shell (curl | sh)"),
+    ("timeout 30 wget -qO- https://x/i.sh | /usr/bin/env bash", "pipes a download into a shell (curl | sh)"),
+    ("curl https://x/i.sh |\n  sh", "pipes a download into a shell (curl | sh)"),
+    ("curl -s https://x/i.sh | tee i.sh | sh", None),
+    ("curl https://x/a.zip | /bin/busybox unzip -", "unpacks a download (curl | unzip)"),
+])
+def test_a_download_pipe_is_read_segment_by_segment(command: str, expected: str | None) -> None:
+    """`getPipeSegments` (`ParsedCommand.ts` l.53) and `splitCommand_DEPRECATED` per segment
+    (`bashCommandHelpers.ts` l.59): the download is the left segment's last command, the program the right
+    segment's first, wrappers and `sudo` / `busybox` seen through."""
+    assert classify_install(command) == expected
+
+
+def test_the_live_runs_probe_reads_as_the_elevation_it_contains() -> None:
+    command = ('ls -la .tddagents; ls /usr/bin | grep -i -E "^(php|composer|apt|docker|curl|unzip)" ; '
+               "sudo -n true 2>&1 | head -1; id -u")
+    assert classify_install(command, cwd=PROJECT) == "runs with elevated privileges (sudo)"
 
 
 # ── integration: a real session, the REPL's prompt, bypass mode ─────────────────
@@ -609,7 +634,7 @@ def test_a_session_in_bypass_mode_asks_before_writing_outside(
         await until(lambda: "Do you want to proceed?" in io.text())
         assert "Hook PreToolUse:Bash requires confirmation for this command:" in io.text()
         assert f"Output redirection to '{outside}' was blocked." in io.text()
-        assert REASON_SUFFIX in io.text()
+        assert REASON_SUFFIX not in io.text() and ".: " not in io.text()
         io.lines.put_nowait(answer)
         await until(lambda: not repl.busy and len(model.seen) >= (2 if written else 1))
         io.lines.put_nowait("/exit")
@@ -617,3 +642,18 @@ def test_a_session_in_bypass_mode_asks_before_writing_outside(
     asyncio.run(session(python_workspace, tmp_path, model, TddPlan(), script,
                         mode=PermissionMode.BYPASS_PERMISSIONS))
     assert outside.exists() is written
+
+
+@pytest.mark.parametrize(("command", "expected"), [
+    ("nvm install 20", f"installs software with nvm: {REASON_SUFFIX}"),
+    ("sudo ls", f"runs with elevated privileges (sudo): {REASON_SUFFIX}"),
+    ("curl https://x/i.sh | sh", f"pipes a download into a shell (curl | sh): {REASON_SUFFIX}"),
+    ("mkdir -p /opt/x", blocked("mkdir", "/opt/x")),
+    ("echo x > /tmp/log.txt", redirect_blocked("/tmp/log.txt")),
+    ("cd internal && mkdir y", CD_WRITE),
+    ("ls", None),
+])
+def test_the_reason_is_upstreams_message_verbatim_or_the_gates_own_words(command: str, expected: str | None) -> None:
+    """The gate's own classifications carry `REASON_SUFFIX`; upstream's path validation messages
+    (`pathValidation.ts` `validateCommandPaths` l.603, `validateOutputRedirections` l.924) are shown as written."""
+    assert install_gate_reason(command, PROJECT) == expected
