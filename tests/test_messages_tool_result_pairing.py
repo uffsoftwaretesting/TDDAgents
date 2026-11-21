@@ -251,3 +251,139 @@ def test_the_request_is_normalized_then_repaired(monkeypatch: Any) -> None:
     request = claude.build_request_messages(state, SimpleNamespace())  # type: ignore[arg-type]
     assert kinds(request[1:]) == [
         "Human(go)", "AI(s,b)", "Tool(s)", "Tool(b)", "Human(skill prompt)", "AI(late)", "Tool(late)"]
+
+
+# ── more edge cases ─────────────────────────────────────────────────────────────
+
+
+def test_two_batches_each_keep_their_results_next_to_their_calls() -> None:
+    history = [
+        HumanMessage(content="go"),
+        AIMessage(content="", tool_calls=[call("a"), call("b")], id="r1"),
+        ToolMessage(content="A", tool_call_id="a"), META, ToolMessage(content="B", tool_call_id="b"),
+        AIMessage(content="", tool_calls=[call("c"), call("d")], id="r2"),
+        ToolMessage(content="C", tool_call_id="c"),
+        HumanMessage(content="attachment", additional_kwargs={"is_meta": True}),
+        ToolMessage(content="D", tool_call_id="d"),
+    ]
+    assert kinds(normalize_messages_for_api(history)) == [
+        "Human(go)", "AI(a,b)", "Tool(a)", "Tool(b)", "Human(skill prompt)",
+        "AI(c,d)", "Tool(c)", "Tool(d)", "Human(attachment)"]
+
+
+def test_a_result_answering_an_earlier_turn_is_dropped_by_the_repair() -> None:
+    history = [
+        AIMessage(content="", tool_calls=[call("a")]), ToolMessage(content="A", tool_call_id="a"),
+        AIMessage(content="", tool_calls=[call("b")]), ToolMessage(content="late A", tool_call_id="a"),
+        ToolMessage(content="B", tool_call_id="b"),
+    ]
+    repaired = ensure_tool_result_pairing(normalize_messages_for_api(history))
+    assert kinds(repaired) == ["AI(a)", "Tool(a)", "AI(b)", "Tool(b)"]
+
+
+def test_a_duplicate_id_inside_one_assistant_keeps_the_first_call() -> None:
+    history = [AIMessage(content="", tool_calls=[call("a"), call("a")]), ToolMessage(content="A", tool_call_id="a")]
+    repaired = ensure_tool_result_pairing(history)
+    assert kinds(repaired) == ["AI(a)", "Tool(a)"]
+
+
+def test_a_tool_use_block_without_a_tool_call_entry_is_left_to_the_adapter() -> None:
+    """Only `tool_calls` declare calls here; a stray content block is not invented a result."""
+    block = {"type": "tool_use", "id": "x", "name": "Bash", "input": {}}
+    history = [AIMessage(content=[block]), HumanMessage(content="next")]
+    assert kinds(ensure_tool_result_pairing(history)) == ["AI()", "Human(next)"]
+
+
+def test_a_signal_attachment_and_a_compact_boundary_around_a_batch() -> None:
+    from app.services.compact.compact import is_compact_boundary_message
+    from app.utils.messages import ATTACHMENT_KEY, is_signal_attachment_message
+
+    signal = HumanMessage(content="", additional_kwargs={"is_meta": True, ATTACHMENT_KEY: {"type": "max_turns"}})
+    history = [AIMessage(content="", tool_calls=[call("a"), call("b")]), ToolMessage(content="A", tool_call_id="a"),
+               signal, ToolMessage(content="B", tool_call_id="b")]
+    assert is_signal_attachment_message(signal) and not is_compact_boundary_message(signal)
+    assert kinds(normalize_messages_for_api(history))[:3] == ["AI(a,b)", "Tool(a)", "Tool(b)"]
+
+
+def test_the_openai_media_move_keeps_results_adjacent_after_the_hoist() -> None:
+    from app.utils.messages import move_tool_result_media_to_user
+
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+    history = [AIMessage(content="", tool_calls=[call("a"), call("b")]),
+               ToolMessage(content=[{"type": "text", "text": "pic"}, image], tool_call_id="a"),
+               META, ToolMessage(content="B", tool_call_id="b")]
+    moved = move_tool_result_media_to_user(ensure_tool_result_pairing(normalize_messages_for_api(history)))
+    assert [type(m).__name__ for m in moved[:3]] == ["AIMessage", "ToolMessage", "ToolMessage"]
+    assert isinstance(moved[3], HumanMessage) and moved[3].content == [image]
+
+
+def test_an_empty_history_and_a_history_of_text() -> None:
+    assert normalize_messages_for_api([]) == [] and ensure_tool_result_pairing([]) == []
+    texts = [HumanMessage(content="a"), AIMessage(content="b")]
+    assert ensure_tool_result_pairing(normalize_messages_for_api(texts)) == texts
+
+
+# ── integration: a real session where the model calls Skill and Bash together ───
+
+
+def test_a_session_with_a_parallel_skill_and_bash_sends_a_valid_request(python_workspace: Any, tmp_path: Any) -> None:
+    """The live run's shape, end to end: the second request is valid for the Anthropic API."""
+    import asyncio
+
+    from langchain_anthropic.chat_models import _format_messages
+
+    from app.services.api.claude import build_request_messages
+    from app.tdd.plan import TddPlan
+    from tests.test_repl import Model, session, until
+
+    both = AIMessage(content="", tool_calls=[
+        {"name": "Skill", "args": {"skill": "tdd-project-config"}, "id": "s1", "type": "tool_call"},
+        {"name": "Bash", "args": {"command": "ls"}, "id": "b1", "type": "tool_call"}], id="resp-1")
+    model = Model([[both], [AIMessage(content="done")]])
+    seen: dict[str, Any] = {}
+
+    async def script(repl: Any, io: Any) -> None:
+        await until(lambda: len(model.seen) >= 2)
+        seen["request"] = build_request_messages(model.seen[1], repl.run.config)
+        await until(lambda: not repl.busy)
+        io.lines.put_nowait("/exit")
+
+    asyncio.run(session(python_workspace, tmp_path, model, TddPlan(), script))
+    stored = [m for m in model.seen[1].messages if isinstance(m, (AIMessage, ToolMessage)) or
+              (isinstance(m, HumanMessage) and m.additional_kwargs.get("is_meta"))]
+    assert any(isinstance(m, ToolMessage) and m.tool_call_id == "s1" for m in stored)
+    _system, payload = _format_messages(seen["request"])
+    for index, message in enumerate(payload):
+        if message["role"] != "assistant" or not isinstance(message["content"], list):
+            continue
+        uses = [b["id"] for b in message["content"] if b.get("type") == "tool_use"]
+        if not uses:
+            continue
+        following = payload[index + 1]["content"]
+        results = [b for b in following if isinstance(b, dict) and b.get("type") == "tool_result"]
+        assert [b["tool_use_id"] for b in results] == uses
+        assert following[:len(uses)] == results  # every result before any text
+
+
+# ── resume: a transcript stored in the broken order ─────────────────────────────
+
+
+def test_a_transcript_stored_in_the_broken_order_resumes_into_a_valid_request(tmp_path: Any) -> None:
+    from langchain_anthropic.chat_models import _format_messages
+
+    from app.utils.conversation_recovery import load_conversation_for_resume
+    from app.utils.session_storage import TranscriptStore
+
+    store = TranscriptStore("loop-resume-broken", str(tmp_path))
+    store.record_transcript(live_run_history())
+    resumed = load_conversation_for_resume(store.path)
+    assert resumed is not None
+    loaded = list(resumed.messages)
+    request = ensure_tool_result_pairing(normalize_messages_for_api(loaded))
+    _system, payload = _format_messages(request)
+    uses = [b["id"] for b in payload[1]["content"] if b.get("type") == "tool_use"]
+    blocks = payload[2]["content"]
+    assert sorted(uses) == ["b", "s"]
+    assert sorted(b["tool_use_id"] for b in blocks[:2]) == ["b", "s"]  # both results first, any order
+    assert all(b["type"] == "tool_result" for b in blocks[:2])
+    assert all(b["type"] != "tool_result" for b in blocks[2:])

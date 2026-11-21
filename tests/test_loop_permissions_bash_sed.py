@@ -259,3 +259,20 @@ def test_messages():
     assert SED_ASK_MESSAGE == "sed command requires approval (contains potentially dangerous operations)"
     assert SED_ASK_REASON == (
         "sed command contains operations that require explicit approval (e.g., write commands, execute commands)")
+
+
+@pytest.mark.parametrize("command", [
+    "sed --quiet 1,5p f", "sed --silent 3p f", "sed -nE 1,5p f", "sed -n p f", "sed -n 0p f",
+    "sed -n '1,5p' a b", "sed -n -E '2p' f", "sed -n 1,5p",
+])
+@pytest.mark.parametrize("mode", [PermissionMode.DEFAULT, PermissionMode.ACCEPT_EDITS,
+                                  PermissionMode.BYPASS_PERMISSIONS, PermissionMode.PLAN])
+def test_print_shapes_pass_in_every_mode(command, mode):
+    """`isPrintCommand` (`^(?:\\d+|\\d+,\\d+)?p$`) with `LINE_PRINTING_FLAGS`, whatever the mode."""
+    assert check_sed_constraints(command, ToolPermissionContext(mode=mode)).behavior == "passthrough"
+
+
+@pytest.mark.parametrize("command", ["sed -n '1,5p' -i f", "sed -ni 1p f", "sed -n 'w out' f", "sed -n 1,5d f"])
+@pytest.mark.parametrize("mode", [PermissionMode.DEFAULT, PermissionMode.ACCEPT_EDITS])
+def test_a_print_with_a_write_or_another_command_still_asks(command, mode):
+    assert check_sed_constraints(command, ToolPermissionContext(mode=mode)).behavior == "ask"

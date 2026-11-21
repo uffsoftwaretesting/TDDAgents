@@ -526,3 +526,91 @@ def test_a_hook_forced_ask_is_never_rechecked_away(tmp_path: Path):
     assert result.behavior == PermissionBehavior.ALLOW
     assert len(asker.prompts) == 1
     assert isinstance(asker.prompts[0], Prompt) and asker.prompts[0].recheck is None
+
+
+# ── more recheck / suggestion edge cases ────────────────────────────────────────
+
+
+def test_three_parallel_reads_where_the_first_answer_grants_the_folder(tmp_path: Path):
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
+
+    source = _module_cache(tmp_path)
+    asker = SerialAsker(PermissionAnswer("yes-session"))
+    ctx = interactive_context(tmp_path, asker, mode="acceptEdits")
+    ctx.can_use_tool = build_interactive_can_use_tool(asker)
+    tool = build_read_file_tool()
+    ctx.tools = (tool,)
+    calls = [ToolCall(name=tool.name, args={"file_path": str(source), "offset": n, "limit": 5}, id=f"r{n}")
+             for n in (1, 100, 200)]
+
+    async def go() -> list[Any]:
+        message = AIMessage(content="", tool_calls=calls)
+        return list(await asyncio.gather(*(run_tool_use(c, message, ctx, (tool,)) for c in calls)))
+
+    outcomes = asyncio.run(go())
+    assert len(asker.prompts) == 1
+    assert [o.message.status for o in outcomes] == ["success"] * 3
+
+
+def test_a_changed_context_that_still_does_not_allow_the_call_shows_the_prompt(tmp_path: Path):
+    """`recheckPermission` resolves a prompt only when the fresh decision is an allow."""
+    import dataclasses
+
+    asker = Asker(PermissionAnswer("yes"))
+    ctx = interactive_context(tmp_path, asker)
+    ask = PermissionResult(behavior=PermissionBehavior.ASK, message="m")
+    result = asyncio.run(build_interactive_can_use_tool(asker)(build_bash_tool(), {"command": "make build"}, ask,
+                                                               ctx, "t1"))
+    assert result.behavior == PermissionBehavior.ALLOW
+    recheck = asker.prompts[0].recheck
+    assert recheck is not None
+    # An unrelated change of the context (a mode switch that allows nothing here) before the prompt's turn.
+    ctx.set_app_state(lambda s: dataclasses.replace(s, tool_permission_context=dataclasses.replace(
+        s.tool_permission_context, mode=PermissionMode.PLAN)))
+
+    async def again() -> Any:
+        return await recheck()
+
+    assert asyncio.run(again()) is None
+
+
+def test_the_rechecked_decision_is_the_one_returned(tmp_path: Path):
+    fresh = PermissionResult(behavior=PermissionBehavior.ALLOW, updated_input={"command": "make build -j2"},
+                             decision_reason={"type": "rule"})
+
+    async def answered(prompt: PermissionPrompt) -> PermissionAnswer:
+        return PermissionAnswer("yes", rechecked=fresh)
+
+    ctx = interactive_context(tmp_path, Asker())
+    can_use = build_interactive_can_use_tool(answered)
+    ask = PermissionResult(behavior=PermissionBehavior.ASK, message="m")
+    assert asyncio.run(can_use(build_bash_tool(), {"command": "make build"}, ask, ctx, "t1")) is fresh
+
+
+def test_bash_read_grant_covers_sed_and_read_file_in_that_folder(tmp_path: Path):
+    from app.tools.file_read_tool.file_read_tool import build_read_file_tool
+
+    source = _module_cache(tmp_path)
+    asker = Asker(PermissionAnswer("yes-apply-suggestions"))
+    ctx = interactive_context(tmp_path, asker, mode="acceptEdits")
+    bash = build_bash_tool()
+    assert call(bash, {"command": f"grep -n line {source}"}, ctx).message.status == "success"
+    labels = [o.label for o in asker.prompts[0].options]
+    assert "Yes, allow reading from fpdf@v0.12.0/ from this project" in labels
+    assert call(bash, {"command": f"sed -n 5,9p {source}"}, ctx).message.status == "success"
+    assert call(build_read_file_tool(), {"file_path": str(source)}, ctx).message.status == "success"
+    assert len(asker.prompts) == 1
+
+
+def test_a_write_outside_suggests_the_folder_and_the_grant_allows_the_next_write(tmp_path: Path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    asker = Asker(PermissionAnswer("yes-apply-suggestions"))
+    ctx = interactive_context(tmp_path, asker)
+    bash = build_bash_tool()
+    assert call(bash, {"command": f"mkdir {outside}/a"}, ctx).message.status == "success"
+    perm = ctx.get_app_state().tool_permission_context
+    assert str(outside) in perm.additional_working_directories
+    assert perm.mode == PermissionMode.ACCEPT_EDITS
+    assert call(bash, {"command": f"mkdir {outside}/b"}, ctx).message.status == "success"
+    assert len(asker.prompts) == 1
