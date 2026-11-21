@@ -38,17 +38,19 @@ from typing import Any
 from app.schemas.hooks import CallbackHook, HookMatcher
 from app.tools.bash_tool.bash_permissions import (
     BASH_TOOL_NAME,
+    is_normalized_cd_command,
     strip_all_leading_env_vars,
     strip_safe_wrappers,
     validate_output_redirections,
 )
 from app.tools.bash_tool.path_validation import (
     COMMAND_OPERATION_TYPE,
-    PATH_EXTRACTORS,
+    COMMAND_VALIDATOR,
     parse_command_arguments,
-    validate_path,
+    validate_single_path_command,
 )
-from app.types.permissions import PermissionBehavior, PermissionMode, ToolPermissionContext
+from app.tools.bash_tool.sed_validation import sed_command_is_allowed_by_allowlist
+from app.types.permissions import PermissionBehavior, PermissionMode, PermissionResult, ToolPermissionContext
 from app.utils.bash.commands import extract_output_redirections, split_command
 
 #: `HookCallback.timeout` (seconds): the callback only reads the command.
@@ -226,95 +228,65 @@ def _classify_tokens(tokens: list[str], depth: int, cwd: str | None) -> str | No
     return None
 
 
-#: The project's context for `validate_path`: in acceptEdits a write inside the working directory is
-#: allowed, so what is left is a write outside it (`isPathAllowed`).
+#: The project's permission context for upstream's path validation: acceptEdits with no rules, so `isPathAllowed`
+#: (`utils/permissions/filesystem.ts`) allows a write inside the working directory and nothing else.
 _PROJECT_WRITES = ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS)
 
-
-def _inside(path: str, root: str) -> bool:
-    root = os.path.normpath(root)
-    return os.path.commonpath([root, os.path.normpath(path)]) == root
+#: `checkPathConstraints`' answer to a redirection target built from shell expansion (`pathValidation.ts`).
+SHELL_EXPANSION_REASON = "Shell expansion syntax in paths requires manual approval"
 
 
-def _outside(path: str, cwd: str, root: str | None = None) -> bool:
+def _verdict(result: PermissionResult) -> str | None:
     """
-    `validate_path` refused `path` (resolved from `cwd`) because it is not in the project `root` (default `cwd`),
-    not for a safety check inside it (the protected `.tddagents/`, which the normal permission flow already
-    asks about). A path it could not place (shell expansion such as `$HOME/.local`) is not absolute, so it
-    counts as outside.
+    An ask or a deny from upstream's path validation, as the gate's reason: the decision reason's own text when it
+    is an `other` (cd, glob, shell expansion), else the result's message ("… was blocked. For security, …"). A
+    `safetyCheck` (the protected `.tddagents/`, `.git`) is inside the project and is the normal flow's to ask.
     """
-    allowed, resolved, _reason = validate_path(path, cwd, _PROJECT_WRITES, "create")
-    if allowed:
-        return False
-    if not os.path.isabs(resolved):
-        return True
-    return not _inside(resolved, root if root is not None else cwd)
-
-
-def _write_command(subcommand: str) -> tuple[str, list[str]] | None:
-    """The command and its arguments when it creates or writes (`COMMAND_OPERATION_TYPE`; `sed` only with `-i`)."""
-    args = parse_command_arguments(strip_safe_wrappers(subcommand))
-    if not args:
+    if result.behavior not in (PermissionBehavior.ASK, PermissionBehavior.DENY):
         return None
-    base, rest = args[0], args[1:]
-    if COMMAND_OPERATION_TYPE.get(base) not in ("write", "create"):
+    reason = result.decision_reason or {}
+    if reason.get("type") == "safetyCheck":
         return None
-    if base == "sed" and not any(a in ("-i", "--in-place") or a.startswith(("-i", "--in-place=")) for a in rest):
-        return None
-    return base, rest
+    text = reason.get("reason") if reason.get("type") == "other" else None
+    return str(text) if text else result.message
 
 
-def _cd_target(tokens: list[str]) -> str | None:
-    """The folder a `cd` goes to (`~` with no argument, as the shell does); `None` when it is not a `cd`."""
-    if not tokens or tokens[0] != "cd":
-        return None
-    targets = [t for t in tokens[1:] if t not in ("-L", "-P", "-e", "-@", "--")]
-    return targets[0] if targets else "~"
-
-
-def _cd_leaves(target: str, current: str, root: str) -> tuple[str | None, str]:
+def _path_verdict(command: str, cwd: str) -> str | None:
     """
-    Where a `cd` lands: `(None, folder)` inside the project, or `(target, current)` when it leaves it or its
-    folder cannot be known (`~`, `-`, shell expansion), as `compoundCommandHasCd` gives up on any `cd`
-    (`bashPermissions.ts`; here the project folder is known, so an in-project `cd` is followed instead).
+    Upstream's own verdict on the command's writes, as `bashToolHasPermission` reaches it
+    (`tools/BashTool/bashPermissions.ts`, `tools/BashTool/pathValidation.ts`):
+
+    1. the subcommands, without the `cd <cwd>` prefix models prepend (`filterCdCwdSubcommands`);
+    2. `compoundCommandHasCd`: any `cd`, `pushd` or `popd` among them (`isNormalizedCdCommand`), whatever the order;
+    3. the redirections (`checkPathConstraints` → `validateOutputRedirections`, which asks for any redirection with
+       a cd, and for a target outside the working directory);
+    4. each create/write subcommand (`COMMAND_OPERATION_TYPE`) through `validateSinglePathCommand` →
+       `createPathChecker` → `validateCommandPaths`, which asks for any write with a cd, for a glob or shell
+       expansion, and for a target outside the working directory. `cp`/`mv` with flags (`COMMAND_VALIDATOR`) asks
+       inside the project too and names no path, so it is left to the normal flow.
     """
-    if target == "-" or target.startswith("~") or any(c in target for c in "$`%"):
-        return target, current
-    landed = os.path.normpath(target if os.path.isabs(target) else os.path.join(current, target))
-    return (None, landed) if _inside(landed, root) else (target, current)
-
-
-def _write_outside_project(subcommand: str, cwd: str, root: str | None = None) -> str | None:
-    """
-    A create or write target outside the project, as upstream's path validation sees it
-    (`pathValidation.ts` `COMMAND_OPERATION_TYPE`, `PATH_EXTRACTORS`, `validatePath`): `mkdir`, `touch`,
-    `rm`, `rmdir`, `mv`, `cp`, `sed -i`. A path built from shell expansion (`$HOME/.local`) cannot be
-    placed, so it counts as outside, as `validatePath` asks for it. `COMMAND_VALIDATOR` (mv/cp flags) is
-    left out on purpose: it asks inside the project too.
-    """
-    write = _write_command(subcommand)
-    if write is None:
-        return None
-    base, rest = write
-    operation = COMMAND_OPERATION_TYPE[base]
-    for path in PATH_EXTRACTORS[base](rest):
-        if _outside(path, cwd, root):
-            resolved = validate_path(path, cwd, _PROJECT_WRITES, operation)[1]
-            return f"writes outside the project ({base} {resolved})"
-    return None
-
-
-def _redirect_outside_project(command: str, cwd: str) -> str | None:
-    """An output redirection outside the project (`validateOutputRedirections`, `extractOutputRedirections`)."""
+    subcommands = [s for s in split_command(command) if s.strip() != f"cd {cwd}"]
+    compound_has_cd = any(is_normalized_cd_command(s) for s in subcommands)
     extraction = extract_output_redirections(command)
     if extraction.has_dangerous_redirection:
-        return "writes to a path built from shell expansion"
-    if validate_output_redirections(extraction.redirections, cwd, _PROJECT_WRITES).behavior \
-            == PermissionBehavior.PASSTHROUGH:
-        return None
-    target = next((r.target for r in extraction.redirections if r.target != "/dev/null" and _outside(r.target, cwd)),
-                  None)
-    return f"writes outside the project (> {target})" if target is not None else None
+        return SHELL_EXPANSION_REASON
+    found = _verdict(validate_output_redirections(extraction.redirections, cwd, _PROJECT_WRITES, compound_has_cd))
+    if found is not None:
+        return found
+    for subcommand in subcommands:
+        stripped = strip_safe_wrappers(subcommand)
+        args = parse_command_arguments(stripped)
+        if not args or COMMAND_OPERATION_TYPE.get(args[0]) not in ("write", "create"):
+            continue
+        if args[0] == "sed" and sed_command_is_allowed_by_allowlist(stripped):
+            continue  # `validateSinglePathCommand`'s override: a read-only `sed` is a read
+        validator = COMMAND_VALIDATOR.get(args[0])
+        if validator is not None and not validator(args[1:]):
+            continue
+        found = _verdict(validate_single_path_command(subcommand, cwd, _PROJECT_WRITES, compound_has_cd))
+        if found is not None:
+            return found
+    return None
 
 
 def classify_install(command: str, depth: int = 0, *, cwd: str | None = None) -> str | None:
@@ -338,29 +310,12 @@ def classify_install(command: str, depth: int = 0, *, cwd: str | None = None) ->
             return "pipes a download into a shell (curl | sh)"
         if program in EXTRACTORS:
             return f"unpacks a download (curl | {program})"
-    current = cwd
-    left: str | None = None
     for subcommand in split_command(command):
         stripped = strip_safe_wrappers(strip_all_leading_env_vars(_NEW_LINE_PLACEHOLDER.sub(" ", subcommand).strip()))
-        tokens = _tokens(stripped)
-        target = _cd_target(tokens) if cwd is not None and current is not None else None
-        if target is not None and cwd is not None and current is not None:
-            if left is None:
-                left, current = _cd_leaves(target, current, cwd)
-            continue
-        found = _classify_tokens(tokens, depth, cwd)
-        if found is None and cwd is not None and current is not None:
-            write = _write_command(stripped) if left is not None else None
-            found = (f"writes outside the project (cd {left}, then {write[0]})" if write is not None
-                     else None if left is not None else _write_outside_project(stripped, current, cwd))
+        found = _classify_tokens(_tokens(stripped), depth, cwd)
         if found is not None:
             return found
-    if cwd is not None:
-        if left is not None and any(r.target != "/dev/null"
-                                    for r in extract_output_redirections(command).redirections):
-            return f"writes outside the project (cd {left}, then >)"
-        return _redirect_outside_project(command, cwd)
-    return None
+    return _path_verdict(command, cwd) if cwd is not None else None
 
 
 async def install_gate_callback(

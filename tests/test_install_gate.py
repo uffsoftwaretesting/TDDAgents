@@ -385,23 +385,47 @@ def test_the_live_runs_go_install_asks() -> None:
     assert classify_install(GO_INSTALL) is not None  # the download piped into tar alone is enough
 
 
+#: `pathValidation.ts` `validateCommandPaths`' "was blocked" message, with TDDAgents for Claude Code.
+def blocked(command: str, resolved: str) -> str:
+    from app.tools.bash_tool.path_validation import ACTION_VERBS, format_directory_list
+
+    return (f"{command} in '{resolved}' was blocked. For security, TDDAgents may only {ACTION_VERBS[command]} the "
+            f"allowed working directories for this session: {format_directory_list([PROJECT])}.")
+
+
+def redirect_blocked(resolved: str) -> str:
+    """`validateOutputRedirections`' message."""
+    from app.tools.bash_tool.path_validation import format_directory_list
+
+    return (f"Output redirection to '{resolved}' was blocked. For security, TDDAgents may only write to files in "
+            f"the allowed working directories for this session: {format_directory_list([PROJECT])}.")
+
+
+SHELL_EXPANSION = "Shell expansion syntax in paths requires manual approval"
+GLOB_WRITE = "Glob patterns are not allowed in write operations. Please specify an exact file path."
+CD_WRITE = ("Compound command contains cd with write operation - manual approval required to prevent path "
+            "resolution bypass")
+CD_REDIRECT = ("Compound command contains cd with output redirection - manual approval required to prevent path "
+               "resolution bypass")
+
+
 @pytest.mark.parametrize(("command", "expected"), [
     ("curl -fsSL https://x/go.tgz | tar -C build -xz", "unpacks a download (curl | tar)"),
     ("wget -qO- https://x/a.zip | unzip -", "unpacks a download (curl | unzip)"),
     ("curl -L https://x/a.xz | xz -d > a", "unpacks a download (curl | xz)"),
-    ("mkdir -p /opt/tools", "writes outside the project (mkdir /opt/tools)"),
-    ('mkdir -p "$HOME/.local"', "writes outside the project (mkdir $HOME/.local)"),
-    ("cp tool /usr/local/bin/tool", "writes outside the project (cp /usr/local/bin/tool)"),
-    ("mv x ../sibling/x", "writes outside the project (mv /home/user/ws/sibling/x)"),
-    ("touch /etc/motd", "writes outside the project (touch /etc/motd)"),
-    ("rm -rf /var/cache/x", "writes outside the project (rm /var/cache/x)"),
-    ("sed -i 's/a/b/' /etc/hosts", "writes outside the project (sed /etc/hosts)"),
-    ("echo x > /tmp/log.txt", "writes outside the project (> /tmp/log.txt)"),
-    ("echo x >> ../notes.txt", "writes outside the project (> ../notes.txt)"),
-    ("bash -c 'mkdir -p /opt/x'", "writes outside the project (mkdir /opt/x)"),
-    ("timeout 5 cp a /opt/a", "writes outside the project (cp /opt/a)"),
+    ("mkdir -p /opt/tools", blocked("mkdir", "/opt/tools")),
+    ('mkdir -p "$HOME/.local"', SHELL_EXPANSION),
+    ("cp tool /usr/local/bin/tool", blocked("cp", "/usr/local/bin/tool")),
+    ("mv x ../sibling/x", blocked("mv", "/home/user/ws/sibling/x")),
+    ("touch /etc/motd", blocked("touch", "/etc/motd")),
+    ("rm -rf /var/cache/x", blocked("rm", "/var/cache/x")),
+    ("sed -i 's/a/b/' /etc/hosts", blocked("sed", "/etc/hosts")),
+    ("echo x > /tmp/log.txt", redirect_blocked("/tmp/log.txt")),
+    ("echo x >> ../notes.txt", redirect_blocked("/home/user/ws/notes.txt")),
+    ("bash -c 'mkdir -p /opt/x'", blocked("mkdir", "/opt/x")),
+    ("timeout 5 cp a /opt/a", blocked("cp", "/opt/a")),
 ])
-def test_a_write_outside_the_project_asks(command: str, expected: str) -> None:
+def test_a_write_outside_the_project_asks_with_upstreams_message(command: str, expected: str) -> None:
     assert classify_install(command, cwd=PROJECT) == expected
 
 
@@ -438,7 +462,7 @@ def test_the_callback_uses_the_hook_inputs_cwd() -> None:
     outside = call({"tool_name": "Bash", "cwd": PROJECT, "tool_input": {"command": "mkdir -p /opt/x"}})
     assert inside == {}
     assert outside["hookSpecificOutput"]["permissionDecisionReason"] == (
-        f"writes outside the project (mkdir /opt/x): {REASON_SUFFIX}")
+        f"{blocked('mkdir', '/opt/x')}: {REASON_SUFFIX}")
 
 
 @pytest.mark.parametrize("cwd", [None, "", 7])
@@ -451,33 +475,42 @@ def test_through_the_pipeline_a_write_outside_asks_in_bypass_mode(tmp_path: Any)
     ctx = context(tmp_path, mode=PermissionMode.BYPASS_PERMISSIONS)
     decision = decide(ctx, "cp tool /opt/tool")
     assert decision.behavior == PermissionBehavior.ASK
-    assert "writes outside the project" in decision.message
+    assert "cp in '/opt/tool' was blocked" in decision.message
 
 
-# ── cd in a compound command (bashPermissions.ts compoundCommandHasCd; pathValidation.ts:645) ──
-
-
-@pytest.mark.parametrize("command", [
-    "cd /opt && mkdir x", "cd ~ && touch a", "cd && touch a", "cd $HOME/x && cp a b", "cd - && mkdir x",
-    "cd /tmp; echo x > y", "cd internal && cd ../.. && mkdir z", "cd .. && mkdir sibling",
-    "cd /opt && sed -i 's/a/b/' conf", "cd ~/.local && rm -rf go",
-])
-def test_a_cd_out_of_the_project_makes_a_later_write_outside(command: str) -> None:
-    found = classify_install(command, cwd=PROJECT)
-    assert found is not None and found.startswith("writes outside the project"), found
+# ── cd in a compound command, as upstream ─────────────────────────────────────
+# `bashPermissions.ts` `isNormalizedCdCommand` (cd, pushd, popd), `filterCdCwdSubcommands` (a `cd <cwd>` prefix is
+# dropped) and `compoundCommandHasCd`; `pathValidation.ts` `validateCommandPaths` / `validateOutputRedirections`
+# ask for any write or redirection when it is set, whatever the order: the final folder cannot be known.
 
 
 @pytest.mark.parametrize("command", [
-    "cd internal && mkdir y", "cd internal/services && touch a.go", "cd .. && ls", "cd /opt && ls",
-    "cd /tmp && cat x", "cd internal && echo x > out.txt", "cd internal && cd .. && mkdir build",
-    "pushd /opt && mkdir x",  # pushd is not cd (upstream's cdCommands counts `cd` only)
+    "cd /opt && mkdir x", "cd internal && mkdir y", "cd ~ && touch a", "cd && touch a", "cd $HOME/x && cp a b",
+    "pushd /opt && mkdir x", "popd && rm a", "mkdir x && cd /opt", "cd internal && sed -i 's/a/b/' f",
+    "timeout 5 cd /opt && cp a b", "cd internal && cd .. && mkdir build",
 ])
-def test_a_cd_inside_the_project_or_without_a_write_asks_nothing(command: str) -> None:
+def test_a_cd_with_a_write_asks(command: str) -> None:
+    assert classify_install(command, cwd=PROJECT) == CD_WRITE
+
+
+@pytest.mark.parametrize("command", ["cd internal && echo x > out.txt", "cd /tmp; echo x > y", "popd > log",
+                                     "cd x && echo hi > /dev/null"])  # any redirection, /dev/null included
+def test_a_cd_with_a_redirection_asks(command: str) -> None:
+    assert classify_install(command, cwd=PROJECT) == CD_REDIRECT
+
+
+@pytest.mark.parametrize("command", [
+    f"cd {PROJECT} && mkdir build",  # filterCdCwdSubcommands: the prefix models prepend is no cd
+    f"cd {PROJECT} && go test ./... > report.txt",
+    "cd internal && ls", "cd /opt && cat x", "cd x && sed -n 1p f",
+    "cd .. && ls", "cd internal",
+])
+def test_a_cd_without_a_write_or_the_projects_own_cd_asks_nothing(command: str) -> None:
     assert classify_install(command, cwd=PROJECT) is None
 
 
-def test_the_reason_names_the_folder_left() -> None:
-    assert classify_install("cd /opt && mkdir x", cwd=PROJECT) == "writes outside the project (cd /opt, then mkdir)"
+def test_the_projects_own_cd_still_checks_the_write(command: str = f"cd {PROJECT} && mkdir /opt/x") -> None:
+    assert classify_install(command, cwd=PROJECT) == blocked("mkdir", "/opt/x")
 
 
 def test_without_a_project_folder_cd_is_not_judged() -> None:
@@ -513,7 +546,20 @@ def test_write_targets_edge_cases(command: str, outside: bool) -> None:
 
 
 def test_glob_writes_inside_the_project_report_the_glob() -> None:
-    assert classify_install("rm build/*.o", cwd=PROJECT) == "writes outside the project (rm build/*.o)"
+    assert classify_install("rm build/*.o", cwd=PROJECT) == GLOB_WRITE
+
+
+def test_cp_and_mv_with_flags_are_left_to_the_normal_flow() -> None:
+    """`COMMAND_VALIDATOR`: upstream asks for any `cp`/`mv` with flags, inside the project too; that ask names no
+    path outside, so the gate leaves it to the normal permission flow."""
+    assert classify_install("cp -r src dst", cwd=PROJECT) is None
+    assert classify_install("mv -f a b", cwd=PROJECT) is None
+
+
+def test_a_deny_rule_style_verdict_from_upstream_is_a_reason() -> None:
+    """A safety check inside the project (the protected folder) is the normal flow's, not the gate's."""
+    assert classify_install("touch .tddagents/x", cwd=PROJECT) is None
+    assert classify_install("echo x > .git/config", cwd=PROJECT) is None
 
 
 @pytest.mark.parametrize("command", ["sudo -u postgres psql", "sudo -E env", "doas -u x ls", "pkexec ls"])
@@ -562,7 +608,8 @@ def test_a_session_in_bypass_mode_asks_before_writing_outside(
     async def script(repl: Any, io: Any) -> None:
         await until(lambda: "Do you want to proceed?" in io.text())
         assert "Hook PreToolUse:Bash requires confirmation for this command:" in io.text()
-        assert f"writes outside the project (> {outside}): {REASON_SUFFIX}" in io.text()
+        assert f"Output redirection to '{outside}' was blocked." in io.text()
+        assert REASON_SUFFIX in io.text()
         io.lines.put_nowait(answer)
         await until(lambda: not repl.busy and len(model.seen) >= (2 if written else 1))
         io.lines.put_nowait("/exit")
