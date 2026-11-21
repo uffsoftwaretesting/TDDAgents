@@ -198,15 +198,15 @@ def test_matching_rules_for_input():
 
 def test_exact_match_permission():
     c = ctx(allow=["ls -la"], deny=["rm x"], ask=["git push"])
-    deny = bash_tool_check_exact_match_permission("rm x", c)
+    deny = bash_tool_check_exact_match_permission({"command": "rm x"}, c)
     assert deny.behavior == "deny"
     assert deny.message == "Permission to use Bash with command rm x has been denied."
     assert deny.decision_reason == {"type": "rule", "rule": c.always_deny_rules[0]}
-    ask = bash_tool_check_exact_match_permission("git push", c)
+    ask = bash_tool_check_exact_match_permission({"command": "git push"}, c)
     assert (ask.behavior, ask.decision_reason) == ("ask", {"type": "rule", "rule": c.always_ask_rules[0]})
-    allow = bash_tool_check_exact_match_permission("ls -la", c)
+    allow = bash_tool_check_exact_match_permission({"command": "ls -la"}, c)
     assert (allow.behavior, allow.updated_input) == ("allow", {"command": "ls -la"})
-    other = bash_tool_check_exact_match_permission("pwd", c)
+    other = bash_tool_check_exact_match_permission({"command": "pwd"}, c)
     assert (other.behavior, other.decision_reason) == (
         "passthrough", {"type": "other", "reason": "This command requires approval"})
     assert other.message == "This command requires approval"
@@ -330,30 +330,30 @@ def test_command_has_any_cd():
 # ── pipes ────────────────────────────────────────────────────────────────────
 
 def test_check_command_operator_permissions(cwd):
-    unsafe = check_command_operator_permissions("(rm x)", ctx(), cwd)
+    unsafe = check_command_operator_permissions({"command": "(rm x)"}, ctx(), cwd)
     assert (unsafe.behavior, unsafe.message) == ("ask", ("This command uses shell operators that require approval "
                                                          "for safety"))
-    nopipe = check_command_operator_permissions("ls", ctx(), cwd)
+    nopipe = check_command_operator_permissions({"command": "ls"}, ctx(), cwd)
     assert (nopipe.behavior, nopipe.message) == ("passthrough", "No pipes found in command")
-    allowed = check_command_operator_permissions("ls | wc -l", ctx(), cwd)
+    allowed = check_command_operator_permissions({"command": "ls | wc -l"}, ctx(), cwd)
     assert allowed.behavior == "allow" and allowed.updated_input == {"command": "ls | wc -l"}
-    mixed = check_command_operator_permissions("ls | pip install x", ctx(), cwd)
+    mixed = check_command_operator_permissions({"command": "ls | pip install x"}, ctx(), cwd)
     assert mixed.behavior == "ask"
     assert mixed.message == ("This Bash command contains multiple operations. The following part requires "
                              "approval: pip install x")
-    denied = check_command_operator_permissions("ls | rm y", ctx(deny=["rm y"]), cwd)
+    denied = check_command_operator_permissions({"command": "ls | rm y"}, ctx(deny=["rm y"]), cwd)
     assert denied.behavior == "deny"
     assert denied.message == "Permission to use Bash with command rm y has been denied."
-    cds = check_command_operator_permissions("cd a | cd b", ctx(), cwd)
+    cds = check_command_operator_permissions({"command": "cd a | cd b"}, ctx(), cwd)
     assert cds.message == "Multiple directory changes in one command require approval for clarity"
-    cdgit = check_command_operator_permissions("cd a | git log", ctx(), cwd)
+    cdgit = check_command_operator_permissions({"command": "cd a | git log"}, ctx(), cwd)
     assert cdgit.message == "Compound commands with cd and git require approval to prevent bare repository attacks"
-    assert check_command_operator_permissions("ls | wc > out", ctx(mode=PermissionMode.ACCEPT_EDITS),
+    assert check_command_operator_permissions({"command": "ls | wc > out"}, ctx(mode=PermissionMode.ACCEPT_EDITS),
                                               cwd).behavior == "allow"
 
 
 def test_operator_injection_reason(cwd, monkeypatch):
-    res = check_command_operator_permissions("(echo $(id))", ctx(), cwd)
+    res = check_command_operator_permissions({"command": "(echo $(id))"}, ctx(), cwd)
     assert res.message == "Command contains $() command substitution"
 
 
@@ -374,43 +374,45 @@ def test_operator_injection_reason(cwd, monkeypatch):
     ("ls | grep x", "allow"),
 ])
 def test_bash_tool_has_permission(cwd, command, behavior):
-    assert bash_tool_has_permission(command, ctx(), cwd).behavior == behavior
+    assert bash_tool_has_permission({"command": command}, ctx(), cwd).behavior == behavior
 
 
 def test_has_permission_messages_and_rules(cwd):
-    bad = bash_tool_has_permission("echo ${}", ctx(), cwd)
+    bad = bash_tool_has_permission({"command": "echo ${}"}, ctx(), cwd)
     assert bad.message == "Command contains malformed syntax that cannot be parsed: Bad substitution: ${}"
-    assert bash_tool_has_permission("rm x", ctx(deny=["rm x"]), cwd).behavior == "deny"
-    compound_deny = bash_tool_has_permission("ls && rm y", ctx(deny=["rm y"]), cwd)
+    assert bash_tool_has_permission({"command": "rm x"}, ctx(deny=["rm x"]), cwd).behavior == "deny"
+    compound_deny = bash_tool_has_permission({"command": "ls && rm y"}, ctx(deny=["rm y"]), cwd)
     assert compound_deny.behavior == "deny"
     assert compound_deny.message == "Permission to use Bash with command ls && rm y has been denied."
-    assert bash_tool_has_permission("pytest -q", ctx(allow=["pytest:*"]), cwd).behavior == "allow"
-    both = bash_tool_has_permission("pytest -q && pip install x", ctx(allow=["pytest:*", "pip install:*"]), cwd)
+    assert bash_tool_has_permission({"command": "pytest -q"}, ctx(allow=["pytest:*"]), cwd).behavior == "allow"
+    both = bash_tool_has_permission({"command": "pytest -q && pip install x"},
+                                    ctx(allow=["pytest:*", "pip install:*"]), cwd)
     assert both.behavior == "allow"
-    one = bash_tool_has_permission("pytest -q && pip install x", ctx(allow=["pytest:*"]), cwd)
+    one = bash_tool_has_permission({"command": "pytest -q && pip install x"}, ctx(allow=["pytest:*"]), cwd)
     assert one.behavior == "passthrough"
     assert one.message == ("This Bash command contains multiple operations. The following part requires approval: "
                            "pip install x")
-    assert bash_tool_has_permission(f"cd {cwd} && ls", ctx(), cwd).behavior == "allow"   # cd to cwd is dropped
+    # cd to cwd is dropped
+    assert bash_tool_has_permission({"command": f"cd {cwd} && ls"}, ctx(), cwd).behavior == "allow"
     # operators are checked before the misparsing gate, as upstream: $() is an unsafe compound
-    assert bash_tool_has_permission("echo $(id)", ctx(allow=["echo $(id)"]), cwd).behavior == "ask"
-    exact = bash_tool_has_permission("echo `id`", ctx(allow=["echo `id`"]), cwd)
+    assert bash_tool_has_permission({"command": "echo $(id)"}, ctx(allow=["echo $(id)"]), cwd).behavior == "ask"
+    exact = bash_tool_has_permission({"command": "echo `id`"}, ctx(allow=["echo `id`"]), cwd)
     assert exact.behavior == "allow"                    # exact rule rescues a misparsing ask
-    assert bash_tool_has_permission("echo `id`", ctx(), cwd).message == (
+    assert bash_tool_has_permission({"command": "echo `id`"}, ctx(), cwd).message == (
         "Command contains backticks (`) for command substitution")
-    ask_one = bash_tool_has_permission("ls && cat /etc/x", ctx(), cwd)
+    ask_one = bash_tool_has_permission({"command": "ls && cat /etc/x"}, ctx(), cwd)
     assert ask_one.behavior == "ask" and ask_one.message.startswith("cat in '/etc/x'")
-    redirect = bash_tool_has_permission("ls > /etc/out", ctx(mode=PermissionMode.ACCEPT_EDITS), cwd)
+    redirect = bash_tool_has_permission({"command": "ls > /etc/out"}, ctx(mode=PermissionMode.ACCEPT_EDITS), cwd)
     assert redirect.behavior == "ask" and redirect.message.startswith("Output redirection to '/etc/out'")
 
 
 def test_has_permission_heredoc_misparsing_retry(cwd):
     cmd = "git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\""
-    assert bash_tool_has_permission(cmd, ctx(), cwd).behavior in ("passthrough", "ask")
+    assert bash_tool_has_permission({"command": cmd}, ctx(), cwd).behavior in ("passthrough", "ask")
 
 
 def test_has_permission_pipe_with_injection_is_asked(cwd):
-    res = bash_tool_has_permission("ls | wc -c $(id)", ctx(), cwd)
+    res = bash_tool_has_permission({"command": "ls | wc -c $(id)"}, ctx(), cwd)
     assert res.behavior == "ask"
 
 

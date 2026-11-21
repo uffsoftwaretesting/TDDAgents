@@ -71,29 +71,30 @@ def perm(*, deny: tuple[str | None, ...] = (), ask: tuple[str | None, ...] = (),
 
 
 def test_no_rule_allows_with_the_sandbox() -> None:
-    result = check_sandbox_auto_allow("pip install x", perm())
+    result = check_sandbox_auto_allow({"command": "pip install x"}, perm())
     assert result.behavior == PermissionBehavior.ALLOW and result.updated_input == {"command": "pip install x"}
     assert result.decision_reason == {"type": "other", "reason": AUTO_ALLOWED_WITH_SANDBOX}
     assert AUTO_ALLOWED_WITH_SANDBOX == "Auto-allowed with sandbox (autoAllowBashIfSandboxed enabled)"
 
 
 def test_a_deny_rule_on_the_command_denies() -> None:
-    result = check_sandbox_auto_allow("  rm -rf build ", perm(deny=("rm:*",)))
+    result = check_sandbox_auto_allow({"command": "  rm -rf build "}, perm(deny=("rm:*",)))
     assert result.behavior == PermissionBehavior.DENY
     assert result.message == "Permission to use Bash with command rm -rf build has been denied."
 
 
 def test_a_deny_rule_on_a_subcommand_wins_over_an_ask_on_the_whole() -> None:
-    result = check_sandbox_auto_allow("echo hi && rm -rf /", perm(deny=("rm:*",), ask=("echo hi && rm -rf /",)))
+    result = check_sandbox_auto_allow({"command": "echo hi && rm -rf /"},
+                                      perm(deny=("rm:*",), ask=("echo hi && rm -rf /",)))
     assert result.behavior == PermissionBehavior.DENY
     assert result.decision_reason["rule"].rule_content == "rm:*"  # type: ignore[index]
 
 
 def test_ask_rules_ask_on_a_subcommand_then_on_the_command() -> None:
-    sub = check_sandbox_auto_allow("ls && curl x", perm(ask=("curl:*",)))
+    sub = check_sandbox_auto_allow({"command": "ls && curl x"}, perm(ask=("curl:*",)))
     reason: Any = sub.decision_reason
     assert sub.behavior == PermissionBehavior.ASK and reason["rule"].rule_content == "curl:*"
-    whole = check_sandbox_auto_allow("curl x", perm(ask=("curl:*",)))
+    whole = check_sandbox_auto_allow({"command": "curl x"}, perm(ask=("curl:*",)))
     assert whole.behavior == PermissionBehavior.ASK
 
 
@@ -112,7 +113,8 @@ def test_the_auto_allow_runs_only_for_a_sandboxed_command(tmp_path: Path) -> Non
     assert bash_tool_has_permission_in_sandbox({"command": "echo ${}"}, perm(), cwd, sandbox=Sandbox(),
                                                original_cwd=cwd).behavior == PermissionBehavior.ASK
     # Outside the call, nothing carries the sandbox.
-    assert bash_tool_has_permission("pip install x", perm(), cwd).behavior == PermissionBehavior.PASSTHROUGH
+    outside = bash_tool_has_permission({"command": "pip install x"}, perm(), cwd)
+    assert outside.behavior == PermissionBehavior.PASSTHROUGH
 
 
 def test_a_piped_command_carries_the_override_into_each_segment(tmp_path: Path) -> None:
@@ -231,3 +233,12 @@ def test_a_headless_run_without_a_sandbox_still_asks_the_same(command: str, tmp_
     result = asyncio.run(has_permissions_to_use_tool(build_bash_tool(), {"command": command},
                                                      ctx_for(perm(ask=(None,)), None, ws)))
     assert result.behavior == PermissionBehavior.ASK
+
+
+def test_the_sandbox_auto_allow_hands_back_the_whole_input(tmp_path: Path) -> None:
+    """`checkSandboxAutoAllow(input, …)` returns `updatedInput: input` (`bashPermissions.ts` l.1353)."""
+    cwd = str(tmp_path)
+    call = {"command": "pip install x", "timeout": 9000, "description": "Install", "run_in_background": True}
+    result = bash_tool_has_permission_in_sandbox(call, perm(), cwd, sandbox=Sandbox(), original_cwd=cwd)
+    assert result.decision_reason == {"type": "other", "reason": AUTO_ALLOWED_WITH_SANDBOX}
+    assert result.updated_input == call

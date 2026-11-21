@@ -40,7 +40,7 @@ import os
 import re
 from collections.abc import Mapping
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any, Literal
 
 from app.tools.bash_tool.bash_security import (
@@ -351,10 +351,11 @@ def _ask_for_rule(rule: PermissionRule) -> PermissionResult:
     )
 
 
-def _allow_for_rule(command: str, rule: PermissionRule) -> PermissionResult:
+def _allow_for_rule(input_args: Mapping[str, Any], rule: PermissionRule) -> PermissionResult:
+    """An allow rule's verdict: `updatedInput: input` (`bashPermissions.ts` l.1027, l.1133)."""
     return PermissionResult(
         behavior=PermissionBehavior.ALLOW,
-        updated_input={"command": command},
+        updated_input=dict(input_args),
         decision_reason={"type": "rule", "rule": rule},
     )
 
@@ -370,8 +371,14 @@ def _requires_approval(command: str) -> PermissionResult:
     )
 
 
-def bash_tool_check_exact_match_permission(command: str, context: ToolPermissionContext) -> PermissionResult:
-    """`bashToolCheckExactMatchPermission`: deny, then ask, then allow, else passthrough."""
+def bash_tool_check_exact_match_permission(
+    input_args: Mapping[str, Any], context: ToolPermissionContext
+) -> PermissionResult:
+    """
+    `bashToolCheckExactMatchPermission(input, toolPermissionContext)` (`bashPermissions.ts` l.991): deny, then
+    ask, then allow (`updatedInput: input`, l.1027), else passthrough.
+    """
+    command = str(input_args.get("command") or "")
     trimmed = _js_trim(command)
     deny, ask, allow = matching_rules_for_input(command, context, "exact")
     if deny:
@@ -379,7 +386,7 @@ def bash_tool_check_exact_match_permission(command: str, context: ToolPermission
     if ask:
         return _ask_for_rule(ask[0])
     if allow:
-        return _allow_for_rule(command, allow[0])
+        return _allow_for_rule(input_args, allow[0])
     return _requires_approval(command)
 
 
@@ -497,7 +504,7 @@ def bash_tool_check_permission(
 ) -> PermissionResult:
     """`bashToolCheckPermission`: rules, path constraints, mode, then read-only."""
     trimmed = _js_trim(command)
-    exact = bash_tool_check_exact_match_permission(command, context)
+    exact = bash_tool_check_exact_match_permission({"command": command}, context)
     if exact.behavior in (PermissionBehavior.DENY, PermissionBehavior.ASK):
         return exact
 
@@ -514,7 +521,7 @@ def bash_tool_check_permission(
     if exact.behavior == PermissionBehavior.ALLOW:
         return exact
     if allow:
-        return _allow_for_rule(command, allow[0])
+        return _allow_for_rule({"command": command}, allow[0])
 
     sed_result = check_sed_constraints(command, context)
     if sed_result.behavior != PermissionBehavior.PASSTHROUGH:
@@ -540,7 +547,7 @@ def check_command_and_suggest_rules(
     compound_command_has_cd: bool = False,
 ) -> PermissionResult:
     """`checkCommandAndSuggestRules`: the exact command is the suggestion (no model prefix)."""
-    exact = bash_tool_check_exact_match_permission(command, context)
+    exact = bash_tool_check_exact_match_permission({"command": command}, context)
     if exact.behavior != PermissionBehavior.PASSTHROUGH:
         return exact
 
@@ -601,9 +608,15 @@ _CD_GIT_REASON = "Compound commands with cd and git require approval to prevent 
 # ── pipes (bashCommandHelpers.ts) ────────────────────────────────────────────
 
 def _segmented_command_permission_result(
-    command: str, segments: list[str], context: ToolPermissionContext, cwd: str
+    input_args: Mapping[str, Any], segments: list[str], context: ToolPermissionContext, cwd: str
 ) -> PermissionResult:
-    """`segmentedCommandPermissionResult`: each pipe segment through the full check."""
+    """
+    `segmentedCommandPermissionResult(input, segments, bashToolHasPermissionFn, checkers)`
+    (`tools/BashTool/bashCommandHelpers.ts` l.23): more than one `cd` asks, `cd` with `git` in any segment asks,
+    then each segment goes through the full check as `{...input, command: trimmedSegment}`. A denied segment
+    denies; all allowed is `updatedInput: input`; otherwise the ask carries the suggestions of every segment that
+    is not allowed (l.134-150).
+    """
     cd_segments = [s for s in segments if is_normalized_cd_command(_js_trim(s))]
     if len(cd_segments) > 1:
         return _ask(_MULTIPLE_CD_REASON)
@@ -624,7 +637,7 @@ def _segmented_command_permission_result(
         trimmed = _js_trim(segment)
         if not trimmed:
             continue
-        results[trimmed] = bash_tool_has_permission(trimmed, context, cwd)
+        results[trimmed] = bash_tool_has_permission({**input_args, "command": trimmed}, context, cwd)
 
     for seg_command, seg_result in results.items():
         if seg_result.behavior == PermissionBehavior.DENY:
@@ -636,19 +649,32 @@ def _segmented_command_permission_result(
     if all(r.behavior == PermissionBehavior.ALLOW for r in results.values()):
         return PermissionResult(
             behavior=PermissionBehavior.ALLOW,
-            updated_input={"command": command},
+            updated_input=dict(input_args),
             decision_reason={"type": "subcommandResults", "reasons": results},
         )
+    suggestions = tuple(
+        update for result in results.values() if result.behavior != PermissionBehavior.ALLOW
+        for update in result.suggestions or ()
+    )
     decision = {"type": "subcommandResults", "reasons": results}
     return PermissionResult(
         behavior=PermissionBehavior.ASK,
         message=request_message(BASH_TOOL_NAME, decision),
         decision_reason=decision,
+        suggestions=suggestions or None,
     )
 
 
-def check_command_operator_permissions(command: str, context: ToolPermissionContext, cwd: str) -> PermissionResult:
-    """`checkCommandOperatorPermissions` on the regex `ParsedCommand`."""
+def check_command_operator_permissions(
+    input_args: Mapping[str, Any], context: ToolPermissionContext, cwd: str
+) -> PermissionResult:
+    """
+    `checkCommandOperatorPermissions` → `bashToolCheckCommandOperatorPermissions(input, …)`
+    (`tools/BashTool/bashCommandHelpers.ts` l.181, l.208) on the regex `ParsedCommand`: an unsafe compound
+    command asks; a pipe is judged segment by segment (`getPipeSegments`, each without its output redirections,
+    `buildSegmentWithoutRedirections` l.163); a single segment is left to the normal flow.
+    """
+    command = str(input_args.get("command") or "")
     if is_unsafe_compound_command(command):
         safety = bash_command_is_safe(command)
         reason = (
@@ -661,7 +687,7 @@ def check_command_operator_permissions(command: str, context: ToolPermissionCont
     if len(segments) <= 1:
         return PermissionResult(behavior=PermissionBehavior.PASSTHROUGH, message="No pipes found in command")
     stripped_segments = [without_output_redirections(s) for s in segments]
-    return _segmented_command_permission_result(command, stripped_segments, context, cwd)
+    return _segmented_command_permission_result(input_args, stripped_segments, context, cwd)
 
 
 # ── the sandbox auto-allow ───────────────────────────────────────────────────
@@ -670,22 +696,17 @@ def check_command_operator_permissions(command: str, context: ToolPermissionCont
 AUTO_ALLOWED_WITH_SANDBOX = "Auto-allowed with sandbox (autoAllowBashIfSandboxed enabled)"
 
 
-@dataclass(frozen=True)
-class BashSandboxCheck:
-    """The run's sandbox and the call's input, for the permission check in progress."""
-
-    sandbox: Any
-    input_args: Mapping[str, Any]
+#: The run's sandbox, for the permission check in progress (upstream reads `SandboxManager` as a module).
+_SANDBOX_CHECK: ContextVar[Any] = ContextVar("bash_sandbox_check", default=None)
 
 
-_SANDBOX_CHECK: ContextVar[BashSandboxCheck | None] = ContextVar("bash_sandbox_check", default=None)
-
-
-def check_sandbox_auto_allow(command: str, context: ToolPermissionContext) -> PermissionResult:
+def check_sandbox_auto_allow(input_args: Mapping[str, Any], context: ToolPermissionContext) -> PermissionResult:
     """
-    `checkSandboxAutoAllow`: a deny rule on the command, then on any of its subcommands, denies; then an ask
-    rule on a subcommand, then on the command, asks; anything else is allowed with the sandbox.
+    `checkSandboxAutoAllow(input, toolPermissionContext)` (`bashPermissions.ts` l.1270): a deny rule on the
+    command, then on any of its subcommands, denies; then an ask rule on a subcommand, then on the command,
+    asks; anything else is allowed with the sandbox, as `updatedInput: input` (l.1353).
     """
+    command = str(input_args.get("command") or "")
     trimmed = _js_trim(command)
     deny, ask, _allow = matching_rules_for_input(command, context, "prefix")
     if deny:
@@ -705,24 +726,26 @@ def check_sandbox_auto_allow(command: str, context: ToolPermissionContext) -> Pe
         return _ask_for_rule(ask[0])
     return PermissionResult(
         behavior=PermissionBehavior.ALLOW,
-        updated_input={"command": command},
+        updated_input=dict(input_args),
         decision_reason={"type": "other", "reason": AUTO_ALLOWED_WITH_SANDBOX},
     )
 
 
-def _sandbox_auto_allow(command: str, context: ToolPermissionContext) -> PermissionResult | None:
-    """`bashToolHasPermission`'s auto-allow step, for the run's sandbox (`None`: it does not apply)."""
+def _sandbox_auto_allow(input_args: Mapping[str, Any], context: ToolPermissionContext) -> PermissionResult | None:
+    """
+    `bashToolHasPermission`'s auto-allow step (`bashPermissions.ts` l.1829-1842: `shouldUseSandbox(input)`, then
+    `checkSandboxAutoAllow(input, …)`), for the run's sandbox (`None`: it does not apply).
+    """
     # Imported here: `should_use_sandbox` imports this module's stripping helpers.
     from app.tools.bash_tool.should_use_sandbox import should_use_sandbox
 
-    check = _SANDBOX_CHECK.get()
-    if check is None or check.sandbox is None:
+    sandbox = _SANDBOX_CHECK.get()
+    if sandbox is None:
         return None
-    sandbox = check.sandbox
     if not (sandbox.is_sandboxing_enabled() and sandbox.is_auto_allow_bash_if_sandboxed_enabled()
-            and should_use_sandbox({**check.input_args, "command": command}, sandbox)):
+            and should_use_sandbox(dict(input_args), sandbox)):
         return None
-    result = check_sandbox_auto_allow(command, context)
+    result = check_sandbox_auto_allow(input_args, context)
     return result if result.behavior != PermissionBehavior.PASSTHROUGH else None
 
 
@@ -735,10 +758,10 @@ def bash_tool_has_permission_in_sandbox(
     while sandboxing is on.
     """
     gate = sandbox is not None and sandbox.is_sandboxing_enabled() and cwd != original_cwd
-    check_token = _SANDBOX_CHECK.set(BashSandboxCheck(sandbox=sandbox, input_args=dict(input_args)))
+    check_token = _SANDBOX_CHECK.set(sandbox)
     gate_token = SANDBOXED_OUTSIDE_ORIGINAL_CWD.set(gate)
     try:
-        return bash_tool_has_permission(str(input_args.get("command") or ""), context, cwd)
+        return bash_tool_has_permission(input_args, context, cwd)
     finally:
         SANDBOXED_OUTSIDE_ORIGINAL_CWD.reset(gate_token)
         _SANDBOX_CHECK.reset(check_token)
@@ -746,25 +769,30 @@ def bash_tool_has_permission_in_sandbox(
 
 # ── bashToolHasPermission ────────────────────────────────────────────────────
 
-def bash_tool_has_permission(command: str, context: ToolPermissionContext, cwd: str) -> PermissionResult:
+def bash_tool_has_permission(
+    input_args: Mapping[str, Any], context: ToolPermissionContext, cwd: str
+) -> PermissionResult:
     """
-    `bashToolHasPermission` on the legacy path. Returns 'allow', 'deny', 'ask', or
-    'passthrough' (no rule resolved it and it is not read-only); the runtime gate turns
-    passthrough into ask, and a headless context turns ask into deny.
+    `bashToolHasPermission(input, context)` (`tools/BashTool/bashPermissions.ts` l.1663) on the legacy path.
+    Returns 'allow', 'deny', 'ask', or 'passthrough' (no rule resolved it and it is not read-only); the
+    runtime gate turns passthrough into ask, and a headless context turns ask into deny. An allow hands back
+    the whole input (`updatedInput: input`, l.2374, l.2464), which `toolExecution.ts` (l.1130) then runs: the
+    command alone would drop the call's `timeout`, `run_in_background` and `description`.
     """
+    command = str(input_args.get("command") or "")
     parsed = try_parse_shell_command(command)
     if not parsed.success:
         return _ask(f"Command contains malformed syntax that cannot be parsed: {parsed.error}")
 
-    sandbox_result = _sandbox_auto_allow(command, context)
+    sandbox_result = _sandbox_auto_allow(input_args, context)
     if sandbox_result is not None:
         return sandbox_result
 
-    exact = bash_tool_check_exact_match_permission(command, context)
+    exact = bash_tool_check_exact_match_permission(input_args, context)
     if exact.behavior == PermissionBehavior.DENY:
         return exact
 
-    operator_result = check_command_operator_permissions(command, context, cwd)
+    operator_result = check_command_operator_permissions(input_args, context, cwd)
     if operator_result.behavior != PermissionBehavior.PASSTHROUGH:
         if operator_result.behavior == PermissionBehavior.ALLOW:
             if not injection_check_disabled():
@@ -828,7 +856,7 @@ def bash_tool_has_permission(command: str, context: ToolPermissionContext, cwd: 
     if all(d.behavior == PermissionBehavior.ALLOW for d in decisions) and not possible_injection:
         return PermissionResult(
             behavior=PermissionBehavior.ALLOW,
-            updated_input={"command": command},
+            updated_input=dict(input_args),
             decision_reason={"type": "subcommandResults", "reasons": dict(zip(subcommands, decisions))},
         )
 
@@ -839,7 +867,7 @@ def bash_tool_has_permission(command: str, context: ToolPermissionContext, cwd: 
     if all(r.behavior == PermissionBehavior.ALLOW for r in results.values()):
         return PermissionResult(
             behavior=PermissionBehavior.ALLOW,
-            updated_input={"command": command},
+            updated_input=dict(input_args),
             decision_reason={"type": "subcommandResults", "reasons": results},
         )
     decision = {"type": "subcommandResults", "reasons": results}

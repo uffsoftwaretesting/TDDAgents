@@ -383,3 +383,58 @@ def test_disabling_background_tasks_drops_the_field_and_the_note(monkeypatch):
 def test_bash_results_are_capped_at_upstreams_30000_chars():
     """`BashTool.maxResultSizeChars` is 30_000, below the generic tool default."""
     assert bash_mod.build_bash_tool().max_result_size_chars == bash_mod.BASH_MAX_RESULT_SIZE_CHARS == 30_000
+
+
+# ── the whole input survives the permission check (`bashToolHasPermission(input)`) ──────────────────────────
+
+_FULL_INPUT = {"command": "ls", "timeout": 4321, "description": "List", "run_in_background": False}
+
+
+@pytest.mark.parametrize(
+    "mode", [PermissionMode.DEFAULT, PermissionMode.ACCEPT_EDITS, PermissionMode.BYPASS_PERMISSIONS])
+@pytest.mark.parametrize("command", ["ls", "ls | head -1", "ls && pwd", "echo hi | grep h | wc -l"])
+def test_an_allowed_call_keeps_every_field_of_its_input(mode, command):
+    """`bashToolHasPermission` returns `updatedInput: input` (bashPermissions.ts l.2374, l.2464;
+    bashCommandHelpers.ts `segmentedCommandPermissionResult`), never the command alone."""
+    args = {**_FULL_INPUT, "command": command}
+    perm = ToolPermissionContext(mode=mode)
+    res = run(has_permissions_to_use_tool(build_bash_tool(), args, ctx_for(permission_context=perm)))
+    assert res.behavior == "allow"
+    assert res.updated_input == args
+
+
+def test_an_exact_allow_rule_keeps_every_field_of_its_input():
+    """`bashToolCheckExactMatchPermission` (bashPermissions.ts l.991): `updatedInput: input`."""
+    from app.types.permissions import PermissionBehavior, PermissionRule, PermissionRuleSource
+    rule = PermissionRule(tool_name="Bash", rule_behavior=PermissionBehavior.ALLOW, rule_content="make build",
+                          source=PermissionRuleSource.PROJECT_SETTINGS)
+    perm = ToolPermissionContext(mode=PermissionMode.DEFAULT, always_allow_rules=(rule,))
+    args = {**_FULL_INPUT, "command": "make build"}
+    res = run(check_bash_permissions(args, ctx_for(permission_context=perm)))
+    assert res.behavior == "allow" and res.decision_reason["type"] == "rule"
+    assert res.updated_input == args
+
+
+@pytest.mark.parametrize("command", ["ls", "ls | head -1"])
+def test_the_timeout_the_model_asked_for_reaches_the_shell(monkeypatch, command):
+    """`toolExecution.ts` l.1130: the permission's `updatedInput` is what runs, so it must be the whole input."""
+    seen = recording_timeouts(monkeypatch)
+    ws = FakeWorkspace()
+    tool = build_bash_tool()
+    ctx = tool_context_for(AppStateStore(), workspace=ws, tools=(tool,),
+                           permission_context=ToolPermissionContext(mode=PermissionMode.ACCEPT_EDITS))
+    call = ToolCall(name="Bash", args={"command": command, "timeout": 4321}, id="t1")
+    outcome = run(run_tool_use(call, AIMessage(content=""), ctx, (tool,)))
+    assert outcome.message.status == "success"
+    assert seen == [4321]
+
+
+def test_a_pipe_that_asks_offers_the_rules_of_its_unapproved_segments():
+    """`segmentedCommandPermissionResult` (bashCommandHelpers.ts l.134-150): the ask collects the suggestions
+    of every segment that is not allowed."""
+    from app.tools.bash_tool.bash_permissions import bash_tool_has_permission
+    res = bash_tool_has_permission({"command": "ls | foo-tool --x"}, ToolPermissionContext(), "/tmp")
+    assert res.behavior == "ask"
+    rules = [rule for update in res.suggestions or () for rule in update.rules]
+    assert ("Bash", "foo-tool --x") in rules
+    assert (res.decision_reason or {})["type"] == "subcommandResults"

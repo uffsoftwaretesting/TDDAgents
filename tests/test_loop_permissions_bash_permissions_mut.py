@@ -64,19 +64,19 @@ def injection_checks_on(monkeypatch):
 
 def test_exact_match_uses_the_command_with_its_redirection():
     r = rule(ALLOW, "echo hi > /dev/null")
-    res = bp.bash_tool_check_exact_match_permission("echo hi > /dev/null", ctx(r))
+    res = bp.bash_tool_check_exact_match_permission({"command": "echo hi > /dev/null"}, ctx(r))
     assert (res.behavior, res.decision_reason) == (ALLOW, {"type": "rule", "rule": r})
     assert res.updated_input == {"command": "echo hi > /dev/null"}
 
 
 def test_exact_mode_prefix_rule_matches_a_stripped_wrapper_candidate():
     r = rule(ALLOW, "npm:*")
-    assert bp.bash_tool_check_exact_match_permission("timeout 5 npm", ctx(r)).behavior == ALLOW
+    assert bp.bash_tool_check_exact_match_permission({"command": "timeout 5 npm"}, ctx(r)).behavior == ALLOW
 
 
 def test_exact_mode_does_not_treat_prefix_rules_as_prefixes():
     for behavior in (DENY, ASK):
-        res = bp.bash_tool_check_exact_match_permission("rm x", ctx(rule(behavior, "rm:*")))
+        res = bp.bash_tool_check_exact_match_permission({"command": "rm x"}, ctx(rule(behavior, "rm:*")))
         assert res.behavior == PASS
 
 
@@ -198,15 +198,15 @@ def test_empty_command_is_neither_git_nor_cd():
 
 def test_pipe_results_are_complete(tmp_path):
     cwd = str(tmp_path)
-    res = bp.bash_tool_has_permission("ls | wc -l", ctx(), cwd)
+    res = bp.bash_tool_has_permission({"command": "ls | wc -l"}, ctx(), cwd)
     assert res.behavior == ALLOW and res.updated_input == {"command": "ls | wc -l"}
     assert res.decision_reason is not None and set(res.decision_reason) == {"type", "reasons"}
     assert res.decision_reason["type"] == "subcommandResults"
     d = rule(DENY, "rm:*")
-    res = bp.bash_tool_has_permission("ls | rm x", ctx(d), cwd)
+    res = bp.bash_tool_has_permission({"command": "ls | rm x"}, ctx(d), cwd)
     assert res.behavior == DENY and res.decision_reason is not None
     assert set(res.decision_reason) == {"type", "reasons"} and res.decision_reason["type"] == "subcommandResults"
-    res = bp.bash_tool_has_permission("ls | pip install x", ctx(), cwd)
+    res = bp.bash_tool_has_permission({"command": "ls | pip install x"}, ctx(), cwd)
     assert res.behavior == ASK
     assert res.decision_reason is not None and res.decision_reason["type"] == "subcommandResults"
     assert list(res.decision_reason["reasons"]) == ["ls", "pip install x"]
@@ -215,9 +215,9 @@ def test_pipe_results_are_complete(tmp_path):
 
 
 def test_pipe_with_git_but_no_cd_is_not_the_cd_git_ask(tmp_path):
-    res = bp.bash_tool_has_permission("git log | head", ctx(), str(tmp_path))
+    res = bp.bash_tool_has_permission({"command": "git log | head"}, ctx(), str(tmp_path))
     assert res.message != "Compound commands with cd and git require approval to prevent bare repository attacks"
-    res = bp._segmented_command_permission_result("ls | cat", ["ls", "cat"], ctx(), str(tmp_path))
+    res = bp._segmented_command_permission_result({"command": "ls | cat"}, ["ls", "cat"], ctx(), str(tmp_path))
     assert res.behavior == ALLOW
 
 
@@ -225,9 +225,9 @@ def test_allowed_pipe_still_gets_whole_command_path_checks(tmp_path, monkeypatch
     """The security battery already asks for `>`; the path check shows once it is disabled."""
     monkeypatch.setenv("TDDAGENTS_DISABLE_COMMAND_INJECTION_CHECK", "1")
     cwd = str(tmp_path)
-    res = bp.bash_tool_has_permission("ls | wc > /etc/x", ctx(), cwd)
+    res = bp.bash_tool_has_permission({"command": "ls | wc > /etc/x"}, ctx(), cwd)
     assert res.behavior == ASK and "/etc/x" in res.message
-    res = bp.bash_tool_has_permission("cd sub | ls > out.txt", ctx(), cwd)
+    res = bp.bash_tool_has_permission({"command": "cd sub | ls > out.txt"}, ctx(), cwd)
     assert res.message == CD_REDIRECT_MSG
 
 
@@ -242,7 +242,7 @@ def test_allowed_pipe_still_gets_the_whole_command_security_check(tmp_path, monk
         return real(command)
 
     monkeypatch.setattr(bp, "bash_command_is_safe", flag_whole)
-    res = bp.bash_tool_has_permission("ls | wc -l", ctx(), cwd)
+    res = bp.bash_tool_has_permission({"command": "ls | wc -l"}, ctx(), cwd)
     assert res.behavior == ASK and res.message == "Command contains patterns that require approval"
 
 
@@ -251,28 +251,28 @@ def test_allowed_pipe_still_gets_the_whole_command_security_check(tmp_path, monk
 def test_safe_heredoc_remainder_does_not_ask_early(tmp_path):
     cmd = f'printf "%s" "{HEREDOC}" && ls'
     assert bash_command_is_safe(cmd).is_bash_security_check_for_misparsing is True
-    res = bp.bash_tool_has_permission(cmd, ctx(), str(tmp_path))
+    res = bp.bash_tool_has_permission({"command": cmd}, ctx(), str(tmp_path))
     assert res.behavior == PASS
     assert res.message.startswith("This Bash command contains multiple operations. The following part requires")
 
 
 def test_non_misparsing_remainder_does_not_ask_early(tmp_path):
     cmd = f'printf "%s" "{HEREDOC}" > out.txt'
-    res = bp.bash_tool_has_permission(cmd, ctx(), str(tmp_path))
+    res = bp.bash_tool_has_permission({"command": cmd}, ctx(), str(tmp_path))
     assert res.message != bash_command_is_safe(cmd).message
 
 
 def test_misparsing_compound_command_asks_with_the_validator_message(tmp_path):
     cmd = "echo \x01 && ls"
     original = bash_command_is_safe(cmd)
-    res = bp.bash_tool_has_permission(cmd, ctx(), str(tmp_path))
+    res = bp.bash_tool_has_permission({"command": cmd}, ctx(), str(tmp_path))
     assert res == PermissionResult(behavior=ASK, message=original.message,
                                    decision_reason={"type": "other", "reason": original.message})
 
 
 def test_disabled_injection_checks_skip_the_misparsing_gate(tmp_path, monkeypatch):
     monkeypatch.setenv("TDDAGENTS_DISABLE_COMMAND_INJECTION_CHECK", "1")
-    assert bp.bash_tool_has_permission("echo `id`", ctx(), str(tmp_path)).behavior == PASS
+    assert bp.bash_tool_has_permission({"command": "echo `id`"}, ctx(), str(tmp_path)).behavior == PASS
 
 
 # ── compound commands ────────────────────────────────────────────────────────
@@ -280,17 +280,17 @@ def test_disabled_injection_checks_skip_the_misparsing_gate(tmp_path, monkeypatc
 def test_cd_rules_and_messages(tmp_path):
     cwd = str(tmp_path)
     (tmp_path / "sub").mkdir()
-    assert bp.bash_tool_has_permission("cd sub", ctx(), cwd).behavior == ALLOW
-    assert bp.bash_tool_has_permission("cd a && cd b", ctx(), cwd).message == (
+    assert bp.bash_tool_has_permission({"command": "cd sub"}, ctx(), cwd).behavior == ALLOW
+    assert bp.bash_tool_has_permission({"command": "cd a && cd b"}, ctx(), cwd).message == (
         "Multiple directory changes in one command require approval for clarity")
-    assert bp.bash_tool_has_permission("cd a && git status", ctx(), cwd).message == (
+    assert bp.bash_tool_has_permission({"command": "cd a && git status"}, ctx(), cwd).message == (
         "Compound commands with cd and git require approval to prevent bare repository attacks")
-    assert bp.bash_tool_has_permission("cd sub && mkdir d", ctx(), cwd).message == CD_WRITE_MSG
+    assert bp.bash_tool_has_permission({"command": "cd sub && mkdir d"}, ctx(), cwd).message == CD_WRITE_MSG
 
 
 def test_compound_deny_result_shape(tmp_path):
     d = rule(DENY, "rm:*")
-    res = bp.bash_tool_has_permission("ls && rm x", ctx(d), str(tmp_path))
+    res = bp.bash_tool_has_permission({"command": "ls && rm x"}, ctx(d), str(tmp_path))
     assert res.behavior == DENY
     assert res.message == "Permission to use Bash with command ls && rm x has been denied."
     assert res.decision_reason is not None and set(res.decision_reason) == {"type", "reasons"}
@@ -301,21 +301,21 @@ def test_compound_deny_result_shape(tmp_path):
 def test_single_ask_among_allows_is_returned_directly(tmp_path):
     cwd = str(tmp_path)
     for cmd in ("ls && rm -rf /", "ls && pwd && rm -rf /"):
-        res = bp.bash_tool_has_permission(cmd, ctx(), cwd)
+        res = bp.bash_tool_has_permission({"command": cmd}, ctx(), cwd)
         assert res.behavior == ASK
         assert res.message.startswith("Dangerous rm operation detected: '/'")
 
 
 def test_all_allowed_compound_result(tmp_path):
-    res = bp.bash_tool_has_permission("ls && pwd", ctx(), str(tmp_path))
+    res = bp.bash_tool_has_permission({"command": "ls && pwd"}, ctx(), str(tmp_path))
     assert res.behavior == ALLOW and res.updated_input == {"command": "ls && pwd"}
     assert res.decision_reason is not None and res.decision_reason["type"] == "subcommandResults"
-    single = bp.bash_tool_has_permission("ls", ctx(), str(tmp_path))
+    single = bp.bash_tool_has_permission({"command": "ls"}, ctx(), str(tmp_path))
     assert single.decision_reason is not None and single.decision_reason["type"] == "subcommandResults"
 
 
 def test_multiple_unresolved_subcommands_pass_through(tmp_path):
-    res = bp.bash_tool_has_permission("pip install a && pip install b", ctx(), str(tmp_path))
+    res = bp.bash_tool_has_permission({"command": "pip install a && pip install b"}, ctx(), str(tmp_path))
     assert res.behavior == PASS
     assert res.decision_reason is not None and res.decision_reason["type"] == "subcommandResults"
     assert list(res.decision_reason["reasons"]) == ["pip install a", "pip install b"]
