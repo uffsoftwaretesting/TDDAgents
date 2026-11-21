@@ -393,7 +393,7 @@ the steps **in this order**.
 P=.venv/bin      # the repo-local, gitignored venv; see Commands
 
 # 1. Unit tests — written alongside the change, never bolted on afterwards
-$P/pytest tests/ -q
+$P/pytest tests/ -q          # or -n auto: pytest-xdist, in requirements.txt (about 40 s on 12 cores)
 
 # 2. Lint — zero findings (ruff too, with flake8's codes listed as external)
 $P/flake8 app tests
