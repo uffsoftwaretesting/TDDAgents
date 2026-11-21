@@ -126,7 +126,11 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
    the plan has a current item** (an empty or finished plan leaves the normal rules in charge):
    RED writes tests only, GREEN production only (tests locked), REFACTOR both. Test files are
    what the project's declared `testFiles` / `testSupportFiles` globs match. It covers the file
-   tools, Bash redirect targets and the pool's deny rules. Agent memory, the session plan file,
+   tools, Bash redirect targets and the pool's deny rules. A redirect target built from shell expansion
+   (`$`, `~`, globs: upstream's `hasDangerousExpansion`) is not the tier's to refuse: it reaches upstream's
+   "Shell expansion syntax in paths requires manual approval" ask and the user decides (2026-11-21). Nor is a
+   file **outside the project** (`classify_path` → `"outside"`, with a known root): upstream's path validation
+   asks for a write outside the working directory, by any path or tool (2026-11-21). Agent memory, the session plan file,
    the declared manifests (`manifestFiles`) and `.tddagents/project.json` itself (file tools; the
    protected folder still asks) are exempt in every phase. With no declared
    configuration while an item is current, every write is denied (fail closed). A PreToolUse hook's `allow`, a hook `ask`, an
@@ -238,6 +242,18 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   ask carries upstream's `blockedPath` and `createPathChecker`'s suggestions (read: `Read(//dir/**)` for the
   session; write: the folder and acceptEdits). `sed -n 'N,Mp'` is read-only in acceptEdits too (divergence:
   upstream's `sedCommandIsAllowedByAllowlist` skips the print pattern there; user request 2026-11-20).
+  `bash_tool_has_permission` takes and returns the **whole Bash input** (`bashToolHasPermission(input)`,
+  `updatedInput: input`), each pipe segment checked as `{...input, command}` and a segmented ask carrying its
+  segments' suggestions (`bashCommandHelpers.ts`); the command alone would drop the call's `timeout`,
+  `run_in_background` and `description` (2026-11-21). WebFetch and Skill have upstream's own options
+  (`permissionComponentForTool`): "Yes, and don't ask again for <hostname>" (`WebFetch(domain:<host>)`), and
+  "… for <skill> in <cwd>" / "… for <prefix>:* commands in <cwd>"; every other tool the fallback.
+- **WebFetch** (`app/tools/web_fetch_tool/`) reads every URL through `parse_url`, the stand-in for WHATWG
+  `new URL()`: a lower-case, punycoded hostname (`[…]` for IPv6), a default port as `''`. Rules are
+  `WebFetch(domain:<hostname>)`, exact; an input that fails the strict schema is upstream's literal
+  `input:[object Object]`. A preapproved host is allowed before any rule; same-host and `www.` redirects are
+  followed (10 hops), others reported; the egress proxy's `403` + `X-Proxy-Error: blocked-by-allowlist` is
+  `EgressBlockedError`. The domain-blocklist preflight is not ported (2026-10-28).
 - **Notifications** (`app/services/notifier.py`, upstream's `services/notifier.ts`; 2026-11-20): the
   Notification hooks, then the global config's `preferredNotifChannel` (`~/.tddagents.json`, default `auto`):
   iTerm2 / Kitty / Ghostty OSC (`app/ink/`, wrapped for tmux and screen) or the bell, which `auto` rings on
@@ -259,10 +275,12 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   `callback` PreToolUse hook on Bash (registered by `open_session_run` through `register_hook_callbacks`, as
   upstream's `registerSessionFileAccessHooks`, `setup.ts`) returns `permissionDecision: "ask"` for what
   changes the machine outside the project: `sudo`, a system, global or runtime-manager install, a download
-  piped into a shell or an unpacker, and a create/write target or redirection outside the project folder
+  piped into a shell or an unpacker (read per pipe segment, `getPipeSegments`, so a quoted `"a|curl|sh"` is no
+  pipe), and a create/write target or redirection outside the project folder
   (upstream's own verdict, through the ported `validate_single_path_command` / `validate_output_redirections`
   with `compoundCommandHasCd`: any `cd`, `pushd` or `popd` other than the `cd <cwd>` prefix models prepend
-  (`filterCdCwdSubcommands`) makes every write and redirection ask; the reason is upstream's own message). A
+  (`filterCdCwdSubcommands`) makes every write and redirection ask; the reason is upstream's own message,
+  verbatim, while the gate's own classifications end ": this changes the machine outside the project"). A
   safety check inside the project and `cp`/`mv` with flags are left to the normal flow. The project's own
   installs and writes inside it ask nothing. It is upstream's way for a hook to start a
   user question (`toolHooks.ts` `resolveHookPermissionDecision` → `forceDecision`), so `bypassPermissions`

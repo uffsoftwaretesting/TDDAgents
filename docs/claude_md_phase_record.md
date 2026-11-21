@@ -3266,6 +3266,53 @@ normalization, settings-flag, install-gate, interactive-permission, REPL, sed an
 - **A failing `recheckPermission` crashed the tool call**; upstream fires it with `void`, so the prompt now stays.
 - **Notification tasks were not held**; `Repl._notify` keeps them until done and the session end cancels them.
 
+*The Laravel live run's findings, ported from upstream (2026-11-21, user request and decisions; Opus 5.5):* a
+Laravel MD→PDF run (8/8, final run passed) showed four defects; checking `tools/BashTool/bashCommandHelpers.ts`
+on the user's request found a fifth. Each fix reuses the cited upstream code:
+- **Every allowed Bash call lost its `timeout`, `run_in_background` and `description`.** `bash_tool_has_permission`
+  took the command alone and returned `updated_input={"command": …}`, which `run_tool_use` runs (upstream's
+  `toolExecution.ts` l.1130). It now takes the input, as `bashToolHasPermission(input, …)` (`bashPermissions.ts`
+  l.1663), and returns it where upstream returns `updatedInput: input`: the aggregate allows (l.2374, l.2464),
+  `bashToolCheckExactMatchPermission` (l.991), `checkSandboxAutoAllow` (l.1270) and `segmentedCommandPermissionResult`
+  (`bashCommandHelpers.ts` l.23), whose segments are checked as `{...input, command}` and whose ask now carries the
+  suggestions of every segment not allowed (l.134-150). The per-subcommand helpers keep `{command}`, as upstream.
+- **A quoted alternation read as a download pipe** (`grep -E "^(…|curl|unzip)"` asked "unpacks a download"). The
+  gate's regex over the raw text is gone; pipes are read through `getPipeSegments` (`utils/bash/ParsedCommand.ts`
+  l.53, `splitCommandWithOperators`), each segment split as `segmentedCommandPermissionResult` does (l.59).
+- **The WebFetch prompt's "don't ask again" allowed the whole tool.** WebFetch and Skill fell through to
+  `FallbackPermissionRequest`; their own options are ported (`WebFetchPermissionRequest.tsx` l.91,
+  `SkillPermissionRequest.tsx` l.94, l.125), dispatched as `permissionComponentForTool` does (`PermissionRequest.tsx`
+  l.47).
+- **The TDD tier refused a `~` / `$` redirect target with invented advice** ("Write the test file with WriteFile
+  instead"). User decision: such a target is left to upstream's ask, `checkPathConstraints` → "Shell expansion
+  syntax in paths requires manual approval" (`pathValidation.ts` l.1052; `hasDangerousExpansion`,
+  `utils/bash/commands.ts` l.830). This replaces the earlier "unparseable targets fail closed"; resolvable targets
+  and the no-declaration refusal are unchanged.
+- **The gate's reason read "…'<dir>'.: this changes…".** Upstream's path-validation messages are shown verbatim, as
+  a hook's reason is (`toolHooks.ts` `resolveHookPermissionDecision`); the suffix stays on the gate's own words.
+- **WebFetch, tested extensively** (`tests/test_web_fetch_parity.py`, on the user's request), was ported further:
+  `parse_url` stands in for `new URL()` (punycoded and IPv6 hostnames, a default port as `''`, `validateInput`
+  accepting what the parser accepts); the rule content of an input failing the strict schema is upstream's literal
+  `input:[object Object]`; a 403 with `X-Proxy-Error: blocked-by-allowlist` is `EgressBlockedError`; a reported
+  redirect's output carries `codeText` and `durationMs`. Against the previous code, 20 of the suite's tests fail.
+- **A file outside the project was "production" to the tier**, so in RED `> /home/<user>/.local/bin/x` was refused
+  while `> ~/.local/bin/x` asked. On the user's request to fix it as upstream does, `classify_path` now returns
+  `"outside"` for a path outside the project root (a known root; with none, an absolute path stays production,
+  fail closed), and no phase judges it: upstream's path validation asks for any write outside the working
+  directory (`tools/BashTool/pathValidation.ts` `validateOutputRedirections` l.924 / `validatePath`,
+  `utils/permissions/filesystem.ts` `isPathAllowed` and `checkWritePermissionForTool`), and without the sandbox
+  the install gate asks too. Inside the project nothing changed; with no declaration every write is still refused.
+- **WebFetch against the real internet** (`tests/integration/test_live_web_fetch.py`, `@pytest.mark.live`, run with
+  `RUN_LIVE_LLM_TESTS=1`): real HTTP to example.com (HTML, 404, the http upgrade and the cache), httpbin (a
+  same-host 301 followed, a cross-host 302 reported), youtu.be (a 303, not followed), nextjs.org (preapproved
+  markdown returned as is), vercel.com (markdown through the model), raw.githubusercontent.com (plain text) and
+  w3.org's PDF (saved and summarised), plus the permission pipeline and the real small model end to end.
+- **Mutation-run blockers fixed** (each failed only inside `mutants/`): a stale `mutants/` copy; a subprocess test
+  without `MUTANT_UNDER_TEST=""`; `McpTransportAuth.async_auth_flow`, now a plain method returning its generator
+  (mutmut's trampoline forwards no `asend()`); a test calling a method with a `SimpleNamespace` as `self`.
+- `tests/test_notifier.py`'s idle-prompt integration test raced the bell (the hook's marker can exist before the
+  channel runs, upstream's order); it now waits for the bell.
+
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)
