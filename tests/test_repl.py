@@ -717,6 +717,27 @@ def test_a_crashed_turn_is_reported_and_the_session_goes_on(python_workspace, tm
     assert any(line.startswith("Stopped (model_error)") for line in io.out)
 
 
+def test_a_failed_model_call_shows_upstreams_api_error_above_the_stop(python_workspace, tmp_path):
+    """
+    `query.ts` l.955-996: a model call that raises is shown as its API error (`createAssistantAPIErrorMessage`)
+    before the turn stops `model_error`, so the user reads why (2026-11-21; only the stop line before).
+    """
+    async def raises(state: Any) -> list[Any]:
+        raise RuntimeError("Overloaded: try again later")
+
+    model = Model([raises])
+
+    async def script(repl: Repl, io: FakeIO) -> None:
+        await until(lambda: repl.last_terminal is not None)
+        io.lines.put_nowait("/exit")
+
+    terminal, _, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    assert terminal == Terminal.MODEL_ERROR
+    error = next(i for i, line in enumerate(io.out) if "Overloaded: try again later" in line)
+    stop = next(i for i, line in enumerate(io.out) if line.startswith("Stopped (model_error)"))
+    assert io.out[error] == "● Overloaded: try again later" and error < stop
+
+
 # ── develop_interactive ──────────────────────────────────────────────────────
 
 def test_develop_interactive_plans_then_develops_the_approved_plan(python_workspace, tmp_path):

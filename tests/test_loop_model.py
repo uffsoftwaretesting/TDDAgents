@@ -94,8 +94,6 @@ def _state(ws=None, messages=(), ledger=None, tools=(), todos=()):
 
 def test_stream_call_model_gives_up_on_an_unretryable_factory_error(monkeypatch, config):
     """A ValueError carries no retryable status, so `shouldRetry` refuses it on attempt 1."""
-    from app.services.api.with_retry import CannotRetryError
-
     calls = []
 
     def boom(*args, **kwargs):
@@ -103,9 +101,10 @@ def test_stream_call_model_gives_up_on_an_unretryable_factory_error(monkeypatch,
         raise ValueError("Mock Error")
 
     monkeypatch.setattr("app.services.api.claude.get_chat_model", boom)
-    with pytest.raises(CannotRetryError) as excinfo:
-        _collect(_state(), config)
-    assert isinstance(excinfo.value.original_error, ValueError)
+    # `queryModel`'s catch: the `CannotRetryError` is unwrapped and the failure yielded as upstream's message.
+    (message,) = _collect(_state(), config)
+    assert message.content == "API Error: Mock Error"
+    assert message.additional_kwargs == {"is_api_error_message": True, "api_error": "unknown"}
     assert len(calls) == 1
 
 

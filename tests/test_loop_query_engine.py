@@ -166,6 +166,17 @@ def test_an_api_error_message_is_a_success_with_is_error():
     assert (result.subtype, result.is_error, result.result) == ("success", True, "API Error: boom")
 
 
+def test_a_model_call_that_raises_is_reported_as_its_api_error():
+    """`-p`: the loop's catch yields `createAssistantAPIErrorMessage`, so the result says why (2026-11-21)."""
+    async def raises(state, config):
+        if False:
+            yield AIMessage(content="")
+        raise RuntimeError("upstream unavailable")
+
+    result = _run(_engine(raises), _state())[-1]
+    assert (result.subtype, result.is_error, result.result) == ("success", True, "upstream unavailable")
+
+
 def test_the_last_stop_reason_is_kept():
     first = AIMessage(content="a", response_metadata={"finish_reason": "tool_calls"})
     second = AIMessage(content="b", response_metadata={})

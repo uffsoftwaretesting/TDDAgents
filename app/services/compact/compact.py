@@ -42,6 +42,10 @@ from typing import Any, Literal, Protocol
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from app.services.api.errors import (
+    API_ERROR_MESSAGE_PREFIX,
+    PROMPT_TOO_LONG_ERROR_MESSAGE,
+)
 from app.services.compact.grouping import group_messages_by_api_round
 from app.services.compact.prompt import (
     get_compact_prompt,
@@ -72,8 +76,6 @@ POST_COMPACT_MAX_TOKENS_PER_FILE = 5_000
 MAX_PTL_RETRIES = 3
 PTL_RETRY_MARKER = "[earlier conversation truncated for compaction retry]"
 
-PROMPT_TOO_LONG_ERROR_MESSAGE = "Prompt is too long"
-API_ERROR_MESSAGE_PREFIX = "API Error"
 
 ERROR_MESSAGE_NOT_ENOUGH_MESSAGES = "Not enough messages to compact."
 ERROR_MESSAGE_PROMPT_TOO_LONG = "Conversation too long. Press esc twice to go up a few messages and try again."

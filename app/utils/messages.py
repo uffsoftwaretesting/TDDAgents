@@ -46,6 +46,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.messages.tool import ToolCall
 
+from app.constants.messages import NO_CONTENT_MESSAGE
+
 Message = BaseMessage
 
 
@@ -507,6 +509,23 @@ def ensure_tool_result_pairing(messages: Sequence[Message]) -> list[Message]:
     return list(messages)
 
 
+def create_assistant_api_error_message(
+    content: str, *, error: str | None = None, error_details: str | None = None,
+) -> AIMessage:
+    """
+    `createAssistantAPIErrorMessage` (`reference/claude-code/src/utils/messages.ts` l.435-458): an assistant
+    message whose text is the error, `NO_CONTENT_MESSAGE` when empty, flagged `isApiErrorMessage` with its
+    `error` code and `errorDetails`, which the loop (`is_api_error_message`, the withheld-error checks), the
+    StopFailure hooks and the engine's result read from `additional_kwargs`.
+    """
+    flags: dict[str, Any] = {"is_api_error_message": True}
+    if error is not None:
+        flags["api_error"] = error
+    if error_details is not None:
+        flags["error_details"] = error_details
+    return AIMessage(content=content if content != "" else NO_CONTENT_MESSAGE, additional_kwargs=flags)
+
+
 def normalize_messages_for_api(messages: Sequence[Message]) -> list[Message]:
     """
     `normalizeMessagesForAPI`, as far as this message format needs it: one assistant message per
@@ -531,6 +550,7 @@ def messages_for(attachments: Sequence[HookAttachment]) -> tuple[Message, ...]:
 
 __all__ = [
     "ATTACHMENT_KEY",
+    "create_assistant_api_error_message",
     "INTERRUPT_MESSAGE",
     "INTERRUPT_MESSAGE_FOR_TOOL_USE",
     "HookAttachment",

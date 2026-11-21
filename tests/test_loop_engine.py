@@ -481,7 +481,9 @@ class TestAllTerminalReturns:
             raise RuntimeError("API failure")
 
         events = collect(failing_model)
-        assert events == [Terminated(reason=Terminal.MODEL_ERROR)]
+        # `query.ts` l.955-996: the error's own message as an API-error assistant message, then `model_error`.
+        assert [getattr(e, "content", e) for e in events] == ["API failure", Terminated(reason=Terminal.MODEL_ERROR)]
+        assert getattr(events[0], "additional_kwargs", {})["is_api_error_message"] is True
 
     def test_terminal_blocking_limit_exception(self):
         async def blocking_model(s: LoopState, c: RunConfig) -> AsyncIterator[Message]:

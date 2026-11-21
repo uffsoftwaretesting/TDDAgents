@@ -85,7 +85,13 @@ from app.context import (
 )
 from app.query.config import RunConfig
 from app.query.state import LoopState
-from app.services.api.with_retry import RetryContext, RetryOptions, with_retry
+from app.services.api.errors import get_assistant_message_from_error, unwrap_error
+from app.services.api.with_retry import (
+    FallbackTriggeredError,
+    RetryContext,
+    RetryOptions,
+    with_retry,
+)
 from app.services.compact.compact import is_compact_boundary_message
 from app.tool import Tool
 from app.utils.chat_model_factory import get_chat_model
@@ -267,6 +273,12 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
     one generator, so the achievable equivalent is to retry while nothing has been emitted
     and to let a mid-stream failure raise: once a block has reached the loop, a retry would
     duplicate content or orphan a tool call that was already dispatched.
+
+    **A request that fails is a message, not an exception** (`claude.ts` `queryModel`'s catch, l.2598-2806):
+    `FallbackTriggeredError` propagates to the loop; a cancelled request returns quietly
+    (`APIUserAbortError`); anything else is unwrapped from `CannotRetryError`, logged (`logAPIError`) and
+    yielded as `getAssistantMessageFromError` (`app/services/api/errors.py`), which the loop's API-error guard
+    ends the turn on. A mid-stream failure still raises into the loop's own catch (`query.ts` l.955-996).
     """
     async def operation(attempt: int, context: RetryContext) -> AsyncIterable[Any]:
         stream = stop_on_cancel(open_model_stream(state, config, context), state.tool_context.cancel)
@@ -279,23 +291,38 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
             return _empty_stream()
         return _restream(first, iterator)
 
-    opened = await with_retry(
-        operation,
-        RetryOptions(
-            # Upstream `options.mainLoopModel`: a skill's override wins over the run's model.
-            model=state.tool_context.main_loop_model or config.model,
-            max_retries=config.max_retries,
-            fallback_model=config.fallback_model,
-            on_notice=lambda notice: logger.warning(
-                "Model call attempt %d/%d failed: %s",
-                notice.attempt, notice.max_retries + 1, notice.error,
-            ),
-            is_cancelled=lambda: state.tool_context.cancel.cancelled,
-        ),
-    )
+    # Upstream `options.mainLoopModel`: a skill's override wins over the run's model.
+    model = state.tool_context.main_loop_model or config.model
+    try:
+        opened = await with_retry(operation, _retry_options(state, config, model))
+    except FallbackTriggeredError:
+        raise  # `claude.ts` l.2599-2605: query.ts performs the model switch
+    except Exception as failure:  # noqa: BLE001 - upstream's `queryModel` catch: the failure becomes a message
+        if state.tool_context.cancel.cancelled:
+            # `APIUserAbortError` returns quietly; here a cancel reaches `with_retry` as its token, and it gives up.
+            return
+        error, error_model = unwrap_error(failure, model)
+        # `logAPIError`: what failed, on which model, with its stack (`logError` writes `err.stack`).
+        logger.error("API request failed on %s: %s: %s", error_model, type(error).__name__, error, exc_info=error)
+        yield get_assistant_message_from_error(error, error_model)
+        return
 
     async for message in frame_content_blocks(opened, getattr(state.tool_context, "on_stream_chunk", None)):
         yield message
+
+
+def _retry_options(state: LoopState, config: RunConfig, model: str) -> RetryOptions:
+    """`withRetry`'s options for the main-loop request."""
+    return RetryOptions(
+        model=model,
+        max_retries=config.max_retries,
+        fallback_model=config.fallback_model,
+        on_notice=lambda notice: logger.warning(
+            "Model call attempt %d/%d failed: %s",
+            notice.attempt, notice.max_retries + 1, notice.error,
+        ),
+        is_cancelled=lambda: state.tool_context.cancel.cancelled,
+    )
 
 
 def stop_on_cancel(stream: AsyncIterable[Any], cancel: Any) -> AsyncIterator[Any]:

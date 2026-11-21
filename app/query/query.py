@@ -52,6 +52,7 @@ from app.utils.messages import (
     Message,
     ToolCall,
     ToolUseSummaryMessage,
+    create_assistant_api_error_message,
     create_tool_use_summary_message,
     create_user_interruption_message,
     is_hook_stopped_continuation,
@@ -408,8 +409,10 @@ async def run_loop(
                 model_failed = exc
 
         if model_failed is not None:
-            # Upstream's `logError` on a failed model call: the terminal alone says nothing of why.
-            logger.error("Model call failed: %s", model_failed)
+            # `query.ts` l.955-996. `logError(error)` writes `err.stack`: the type, message and traceback, so an
+            # exception with an empty message (`httpx.ReadTimeout('')`) still says what failed.
+            logger.error("Model call failed: %s: %s", type(model_failed).__name__, model_failed,
+                         exc_info=model_failed)
             # Upstream repairs before it reports: the stream may already have emitted a
             # tool_use whose tool_result will now never arrive, and the next request would
             # be malformed without one (invariant B7).
@@ -419,6 +422,9 @@ async def run_loop(
                 tuple(tool_calls), set(), message=str(model_failed)
             ):
                 yield repair
+            # "Surface the real error instead of a misleading [Request interrupted by user]": the error's own
+            # message, `(no content)` when it has none (`createAssistantAPIErrorMessage`).
+            yield create_assistant_api_error_message(str(model_failed))
             term = Terminated(reason=Terminal.MODEL_ERROR)
             deps.emit_event(term)
             yield term
