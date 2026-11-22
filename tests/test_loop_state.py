@@ -29,6 +29,7 @@ def make_state(**overrides: Any) -> LoopState:
         "phase_ledger": PhaseLedger(),
         "compaction_tracking": None,
         "has_attempted_reactive_compact": False,
+        "max_output_tokens_recovery_count": 0,
         "stop_hook_active": None,
         "turn_count": 1,
         "transition": None,
@@ -94,8 +95,9 @@ class TestEveryFieldIsNamed:
 
     def test_the_record_carries_exactly_the_agreed_fields(self):
         """
-        Pinned because the two counters were dropped deliberately when the ceilings were:
-        re-adding one silently would re-add a bound nothing decided to have.
+        Pinned because a counter is a ceiling: only upstream's bounds have one
+        (`max_output_tokens_recovery_count`, `query.ts` `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT`), and
+        adding one silently would add a bound nothing decided to have.
         """
         assert [f.name for f in fields(LoopState)] == [
             "messages",
@@ -103,6 +105,7 @@ class TestEveryFieldIsNamed:
             "phase_ledger",
             "compaction_tracking",
             "has_attempted_reactive_compact",
+            "max_output_tokens_recovery_count",
             "stop_hook_active",
             "turn_count",
             "transition",
@@ -120,6 +123,7 @@ class TestInitialState:
         assert state.transition is None
         assert state.compaction_tracking is None
         assert state.has_attempted_reactive_compact is False
+        assert state.max_output_tokens_recovery_count == 0
         assert state.stop_hook_active is None
 
     def test_the_ledger_starts_with_nothing_observed(self):

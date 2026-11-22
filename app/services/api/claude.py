@@ -71,7 +71,7 @@ from langchain_core.messages import (
     SystemMessage,
     message_chunk_to_message,
 )
-from langchain_core.messages.tool import ToolCallChunk
+from langchain_core.messages.tool import ToolCall, ToolCallChunk
 
 from app.config.config import Config
 from app.constants.system_prompt_sections import (
@@ -85,7 +85,11 @@ from app.context import (
 )
 from app.query.config import RunConfig
 from app.query.state import LoopState
-from app.services.api.errors import get_assistant_message_from_error, unwrap_error
+from app.services.api.errors import (
+    API_ERROR_MESSAGE_PREFIX,
+    get_assistant_message_from_error,
+    unwrap_error,
+)
 from app.services.api.with_retry import (
     FallbackTriggeredError,
     RetryContext,
@@ -95,14 +99,17 @@ from app.services.api.with_retry import (
 from app.services.compact.compact import is_compact_boundary_message
 from app.tool import Tool
 from app.utils.chat_model_factory import get_chat_model
+from app.utils.json import safe_parse_json
 from app.utils.messages import (
     Message,
+    create_assistant_api_error_message,
     ensure_tool_result_pairing,
     move_tool_result_media_to_user,
     normalize_messages_for_api,
 )
 from app.utils.model.model import provider_for_model
 from app.utils.token_metrics import GlobalTokenTracker
+from app.utils.tokens import get_max_output_tokens_for_model
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +244,6 @@ def open_model_stream(state: LoopState, config: RunConfig, context: RetryContext
     overrides: dict[str, Any] = {"max_tokens": context.max_tokens_override} if context.max_tokens_override else {}
     # `claude.ts`: the thinking parameter, and temperature only while thinking is off.
     from app.utils.thinking import thinking_request_kwargs
-    from app.utils.tokens import get_max_output_tokens_for_model
 
     max_output = context.max_tokens_override or get_max_output_tokens_for_model(context.model)
     thinking, without_temperature = thinking_request_kwargs(
@@ -279,8 +285,16 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
     (`APIUserAbortError`); anything else is unwrapped from `CannotRetryError`, logged (`logAPIError`) and
     yielded as `getAssistantMessageFromError` (`app/services/api/errors.py`), which the loop's API-error guard
     ends the turn on. A mid-stream failure still raises into the loop's own catch (`query.ts` l.955-996).
+
+    **A response the output-token limit cut off is followed by an API error** (`claude.ts` `message_delta`,
+    l.2266-2292): the stop reason of the stream's last frame, read by `max_output_tokens_error`, with the
+    limit this request was sent with. The loop withholds it and decides the recovery (`query.ts`).
     """
+    sent_max_tokens: list[int] = []
+
     async def operation(attempt: int, context: RetryContext) -> AsyncIterable[Any]:
+        # `maxOutputTokens` as `queryModel` computed it for the request that streams.
+        sent_max_tokens[:] = [context.max_tokens_override or get_max_output_tokens_for_model(context.model)]
         stream = stop_on_cancel(open_model_stream(state, config, context), state.tool_context.cancel)
         # Pull the first item inside the retried operation, so a provider that fails at
         # connect or on the first frame is still "before any output" and may be retried.
@@ -307,8 +321,56 @@ async def stream_call_model(state: LoopState, config: RunConfig) -> AsyncIterato
         yield get_assistant_message_from_error(error, error_model)
         return
 
-    async for message in frame_content_blocks(opened, getattr(state.tool_context, "on_stream_chunk", None)):
+    stop_reasons: list[str] = []
+
+    async def watched() -> AsyncIterator[Any]:
+        async for item in opened:
+            reason = stop_reason_of(item)
+            if reason is not None:
+                stop_reasons.append(reason)
+            yield item
+
+    async for message in frame_content_blocks(watched(), getattr(state.tool_context, "on_stream_chunk", None)):
         yield message
+    limit = sent_max_tokens[-1] if sent_max_tokens else get_max_output_tokens_for_model(model)
+    cut_off = max_output_tokens_error(stop_reasons[-1] if stop_reasons else None, limit)
+    if cut_off is not None:
+        yield cut_off
+
+
+def stop_reason_of(item: Any) -> str | None:
+    """
+    The stop reason a streamed frame carries: Anthropic's `message_delta` `stop_reason` (langchain_anthropic
+    puts it in `response_metadata`), or the OpenAI chunk's `finish_reason`.
+    """
+    metadata = getattr(item, "response_metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    reason = metadata.get("stop_reason") or metadata.get("finish_reason")
+    return reason if isinstance(reason, str) else None
+
+
+#: The stop reasons that mean the output-token limit cut the response: Anthropic's, and OpenAI's `length`.
+MAX_TOKENS_STOP_REASONS = frozenset({"max_tokens", "length"})
+
+
+def max_output_tokens_error(stop_reason: str | None, max_output_tokens: int) -> AIMessage | None:
+    """
+    `claude.ts` l.2266-2292: a `max_tokens` stop is "Claude's response exceeded the N output token
+    maximum", a `model_context_window_exceeded` stop "The model has reached its context window limit"; both
+    `apiError: 'max_output_tokens'`, so `query.ts` reuses one recovery path. Upstream's environment
+    variable is named as this build's, `TDDAGENTS_MAX_OUTPUT_TOKENS`.
+    """
+    if stop_reason in MAX_TOKENS_STOP_REASONS:
+        logger.info("Max output tokens reached: %d", max_output_tokens)  # `tengu_max_tokens_reached`
+        content = (f"{API_ERROR_MESSAGE_PREFIX}: Claude's response exceeded the {max_output_tokens} output token "
+                   "maximum. To configure this behavior, set the TDDAGENTS_MAX_OUTPUT_TOKENS environment variable.")
+    elif stop_reason == "model_context_window_exceeded":
+        logger.info("Context window exceeded (max output tokens %d)", max_output_tokens)
+        content = f"{API_ERROR_MESSAGE_PREFIX}: The model has reached its context window limit."
+    else:
+        return None
+    return create_assistant_api_error_message(content, error="max_output_tokens")
 
 
 def _retry_options(state: LoopState, config: RunConfig, model: str) -> RetryOptions:
@@ -464,8 +526,32 @@ class BlockAccumulator:
     def flush(self) -> Iterator[BaseMessage]:
         """Close the open block, if any — the `content_block_stop` of the stream's end."""
         if self._chunk is not None:
-            yield message_chunk_to_message(self._chunk)
+            yield parse_tool_inputs_strictly(self._chunk, message_chunk_to_message(self._chunk))
         self._key, self._chunk = None, None
+
+
+def parse_tool_inputs_strictly(chunk: AIMessageChunk, message: BaseMessage) -> BaseMessage:
+    """
+    A tool block's input as upstream reads it at `content_block_stop` (`utils/messages.ts`
+    `normalizeContentFromAPI` l.2651-2694): the streamed JSON through `safeParseJSON`, `{}` when it does not
+    parse (`parsed ?? {}`), logged as `tengu_tool_input_json_parse_fail`. LangChain's own `parse_partial_json`
+    would repair a cut-off input into a call nobody made. A call without a name stays LangChain's invalid
+    call: upstream's block always has one (`content_block_start`).
+    """
+    raw = [c for c in _tool_call_chunks(chunk) if c.get("name")]
+    if not raw or not isinstance(message, AIMessage):
+        return message
+    calls: list[ToolCall] = []
+    for entry in raw:
+        name = str(entry["name"])
+        text = entry.get("args") or ""
+        parsed = safe_parse_json(text, should_log_error=False) if isinstance(text, str) else None
+        if parsed is None and text:
+            logger.warning("tool input JSON parse fail: %s (%d chars): %s", name, len(text), str(text)[:200])
+        calls.append(ToolCall(name=name, args=parsed if isinstance(parsed, dict) else {}, id=entry.get("id"),
+                              type="tool_call"))
+    invalid = [c for c in message.invalid_tool_calls if not c.get("name")]
+    return message.model_copy(update={"tool_calls": calls, "invalid_tool_calls": invalid})
 
 
 async def frame_content_blocks(

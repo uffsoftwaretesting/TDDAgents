@@ -532,10 +532,18 @@ def normalize_messages_for_api(messages: Sequence[Message]) -> list[Message]:
     response (`mergeAssistantMessages`), every batch's results directly after their calls
     (`mergeUserMessages` / `hoistToolResults`), attachments after the batch
     (`reorderAttachmentsForAPI`). The request then runs `ensure_tool_result_pairing`, as upstream's
-    `services/api/claude.ts` does; `/context` (`analyzeContext.ts`) counts this view alone. The input
-    is never changed.
+    `services/api/claude.ts` does; `/context` (`analyzeContext.ts`) counts this view alone. A synthetic
+    API error (`createAssistantAPIErrorMessage`) is never sent (`isSyntheticApiErrorMessage`, l.321-329,
+    filtered at l.2069): the model only ever sees what it said. The input is never changed.
     """
-    return reorder_attachments_for_api(hoist_tool_results(merge_split_assistant_messages(messages)))
+    sendable = [m for m in messages if not is_synthetic_api_error_message(m)]
+    return reorder_attachments_for_api(hoist_tool_results(merge_split_assistant_messages(sendable)))
+
+
+def is_synthetic_api_error_message(message: Message) -> bool:
+    """`isSyntheticApiErrorMessage`: an assistant message `create_assistant_api_error_message` made."""
+    kwargs = getattr(message, "additional_kwargs", None)
+    return message.type == "ai" and isinstance(kwargs, dict) and kwargs.get("is_api_error_message") is True
 
 
 def messages_for(attachments: Sequence[HookAttachment]) -> tuple[Message, ...]:
@@ -569,6 +577,7 @@ __all__ = [
     "extract_tag",
     "is_attachment_message",
     "is_hook_stopped_continuation",
+    "is_synthetic_api_error_message",
     "messages_for",
     "normalize_attachment_for_api",
     "reorder_attachments_for_api",

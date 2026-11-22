@@ -24,10 +24,11 @@ about a field, which is precisely the silence this design is built to remove. Th
 starting record is built by `initial_loop_state` below, so "what the run begins as" also
 has exactly one definition.
 
-Fields that existed only to be compared against a ceiling are absent, because there are no
-ceilings: `output_limit_recovery_count` and `tdd_block_count` from §3.1's list, and
-`consecutiveFailures` from the compaction record below. How often a recovery path fired is
-recoverable from the transition history, which is where Part L2 reads it from anyway.
+Ceilings follow claude-code: a counter exists only where upstream bounds something.
+`max_output_tokens_recovery_count` is upstream's `maxOutputTokensRecoveryCount`, read against
+`MAX_OUTPUT_TOKENS_RECOVERY_LIMIT` (`query.ts` l.164); `consecutiveFailures` lives in the
+compaction record below. `tdd_block_count` from §3.1's list stays absent: upstream bounds no
+stop hook.
 """
 
 from __future__ import annotations
@@ -91,6 +92,9 @@ class LoopState:
     phase_ledger: PhaseLedger
     compaction_tracking: CompactionTracking | None
     has_attempted_reactive_compact: bool
+    #: Upstream `maxOutputTokensRecoveryCount`: +1 at each `max_output_tokens_recovery`, 0 at
+    #: `next_turn` and after a blocking stop hook, preserved by every other site (`query.ts`).
+    max_output_tokens_recovery_count: int
     stop_hook_active: bool | None
     turn_count: int
     transition: Transition | None
@@ -126,6 +130,7 @@ def initial_loop_state(
         phase_ledger=ledger,
         compaction_tracking=None,
         has_attempted_reactive_compact=False,
+        max_output_tokens_recovery_count=0,
         stop_hook_active=None,
         turn_count=1,
         transition=None,

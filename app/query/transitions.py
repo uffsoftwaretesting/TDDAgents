@@ -109,10 +109,12 @@ class Transition:
 
     A record rather than a bare enum member, because upstream's `Continue` is a union of
     objects and some of its members carry a payload. Nothing is declared here before a site
-    sets it, which is why the record has exactly one member today.
+    sets it: `attempt` is `max_output_tokens_recovery`'s (`query.ts` l.1245-1248,
+    `{ reason: 'max_output_tokens_recovery', attempt }`), `None` for every other reason.
     """
 
     reason: Continue
+    attempt: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

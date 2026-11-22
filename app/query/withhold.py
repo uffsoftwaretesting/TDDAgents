@@ -93,25 +93,12 @@ def is_prompt_too_long(message: Message) -> bool:
 
 def is_max_output_tokens(message: Message) -> bool:
     """
-    Check if a message represents a model output token truncation.
+    `isWithheldMaxOutputTokens` (`reference/claude-code/src/query.ts` l.175-179): the assistant API error
+    `stream_call_model` yields for a `max_tokens` or `model_context_window_exceeded` stop
+    (`services/api/claude.ts` l.2266-2292), `apiError === 'max_output_tokens'`. The cut-off response
+    itself carries no flag: its stop reason is read once, where the error is made.
     """
-    err = _get_api_error(message)
-    if err == "max_output_tokens":
-        return True
-
-    additional = getattr(message, "additional_kwargs", None)
-    if isinstance(additional, dict):
-        finish_reason = additional.get("finish_reason")
-        if finish_reason in ("length", "max_tokens"):
-            return True
-
-    response_meta = getattr(message, "response_metadata", None)
-    if isinstance(response_meta, dict):
-        finish_reason = response_meta.get("finish_reason")
-        if finish_reason in ("length", "max_tokens"):
-            return True
-
-    return False
+    return _get_api_error(message) == "max_output_tokens"
 
 
 def is_media_size_error(message: Message) -> bool:

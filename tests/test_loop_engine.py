@@ -31,6 +31,7 @@ from app.query.deps import (
     UuidGenerator,
 )
 from app.query.query import (
+    OUTPUT_TOKEN_LIMIT_RECOVERY_MESSAGE,
     BlockingLimitError,
     LoopEvent,
     LoopNeverTerminated,
@@ -725,6 +726,7 @@ class TestResetPreserveMatrix:
     def test_max_output_tokens_recovery_matrix(self):
         initial = start(
             has_attempted_reactive_compact=True,
+            max_output_tokens_recovery_count=1,
             stop_hook_active=True,
             turn_count=4,
             phase_ledger=PhaseLedger(phase="GREEN", tests_written=True),
@@ -736,7 +738,9 @@ class TestResetPreserveMatrix:
         collect(model, deps=deps, state=initial)
 
         next_state = model.seen[1]
-        assert next_state.messages[-1].content == "Please continue from where you left off."
+        assert next_state.messages[-1].content == OUTPUT_TOKEN_LIMIT_RECOVERY_MESSAGE
+        assert next_state.messages[-1].additional_kwargs == {"is_meta": True}
+        assert next_state.max_output_tokens_recovery_count == 2
         assert next_state.phase_ledger == initial.phase_ledger
         assert next_state.compaction_tracking == initial.compaction_tracking
         assert next_state.has_attempted_reactive_compact is True
@@ -744,6 +748,7 @@ class TestResetPreserveMatrix:
         assert next_state.turn_count == 4
         assert next_state.transition is not None
         assert next_state.transition.reason is Continue.MAX_OUTPUT_TOKENS_RECOVERY
+        assert next_state.transition.attempt == 2
 
 
 class TestDrain:

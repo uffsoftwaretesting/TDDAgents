@@ -123,6 +123,15 @@ LoopEvent: TypeAlias = Message | Terminated | ToolUseSummaryMessage
 #: `query.ts`'s repair text when a model fallback abandons a turn's tool calls.
 FALLBACK_REPAIR_MESSAGE = "Model fallback triggered"
 
+#: `query.ts` l.164: how many times one turn is resumed after its answer hit the output-token limit.
+MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
+
+#: `query.ts` l.1224-1227: the meta message that resumes a response cut off by the output-token limit.
+OUTPUT_TOKEN_LIMIT_RECOVERY_MESSAGE = (
+    "Output token limit hit. Resume directly — no apology, no recap of what you were doing. "
+    "Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces."
+)
+
 
 class LoopNeverTerminated(RuntimeError):
     """
@@ -475,6 +484,7 @@ async def run_loop(
                         phase_ledger=state.tool_context.get_app_state().phase_ledger,
                         compaction_tracking=tracking,
                         has_attempted_reactive_compact=True,
+                        max_output_tokens_recovery_count=state.max_output_tokens_recovery_count,
                         stop_hook_active=None,
                         turn_count=state.turn_count,
                         transition=Transition(reason=Continue.REACTIVE_COMPACT_RETRY),
@@ -495,30 +505,6 @@ async def run_loop(
             yield term
             return
 
-        has_max_tokens = any(
-            _is_api_error(m, "max_output_tokens") or is_max_output_tokens(m)
-            for m in assistant_messages
-        )
-        if has_max_tokens:
-            if gate_snapshot.max_output_tokens_recovery_enabled:
-                resume_msg = HumanMessage(content="Please continue from where you left off.")
-                state = LoopState(
-                    messages=(*messages_for_query, *assistant_messages, resume_msg),
-                    tool_context=state.tool_context,
-                    phase_ledger=state.tool_context.get_app_state().phase_ledger,
-                    compaction_tracking=tracking,
-                    has_attempted_reactive_compact=state.has_attempted_reactive_compact,
-                    stop_hook_active=None,
-                    turn_count=state.turn_count,
-                    transition=Transition(reason=Continue.MAX_OUTPUT_TOKENS_RECOVERY),
-                    pending_tool_use_summary=None,
-                )
-                deps.emit_event(state.transition)
-                continue
-
-            for wm in withheld_messages:
-                yield wm
-
         if state.tool_context.cancel.cancelled or turn_controller.signal.aborted:
             if abort_reason(state.tool_context, turn_controller) != "interrupt":
                 yield create_user_interruption_message(tool_use=False)
@@ -534,6 +520,39 @@ async def run_loop(
                 yield summary
 
         if not needs_follow_up:
+            # `query.ts` l.1185-1256: the answer hit the output-token limit (the error `stream_call_model`
+            # yielded for a `max_tokens` stop, withheld above). Upstream's 64k escalation first is behind
+            # `tengu_otk_slot_v1`, off in the external build; then the turn is resumed with a meta message,
+            # up to `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT` times; once exhausted the withheld error is shown and
+            # the API-error guard below ends the turn. Never with a tool call: those run (`needsFollowUp`).
+            last_message = assistant_messages[-1] if assistant_messages else None
+            if (
+                last_message is not None
+                and gate_snapshot.max_output_tokens_recovery_enabled
+                and is_max_output_tokens(last_message)
+            ):
+                if state.max_output_tokens_recovery_count < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT:
+                    recovery_message = HumanMessage(
+                        content=OUTPUT_TOKEN_LIMIT_RECOVERY_MESSAGE, additional_kwargs={"is_meta": True}
+                    )
+                    attempt = state.max_output_tokens_recovery_count + 1
+                    state = LoopState(
+                        messages=(*messages_for_query, *assistant_messages, recovery_message),
+                        tool_context=state.tool_context,
+                        phase_ledger=state.tool_context.get_app_state().phase_ledger,
+                        compaction_tracking=tracking,
+                        has_attempted_reactive_compact=state.has_attempted_reactive_compact,
+                        max_output_tokens_recovery_count=attempt,
+                        stop_hook_active=None,
+                        turn_count=state.turn_count,
+                        transition=Transition(reason=Continue.MAX_OUTPUT_TOKENS_RECOVERY, attempt=attempt),
+                        pending_tool_use_summary=None,
+                    )
+                    deps.emit_event(state.transition)
+                    continue
+                # Recovery exhausted — surface the withheld error now.
+                yield last_message
+
             # The anti-spiral guard, `query.ts`:
             #   "Skip stop hooks when the last message is an API error ... The model never
             #    produced a real response — hooks evaluating it create a death spiral:
@@ -576,6 +595,7 @@ async def run_loop(
                     phase_ledger=state.tool_context.get_app_state().phase_ledger,
                     compaction_tracking=tracking,
                     has_attempted_reactive_compact=state.has_attempted_reactive_compact,
+                    max_output_tokens_recovery_count=0,
                     stop_hook_active=True,
                     turn_count=state.turn_count,
                     transition=Transition(reason=Continue.STOP_HOOK_BLOCKING),
@@ -670,6 +690,7 @@ async def run_loop(
             phase_ledger=refreshed_context.get_app_state().phase_ledger,
             compaction_tracking=tracking,
             has_attempted_reactive_compact=False,
+            max_output_tokens_recovery_count=0,
             stop_hook_active=state.stop_hook_active,
             turn_count=state.turn_count + 1,
             transition=Transition(reason=Continue.NEXT_TURN),

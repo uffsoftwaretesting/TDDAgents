@@ -27,7 +27,7 @@ from app.query.withhold import (
 )
 from app.state.app_state_store import AppStateStore
 from app.tool import ToolContext, ToolResult, build_tool, tool_context_for
-from app.utils.messages import Message, ToolCall
+from app.utils.messages import Message, ToolCall, create_assistant_api_error_message
 
 CONFIG = build_run_config("recovery-test")
 
@@ -139,23 +139,20 @@ class TestWithholdPredicates:
         assert is_prompt_too_long(m_ok) is False
 
     def test_is_max_output_tokens_variations(self) -> None:
+        """`isWithheldMaxOutputTokens`: the API error's `apiError` only. The provider's stop reason is read
+        once, by `stream_call_model`, which yields that error after the cut-off response."""
         m1 = AIMessage(content="cut", additional_kwargs={"api_error": "max_output_tokens"})
         assert is_max_output_tokens(m1) is True
 
-        m2_len = AIMessage(content="cut", additional_kwargs={"finish_reason": "length"})
-        assert is_max_output_tokens(m2_len) is True
+        for flagged_by_provider in (
+            AIMessage(content="cut", additional_kwargs={"finish_reason": "length"}),
+            AIMessage(content="cut", response_metadata={"finish_reason": "length"}),
+            AIMessage(content="cut", response_metadata={"stop_reason": "max_tokens"}),
+        ):
+            assert is_max_output_tokens(flagged_by_provider) is False
 
-        m2_tok = AIMessage(content="cut", additional_kwargs={"finish_reason": "max_tokens"})
-        assert is_max_output_tokens(m2_tok) is True
-
-        m3_len = AIMessage(content="cut", response_metadata={"finish_reason": "length"})
-        assert is_max_output_tokens(m3_len) is True
-
-        m3_tok = AIMessage(content="cut", response_metadata={"finish_reason": "max_tokens"})
-        assert is_max_output_tokens(m3_tok) is True
-
-        m_ok = AIMessage(content="full answer", additional_kwargs={"finish_reason": "stop"})
-        assert is_max_output_tokens(m_ok) is False
+        m_other = AIMessage(content="x", additional_kwargs={"api_error": "prompt_too_long"})
+        assert is_max_output_tokens(m_other) is False
 
     def test_is_media_size_error_variations(self) -> None:
         m_img = AIMessage(content="", additional_kwargs={"api_error": "image_error"})
@@ -191,6 +188,7 @@ class TestWithholdGateSnapshot:
             phase_ledger=state_first.phase_ledger,
             compaction_tracking=None,
             has_attempted_reactive_compact=True,
+            max_output_tokens_recovery_count=0,
             stop_hook_active=None,
             turn_count=1,
             transition=Transition(reason=Continue.REACTIVE_COMPACT_RETRY),
@@ -209,7 +207,8 @@ class TestWithholdGateSnapshot:
         """
         ptl = AIMessage(content="", additional_kwargs={"api_error": "prompt_too_long"})
         media = AIMessage(content="", additional_kwargs={"api_error": "image_error"})
-        max_tok = AIMessage(content="cut", additional_kwargs={"finish_reason": "length"})
+        max_tok = AIMessage(content="API Error: cut",
+                            additional_kwargs={"is_api_error_message": True, "api_error": "max_output_tokens"})
         normal = AIMessage(content="hello")
 
         # PTL with collapse enabled
@@ -291,6 +290,7 @@ def test_exhausted_413_surfaces_withheld_error() -> None:
             phase_ledger=context.get_app_state().phase_ledger,
             compaction_tracking=None,
             has_attempted_reactive_compact=True,  # Already attempted!
+            max_output_tokens_recovery_count=0,
             stop_hook_active=None,
             turn_count=1,
             transition=Transition(reason=Continue.REACTIVE_COMPACT_RETRY),
@@ -321,17 +321,19 @@ def test_withheld_max_output_tokens_recovers() -> None:
         context = tool_context_for(AppStateStore())
         state = initial_loop_state(messages=(HumanMessage(content="write function"),), tool_context=context)
 
-        truncated_msg = AIMessage(content="def foo():\n    return", additional_kwargs={"finish_reason": "length"})
+        truncated_msg = AIMessage(content="def foo():\n    return", id="r1")
+        error_msg = create_assistant_api_error_message("API Error: cut", error="max_output_tokens")
         resumed_msg = AIMessage(content=" 42")
 
-        deps = make_deps(model_turns=[[truncated_msg], [resumed_msg]])
+        deps = make_deps(model_turns=[[truncated_msg, error_msg], [resumed_msg]])
 
         emitted_events: list[Any] = []
         async for event in run_loop(state, CONFIG, deps):
             emitted_events.append(event)
 
-        # Truncated message is withheld during turn 1
-        assert truncated_msg not in emitted_events
+        # The cut-off answer is shown; its API error is withheld while recovery is possible
+        assert truncated_msg in emitted_events
+        assert error_msg not in emitted_events
         assert resumed_msg in emitted_events
         term = next(e for e in emitted_events if isinstance(e, Terminated))
         assert term.reason is Terminal.COMPLETED
