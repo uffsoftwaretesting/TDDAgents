@@ -3337,6 +3337,44 @@ on the user's request found a fifth. Each fix reuses the cited upstream code:
 - `tests/test_notifier.py`'s idle-prompt integration test raced the bell (the hook's marker can exist before the
   channel runs, upstream's order); it now waits for the bell.
 
+*A response cut off by the output-token limit, ported from upstream (2026-11-22, user request and decisions; Opus
+5.5):* in the Rust MD→PDF run, item 6's tester answered seven times in a row with one huge WriteFile/Bash call that
+stopped at the 32,000-token cap (`stop_reason: max_tokens`); each lost its main argument and failed validation. The
+user asked how Claude Code splits large work and recovers. What `reference/claude-code/src/` does, verified:
+- **Splitting is prompt-level only**: `tools/FileWriteTool/prompt.ts` ("Prefer the Edit tool … it only sends the
+  diff"), `tools/FileEditTool/prompt.ts` `getDefaultEditDescription`, `constants/prompts.ts` ("Don't retry the
+  identical action blindly").
+- **A `max_tokens` / `model_context_window_exceeded` stop** is followed by an assistant API error
+  (`services/api/claude.ts` l.2266-2292, `apiError: 'max_output_tokens'`). `query.ts` withholds it (l.820-827).
+  **Only when the model asked for no tool** (`if (!needsFollowUp)`, l.1062) it resumes the turn with a meta message
+  ("Output token limit hit. Resume directly …", l.1224-1228), up to `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3` (l.164).
+  The count resets at `next_turn` (l.1720) and after a blocking stop hook (l.1291). Once exhausted it yields the error
+  (l.1254) and the API-error guard ends the turn. The 64k escalation (l.1189-1221) is behind `tengu_otk_slot_v1`, off
+  for third parties.
+- **A tool call's streamed input is parsed strictly** (`utils/messages.ts` `normalizeContentFromAPI` l.2651-2694,
+  `utils/json.ts` `safeParseJSON`): `{}` when it does not parse.
+- **Synthetic API errors are never sent** (`normalizeMessagesForAPI` l.2069, `isSyntheticApiErrorMessage`).
+- **Consequence: upstream loops the same way** on a cut-off tool call. Its input is `{}`, validation fails, the
+  error is stripped and recovery is skipped.
+- **The git diff is display-only** (`utils/gitDiff.ts`, the Write/Edit `gitDiff` output under `CLAUDE_CODE_REMOTE` +
+  `tengu_quartz_lantern`); the model never sees it.
+
+User decisions:
+- **Faithful port only** (no extension for the cut-off tool call);
+- **git diff not ported**;
+- **the ant-only Edit hint added** (`minimalUniquenessHint`, a recorded deviation from the external-build text).
+
+Ported:
+- `stream_call_model` reads the last frame's stop reason (`stop_reason_of`; OpenAI's `length` too) and yields
+  `max_output_tokens_error`, with the limit the request was sent with and `TDDAGENTS_MAX_OUTPUT_TOKENS`.
+- `BlockAccumulator.flush` → `parse_tool_inputs_strictly` (new `app/utils/json.py` `safe_parse_json`) replaces
+  LangChain's lenient `parse_partial_json`.
+- `is_max_output_tokens` reads the `api_error` flag only.
+- The recovery moved inside `if not needs_follow_up`, with upstream's meta text, a `LoopState`
+  `max_output_tokens_recovery_count` and `Transition.attempt`. Before, a non-meta "Please continue from where you
+  left off." was sent with no limit, even after a tool call.
+- `normalize_messages_for_api` drops `is_synthetic_api_error_message`.
+
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)

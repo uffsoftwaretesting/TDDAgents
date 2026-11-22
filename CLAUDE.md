@@ -100,7 +100,8 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
   bound **with upstream's constant and a citation**. Where upstream is unbounded, stay
   unbounded: **no turn limit by default**. Upstream's `--max-turns`, `--max-budget-usd` and
   `--json-schema` exist only as opt-in `-p` flags (`run_loop(max_turns=…)`, `QueryEngine`; user
-  decision 2026-11-01). The retry layer keeps `withRetry`'s ceiling.
+  decision 2026-11-01). The retry layer keeps `withRetry`'s ceiling; a response cut off by the
+  output-token limit is resumed `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3` times per turn (`query.ts` l.164).
   `has_attempted_reactive_compact` is a latch, not a budget. Invent no other ceiling.
 - **`run_loop` yields `Terminated` last** instead of returning it (PEP 525 forbids a value in
   an async generator's `return`). `drain` stands in for JS's `yield*` return.
@@ -112,8 +113,15 @@ TDD-only code lives in **`app/tdd/`**, the session driver in **`app/session/`**.
 - The model emits **one message per content block**. Blocks of one response share a response
   id, and the request builder merges them back into one assistant message
   (`merge_split_assistant_messages`), or OpenAI rejects parallel tool calls.
+- **A response cut off by the output-token limit** (2026-11-22): `stream_call_model` follows it with upstream's
+  API error (`claude.ts` l.2266-2292, `api_error: "max_output_tokens"`); the loop withholds it and, **only when
+  the model asked for no tool** (`query.ts` l.1062), resumes the turn with upstream's meta message, up to 3 times
+  (`LoopState.max_output_tokens_recovery_count`, reset at `next_turn` and after a blocking stop hook), then shows
+  it. A tool call's streamed input is parsed strictly (`parse_tool_inputs_strictly`, `app/utils/json.py`): `{}` when
+  it does not parse, never LangChain's repaired guess. A cut-off tool call therefore fails validation, as upstream.
 - **The request is normalized, then repaired** (2026-11-20): `app/utils/messages.py`
-  `normalize_messages_for_api` (merge, then `hoist_tool_results`: a batch's results directly after their
+  `normalize_messages_for_api` (synthetic API errors dropped, `isSyntheticApiErrorMessage`; merge, then
+  `hoist_tool_results`: a batch's results directly after their
   calls, a skill's meta prompt or an attachment after them, upstream's `mergeUserMessages` /
   `hoistToolResults`), then `ensure_tool_result_pairing` (synthetic error results, orphans dropped,
   `services/api/claude.ts`). The stored history is never rewritten, so a broken transcript heals on resume.
