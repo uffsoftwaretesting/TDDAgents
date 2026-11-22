@@ -177,12 +177,17 @@ def test_write_is_upstreams():
 
 
 @needs_reference
-def test_edit_is_upstreams_external_build():
+def test_edit_is_upstreams_ant_build():
+    """`getDefaultEditDescription` with `USER_TYPE === 'ant'`: the `minimalUniquenessHint` is kept (user
+    decision 2026-11-22), the rest the external text."""
     source = (TOOLS / "FileEditTool" / "prompt.ts").read_text()
     pre = _template(_function(source, "getPreReadInstruction")).replace("\\n", "\n")
+    hint = re.search(r"\?\s*`(\\n- Use the smallest old_string[^`]*)`", source)
+    assert hint is not None
     body = _template(_function(source, "getDefaultEditDescription"))
     body = (body.replace("${getPreReadInstruction()}", pre).replace("${prefixFormat}", "line number + tab")
-            .replace("${minimalUniquenessHint}", "").replace("${FILE_READ_TOOL_NAME}", "ReadFile")
+            .replace("${minimalUniquenessHint}", hint.group(1).replace("\\n", "\n"))
+            .replace("${FILE_READ_TOOL_NAME}", "ReadFile")
             .replace("from Read tool output", "from ReadFile tool output").replace("\\`", "`"))
     assert _tool_prompt("file_edit_tool") == body
 
