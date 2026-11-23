@@ -12,10 +12,12 @@ from typing import Any
 from langchain_core.messages import AIMessage
 
 import app.project_onboarding_state as onboarding
+from app.components.logo_v2.feed import FeedConfig, FeedLine
 from app.utils.config import get_current_project_config, save_current_project_config
 from app.utils.file import is_dir_empty
 
-TIP = "Tips for getting started\nRun /init to create a TDDAGENTS.md file with instructions for TDDAgents\n"
+TIP_TITLE = "Tips for getting started"
+TIP = "Run /init to create a TDDAGENTS.md file with instructions for TDDAgents"
 
 
 def test_is_dir_empty(tmp_path):
@@ -97,12 +99,14 @@ def test_the_feed_lists_enabled_steps_incomplete_first(tmp_path):
     step = onboarding.Step
     steps = [step("a", "Done", True, True, True), step("b", "Off", False, True, False),
              step("c", "Todo", False, True, True)]
-    assert onboarding.create_project_onboarding_feed(steps, tmp_path, home=tmp_path / "home") == (
-        "Tips for getting started\nTodo\n✔ Done")
-    assert onboarding.create_project_onboarding_feed(steps, tmp_path, home=tmp_path) == (
+    feed = onboarding.create_project_onboarding_feed(steps, tmp_path, home=tmp_path / "home")
+    assert feed == FeedConfig("Tips for getting started", (FeedLine("Todo"), FeedLine("✔ Done")))
+    assert feed.plain() == "Tips for getting started\nTodo\n✔ Done"
+    assert onboarding.create_project_onboarding_feed(steps, tmp_path, home=tmp_path).plain() == (
         "Tips for getting started\nTodo\n✔ Done\nNote: You have launched TDDAgents in your home directory. "
         "For the best experience, launch it in a project directory instead.")
-    assert onboarding.create_project_onboarding_feed([], Path.home()).endswith(onboarding.HOME_DIRECTORY_WARNING)
+    assert onboarding.create_project_onboarding_feed([], Path.home()).lines[-1].text == (
+        onboarding.HOME_DIRECTORY_WARNING)
 
 
 def test_the_repl_header_shows_the_tip_once_per_session_and_marks_on_each_turn(
@@ -122,7 +126,10 @@ def test_the_repl_header_shows_the_tip_once_per_session_and_marks_on_each_turn(
 
     plan = TddPlan.from_texts(["A"]).complete_current(CYCLE)
     _, _, io = asyncio.run(session(python_workspace, tmp_path, model, plan, script))
-    assert io.out[1] == TIP  # after the title panel
+    # Inside the title panel (`LogoV2`'s feed column), not after it.
+    header = io.out[0]
+    assert header.index(TIP_TITLE) < header.index("Run /init") < header.index("╰")
+    assert not any(TIP_TITLE in line for line in io.out[1:])
     assert get_current_project_config(tmp_path) == {"projectOnboardingSeenCount": 1,
                                                     "hasCompletedProjectOnboarding": True}
 

@@ -5,7 +5,7 @@ The project onboarding steps: create an app (an empty folder), or run `/init` (a
 Ported from `reference/claude-code/src/projectOnboardingState.ts` -> `Step`, `getSteps`,
 `isProjectOnboardingComplete`, `maybeMarkProjectOnboardingComplete`, `shouldShowProjectOnboarding`,
 `incrementProjectOnboardingSeenCount`, and `components/LogoV2/feedConfigs.tsx` ->
-`createProjectOnboardingFeed` (its title and lines, as text: the REPL is line-based).
+`createProjectOnboardingFeed` (its title and lines, a `FeedConfig`).
 
 `hasCompletedProjectOnboarding` and `projectOnboardingSeenCount` live in the project's entry of
 the global config (`app/utils/config.py`), as upstream's `ProjectConfig`; a missing count is 0
@@ -29,6 +29,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.components.logo_v2.feed import FeedConfig, FeedLine
 from app.utils.claudemd import MEMORY_FILE_NAME
 from app.utils.config import ProjectConfig, get_current_project_config, save_current_project_config
 from app.utils.file import is_dir_empty
@@ -113,16 +114,17 @@ def increment_project_onboarding_seen_count(cwd: str | Path) -> None:
         cwd, lambda current: {**current, PROJECT_ONBOARDING_SEEN_COUNT: _seen_count(current) + 1})
 
 
-def create_project_onboarding_feed(steps: list[Step], cwd: str | Path, home: str | Path | None = None) -> str:
+def create_project_onboarding_feed(steps: list[Step], cwd: str | Path, home: str | Path | None = None) -> FeedConfig:
     """
     `createProjectOnboardingFeed`: the title, then the enabled steps (incomplete ones first, a tick
-    on a complete one), then the home-directory note when the session runs in `home`.
+    on a complete one), then the home-directory note when the session runs in `home`. The REPL shows
+    it as the title box's right-hand column (`LogoV2`).
     """
     enabled = sorted((s for s in steps if s.is_enabled), key=lambda s: s.is_complete)
     lines = [f"{TICK} {s.text}" if s.is_complete else s.text for s in enabled]
     if Path(cwd) == Path(home if home is not None else Path.home()):
         lines.append(HOME_DIRECTORY_WARNING)
-    return "\n".join([PROJECT_ONBOARDING_FEED_TITLE, *lines])
+    return FeedConfig(title=PROJECT_ONBOARDING_FEED_TITLE, lines=tuple(FeedLine(text) for text in lines))
 
 
 __all__ = [
