@@ -34,6 +34,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from app.components.messages.assistant_text_message import is_turn_final_text
 from app.components.messages.assistant_tool_use_message import render_tool_use_row
 from app.components.messages.system_text_message import render_stop_hook_summary
 from app.components.messages.user_tool_result_message.user_tool_result_message import tool_result_text
@@ -69,12 +70,15 @@ class CollapsedReadSearchRenderer:
 
     def __init__(
         self, tools: Callable[[], Sequence[Tool]], context: Callable[[], Any], render: Callable[[Any], str | None],
-        *, verbose: bool = False,
+        *, verbose: bool = False, final_text: Callable[[str], str] | None = None,
     ) -> None:
         self._tools = tools
         self._context = context
         self._render = render
         self.verbose = verbose
+        #: How the message that ends a turn is drawn (`assistant_text_message.style_final_message` on a
+        #: terminal that shows colour); `None` keeps it a `●` row like any other text.
+        self._final_text = final_text
         self.group: ReadSearchGroup | None = None
         self._shown_hint: str | None = None
         #: The calls outside a group whose results have not arrived, by id, in call order.
@@ -138,7 +142,10 @@ class CollapsedReadSearchRenderer:
         text = _text_of(message)
         if text.strip():
             lines.extend(self.flush())
-            lines.append(f"● {text.strip()}")
+            if self._final_text is not None and is_turn_final_text(message, text):
+                lines.append(self._final_text(text))
+            else:
+                lines.append(f"● {text.strip()}")
         tools, context = self._tools(), self._context()
         for call in message.tool_calls:
             args = call.get("args") or {}

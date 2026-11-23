@@ -29,5 +29,9 @@ SUBTLE = "rgb(80,80,80)"
 #: `theme.permission` and `theme.planMode`, both the brand green here (see the module docstring).
 PERMISSION = BRAND
 PLAN_MODE = BRAND
+#: The border of the message that ends a turn: a strong orange, TDDAgents' own (user decision
+#: 2026-11-23).
+FINAL_MESSAGE = "rgb(255,140,0)"
 
-__all__ = ["BRAND", "ERROR", "INACTIVE", "PERMISSION", "PLAN_MODE", "SUBTLE", "SUCCESS", "TEXT", "WARNING"]
+__all__ = ["BRAND", "ERROR", "FINAL_MESSAGE", "INACTIVE", "PERMISSION", "PLAN_MODE", "SUBTLE", "SUCCESS", "TEXT",
+           "WARNING"]

@@ -94,6 +94,8 @@ from app.components.permissions.ask_user_question_permission_request.preview_box
     has_any_preview,
     preview_box,
 )
+from app.components.logo_v2.feed import FeedConfig
+from app.components.messages.assistant_text_message import style_final_message
 from app.components.design_system.question_box import style_question
 from app.components.messages.system_text_message import NoticeLevel, notice
 from app.bootstrap.state import flush_interaction_time, get_last_interaction_time, update_last_interaction_time
@@ -355,8 +357,12 @@ class Repl:
         self.run = run
         self.io = io
         #: Consecutive searches and reads collapse into one summary; `--verbose` expands them.
+        # The message that ends a turn is an orange box on a terminal that shows colour (user decision
+        # 2026-11-23, `app/components/messages/assistant_text_message.py`); a plain sink keeps the `●` row.
+        final_text = (lambda text: style_final_message(text, self._width())) if self._colour else None
         self.renderer = CollapsedReadSearchRenderer(
-            lambda: getattr(self.run.ctx, "tools", ()) or (), lambda: self.run.ctx, render_message, verbose=verbose)
+            lambda: getattr(self.run.ctx, "tools", ()) or (), lambda: self.run.ctx, render_message, verbose=verbose,
+            final_text=final_text)
         self.turn: asyncio.Task[None] | None = None
         self.deferred: list[SlashCommand] = []
         self.pending: PendingAnswer | None = None
@@ -1155,13 +1161,16 @@ class Repl:
         else:
             self._note(text, "warning")
 
-    def _logo(self, project: Path) -> str:
-        """The title panel (`app/components/logo_v2/`), coloured on a terminal that shows colour."""
-        from app.components.logo_v2.logo_v2 import MAX_WIDTH, render_logo
+    def _logo(self, project: Path, feed: FeedConfig | None = None) -> str:
+        """
+        The title panel (`app/components/logo_v2/`) as wide as the terminal, with `feed` as its right-hand
+        column (`LogoV2`), coloured on a terminal that shows colour.
+        """
+        from app.components.logo_v2.logo_v2 import render_logo
 
         model = str(getattr(getattr(self.run, "config", None), "model", "") or "")
-        width = min(shutil.get_terminal_size().columns, MAX_WIDTH)
-        return render_logo(model, project, width=width, color=bool(getattr(self.io, "supports_color", False)))
+        return render_logo(model, project, width=self._width(), color=bool(getattr(self.io, "supports_color", False)),
+                           feed=feed)
 
     # ── the session ────────────────────────────────────────────────────────
 
@@ -1174,13 +1183,13 @@ class Repl:
         from app.hooks.notifs.use_settings_errors import use_settings_errors
 
         project = self._project_dir()
-        # `Messages.tsx`'s `<LogoV2 />` first: the title, then `/help for commands` (the command list is
-        # `/help`'s, user decision 2026-11-17).
-        self.io.write(self._logo(project))
-        if should_show_project_onboarding(project):
-            # `LogoV2`'s onboarding feed, and its seen count (once per session here, see
-            # `app/project_onboarding_state.py`).
-            self.io.write(f"{create_project_onboarding_feed(get_steps(project), project)}\n")
+        # `Messages.tsx`'s `<LogoV2 />` first: the title with the onboarding feed as its right-hand column
+        # (`LogoV2`), then `/help for commands` (the command list is `/help`'s, user decision 2026-11-17).
+        feed = create_project_onboarding_feed(get_steps(project), project) if should_show_project_onboarding(
+            project) else None
+        self.io.write(self._logo(project, feed))
+        if feed is not None:
+            # The feed's seen count, once per session here (see `app/project_onboarding_state.py`).
             increment_project_onboarding_seen_count(project)
         in_plan = self.run.store.get().tool_permission_context.mode == PermissionMode.PLAN
         if in_plan:
