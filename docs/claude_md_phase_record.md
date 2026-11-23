@@ -3375,6 +3375,27 @@ Ported:
   left off." was sent with no limit, even after a tool call.
 - `normalize_messages_for_api` drops `is_synthetic_api_error_message`.
 
+*The REPL's header and the turn's final message (2026-11-23, user request and decisions; Opus 5.5):*
+- **The onboarding tips sat under the title box as loose text.** They are now the box's right-hand column, upstream's
+  `LogoV2` layout (`components/LogoV2/LogoV2.tsx` l.415-436, `Feed.tsx`, `feedConfigs.tsx`
+  `createProjectOnboardingFeed`, `utils/logoV2Utils.ts` `getLayoutMode` / `calculateOptimalLeftWidth`). The feed is
+  ported as `app/components/logo_v2/feed.py` (`FeedConfig`, `calculate_feed_width`, the title bold in the brand
+  green); `create_project_onboarding_feed` returns one. Divergences:
+  - below 70 columns the feed stacks under the logo inside the box (upstream's compact layout drops it);
+  - the logo column has no 50-column cap and gives way so the feed keeps 30 columns (upstream caps the logo and
+    truncates the folder), so a workspace path stays whole;
+  - the panel spans the terminal.
+- **The message that ends a turn is an orange box** (`app/components/messages/assistant_text_message.py`, user
+  decision): an answer with text, no tool call, and stop reason `end_turn` / `stop_sequence` / `stop`.
+  - The stop reason reaches only a response's last block, so text before a tool call stays a `●` row, and a
+    `max_tokens` cut is resumed, not final.
+  - The box has a bold `rgb(255,140,0)` border (`theme.FINAL_MESSAGE`), the title ` ⚠ TDDAgents `, and the Markdown
+    rendered with the plan box's `PlanMarkdown`.
+  - It appears on a colour terminal only; plain sinks keep `● …`. Upstream boxes no assistant text.
+- **Seen on this machine:** the home folder is a git repository, so `getProjectPathForConfig` keys every workspace
+  to it, and the shared `projectOnboardingSeenCount` had reached 4. The tips never showed. This is upstream's
+  behaviour and was left as it is.
+
 ## Conventions and gotchas
 
 - **Everything is in English** — prompts, logs, docstrings, comments, identifiers, and type names. (Phase 0 of the refactor migrated this codebase from a prior Portuguese-prompts/English-identifiers split; match English everywhere when adding code.)
