@@ -2582,7 +2582,7 @@ A live session broke when the user typed `/edit` at the plan approval. Ported fr
   a run with no request opens (`fresh_thread_id`), runs SessionStart at open without a turn
   (`open_fresh_session`, as `main.tsx`'s `processSessionStartHooks('startup')`), and the first message typed
   is the request (`pending_prefix`, `first_request` for the reports). The title is `LogoV2`'s rounded box in
-  `rich` (`app/components/logo_v2/logo_v2.py`), then `/help for commands`; the command list is `/help`'s.
+  `rich` (`app/components/logo_v2/logo_v2.py`), then `/help for commands` (inside the box since 2026-11-23); the command list is `/help`'s.
   A session folder TDDAgents created is trusted without the dialog (`is_tddagents_workspace`; a divergence).
   The status glyph is `⛨` (decision).
 
@@ -3384,7 +3384,9 @@ Ported:
   - below 70 columns the feed stacks under the logo inside the box (upstream's compact layout drops it);
   - the logo column has no 50-column cap and gives way so the feed keeps 30 columns (upstream caps the logo and
     truncates the folder), so a workspace path stays whole;
-  - the panel spans the terminal.
+  - the panel spans the terminal;
+  - `/help for commands` (`HELP_HINT`) is the logo column's last line, after a blank one, inside the box (user
+    decision; it followed the box before). Upstream's logo has no such line.
 - **The message that ends a turn is an orange box** (`app/components/messages/assistant_text_message.py`, user
   decision): an answer with text, no tool call, and stop reason `end_turn` / `stop_sequence` / `stop`.
   - The stop reason reaches only a response's last block, so text before a tool call stays a `●` row, and a

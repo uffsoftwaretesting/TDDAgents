@@ -328,7 +328,7 @@ A wrong test in GREEN goes back by spawning the tester agent (phase-on-spawn res
   between dashed rules, "Ready to code?"), TDDAgents' notices take their level's colour (`notice`), a
   finished plan is a box, and the exit report is one summary box (`app/components/session_summary.py`).
   The title box holds upstream's `LogoV2` feed column (2026-11-23): the onboarding tips beside the logo behind a
-  divider from 70 columns, under it when narrower, `/help for commands` after the box
+  divider from 70 columns, under it when narrower, `/help for commands` the logo column's last line, inside the box
   (`app/components/logo_v2/`). **The message that ends a turn** (text, no tool call, stop reason `end_turn`) is
   a strong-orange box titled ` ⚠ TDDAgents `, its Markdown rendered (`app/components/messages/
   assistant_text_message.py`; divergence, user decision 2026-11-23); text between tool calls stays a `●` row.

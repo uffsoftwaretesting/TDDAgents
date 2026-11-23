@@ -352,7 +352,8 @@ def test_a_session_works_through_the_plan_and_stays_open(python_workspace, tmp_p
     # The project has files and no TDDAGENTS.md: the onboarding tip comes first (`LogoV2`).
     # The title first (`<LogoV2 />`) with the onboarding tip as its feed column, then the plan; the command
     # list is /help's.
-    assert io.out[0].startswith("╭─  TDDAgents v") and io.out[0].endswith("/help for commands")
+    assert io.out[0].startswith("╭─  TDDAgents v") and io.out[0].endswith("╯")
+    assert io.out[0].index("/help for commands") < io.out[0].index("╰")
     assert io.out[0].index("Tips for getting started") < io.out[0].index("Run /init") < io.out[0].index("╰")
     assert io.out[1] == "TDD plan:\n▶ 1. add"
     assert HELP_TEXT not in io.out[:2]

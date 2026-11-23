@@ -1184,7 +1184,8 @@ class Repl:
 
         project = self._project_dir()
         # `Messages.tsx`'s `<LogoV2 />` first: the title with the onboarding feed as its right-hand column
-        # (`LogoV2`), then `/help for commands` (the command list is `/help`'s, user decision 2026-11-17).
+        # (`LogoV2`), `/help for commands` inside it (the command list is `/help`'s, user decisions 2026-11-17,
+        # 2026-11-23).
         feed = create_project_onboarding_feed(get_steps(project), project) if should_show_project_onboarding(
             project) else None
         self.io.write(self._logo(project, feed))

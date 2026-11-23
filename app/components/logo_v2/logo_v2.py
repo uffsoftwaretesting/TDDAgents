@@ -12,8 +12,8 @@ behind a vertical divider, when the terminal is `HORIZONTAL_MIN_COLUMNS` wide (`
 decision 2026-11-23: upstream's compact layout drops the feed). It is rendered once, to a string with its
 ANSI styles, and written above the input line like any other text.
 
-*Divergences:* no mascot and no "Welcome back" greeting; the panel spans the terminal, and `HELP_HINT`
-follows it.
+*Divergences:* no mascot and no "Welcome back" greeting; the panel spans the terminal, and `HELP_HINT` is
+the logo column's last line, after a blank one (user decision 2026-11-23; it followed the box before).
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ PRODUCT_NAME = "TDDAgents"
 BRAND_COLOR = theme.BRAND
 #: The width the panel takes when the caller gives none.
 DEFAULT_WIDTH = 80
-#: The line under the title that points at the commands.
+#: The logo column's last line, which points at the commands.
 HELP_HINT = "/help for commands"
 #: `getLayoutMode`: the feed sits beside the logo from this many columns on.
 HORIZONTAL_MIN_COLUMNS = 70
@@ -90,14 +90,16 @@ def left_column_width(lines: list[str], width: int) -> int | None:
 def render_logo(model: str, folder: str | Path, *, width: int = DEFAULT_WIDTH, color: bool = True,
                 home: str | Path | None = None, feed: FeedConfig | None = None) -> str:
     """
-    The title panel, `width` columns wide, then `HELP_HINT`; with `feed`, the feed beside the logo (or
-    under it on a narrow terminal). With `color` its ANSI styles, else plain text.
+    The title panel, `width` columns wide, `HELP_HINT` the logo's last line; with `feed`, the feed beside the
+    logo (or under it on a narrow terminal). With `color` its ANSI styles, else plain text.
     """
-    lines = [f"{STATUS_GLYPH}  {PRODUCT_NAME}", f"{model} · Red → Green → Refactor", display_folder(folder, home)]
+    lines = [f"{STATUS_GLYPH}  {PRODUCT_NAME}", f"{model} · Red → Green → Refactor", display_folder(folder, home),
+             HELP_HINT]
     logo = Text()
     logo.append(f"{lines[0]}\n", style=f"bold {BRAND_COLOR}")
     logo.append(f"{lines[1]}\n", style=theme.TEXT)
-    logo.append(lines[2], style=theme.TEXT)
+    logo.append(f"{lines[2]}\n\n", style=theme.TEXT)
+    logo.append(lines[3], style=theme.TEXT)
     # A long folder or model wraps rather than being cut with an ellipsis.
     logo.overflow = "fold"
     body: RenderableType = logo
@@ -114,7 +116,7 @@ def render_logo(model: str, folder: str | Path, *, width: int = DEFAULT_WIDTH, c
         body = Group(logo, Rule(style=BRAND_COLOR), feed_renderable(feed))
     panel = Panel(body, box=ROUNDED, title=f" {PRODUCT_NAME} v{VERSION} ", title_align="left",
                   border_style=BRAND_COLOR, padding=(1, 2), width=width)
-    styled = to_ansi(Group(panel, Text(f"  {HELP_HINT}", style=theme.TEXT)), width)
+    styled = to_ansi(panel, width)
     return styled if color else plain_text(styled)
 
 

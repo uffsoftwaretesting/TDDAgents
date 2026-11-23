@@ -2,7 +2,7 @@
 The title box's feed column (`app/components/logo_v2/feed.py`, `logo_v2.py`), upstream's `LogoV2` layout
 (`components/LogoV2/LogoV2.tsx`, `Feed.tsx`, `utils/logoV2Utils.ts`): beside the logo behind a divider from
 `HORIZONTAL_MIN_COLUMNS` on, under it after a rule when narrower, always inside the box; `/help for commands`
-after the box.
+the logo column's last line.
 """
 
 from __future__ import annotations
@@ -52,7 +52,9 @@ def test_a_wide_terminal_puts_the_feed_beside_the_logo_inside_the_box():
     tip_row = next(line for line in lines if "Run /init" in line)
     assert "claude-sonnet-5-5 · Red → Green → Refactor" in tip_row
     assert "~/.tddagents/workspaces/tdd-be4e5851317643db/project" in logo(120)  # whole, not cut
-    assert lines[-2].startswith("╰") and lines[-1] == f"  {HELP_HINT}"
+    hint_row = next(line for line in lines if HELP_HINT in line)
+    assert hint_row.startswith(f"│  {HELP_HINT} ") and hint_row.count("│") == 3  # the logo column's, beside the divider
+    assert lines.index(hint_row) < len(lines) - 1 and lines[-1].startswith("╰")
 
 
 def test_the_logo_column_gives_way_so_the_feed_keeps_its_minimum():
@@ -80,7 +82,8 @@ def test_a_narrow_terminal_stacks_the_feed_under_the_logo_inside_the_box():
 
 def test_without_a_feed_only_the_logo():
     text = logo(100, feed=None)
-    assert "Tips" not in text and "⛨  TDDAgents" in text and text.endswith(f"  {HELP_HINT}")
+    assert "Tips" not in text and "⛨  TDDAgents" in text and f"│  {HELP_HINT} " in text
+    assert text.split("\n")[-1].startswith("╰")  # nothing after the box
 
 
 def test_in_colour_the_feed_title_is_bold_green():

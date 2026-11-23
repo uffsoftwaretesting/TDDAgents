@@ -44,7 +44,10 @@ def test_the_title_panel():
     assert lines[0].startswith(f"╭─  TDDAgents v{VERSION}  ─") and lines[0].endswith("╮")
     assert "│  ⛨  TDDAgents" in text and "claude-sonnet-5-5 · Red → Green → Refactor" in text
     assert "~/.tddagents/workspaces/t/project" in text
-    assert lines[-2].startswith("╰") and lines[-1] == f"  {HELP_HINT}"
+    # The hint is the logo's last line, after a blank one, inside the box (user decision 2026-11-23).
+    folder = next(i for i, line in enumerate(lines) if "~/.tddagents/workspaces/t/project" in line)
+    assert lines[folder + 1].strip("│ ") == "" and lines[folder + 2].startswith(f"│  {HELP_HINT} ")
+    assert lines[-1].startswith("╰") and lines[-2].strip("│ ") == ""
     assert all(len(line) <= DEFAULT_WIDTH for line in lines) and len(lines[0]) == DEFAULT_WIDTH
     assert "\x1b[" not in text  # plain without colour
 
