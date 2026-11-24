@@ -137,12 +137,12 @@ def test_the_sandbox_section_is_upstreams() -> None:
     assert section.split("\n")[:6] == [
         "",
         "## Command sandbox",
-        "By default, your command will be run in a sandbox. This sandbox controls which directories and network "
-        "hosts commands may access or modify without an explicit override.",
+        ("By default, your command will be run in a sandbox. This sandbox controls which directories and network "
+         "hosts commands may access or modify without an explicit override."),
         "",
         "The sandbox has the following restrictions:",
-        'Filesystem: {"read":{"denyOnly":["~"],"allowWithinDeny":["."]},"write":{"allowOnly":["/dev/null",'
-        '"$TMPDIR","."],"denyWithinAllow":["/p/.tddagents/project.json"]}}',
+        ('Filesystem: {"read":{"denyOnly":["~"],"allowWithinDeny":["."]},"write":{"allowOnly":["/dev/null",'
+         '"$TMPDIR","."],"denyWithinAllow":["/p/.tddagents/project.json"]}}'),
     ]
     lines = section.split("\n")
     assert lines[6] == 'Network: {"allowedHosts":["pypi.org"],"deniedHosts":["evil.io"]}'

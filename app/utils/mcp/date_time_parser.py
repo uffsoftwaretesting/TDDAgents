@@ -15,7 +15,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +25,14 @@ QueryHaiku = Callable[[str, str], Awaitable[str]]
 UNABLE_TO_PARSE = "Unable to parse date/time from input"
 PARSE_FAILED = "Unable to parse date/time. Please enter in ISO 8601 format manually."
 
-SYSTEM_PROMPT = "\n\n".join([
+SYSTEM_PROMPT = "\n\n".join([  # noqa: FLY002 - one part per line
     "You are a date/time parser that converts natural language into ISO 8601 format.",
     "You MUST respond with ONLY the ISO 8601 formatted string, with no explanation or additional text.",
     "If the input is ambiguous, prefer future dates over past dates.",
     "For times without dates, use today's date.",
     "For dates without times, do not include a time component.",
-    'If the input is incomplete or you cannot confidently parse it into a valid date, respond with exactly '
-    '"INVALID" (nothing else).',
+    ('If the input is incomplete or you cannot confidently parse it into a valid date, respond with exactly '
+     '"INVALID" (nothing else).'),
     'Examples of INVALID input: partial dates like "2025-01-", lone numbers like "13", gibberish.',
     'Examples of valid natural language: "tomorrow", "next Monday", "jan 1st 2025", "in 2 hours", "yesterday".',
 ])
@@ -60,7 +60,7 @@ def _timezone(now: datetime) -> str:
 
 def _iso_utc(now: datetime) -> str:
     """`Date.prototype.toISOString`."""
-    utc = now.astimezone(timezone.utc)
+    utc = now.astimezone(UTC)
     return utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"
 
 

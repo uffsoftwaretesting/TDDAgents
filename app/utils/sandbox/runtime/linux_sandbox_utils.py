@@ -142,9 +142,8 @@ def find_symlink_in_path(target_path: str, allowed_write_paths: list[str], fs: S
     """
     for next_path in _components(target_path):
         try:
-            if fs.is_symlink(next_path):
-                if any(_within(next_path, allowed) for allowed in allowed_write_paths):
-                    return next_path
+            if fs.is_symlink(next_path) and any(_within(next_path, allowed) for allowed in allowed_write_paths):
+                return next_path
         except OSError:
             break
     return None
@@ -346,8 +345,8 @@ def build_sandbox_command(
     shell_path = shell or "bash"
     socat_commands = [
         f"socat TCP-LISTEN:{INTERNAL_HTTP_PROXY_PORT},fork,reuseaddr UNIX-CONNECT:{http_socket_path} >/dev/null 2>&1 &",
-        f"socat TCP-LISTEN:{INTERNAL_SOCKS_PROXY_PORT},fork,reuseaddr UNIX-CONNECT:{socks_socket_path} "
-        ">/dev/null 2>&1 &",
+        (f"socat TCP-LISTEN:{INTERNAL_SOCKS_PROXY_PORT},fork,reuseaddr UNIX-CONNECT:{socks_socket_path} "
+         ">/dev/null 2>&1 &"),
         'trap "kill %1 %2 2>/dev/null; exit" EXIT',
     ]
     if seccomp_filter_path:

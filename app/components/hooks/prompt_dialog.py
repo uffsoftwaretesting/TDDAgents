@@ -13,8 +13,8 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
-from app.types.hooks import PromptOption, PromptRequest
 from app.components.design_system.dialog import is_option_number
+from app.types.hooks import PromptOption, PromptRequest
 
 HOOK_PROMPTS_ENV = "TDDAGENTS_HOOK_PROMPTS"
 #: The error a cancelled prompt rejects with (`REPL.tsx`).

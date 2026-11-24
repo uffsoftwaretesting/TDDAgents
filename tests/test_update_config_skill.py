@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.constants.product import CLI_COMMAND
+from app.services.plugins.plugin_operations import PLUGIN_CLI
 from app.skills.bundled.index import init_bundled_skills
 from app.skills.bundled.update_config import (
     DESCRIPTION,
@@ -29,7 +30,6 @@ from app.skills.bundled.update_config import (
 )
 from app.skills.bundled_skills import BundledSkillContext, get_bundled_skills
 from app.skills.load_skills_dir import get_skill_registry
-from app.services.plugins.plugin_operations import PLUGIN_CLI
 from app.tools.skill_tool.skill_tool import skill_has_only_safe_properties
 from app.utils.process_user_input.process_slash_command import get_messages_for_prompt_slash_command
 from app.utils.settings import schema_output
@@ -87,10 +87,10 @@ TOOL_RESPONSE: list[Substitution] = [
 ]
 #: Settings this build does not read, sections dropped, the plugin sources it has.
 SETTINGS_ONLY: list[Substitution] = [
-    ('### Environment Variables\n```json\n{\n  "env": {\n    "DEBUG": "true",\n    "MY_API_KEY": "value"\n  }\n}\n'
-     "```\n\n", ""),
-    ('### Model & Agent\n```json\n{\n  "model": "sonnet",  // or "opus", "haiku", full model ID\n'
-     '  "agent": "agent-name",\n', '### Thinking\n```json\n{\n'),
+    (('### Environment Variables\n```json\n{\n  "env": {\n    "DEBUG": "true",\n    "MY_API_KEY": "value"\n  }\n}\n'
+     "```\n\n"), ""),
+    (('### Model & Agent\n```json\n{\n  "model": "sonnet",  // or "opus", "haiku", full model ID\n'
+     '  "agent": "agent-name",\n'), '### Thinking\n```json\n{\n'),
     (re.compile(r"### Attribution \(Commits & PRs\)\n.*?hide that attribution\.\n\n", re.DOTALL), ""),
     ("where source is `claude-code-marketplace`, `claude-plugins-official`, or `builtin`.",
      "where source is a marketplace's name (`{{PLUGIN_CLI}} marketplace list`) or `builtin`."),

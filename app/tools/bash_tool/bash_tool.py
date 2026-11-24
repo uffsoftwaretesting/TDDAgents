@@ -225,13 +225,13 @@ def _json(value: Any) -> str:
 
 #: `getSimpleSandboxSection`'s override items, when unsandboxed commands are allowed.
 SANDBOX_OVERRIDE_ALLOWED: list[str | list[str]] = [
-    "You should always default to running commands within the sandbox. Do NOT attempt to set "
-    "`dangerouslyDisableSandbox: true` unless:",
+    ("You should always default to running commands within the sandbox. Do NOT attempt to set "
+     "`dangerouslyDisableSandbox: true` unless:"),
     [
         "The user *explicitly* asks you to bypass sandbox",
-        "A specific command just failed and you see evidence of sandbox restrictions causing the failure. Note "
-        "that commands can fail for many reasons unrelated to the sandbox (missing files, wrong arguments, network "
-        "issues, etc.).",
+        ("A specific command just failed and you see evidence of sandbox restrictions causing the failure. Note "
+         "that commands can fail for many reasons unrelated to the sandbox (missing files, wrong arguments, network "
+         "issues, etc.)."),
     ],
     "Evidence of sandbox-caused failures includes:",
     [
@@ -243,14 +243,14 @@ SANDBOX_OVERRIDE_ALLOWED: list[str | list[str]] = [
     "When you see evidence of sandbox-caused failure:",
     [
         "Immediately retry with `dangerouslyDisableSandbox: true` (don't ask, just do it)",
-        "Briefly explain what sandbox restriction likely caused the failure. Be sure to mention that the user can "
-        "use the `/sandbox` command to manage restrictions.",
+        ("Briefly explain what sandbox restriction likely caused the failure. Be sure to mention that the user can "
+         "use the `/sandbox` command to manage restrictions."),
         "This will prompt the user for permission",
     ],
-    "Treat each command you execute with `dangerouslyDisableSandbox: true` individually. Even if you have "
-    "recently run a command with this setting, you should default to running future commands within the sandbox.",
-    "Do not suggest adding sensitive paths like ~/.bashrc, ~/.zshrc, ~/.ssh/*, or credential files to the sandbox "
-    "allowlist.",
+    ("Treat each command you execute with `dangerouslyDisableSandbox: true` individually. Even if you have "
+     "recently run a command with this setting, you should default to running future commands within the sandbox."),
+    ("Do not suggest adding sensitive paths like ~/.bashrc, ~/.zshrc, ~/.ssh/*, or credential files to the sandbox "
+     "allowlist."),
 ]
 #: ... and when the policy forbids them.
 SANDBOX_OVERRIDE_FORBIDDEN: list[str | list[str]] = [
@@ -300,8 +300,8 @@ def get_simple_sandbox_section(sandbox: Any) -> str:
     return "\n".join([
         "",
         "## Command sandbox",
-        "By default, your command will be run in a sandbox. This sandbox controls which directories and network "
-        "hosts commands may access or modify without an explicit override.",
+        ("By default, your command will be run in a sandbox. This sandbox controls which directories and network "
+         "hosts commands may access or modify without an explicit override."),
         "",
         "The sandbox has the following restrictions:",
         "\n".join(restrictions),

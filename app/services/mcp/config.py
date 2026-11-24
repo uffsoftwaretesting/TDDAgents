@@ -44,7 +44,6 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
-from app.utils.debug import log_for_debugging
 from app.services.mcp.env_expansion import expand_env_vars_in_string
 from app.services.mcp.normalization import normalize_name_for_mcp
 from app.services.mcp.types import (
@@ -54,6 +53,7 @@ from app.services.mcp.types import (
     server_config_from_raw,
 )
 from app.types.permissions import PermissionRuleSource
+from app.utils.debug import log_for_debugging
 from app.utils.hooks.hooks_config_snapshot import is_restricted_to_plugin_only
 from app.utils.settings.settings import (
     SettingsLocations,
@@ -516,8 +516,8 @@ __all__ = [
     "dedup_plugin_mcp_servers",
     "filter_mcp_servers_by_policy",
     "get_claude_code_mcp_configs",
-    "get_mcp_config_by_name",
     "get_global_config_path",
+    "get_mcp_config_by_name",
     "get_mcp_configs_by_scope",
     "get_mcp_server_signature",
     "get_project_config_key",

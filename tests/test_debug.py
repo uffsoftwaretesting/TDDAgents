@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import io
-from typing import Any
 import json
 import logging
 import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -414,7 +414,7 @@ def test_the_terminal_filter_keeps_app_warnings_off_and_lets_the_rest_through():
 
     root = logging.getLogger("tdd-filter-test-root")
     root.propagate = False
-    handler, stream = _terminal(root)
+    handler, _stream = _terminal(root)
     try:
         assert [type(f) for f in handler.filters] == [TerminalLogFilter]
         mine = logging.makeLogRecord

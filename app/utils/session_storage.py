@@ -705,7 +705,6 @@ def fork_session_transcript(source: Path, target: Path, session_id: str) -> None
 
 
 __all__ = [
-    "fork_session_transcript",
     "FILE_HISTORY_SNAPSHOT_TYPE",
     "SAVE_HOOK_ADDITIONAL_CONTEXT_ENV",
     "SKIP_PROMPT_HISTORY_ENV",
@@ -716,11 +715,12 @@ __all__ = [
     "LoadedTranscript",
     "TranscriptStore",
     "build_conversation_chain",
-    "build_file_history_snapshot_chain",
     "build_entry",
+    "build_file_history_snapshot_chain",
     "ensure_message_uuid",
     "entry_to_message",
     "entry_type_of",
+    "fork_session_transcript",
     "get_agent_transcript",
     "is_loggable_message",
     "iso_timestamp",

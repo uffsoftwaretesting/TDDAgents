@@ -23,7 +23,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TextIO
 
-
 #: `main.tsx`'s description of the command, with the product substitution.
 DOCTOR_DESCRIPTION = (
     "Check the health of your TDDAgents auto-updater. Note: The workspace trust dialog is skipped and stdio "

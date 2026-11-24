@@ -222,14 +222,14 @@ LISTED = frozenset({"src/math.test.ts", "src/other.test.ts", "vendor/v.test.ts",
     ('<testsuite name="x"><testcase classname="src/math.test.ts" name="adds"/></testsuite>',
      {"src/math.test.ts"}),
     # The enclosing suite's name is the path (nested: an outer suite names it).
-    ('<testsuites><testsuite name="src/other.test.ts"><testsuite name="adds"><testcase classname="Calc" name="a"/>'
-     '</testsuite></testsuite></testsuites>', {"src/other.test.ts"}),
+    (('<testsuites><testsuite name="src/other.test.ts"><testsuite name="adds"><testcase classname="Calc" name="a"/>'
+     '</testsuite></testsuite></testsuites>'), {"src/other.test.ts"}),
     # Mixed: one case by attribute, one by an absolute classname inside the project.
-    ('<testsuite><testcase name="a" file="src/math.test.ts"/><testcase classname="/proj/src/other.test.ts" '
-     'name="b"/></testsuite>', {"src/math.test.ts", "src/other.test.ts"}),
+    (('<testsuite><testcase name="a" file="src/math.test.ts"/><testcase classname="/proj/src/other.test.ts" '
+     'name="b"/></testsuite>'), {"src/math.test.ts", "src/other.test.ts"}),
     # One unresolved case: the report names no files.
-    ('<testsuite name="calc"><testcase name="a" file="src/math.test.ts"/><testcase classname="com.x.CalcTest" '
-     'name="b"/></testsuite>', None),
+    (('<testsuite name="calc"><testcase name="a" file="src/math.test.ts"/><testcase classname="com.x.CalcTest" '
+     'name="b"/></testsuite>'), None),
     # A classname that is a file only under an excluded path names nothing.
     ('<testsuite><testcase classname="vendor/v.test.ts" name="a"/></testsuite>', None),
     # surefire, go-junit-report, nextest name no file of the project.

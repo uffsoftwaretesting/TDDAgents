@@ -84,11 +84,11 @@ async def select(
 
 
 __all__ = [
-    "is_option_number",
     "CANCELLED",
     "Cancelled",
     "DialogIO",
     "choice_hint",
+    "is_option_number",
     "parse_choice",
     "render_options",
     "select",

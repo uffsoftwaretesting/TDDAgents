@@ -153,7 +153,7 @@ def is_tddagents_settings_path(file_path: str, cwd: str, locations: SettingsLoca
     project's), or one of this run's settings files; compared normalized and case-insensitively.
     """
     normalized = normalize_case_for_comparison(expand_path(file_path, cwd))
-    if normalized.endswith("/.tddagents/settings.json") or normalized.endswith("/.tddagents/settings.local.json"):
+    if normalized.endswith(("/.tddagents/settings.json", "/.tddagents/settings.local.json")):
         return True
     return any(normalize_case_for_comparison(path) == normalized for path in get_settings_paths(locations))
 

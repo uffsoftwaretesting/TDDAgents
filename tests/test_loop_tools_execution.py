@@ -13,7 +13,6 @@ from app.services.tools.tool_execution import (
     run_tool_use,
     yield_missing_tool_results,
 )
-from app.utils.messages import SYNTHETIC_TOOL_RESULT_PLACEHOLDER
 from app.state.app_state_store import AppStateStore
 from app.tool import (
     PermissionResult,
@@ -22,7 +21,7 @@ from app.tool import (
     build_tool,
     tool_context_for,
 )
-from app.utils.messages import ToolCall
+from app.utils.messages import SYNTHETIC_TOOL_RESULT_PLACEHOLDER, ToolCall
 
 
 class TestRunToolUse:

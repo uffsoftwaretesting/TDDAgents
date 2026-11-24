@@ -87,7 +87,7 @@ def mcp_json(loc: SettingsLocations, *names: str) -> None:
 def test_the_dialog_text_and_its_options(loc: SettingsLocations) -> None:
     io = FakeDialog("2")
     asyncio.run(mcp_server_approval_dialog(io, "db", loc))
-    assert io.asked == ["\n".join([
+    assert io.asked == ["\n".join([  # noqa: FLY002 - one part per line
         "New MCP server found in .mcp.json: db", "",
         "MCP servers may execute code or access system resources. All tool calls require approval.", "",
         "  1. Use this and all future MCP servers in this project",
@@ -145,7 +145,7 @@ def test_a_failed_write_is_logged(loc: SettingsLocations, caplog: pytest.LogCapt
 def test_the_multiselect_text(loc: SettingsLocations) -> None:
     io = FakeDialog("")
     asyncio.run(mcp_server_multiselect_dialog(io, ["a", "b"], loc))
-    assert io.asked == ["\n".join([
+    assert io.asked == ["\n".join([  # noqa: FLY002 - one part per line
         "2 new MCP servers found in .mcp.json", "Select any you wish to enable.", "",
         MCP_SERVER_DIALOG_COPY, "", "  1. a", "  2. b",
         "Choose any of 1-2 to enable, e.g. 1,3 · Enter to enable all · Esc to reject all"])]

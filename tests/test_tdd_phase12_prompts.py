@@ -13,8 +13,8 @@ import pytest
 from app.context import _file_section
 from app.session.prompts import development_approved_prompt
 from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
-from app.tdd.prompt_vars import TDD_PROMPT_VARS
 from app.tdd.plan import TddPlan
+from app.tdd.prompt_vars import TDD_PROMPT_VARS
 
 REPO = Path(__file__).resolve().parents[1]
 #: The old RED rule, in the forms it was written.

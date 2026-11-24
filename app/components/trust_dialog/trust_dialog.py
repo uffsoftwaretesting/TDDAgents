@@ -114,12 +114,12 @@ async def show_trust_dialog(
 
 __all__ = [
     "ABILITIES",
-    "is_tddagents_workspace",
     "OPTIONS",
     "SAFETY_CHECK",
     "TITLE",
     "TrustDialogExit",
     "accept_trust",
+    "is_tddagents_workspace",
     "render_trust_dialog",
     "show_trust_dialog",
 ]

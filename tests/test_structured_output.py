@@ -96,7 +96,7 @@ def test_signals_never_reach_the_request() -> None:
 
     signal = create_signal_attachment_message(Attachment("structured_output", {"data": {}}))
     state = initial_loop_state((HumanMessage(content="task"), signal), tool_context_for(AppStateStore()))
-    import app.services.api.claude as claude
+    from app.services.api import claude
 
     original = claude.request_system_texts
     claude.request_system_texts = lambda s, c: ["system"]  # type: ignore[assignment]

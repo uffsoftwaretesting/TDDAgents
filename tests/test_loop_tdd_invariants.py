@@ -29,6 +29,7 @@ from app.query.transitions import Terminal, Terminated
 from app.services.tools.tool_orchestration import run_tools
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.coverage_gate import CoverageReading, CoverageStatus
+from app.tdd.junit_report import JUnitReport
 from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.phase_permissions import (
     IMPLEMENTATION_WRITER_TOOL_NAMES,
@@ -47,7 +48,6 @@ from app.types.permissions import (
     ToolPermissionContext,
 )
 from app.utils.permissions.permissions import has_permissions_to_use_tool
-from app.tdd.junit_report import JUnitReport
 from tests.conftest import FakeWorkspace
 from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
 

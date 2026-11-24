@@ -19,6 +19,7 @@ from app.components.design_system.question_box import PLAN_TITLE, style_question
 from app.components.design_system.rich_render import plain_text, to_ansi
 from app.components.logo_v2.logo_v2 import BRAND_COLOR, render_logo
 from app.components.messages.system_text_message import notice
+from app.components.permissions.permission_options import NO, YES
 from app.components.session_summary import (
     PLAN_DONE_HINT,
     SessionReport,
@@ -26,7 +27,6 @@ from app.components.session_summary import (
     session_report_box,
 )
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt, plan_approval_message
-from app.components.permissions.permission_options import NO, YES
 from app.query.transitions import Terminal
 from app.screens.repl import Repl, question_reminder, render_permission_prompt, render_question
 from tests.test_repl import FakeIO

@@ -107,7 +107,7 @@ def test_the_final_run_sandboxes_setup_and_test_in_the_clean_copy(
 
 def test_the_copy_carries_the_projects_settings(script_project: LocalWorkspace, fake_tools: Path,
                                                 monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.tdd.final_run as final_run
+    from app.tdd import final_run
 
     project_settings(script_project, {"enabled": True})
     project_settings(script_project, {"excludedCommands": []}, "settings.local.json")

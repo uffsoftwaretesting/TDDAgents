@@ -17,9 +17,9 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.utils.messages import (
+    ORPHANED_TOOL_RESULT_REMOVED,
     SYNTHETIC_TOOL_RESULT_PLACEHOLDER,
     TOOL_USE_INTERRUPTED,
-    ORPHANED_TOOL_RESULT_REMOVED,
     ensure_tool_result_pairing,
     hoist_tool_results,
     normalize_messages_for_api,
@@ -242,7 +242,7 @@ def test_the_context_analysis_counts_without_the_pairing_repair() -> None:
 def test_the_request_is_normalized_then_repaired(monkeypatch: Any) -> None:
     from types import SimpleNamespace
 
-    import app.services.api.claude as claude
+    from app.services.api import claude
 
     monkeypatch.setattr(claude, "request_system_texts", lambda state, config: ["system"])
     monkeypatch.setattr(claude, "request_user_context", lambda state, config: {})

@@ -351,7 +351,7 @@ async def _load_cache_metadata(cache_dir: str, source: str) -> McpbCacheMetadata
     """`loadCacheMetadata`: `None` when absent; any other failure is logged and is `None` too."""
     metadata_path = _get_metadata_path(cache_dir, source)
     try:
-        with open(metadata_path, encoding="utf-8") as handle:
+        with open(metadata_path, encoding="utf-8") as handle:  # noqa: ASYNC230 - sync file call
             data: McpbCacheMetadata = json.loads(handle.read())
         return data
     except FileNotFoundError:
@@ -364,7 +364,8 @@ async def _load_cache_metadata(cache_dir: str, source: str) -> McpbCacheMetadata
 async def _save_cache_metadata(cache_dir: str, source: str, metadata: McpbCacheMetadata) -> None:
     """`saveCacheMetadata`."""
     os.makedirs(cache_dir, exist_ok=True)
-    with open(_get_metadata_path(cache_dir, source), "w", encoding="utf-8") as handle:
+    path = _get_metadata_path(cache_dir, source)
+    with open(path, "w", encoding="utf-8") as handle:  # noqa: ASYNC230 - sync file call
         handle.write(json.dumps(metadata, indent=2))
 
 
@@ -410,7 +411,7 @@ async def _download_mcpb(url: str, dest_path: str, on_progress: ProgressCallback
 
     try:
         data = await http_get_bytes(url, MCPB_DOWNLOAD_TIMEOUT_MS, report)
-        with open(dest_path, "wb") as handle:
+        with open(dest_path, "wb") as handle:  # noqa: ASYNC230 - sync file call
             handle.write(data)
         logger.debug("Downloaded %d bytes to %s", len(data), dest_path)
         if on_progress is not None:
@@ -446,10 +447,10 @@ async def _extract_mcpb_contents(
             os.makedirs(directory, exist_ok=True)
         if file_path.endswith(_TEXT_EXTENSIONS):
             content = file_data.decode("utf-8", errors="replace").removeprefix("﻿")
-            with open(full_path, "w", encoding="utf-8") as text_handle:
+            with open(full_path, "w", encoding="utf-8") as text_handle:  # noqa: ASYNC230 - sync file call
                 text_handle.write(content)
         else:
-            with open(full_path, "wb") as binary_handle:
+            with open(full_path, "wb") as binary_handle:  # noqa: ASYNC230 - sync file call
                 binary_handle.write(file_data)
         mode = modes.get(file_path)
         if mode and mode & 0o111:
@@ -551,7 +552,7 @@ async def load_mcpb_file(
         logger.debug("Using cached MCPB from %s (hash: %s)", metadata["extractedPath"], metadata["contentHash"])
         manifest_path = os.path.join(metadata["extractedPath"], "manifest.json")
         try:
-            with open(manifest_path, encoding="utf-8") as handle:
+            with open(manifest_path, encoding="utf-8") as handle:  # noqa: ASYNC230 - sync file call
                 manifest_content = handle.read()
         except FileNotFoundError as exc:
             message = f"Cached manifest not found: {manifest_path}"
@@ -588,7 +589,7 @@ async def load_mcpb_file(
         if on_progress is not None:
             on_progress(f"Loading {source}...")
         try:
-            with open(local_path, "rb") as bundle:
+            with open(local_path, "rb") as bundle:  # noqa: ASYNC230 - sync file call
                 mcpb_data = bundle.read()
         except FileNotFoundError as exc:
             message = f"MCPB file not found: {local_path}"

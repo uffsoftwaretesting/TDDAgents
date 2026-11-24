@@ -100,11 +100,12 @@ def test_attachments_boundary_summary_result_and_the_rest() -> None:
 
 
 def result_message(**overrides: Any) -> ResultMessage:
-    fields: dict[str, Any] = dict(
-        subtype="success", is_error=False, duration_ms=5, duration_api_ms=3, num_turns=2, stop_reason="end_turn",
-        session_id=SID, total_cost_usd=0.5, usage={"input_tokens": 1}, model_usage={}, terminal_reason="completed",
-        uuid="r1", result="ok", permission_denials=({"tool_name": "Agent", "tool_use_id": "t", "tool_input": {}},),
-    )
+    fields: dict[str, Any] = {
+        "subtype": "success", "is_error": False, "duration_ms": 5, "duration_api_ms": 3, "num_turns": 2,
+        "stop_reason": "end_turn", "session_id": SID, "total_cost_usd": 0.5, "usage": {"input_tokens": 1},
+        "model_usage": {}, "terminal_reason": "completed", "uuid": "r1", "result": "ok",
+        "permission_denials": ({"tool_name": "Agent", "tool_use_id": "t", "tool_input": {}},),
+    }
     fields.update(overrides)
     return ResultMessage(**fields)
 
@@ -482,8 +483,8 @@ def test_permission_mode_changes_are_streamed(python_workspace: Any, tmp_path: P
 
 
 def test_the_host_answers_a_question(python_workspace: Any, tmp_path: Path) -> None:
-    from app.tdd.plan import TddPlan, plan_path, save_plan
     from app.cli.print import session_run_id
+    from app.tdd.plan import TddPlan, plan_path, save_plan
 
     save_plan(plan_path(session_run_id("sj-ask"), str(python_workspace.root)), TddPlan.from_texts(["x"]))
     question = {"question": "Size?", "header": "Size", "multiSelect": False,

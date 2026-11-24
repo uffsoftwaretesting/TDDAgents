@@ -94,13 +94,13 @@ def init_command(cwd: str | Path) -> InitCommand:
 
 __all__ = [
     "INIT_PROGRESS_MESSAGE",
-    "InitCommand",
     "NEW_INIT_DESCRIPTION",
     "NEW_INIT_ENV",
     "NEW_INIT_PROMPT",
     "OLD_INIT_DESCRIPTION",
     "OLD_INIT_PROMPT",
     "PROMPTS_DIR",
+    "InitCommand",
     "get_init_description",
     "init_command",
     "is_new_init_enabled",

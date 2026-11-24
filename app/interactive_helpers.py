@@ -118,8 +118,8 @@ __all__ = [
     "PROMPT",
     "SetupDialogExit",
     "SetupDialogIO",
+    "launch_invalid_settings_dialog",
     "read_setup_line",
     "setup_settings_locations",
-    "launch_invalid_settings_dialog",
     "show_mcpjson_server_approvals",
 ]

@@ -500,7 +500,7 @@ def _blocked_path(result: PermissionResult) -> str | None:
 def _hook_output(raw: Any) -> dict[str, Any]:
     """`hookJSONOutputSchema().parse`: an object."""
     if not isinstance(raw, Mapping):
-        raise ValueError("hook callback output: Expected object")
+        raise ValueError("hook callback output: Expected object")  # noqa: TRY004 - a schema parse error
     return dict(raw)
 
 

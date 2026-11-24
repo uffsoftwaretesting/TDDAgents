@@ -377,8 +377,8 @@ def test_rewind_files_flag_end_to_end(tmp_path: Path, monkeypatch: Any) -> None:
                                             write_err=err.append, **rewind_options))
 
     assert rewind("not-a-message") == 1
-    assert err == ["Error: --rewind-files requires a user message UUID, but not-a-message is not a user message "
-                   "in this session\n"]
+    assert err == [("Error: --rewind-files requires a user message UUID, but not-a-message is not a user message "
+                   "in this session\n")]
     assert rewind(ids["first"]) == 0
     assert out == [f"Files rewound to state at message {ids['first']}\n"]
     assert not target.exists()

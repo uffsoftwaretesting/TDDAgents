@@ -421,7 +421,7 @@ def replace_variables(value: Any, variables: Mapping[str, str | list[str]]) -> A
                     )
                 else:
                     template = replacement
-                    result = pattern.sub(lambda m: _js_replacement(template, m), result)
+                    result = pattern.sub(lambda m: _js_replacement(template, m), result)  # noqa: B023 - used at once
         return result
     if isinstance(value, list):
         items: list[Any] = []

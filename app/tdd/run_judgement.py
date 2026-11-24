@@ -194,13 +194,13 @@ def judge(exit_code: int, report: JUnitReport | None, collection: Collection | N
 
 __all__ = [
     "FLOOR_ACCEPTED",
-    "NO_REPORT",
-    "UNREADABLE_REPORT",
-    "NO_TESTS",
     "NOT_RUN",
-    "UNDECLARED",
+    "NO_REPORT",
+    "NO_TESTS",
     "SHELL_EXIT_SEMANTICS",
     "SIGNAL_EXIT_BASE",
+    "UNDECLARED",
+    "UNREADABLE_REPORT",
     "ExitSemantic",
     "Judgement",
     "Outcome",

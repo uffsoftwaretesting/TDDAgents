@@ -18,7 +18,6 @@ from typing import Any
 from app.utils.settings.validation import ValidationError
 from app.utils.treeify import treeify
 
-
 #: What `parseInt(part, 10)` reads a number from (it is not `NaN`): optional blanks and sign, then a digit.
 _PARSES_AS_INT = re.compile(r"\s*[+-]?\d")
 

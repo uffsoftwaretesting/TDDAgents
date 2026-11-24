@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -199,10 +200,8 @@ def test_input_typed_during_a_blocked_tdd_turn_ends_it_and_is_the_next_turn():
         async for event in ask_turn(run, "start"):  # type: ignore[arg-type]
             events.append(event)
         # Model out of script after the next turn's block: a loud failure ends that turn.
-        try:
+        with contextlib.suppress(Exception):  # the scripted model ran out, as expected
             await wait_for_background_work(run)  # type: ignore[arg-type]
-        except Exception:  # noqa: BLE001 - the scripted model ran out, as expected
-            pass
         return events
 
     first_turn = asyncio.run(scenario())

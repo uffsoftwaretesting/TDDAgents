@@ -1241,9 +1241,6 @@ def marketplace_source_json_schema() -> dict[str, Any]:
 
 
 __all__ = [
-    "marketplace_source_json_schema",
-    "plugin_author_json_schema",
-    "plugin_source_json_schema",
     "ALLOWED_OFFICIAL_MARKETPLACE_NAMES",
     "BLOCKED_OFFICIAL_NAME_PATTERN",
     "DEP_REF_REGEX",
@@ -1292,8 +1289,11 @@ __all__ = [
     "is_marketplace_auto_update",
     "is_url",
     "issues_from_validation_error",
+    "marketplace_source_json_schema",
     "normalize_dependency_ref",
     "parse",
+    "plugin_author_json_schema",
+    "plugin_source_json_schema",
     "safe_parse",
     "typed_dict_keys",
     "unrecognized_key_issues",

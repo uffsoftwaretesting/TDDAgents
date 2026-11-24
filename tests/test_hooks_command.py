@@ -29,6 +29,7 @@ from app.components.hooks.view_hook_mode import (
     round_box,
 )
 from app.schemas.hooks import AgentHook, CallbackHook, CommandHook, FunctionHook, HookMatcher, HttpHook, PromptHook
+from app.utils.hooks.hook_events import HOOK_EVENTS
 from app.utils.hooks.hooks import HookDispatcher
 from app.utils.hooks.hooks_config_manager import (
     get_hook_event_metadata,
@@ -47,7 +48,6 @@ from app.utils.hooks.hooks_settings import (
     hook_source_inline_display_string,
     sort_matchers_by_priority,
 )
-from app.utils.hooks.hook_events import HOOK_EVENTS
 from app.utils.settings.settings import SettingsLocations
 from tests.dialog_fakes import ESC, FakeDialog
 

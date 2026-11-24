@@ -53,14 +53,15 @@ import logging
 import re
 import shutil
 import time
-from pathlib import Path
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
+from pathlib import Path
 from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
+from app.bootstrap.state import flush_interaction_time, get_last_interaction_time, update_last_interaction_time
 from app.cli.print import (
     DevelopmentRun,
     project_root_of,
@@ -80,6 +81,8 @@ from app.commands.commands import (
     parse_slash_command,
     reload_plugins_message,
 )
+from app.components.design_system.dialog import is_option_number
+from app.components.design_system.question_box import style_question
 from app.components.hooks.prompt_dialog import (
     PROMPT_CANCELLED,
     PromptCancelled,
@@ -87,20 +90,27 @@ from app.components.hooks.prompt_dialog import (
     parse_prompt_choice,
     render_prompt_dialog,
 )
+from app.components.logo_v2.feed import FeedConfig
+from app.components.messages.assistant_text_message import style_final_message
 from app.components.messages.collapsed_read_search_content import (
     CollapsedReadSearchRenderer,
 )
+from app.components.messages.system_text_message import NoticeLevel, notice
 from app.components.permissions.ask_user_question_permission_request.preview_box import (
     has_any_preview,
     preview_box,
 )
-from app.components.logo_v2.feed import FeedConfig
-from app.components.messages.assistant_text_message import style_final_message
-from app.components.design_system.question_box import style_question
-from app.components.messages.system_text_message import NoticeLevel, notice
-from app.bootstrap.state import flush_interaction_time, get_last_interaction_time, update_last_interaction_time
 from app.components.permissions.permission_options import PermissionOption
 from app.components.permissions.permission_request import get_notification_message
+from app.components.permissions.sandbox_permission_request import (
+    DENIED as SANDBOX_DENIED,
+)
+from app.components.permissions.sandbox_permission_request import (
+    SandboxPermissionResponse,
+    parse_sandbox_permission_answer,
+    render_sandbox_permission_request,
+    sandbox_permission_options,
+)
 from app.components.spinner.spinner import pick_spinner_verb, spinner_message, spinner_status_line
 from app.constants.spinner_verbs import get_spinner_verbs
 from app.hooks.use_can_use_tool import PermissionAnswer, PermissionPrompt
@@ -112,21 +122,12 @@ from app.project_onboarding_state import (
     maybe_mark_project_onboarding_complete,
     should_show_project_onboarding,
 )
-from app.components.permissions.sandbox_permission_request import (
-    DENIED as SANDBOX_DENIED,
-)
-from app.components.permissions.sandbox_permission_request import (
-    SandboxPermissionResponse,
-    parse_sandbox_permission_answer,
-    render_sandbox_permission_request,
-    sandbox_permission_options,
-)
 from app.query.transitions import Terminal
 from app.query_engine import ResultMessage
 from app.session.prompts import development_continue_prompt
 from app.tdd.plan import TddPlan, render_plan, update_tdd_plan
-from app.tools.agent_tool.load_agents_dir import get_agent_definitions_with_overrides
 from app.tool import find_tool_by_name
+from app.tools.agent_tool.load_agents_dir import get_agent_definitions_with_overrides
 from app.tools.agent_tool.ui import extract_last_tool_info
 from app.tools.todo_write_tool.todo_write_tool import read_todos
 from app.types.hooks import PromptRequest, PromptResponse
@@ -139,7 +140,6 @@ from app.utils.permissions.permission_update import PermissionUpdate
 from app.utils.permissions.permissions import persist_permissions
 from app.utils.process_user_input.process_slash_command import parse_slash_input
 from app.utils.sandbox.sandbox_adapter import should_allow_managed_sandbox_domains_only
-from app.components.design_system.dialog import is_option_number
 
 logger = logging.getLogger("TDDOrchestrator.REPL")
 

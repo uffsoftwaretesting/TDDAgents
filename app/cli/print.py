@@ -64,7 +64,6 @@ from typing import Any, NoReturn
 
 from langchain_core.messages import HumanMessage
 
-from app.utils.debug import TERMINAL
 from app.bootstrap.state import SessionBootstrap
 from app.coordinator.coordinator_mode import (
     apply_coordinator_tool_filter,
@@ -89,6 +88,7 @@ from app.tools.tools import assemble_tool_pool
 from app.types.permissions import PermissionMode, ToolPermissionContext
 from app.utils.claudemd import is_env_truthy
 from app.utils.conversation_recovery import ConversationForResume
+from app.utils.debug import TERMINAL
 from app.utils.file_history import (
     copy_file_history_for_resume,
     handle_rewind_files,
@@ -2484,9 +2484,9 @@ class HeadlessStreaming:
             path = expand_path(str(request.get("path")), self.run_.ctx)
             disk_mtime = int(os.stat(path).st_mtime * 1000)
             if disk_mtime <= int(request.get("mtime") or 0):
-                with open(path, encoding="utf-8") as handle:
+                with open(path, encoding="utf-8") as handle:  # noqa: ASYNC230 - sync file call
                     raw = handle.read()
-                content = (raw[1:] if raw.startswith("﻿") else raw).replace("\r\n", "\n")
+                content = (raw.removeprefix("﻿")).replace("\r\n", "\n")
                 self.pending_seeds[path] = FileState(content=content)
         except (OSError, ValueError, UnicodeDecodeError):
             pass
@@ -2744,51 +2744,51 @@ async def run_rewind_files(
 
 
 __all__ = [
+    "PERMISSION_PROMPT_ABORTED",
     "DevelopmentOutcome",
     "DevelopmentRun",
+    "HeadlessOptions",
+    "HeadlessStreaming",
+    "NoConversationFound",
+    "NoMessagesReturned",
+    "PermissionPromptToolError",
     "ask_turn",
     "begin_session",
     "build_builtin_tools",
-    "coordinator_context",
-    "first_prompts",
-    "interrupt_on_now_priority",
-    "load_initial_messages",
-    "main_thread_tools",
-    "next_main_thread_command",
-    "open_session_run",
-    "outcome_of",
-    "project_root_of",
-    "restore_session",
-    "run_agent_memory_store",
-    "HeadlessOptions",
-    "HeadlessStreaming",
-    "NoMessagesReturned",
     "build_mcp_server_statuses",
     "can_batch_with",
+    "coordinator_context",
+    "create_can_use_tool_with_permission_prompt",
     "final_output",
+    "first_prompts",
+    "fork_thread",
+    "get_permission_prompt_tool_can_use_tool",
+    "interrupt_on_now_priority",
     "is_last_message_candidate",
     "join_prompt_commands",
-    "parse_task_notification",
-    "prompt_from_content",
-    "NoConversationFound",
-    "PERMISSION_PROMPT_ABORTED",
-    "PermissionPromptToolError",
-    "create_can_use_tool_with_permission_prompt",
-    "get_permission_prompt_tool_can_use_tool",
-    "fork_thread",
+    "load_initial_messages",
+    "main_thread_tools",
     "most_recent_thread",
-    "run_headless",
-    "thread_transcript",
-    "use_json_schema",
+    "next_main_thread_command",
+    "open_fresh_session",
+    "open_session_run",
+    "outcome_of",
+    "parse_task_notification",
+    "project_root_of",
+    "prompt_from_content",
     "restore_resumed_state",
+    "restore_session",
+    "run_agent_memory_store",
+    "run_headless",
     "run_permission_context",
     "run_rewind_files",
     "run_settings_locations",
     "seed_read_file_state",
     "session_run_id",
     "session_workspace",
-    "open_fresh_session",
     "start_session",
     "submit_prompt",
+    "thread_transcript",
+    "use_json_schema",
     "wait_for_background_work",
 ]

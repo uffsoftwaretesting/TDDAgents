@@ -28,6 +28,7 @@ from app.query.transitions import Continue, Terminal
 from app.services.tools.tool_orchestration import run_tools
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.project_config import load_project_config
 from app.tdd.run_tests_tool.run_tests_tool import (
     build_run_tests_tool,
 )
@@ -39,7 +40,6 @@ from app.utils.abort_controller import (
 )
 from app.utils.messages import Message, ToolCall
 from app.workspace.local import LocalWorkspace
-from app.tdd.project_config import load_project_config
 
 # ============================================================================
 # Test Fixture Helpers & Tool Factories

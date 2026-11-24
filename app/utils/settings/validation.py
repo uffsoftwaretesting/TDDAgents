@@ -214,9 +214,9 @@ def filter_invalid_permission_rules(data: Any, file_path: str) -> list[Validatio
 
 
 __all__ = [
+    "UNDEFINED",
     "SchemaIssue",
     "SettingsFileContentValidation",
-    "UNDEFINED",
     "ValidationError",
     "extract_received_from_message",
     "filter_invalid_permission_rules",

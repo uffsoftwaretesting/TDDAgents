@@ -59,14 +59,14 @@ NEW_INIT_ONLY = [
     # No bundled `/verify` skill.
     ("existing bundled skill (e.g., `/verify`), write", "existing bundled skill, write"),
     # The official marketplace's plugins are `.claude-plugin/` packages, which this build does not load.
-    ("- If frontend code was detected (React, Vue, Svelte, etc.): `/plugin install "
+    (("- If frontend code was detected (React, Vue, Svelte, etc.): `/plugin install "
      "frontend-design@claude-plugins-official` gives Claude design principles and component patterns so it "
-     "produces polished UI; `/plugin install playwright@claude-plugins-official` lets Claude launch a real browser, "
-     "screenshot what it built, and fix visual bugs itself.\n", ""),
-    ("- To help you create skills and optimize existing skills using evals, Claude Code has an official "
+      "produces polished UI; `/plugin install playwright@claude-plugins-official` lets Claude launch a real browser, "
+      "screenshot what it built, and fix visual bugs itself.\n"), ""),
+    (("- To help you create skills and optimize existing skills using evals, Claude Code has an official "
      "skill-creator plugin you can install. Install it with `/plugin install skill-creator@claude-plugins-official`, "
-     "then run `/skill-creator <skill-name>` to create new skills or refine any existing skill. "
-     "(Always include this one.)\n", ""),
+      "then run `/skill-creator <skill-name>` to create new skills or refine any existing skill. "
+      "(Always include this one.)\n"), ""),
     # No `/plugin` dialog: the `plugin` CLI lists what the marketplaces offer.
     ("- Browse official plugins with `/plugin` — ", "- Browse plugins with `{{PLUGIN_CLI}} list --available` — "),
 ]

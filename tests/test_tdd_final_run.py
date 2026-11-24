@@ -25,6 +25,7 @@ from app.tdd.final_run import (
     run_final,
 )
 from app.tdd.ledger import PhaseLedger, TddPhase
+from app.tdd.project_config import save_project_config
 from app.tdd.run_tests_tool.run_tests_tool import build_run_tests_tool
 from app.tool import tool_context_for
 from app.utils.ripgrep import ripgrep_command
@@ -32,7 +33,6 @@ from app.workspace.local import LocalWorkspace
 from tests.conftest import FakeWorkspace
 from tests.plan_helpers import CURRENT_ITEM_PLAN
 from tests.script_project import SCRIPT_PROJECT_CONFIG, make_script_project
-from app.tdd.project_config import save_project_config
 
 SKIP_TEST = "exit 77\n"
 COMMAND = "Test: sh run-tests.sh"

@@ -19,17 +19,17 @@ from app.bootstrap.state import set_flag_settings_inline
 from app.components.invalid_settings_dialog import invalid_settings_dialog
 from app.components.trust_dialog.trust_dialog import TrustDialogExit
 from app.components.validation_errors_list import build_nested_tree, render_validation_errors
-from app.interactive_helpers import launch_invalid_settings_dialog
-from app.types.permissions import PermissionRuleSource
-from app.utils.hooks.hooks_config_snapshot import capture_hooks_config_snapshot
-from app.utils.settings.all_errors import get_settings_with_all_errors
 from app.hooks.notifs.use_settings_errors import (
     SETTINGS_ERRORS_TIMEOUT_MS,
     settings_errors_notification_text,
     use_settings_errors,
 )
+from app.interactive_helpers import launch_invalid_settings_dialog
+from app.types.permissions import PermissionRuleSource
+from app.utils.hooks.hooks_config_snapshot import capture_hooks_config_snapshot
 from app.utils.permissions.filesystem import get_settings_paths, is_tddagents_settings_path
 from app.utils.permissions.permission_update import update_settings_for_source
+from app.utils.settings.all_errors import get_settings_with_all_errors
 from app.utils.settings.permission_validation import permission_rule_issue_message, validate_permission_rule
 from app.utils.settings.schema_output import generate_settings_json_schema
 from app.utils.settings.schema_validator import safe_parse_settings, strip_unknown_keys
@@ -125,9 +125,10 @@ def test_empty_and_missing_files(tmp_path: Path) -> None:
     ([1], [("", "Expected object, but received array")]),
     ({"permissions": {"allow": "Bash"}}, [("permissions.allow", "Expected array, but received string")]),
     ({"disableAllHooks": "yes"}, [("disableAllHooks", "Expected boolean, but received string")]),
-    ({"permissions": {"defaultMode": "nope"}}, [("permissions.defaultMode", 'Invalid value. Expected one of: '
-                                                 '"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", '
-                                                 '"auto"')]),
+    ({"permissions": {"defaultMode": "nope"}},
+     [("permissions.defaultMode", ('Invalid value. Expected one of: '
+                                   '"default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", '
+                                   '"auto"'))]),
     ({"permissions": {"disableBypassPermissionsMode": "x"}},
      [("permissions.disableBypassPermissionsMode", 'Invalid value. Expected one of: "disable"')]),
     ({"hooks": {"Nope": []}}, [("hooks.Nope", "Invalid key in record")]),
@@ -165,11 +166,11 @@ def test_invalid_permission_rules_are_dropped_with_a_warning_and_the_file_kept()
         {"permissions": {"allow": ["Bash()", 3, "Bash(ls)"], "deny": ["read"], "ask": "x"}}, "f.json")
     assert parsed is None  # `ask` is not an array: the schema still fails, after the warnings
     assert [(e.path, e.message) for e in errors][:3] == [
-        ("permissions.allow", 'Invalid permission rule "Bash()" was skipped: Empty parentheses. Either specify a '
-                              'pattern or use just "Bash" without parentheses'),
+        ("permissions.allow", ('Invalid permission rule "Bash()" was skipped: Empty parentheses. Either specify a '
+                               'pattern or use just "Bash" without parentheses')),
         ("permissions.allow", "Non-string value in allow array was removed"),
-        ("permissions.deny", 'Invalid permission rule "read" was skipped: Tool names must start with uppercase. '
-                             'Use "Read"'),
+        ("permissions.deny", ('Invalid permission rule "read" was skipped: Tool names must start with uppercase. '
+                              'Use "Read"')),
     ]
     assert [e.invalid_value for e in errors[:3]] == ["Bash()", 3, "read"]
     parsed, errors = parse_settings_document({"permissions": {"allow": ["Bash()", "Bash(ls)"]}}, "f.json")
@@ -281,31 +282,31 @@ def test_validation_tips() -> None:
     ("", "Permission rule cannot be empty"),
     ("Bash(ls", "Mismatched parentheses. Ensure all opening parentheses have matching closing parentheses"),
     ("()", "Empty parentheses with no tool name. Specify a tool name before the parentheses"),
-    ("Bash()", 'Empty parentheses. Either specify a pattern or use just "Bash" without parentheses. Examples: Bash, '
-               "Bash(some-pattern)"),
-    ("mcp__srv__tool(x)", 'MCP rules do not support patterns in parentheses. Use "mcp__srv__tool" without '
-                          'parentheses, or use "mcp__srv__*" for all tools. Examples: mcp__srv, mcp__srv__*, '
-                          "mcp__srv__tool"),
-    ("mcp__srv(*)", 'MCP rules do not support patterns in parentheses. Use "mcp__srv" without parentheses, or use '
-                    '"mcp__srv__*" for all tools. Examples: mcp__srv, mcp__srv__*'),
+    ("Bash()", ('Empty parentheses. Either specify a pattern or use just "Bash" without parentheses. Examples: Bash, '
+                "Bash(some-pattern)")),
+    ("mcp__srv__tool(x)", ('MCP rules do not support patterns in parentheses. Use "mcp__srv__tool" without '
+                           'parentheses, or use "mcp__srv__*" for all tools. Examples: mcp__srv, mcp__srv__*, '
+                           "mcp__srv__tool")),
+    ("mcp__srv(*)", ('MCP rules do not support patterns in parentheses. Use "mcp__srv" without parentheses, or use '
+                     '"mcp__srv__*" for all tools. Examples: mcp__srv, mcp__srv__*')),
     ("bash", 'Tool names must start with uppercase. Use "Bash"'),
-    ("WebSearch(a*)", "WebSearch does not support wildcards. Use exact search terms without * or ?. Examples: "
-                      "WebSearch(claude ai), WebSearch(typescript tutorial)"),
-    ("WebFetch(https://x)", 'WebFetch permissions use domain format, not URLs. Use "domain:hostname" format. '
-                            "Examples: WebFetch(domain:example.com), WebFetch(domain:github.com)"),
-    ("WebFetch(x.com)", 'WebFetch permissions must use "domain:" prefix. Use "domain:hostname" format. Examples: '
-                        "WebFetch(domain:example.com), WebFetch(domain:*.google.com)"),
-    ("Bash(npm:* x)", "The :* pattern must be at the end. Move :* to the end for prefix matching, or use * for "
-                      "wildcard matching. Examples: Bash(npm run:*) - prefix matching (legacy), Bash(npm run *) - "
-                      "wildcard matching"),
-    ("Bash(:*)", "Prefix cannot be empty before :*. Specify a command prefix before :*. Examples: Bash(npm:*), "
-                 "Bash(git:*)"),
-    ("Edit(src:*)", 'The ":*" syntax is only for Bash prefix rules. Use glob patterns like "*" or "**" for file '
-                    "matching. Examples: Edit(*.ts) - matches .ts files, Edit(src/**) - matches all files in src, "
-                    "Edit(**/*.test.ts) - matches test files"),
-    ("ReadFile(a*b)", "Wildcard placement might be incorrect. Wildcards are typically used at path boundaries. "
-                      "Examples: ReadFile(*.js) - all .js files, ReadFile(src/*) - all files directly in src, "
-                      "ReadFile(src/**) - all files recursively in src"),
+    ("WebSearch(a*)", ("WebSearch does not support wildcards. Use exact search terms without * or ?. Examples: "
+                       "WebSearch(claude ai), WebSearch(typescript tutorial)")),
+    ("WebFetch(https://x)", ('WebFetch permissions use domain format, not URLs. Use "domain:hostname" format. '
+                             "Examples: WebFetch(domain:example.com), WebFetch(domain:github.com)")),
+    ("WebFetch(x.com)", ('WebFetch permissions must use "domain:" prefix. Use "domain:hostname" format. Examples: '
+                         "WebFetch(domain:example.com), WebFetch(domain:*.google.com)")),
+    ("Bash(npm:* x)", ("The :* pattern must be at the end. Move :* to the end for prefix matching, or use * for "
+                       "wildcard matching. Examples: Bash(npm run:*) - prefix matching (legacy), Bash(npm run *) - "
+                       "wildcard matching")),
+    ("Bash(:*)", ("Prefix cannot be empty before :*. Specify a command prefix before :*. Examples: Bash(npm:*), "
+                  "Bash(git:*)")),
+    ("Edit(src:*)", ('The ":*" syntax is only for Bash prefix rules. Use glob patterns like "*" or "**" for file '
+                     "matching. Examples: Edit(*.ts) - matches .ts files, Edit(src/**) - matches all files in src, "
+                     "Edit(**/*.test.ts) - matches test files")),
+    ("ReadFile(a*b)", ("Wildcard placement might be incorrect. Wildcards are typically used at path boundaries. "
+                       "Examples: ReadFile(*.js) - all .js files, ReadFile(src/*) - all files directly in src, "
+                       "ReadFile(src/**) - all files recursively in src")),
 ])
 def test_invalid_permission_rules(rule: str, message: str) -> None:
     result = validate_permission_rule(rule)
@@ -355,7 +356,7 @@ def test_the_dialog_continues_or_exits() -> None:
     errors = [ValidationError(file="s.json", path="disableAllHooks", message="Expected boolean, but received string")]
     io = FakeDialog("2")
     assert asyncio.run(invalid_settings_dialog(io, errors)) is True
-    assert io.asked[0] == "\n".join([
+    assert io.asked[0] == "\n".join([  # noqa: FLY002 - one part per line
         "Settings Error", "", "s.json", " └ disableAllHooks: Expected boolean, but received string",
         "Files with errors are skipped entirely, not just the invalid settings.", "",
         "  1. Exit and fix manually", "  2. Continue without these settings", "Choose 1-2 · Esc to exit"])
@@ -428,7 +429,7 @@ def test_validate_settings_file_content() -> None:
     assert invalid_json.full_schema == schema
     result = validate_settings_file_content(json.dumps({
         "disableAllHooks": "no", "envv": {}, "modle": "x", "permissions": {"allow": ["bash"], "futureKey": 1}}))
-    assert result == SettingsFileContentValidation(False, "\n".join([
+    assert result == SettingsFileContentValidation(False, "\n".join([  # noqa: FLY002 - one part per line
         "Settings validation failed:",
         "- disableAllHooks: Expected boolean, but received string",
         '- permissions.allow.0: Tool names must start with uppercase. Use "Bash"',
@@ -468,8 +469,8 @@ def test_strict_parsing_accepts_upstreams_keys_this_build_does_not_read(key: str
 @pytest.mark.parametrize("key, value, expected", [
     ("model", 3, [("model", "Expected string, but received number")]),
     ("env", "A=1", [("env", "Expected record, but received string")]),
-    ("$schema", "https://example.com/s.json", [("$schema", 'Invalid value. Expected one of: '
-                                                '"https://json.schemastore.org/claude-code-settings.json"')]),
+    ("$schema", "https://example.com/s.json", [("$schema", ('Invalid value. Expected one of: '
+                                                '"https://json.schemastore.org/claude-code-settings.json"'))]),
     ("statusLine", {"type": "script"}, [("statusLine.type", 'Invalid value. Expected one of: "command"'),
                                         ("statusLine.command", "Expected string, but received undefined")]),
     ("cleanupPeriodDays", -1, [("cleanupPeriodDays", "Number must be greater than or equal to 0")]),

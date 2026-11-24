@@ -341,13 +341,13 @@ class SettingsChangeDetector:
 
 __all__ = [
     "CONFIG_CHANGE_SOURCE",
-    "ConfigChangeHooks",
     "DELETION_GRACE_MS",
     "FILE_STABILITY_POLL_INTERVAL_MS",
     "FILE_STABILITY_THRESHOLD_MS",
     "INTERNAL_WRITE_WINDOW_MS",
-    "SettingsChangeDetector",
+    "ConfigChangeHooks",
     "FileIdentity",
+    "SettingsChangeDetector",
     "SettingsListener",
     "file_identity",
     "setting_source_to_config_change_source",

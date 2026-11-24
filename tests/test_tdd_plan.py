@@ -351,7 +351,6 @@ def test_moving_the_work_to_another_item_restarts_the_ledger(tmp_path: Path):
 def test_a_new_current_item_fingerprints_its_tests_as_red_baseline():
     from app.tdd.suite_fingerprint import fingerprint_test_files
     from tests.conftest import FakeWorkspace
-
     from tests.plan_helpers import TEST_PROJECT_CONFIG
 
     ws = FakeWorkspace(files={"tests/test_a.py": "A"})

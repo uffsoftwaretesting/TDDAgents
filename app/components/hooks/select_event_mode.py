@@ -23,8 +23,8 @@ READ_ONLY_NOTICE = (f"{INFO} This menu is read-only. To add or modify hooks, edi
                     "TDDAgents.")
 RESTRICTED_BY_POLICY = (
     f"{INFO} Hooks Restricted by Policy",
-    "Only hooks from managed settings can run. User-defined hooks from ~/.tddagents/settings.json, "
-    ".tddagents/settings.json, and .tddagents/settings.local.json are blocked.",
+    ("Only hooks from managed settings can run. User-defined hooks from ~/.tddagents/settings.json, "
+     ".tddagents/settings.json, and .tddagents/settings.local.json are blocked."),
 )
 
 

@@ -127,17 +127,17 @@ from app.types.hooks import (
     parse_prompt_request,
     validate_hook_json,
 )
+from app.utils.debug import TERMINAL, log_for_debugging
 from app.utils.hooks.async_hook_registry import AsyncHookRegistry
 from app.utils.hooks.hook_events import (
-    HookEventEmitter,
     SESSION_END_HOOK_TIMEOUT_MS_DEFAULT,
     TOOL_EVENTS,
     TOOL_HOOK_EXECUTION_TIMEOUT_MS,
     HookEvent,
+    HookEventEmitter,
     match_query_for,
 )
 from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
-from app.utils.debug import TERMINAL, log_for_debugging
 from app.utils.messages import HookAttachment, HookBlockingError, Message
 from app.utils.settings.settings import (
     LEGACY_TOOL_NAME_ALIASES,
@@ -485,7 +485,7 @@ class HookDispatcher:
         try:
             answer = hook.callback(list(messages))
             passed = await asyncio.wait_for(answer, timeout) if inspect.isawaitable(answer) else answer
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             return HookResult(hook=hook, outcome="cancelled")
         except Exception as exc:  # noqa: BLE001 - upstream logs it and reports a non-blocking error
             logger.error("Function hook failed: %s", exc)

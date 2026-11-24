@@ -103,8 +103,8 @@ def test_session_flags_resolve_the_thread(workspaces: Path, monkeypatch: pytest.
 
 
 @pytest.mark.parametrize(("argv", "error"), [
-    (("-c", "--session-id", "x"), "Error: --session-id can only be used with --continue or --resume if "
-                                  "--fork-session is also specified."),
+    (("-c", "--session-id", "x"), ("Error: --session-id can only be used with --continue or --resume if "
+                                   "--fork-session is also specified.")),
     (("--session-id", "not-a-uuid"), "Error: Invalid session ID. Must be a valid UUID."),
     (("-p", "--resume", "tdd-missing"), "No conversation found with session ID: tdd-missing"),
     (("-p", "--resume"), "Error: --resume requires a session ID when used with --print"),

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.tdd.prompt_vars import TDD_PROMPT_VARS
 from app.tdd.plan import TddPlan, render_plan
+from app.tdd.prompt_vars import TDD_PROMPT_VARS
 from app.utils.frontmatter_parser import render_prompt
 
 PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts" / "session"

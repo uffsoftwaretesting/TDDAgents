@@ -23,8 +23,8 @@ ESC_TO_GO_BACK = "Esc to go back"
 
 async def show_no_hooks(io: DialogIO, title: str, subtitle: str) -> Cancelled:
     """An event (or matcher) with nothing configured, until Esc (or any line) goes back."""
-    await io.ask("\n".join([title, subtitle, "", NO_HOOKS, HOW_TO_ADD, ESC_TO_GO_BACK]), lambda _line: CANCELLED,
-                 ESC_TO_GO_BACK, CANCELLED)
+    text = "\n".join([title, subtitle, "", NO_HOOKS, HOW_TO_ADD, ESC_TO_GO_BACK])  # noqa: FLY002 - one part per line
+    await io.ask(text, lambda _line: CANCELLED, ESC_TO_GO_BACK, CANCELLED)
     return CANCELLED
 
 

@@ -133,10 +133,10 @@ async def atomic_write_to_zip_cache(target_path: str, data: str | bytes) -> None
     tmp_path = os.path.join(directory, f".{os.path.basename(target_path)}.tmp.{secrets.token_hex(4)}")
     try:
         if isinstance(data, str):
-            with open(tmp_path, "w", encoding="utf-8") as handle:
+            with open(tmp_path, "w", encoding="utf-8") as handle:  # noqa: ASYNC230 - sync file call
                 handle.write(data)
         else:
-            with open(tmp_path, "wb") as handle:
+            with open(tmp_path, "wb") as handle:  # noqa: ASYNC230 - sync file call
                 handle.write(data)
         os.replace(tmp_path, target_path)
     except BaseException:
@@ -209,7 +209,7 @@ async def _collect_files_for_zip(
             await _collect_files_for_zip(base_dir, rel_path, files, visited)
         elif stat.S_ISREG(file_stat.st_mode):
             try:
-                with open(full_path, "rb") as handle:
+                with open(full_path, "rb") as handle:  # noqa: ASYNC230 - sync file call
                     content = handle.read()
             except OSError as exc:
                 logger.debug("Failed to read file for zip: %s: %s", rel_path, exc)
@@ -219,7 +219,7 @@ async def _collect_files_for_zip(
 
 async def extract_zip_to_directory(zip_path: str, target_dir: str) -> None:
     """`extractZipToDirectory`: every entry written under `target_dir`, executable bits restored."""
-    with open(zip_path, "rb") as handle:
+    with open(zip_path, "rb") as handle:  # noqa: ASYNC230 - sync file call
         zip_buf = handle.read()
     files = await unzip_file(zip_buf)
     modes = parse_zip_modes(zip_buf)
@@ -230,7 +230,7 @@ async def extract_zip_to_directory(zip_path: str, target_dir: str) -> None:
             continue
         full_path = os.path.join(target_dir, rel_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "wb") as out:
+        with open(full_path, "wb") as out:  # noqa: ASYNC230 - sync file call
             out.write(data)
         mode = modes.get(rel_path)
         if mode and mode & 0o111:

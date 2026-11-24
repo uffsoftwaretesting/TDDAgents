@@ -25,7 +25,7 @@ from app.ink.parse_keypress import parse_mouse_event
 
 @pytest.fixture(autouse=True)
 def _clean_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.bootstrap.state as state
+    from app.bootstrap import state
 
     monkeypatch.setattr(state, "_LAST_INTERACTION_TIME", [0.0])
     monkeypatch.setattr(state, "_INTERACTION_TIME_DIRTY", [False])
@@ -151,9 +151,10 @@ def test_typing_without_enter_moves_the_clock() -> None:
 
 
 def test_the_status_ticker_flushes_the_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.screens.terminal_io as seam
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
+
+    import app.screens.terminal_io as seam
 
     monkeypatch.setattr(seam, "STATUS_REFRESH_SECONDS", 0.01)
 

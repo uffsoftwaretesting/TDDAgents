@@ -85,14 +85,14 @@ from app.tdd.run_tests_tool import ui
 from app.tdd.suite_fingerprint import (
     file_changed,
     fingerprint_test_files,
+    hash_test_files,
     have_tests_changed,
     project_files,
-    hash_test_files,
 )
 from app.tdd.test_listing import TestListing, run_test_listing
 from app.tool import BuiltTool, ToolContext, ToolResult, build_tool
-from app.workspace.base import WorkspaceCancelled
 from app.utils.frontmatter_parser import parse_markdown_frontmatter
+from app.workspace.base import WorkspaceCancelled
 
 PROMPT_PATH = Path(__file__).with_name("prompt.md")
 

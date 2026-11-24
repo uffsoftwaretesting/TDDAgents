@@ -92,13 +92,14 @@ def test_request_kwargs_per_provider() -> None:
 
 
 def test_the_request_sends_thinking_and_drops_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
+    from langchain_core.messages import HumanMessage
+
     from app.query.config import build_run_config
     from app.query.state import initial_loop_state
     from app.services.api.claude import open_model_stream
     from app.services.api.with_retry import RetryContext
     from app.state.app_state_store import AppStateStore
     from app.tool import tool_context_for
-    from langchain_core.messages import HumanMessage
 
     got: list[dict[str, Any]] = []
 

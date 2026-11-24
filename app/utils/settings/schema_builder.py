@@ -148,8 +148,8 @@ def document(schema: JsonSchema) -> JsonSchema:
 
 __all__ = [
     "JSON_SCHEMA_DRAFT",
-    "JsonSchema",
     "MAX_SAFE_INTEGER",
+    "JsonSchema",
     "Property",
     "array",
     "boolean",

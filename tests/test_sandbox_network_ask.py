@@ -12,7 +12,7 @@ import socket
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Self
 
 import pytest
 
@@ -177,7 +177,7 @@ def test_managed_domains_only_offers_no_dont_ask_again(tmp_path: Path) -> None:
 
 
 def test_the_drivers_callback_routes_to_the_repl(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.session.driver as driver
+    from app.session import driver
 
     captured: dict[str, Any] = {}
 
@@ -197,7 +197,7 @@ def test_the_drivers_callback_routes_to_the_repl(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr("app.interactive_helpers.launch_invalid_settings_dialog", no_trust)
 
     class IO:
-        def __enter__(self) -> IO:
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(self, *exc: object) -> None:

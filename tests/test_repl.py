@@ -513,7 +513,7 @@ def test_hooks_reloads_the_hooks_and_lists_them_until_esc(python_workspace, tmp_
         await until(lambda: "Hooks dialog dismissed" in io.out)
         io.lines.put_nowait("/exit")
 
-    _, repl, io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
+    _, repl, _io = asyncio.run(session(python_workspace, tmp_path, model, TddPlan.from_texts(["A"]), script))
     stop = repl.run.ctx.hook_dispatcher.snapshot.matchers_for("Stop")
     assert [hook.command for matcher in stop for hook in matcher.hooks] == ["echo done"]
 

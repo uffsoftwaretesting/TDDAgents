@@ -664,11 +664,11 @@ def query_haiku_for(context: Any) -> Callable[[str, str], Awaitable[str]]:
 
 
 __all__ = [
-    "stop_on_cancel",
     "TEXT_BLOCK",
     "BlockAccumulator",
     "BlockKey",
     "frame_content_blocks",
     "query_haiku_for",
     "split_chunk_into_blocks",
+    "stop_on_cancel",
 ]

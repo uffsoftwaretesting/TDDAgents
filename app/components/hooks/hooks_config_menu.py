@@ -84,9 +84,9 @@ def render_disabled(total_hooks_count: int, by_policy: bool) -> list[str]:
     """The "Hook Configuration - Disabled" screen."""
     lines = [
         "Hook Configuration - Disabled", "",
-        f"All hooks are currently disabled{' by a managed settings file' if by_policy else ''}. You have "
-        f"{total_hooks_count} configured {plural(total_hooks_count, 'hook')} that "
-        f"{plural(total_hooks_count, 'is', 'are')} not running.",
+        (f"All hooks are currently disabled{' by a managed settings file' if by_policy else ''}. You have "
+         f"{total_hooks_count} configured {plural(total_hooks_count, 'hook')} that "
+         f"{plural(total_hooks_count, 'is', 'are')} not running."),
         "", "When hooks are disabled:", "· No hook commands will execute",
         "· Tool operations will proceed without hook validation",
     ]

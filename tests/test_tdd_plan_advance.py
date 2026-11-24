@@ -23,6 +23,7 @@ from app.query.transitions import Continue, Terminal, Terminated, Transition
 from app.services.tools.tool_orchestration import run_tools
 from app.state.app_state_store import AppState, AppStateStore
 from app.tdd.coverage_gate import UNAVAILABLE, CoverageReading, CoverageStatus
+from app.tdd.junit_report import JUnitReport
 from app.tdd.ledger import PhaseLedger, TddPhase, TestRunRecord
 from app.tdd.plan import PLAN_FILE_NAME, ItemStatus, TddPlan, load_plan
 from app.tdd.plan_advance import advance_plan, next_item_message
@@ -37,7 +38,6 @@ from app.tdd.tdd_state_attachment import (
     tdd_state_data,
 )
 from app.tool import tool_context_for
-from app.tdd.junit_report import JUnitReport
 from tests.conftest import FakeWorkspace
 from tests.plan_helpers import TEST_PROJECT_CONFIG
 

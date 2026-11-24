@@ -33,10 +33,10 @@ import logging
 import os
 import sys
 import uuid
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from app.utils.debug_filter import DebugFilter, parse_debug_filter, should_show_debug_message
@@ -191,7 +191,7 @@ def _update_latest_debug_log_symlink(path: str) -> None:
 
 def _timestamp() -> str:
     """`new Date().toISOString()`."""
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def log_for_debugging(message: str, *, level: DebugLogLevel = "debug") -> None:
@@ -329,13 +329,13 @@ __all__ = [
     "APP_LOGGER_PREFIXES",
     "DEBUG_LOGS_DIR_ENV",
     "DEBUG_LOG_LEVEL_ENV",
-    "DebugLogHandler",
+    "LEVEL_ORDER",
     "OFF_TERMINAL",
     "TERMINAL",
     "TERMINAL_LOG_FORMAT",
-    "TerminalLogFilter",
+    "DebugLogHandler",
     "DebugLogLevel",
-    "LEVEL_ORDER",
+    "TerminalLogFilter",
     "configure_debug",
     "enable_debug_logging",
     "get_debug_file_path",
@@ -343,14 +343,14 @@ __all__ = [
     "get_debug_log_path",
     "get_has_formatted_output",
     "get_min_debug_log_level",
-    "install_terminal_log_filter",
-    "route_terminal_logs",
-    "terminal_log_handlers",
     "install_debug_log_handler",
+    "install_terminal_log_filter",
     "is_debug_mode",
     "is_debug_to_stderr",
     "log_for_debugging",
     "reset_debug_state",
+    "route_terminal_logs",
     "set_debug_session_id",
     "set_has_formatted_output",
+    "terminal_log_handlers",
 ]

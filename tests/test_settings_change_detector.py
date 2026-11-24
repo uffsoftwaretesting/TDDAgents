@@ -488,7 +488,7 @@ def test_apply_settings_change_reloads_rules_and_hooks_and_strips_dangerous_allo
 
 
 def test_apply_settings_change_honours_disable_bypass(tmp_path):
-    store, loc, dispatcher = _run_state(tmp_path, dangerously_skip_permissions=True)
+    store, loc, _dispatcher = _run_state(tmp_path, dangerously_skip_permissions=True)
     assert store.get().tool_permission_context.mode == PermissionMode.BYPASS_PERMISSIONS
     write(project_settings(tmp_path), {"permissions": {"disableBypassPermissionsMode": "disable"}})
     apply_settings_change(S.PROJECT_SETTINGS, store.update, loc, None)

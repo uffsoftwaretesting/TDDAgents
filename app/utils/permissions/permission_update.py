@@ -49,8 +49,8 @@ from app.types.permissions import (
     PermissionRuleSource,
     ToolPermissionContext,
 )
-from app.utils.permissions.permission_rule_parser import permission_rule_value_to_string
 from app.utils.debug import log_for_debugging
+from app.utils.permissions.permission_rule_parser import permission_rule_value_to_string
 from app.utils.settings.internal_writes import mark_internal_write
 from app.utils.settings.settings import (
     SettingsLocations,
@@ -457,7 +457,6 @@ __all__ = [
     "MANAGED_ONLY_CLEARED_SOURCES",
     "PERSISTABLE_DESTINATIONS",
     "RULE_UPDATE_TYPES",
-    "permission_update_to_json",
     "UPDATE_DESTINATIONS",
     "UPDATE_TYPES",
     "PermissionUpdate",
@@ -468,6 +467,7 @@ __all__ = [
     "create_read_rule_suggestion",
     "parse_permission_update",
     "parse_permission_updates",
+    "permission_update_to_json",
     "persist_permission_update",
     "persist_permission_updates",
     "settings_locations_for",

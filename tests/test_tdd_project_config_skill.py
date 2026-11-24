@@ -15,23 +15,7 @@ import pytest
 from app.skills.bundled.index import init_bundled_skills
 from app.skills.bundled_skills import BundledSkillContext
 from app.skills.load_skills_dir import get_skill_registry
-from app.tdd.project_config_skill import (
-    LANGUAGE_INDICATORS,
-    LANGUAGES,
-    SKILL_DIR,
-    build_inline_reference,
-    build_prompt,
-    detect_language,
-    ecosystem_listing,
-    get_files_for_language,
-    get_prompt_for_command,
-    language_from_args,
-    NOSANDBOX_DIR,
-    process_content,
-    sandbox_enabled,
-    skill_files,
-    tdd_project_config_skill,
-)
+from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
 from app.tdd.plan import PROJECT_CONFIG_HEADING
 from app.tdd.project_config import (
     COVERAGE_REPORT_ENV,
@@ -40,7 +24,23 @@ from app.tdd.project_config import (
     PROJECT_CONFIG_VERSION,
     parse_project_config,
 )
-from app.tdd.coverage_gate import COVERAGE_RULE_OF_THUMB
+from app.tdd.project_config_skill import (
+    LANGUAGE_INDICATORS,
+    LANGUAGES,
+    NOSANDBOX_DIR,
+    SKILL_DIR,
+    build_inline_reference,
+    build_prompt,
+    detect_language,
+    ecosystem_listing,
+    get_files_for_language,
+    get_prompt_for_command,
+    language_from_args,
+    process_content,
+    sandbox_enabled,
+    skill_files,
+    tdd_project_config_skill,
+)
 from app.tdd.prompt_vars import PROJECT_CONFIG_PROMPT_VARS, TDD_PROMPT_VARS
 from app.tools.skill_tool.skill_tool import skill_has_only_safe_properties
 from app.utils.process_user_input.process_slash_command import (
@@ -324,7 +324,8 @@ class TestTheJoinRecipesProduceOneValidReport:
         fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
         report = tmp_path / "junit.xml"
         env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", JUNIT_REPORT_ENV: str(report)}
-        done = subprocess.run(["/bin/sh", "-c", command], cwd=tmp_path, env=env, capture_output=True, text=True)
+        done = subprocess.run(["/bin/sh", "-c", command], cwd=tmp_path, env=env, capture_output=True, text=True,
+                              check=False)
         assert done.returncode == 0, done.stderr
         assert not (tmp_path / reports_dir / "TEST-a.ATest.xml").read_text().endswith("\n")
         parsed = parse_junit_report(report.read_text(encoding="utf-8"))

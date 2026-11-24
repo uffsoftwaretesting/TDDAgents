@@ -32,8 +32,8 @@ from app.utils.session_environment import build_command
 from app.workspace.base import (
     CommandResult,
     FileEntry,
-    WorkspaceKind,
     WorkspaceCancelled,
+    WorkspaceKind,
     WorkspaceNotFound,
     WorkspacePathError,
     WorkspaceProviderError,

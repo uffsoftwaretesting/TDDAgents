@@ -14,14 +14,17 @@ import pytest
 from app.cli.print import project_root_of, run_permission_context
 from app.query.config import build_run_config
 from app.state.app_state_store import AppState, AppStateStore
-from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.junit_report import JUnitReport
+from app.tdd.ledger import PhaseLedger, TddPhase
 from app.tdd.run_tests_tool.run_tests_tool import PHASE_RULES, SuiteExecutionResult, build_run_tests_tool
 from app.tool import tool_context_for
 from app.types.permissions import PermissionMode
 from app.workspace.local import LocalWorkspace, workspaces_root
 from app.workspace.project import (
-    SHIPPED_SANDBOX_PROFILE, SHIPPED_SETTINGS, load_sandbox_profile, prepare_project,
+    SHIPPED_SANDBOX_PROFILE,
+    SHIPPED_SETTINGS,
+    load_sandbox_profile,
+    prepare_project,
 )
 from tests.conftest import FakeWorkspace
 from tests.plan_helpers import CURRENT_ITEM_PLAN, TEST_PROJECT_CONFIG
@@ -162,8 +165,8 @@ def skip_lines(phase: TddPhase) -> list[str]:
     return ["Exit code 0 (the test command completed)", "JUnit report: 4 test(s), 0 failed, 0 errored, 1 skipped",
             "Declared test files the run did not run: unknown (the JUnit report names no test files)",
             "Coverage: not measured",
-            f"TDD ledger: still {phase.value}. {PHASE_RULES[phase]}: 1 test(s) were skipped, the JUnit report names "
-            "no test files."]
+            (f"TDD ledger: still {phase.value}. {PHASE_RULES[phase]}: 1 test(s) were skipped, the JUnit report names "
+             "no test files.")]
 
 
 @pytest.mark.parametrize("phase", [TddPhase.GREEN, TddPhase.REFACTOR])

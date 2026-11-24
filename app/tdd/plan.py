@@ -292,8 +292,8 @@ def parse_project_configuration(plan_text: str) -> tuple[ProjectConfig | None, t
     blocks = _json_blocks(section)
     if len(blocks) != 1:
         found = "none" if not blocks else str(len(blocks))
-        return None, (f'the "{PROJECT_CONFIG_HEADING}" section must hold exactly one fenced json block (found '
-                      f"{found})",)
+        return None, ((f'the "{PROJECT_CONFIG_HEADING}" section must hold exactly one fenced json block (found '
+                      f"{found})"),)
     return parse_project_config_text(blocks[0])
 
 

@@ -120,7 +120,7 @@ def test_the_tool_is_looked_up_at_the_first_ask(capsys: pytest.CaptureFixture[st
     with pytest.raises(SystemExit):
         asyncio.run(not_mcp(target, {}, ASK, context(), "tu"))
     assert "must be an MCP tool" in capsys.readouterr().err
-    none = get_permission_prompt_tool_can_use_tool("x", lambda: [])
+    none = get_permission_prompt_tool_can_use_tool("x", list)
     with pytest.raises(SystemExit):
         asyncio.run(none(target, {}, ASK, context(), "tu"))
     assert "Available MCP tools: none" in capsys.readouterr().err

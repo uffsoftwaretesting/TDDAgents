@@ -50,9 +50,9 @@ prints `VERSION`, as upstream's `.version(...)`.
 """
 
 import argparse
+import json
 import logging
 import os
-import json
 import sys
 import textwrap
 from collections.abc import Mapping, Sequence
@@ -67,13 +67,11 @@ if __package__ in (None, ""):
 
 from dotenv import load_dotenv
 
-from app.cli.print import DevelopmentOutcome, HeadlessOptions
-from app.constants.product import CLI_COMMAND, VERSION
-from app.components.trust_dialog.trust_dialog import TrustDialogExit
 from app.bootstrap.state import set_flag_settings_path
-from app.utils.tempfile import generate_temp_file_path
-from app.workspace.project import load_sandbox_profile
-from app.utils.sandbox.sandbox_adapter import SandboxUnavailableError
+from app.cli.print import DevelopmentOutcome, HeadlessOptions
+from app.components.design_system.dialog import is_option_number
+from app.components.trust_dialog.trust_dialog import TrustDialogExit
+from app.constants.product import CLI_COMMAND, VERSION
 from app.query.transitions import Terminal
 from app.session.driver import (
     SessionOptions,
@@ -89,7 +87,9 @@ from app.tools.ask_user_question_tool.ask_user_question_tool import render_quest
 from app.types.permissions import PERMISSION_MODES
 from app.utils.claudemd import is_env_truthy
 from app.utils.debug import TERMINAL_LOG_FORMAT, install_terminal_log_filter
-from app.components.design_system.dialog import is_option_number
+from app.utils.sandbox.sandbox_adapter import SandboxUnavailableError
+from app.utils.tempfile import generate_temp_file_path
+from app.workspace.project import load_sandbox_profile
 
 logging.basicConfig(
     level=logging.WARNING,

@@ -161,7 +161,7 @@ def test_interrupt_stops_a_running_test_suite_and_a_message_continues(python_wor
         await until(lambda: "Nothing is running." in io.out)
         io.lines.put_nowait("/exit")
 
-    terminal, repl, io = asyncio.run(session(python_workspace, tmp_path, model, DONE, script))
+    terminal, _repl, io = asyncio.run(session(python_workspace, tmp_path, model, DONE, script))
     assert timings["stopped"] - timings["sent"] < 8  # the 20 s suite was killed, not awaited
     assert "Interrupted. Tell the agents what to do next." in io.text()
     assert "carry on" in _texts(model.seen[1])
@@ -272,7 +272,7 @@ def test_commands_at_a_pending_question_are_never_answers(python_workspace, tmp_
         await until(lambda: not repl.busy)
         io.lines.put_nowait("/exit")
 
-    terminal, _, io = asyncio.run(session(python_workspace, tmp_path, model, DONE, script))
+    terminal, _, _io = asyncio.run(session(python_workspace, tmp_path, model, DONE, script))
     assert terminal == Terminal.ABORTED_TOOLS
     results = [m for m in model.seen[0].messages if isinstance(m, ToolMessage)]
     assert not any("/edit" in str(m.content) or "/help" in str(m.content) for m in results)
@@ -344,7 +344,7 @@ def test_typed_requirements_at_the_plan_approval_reach_the_analyst(python_worksp
         await until(lambda: len(model.seen) >= 4 and not repl.busy)
         io.lines.put_nowait("/exit")
 
-    _, repl, io = asyncio.run(session(python_workspace, tmp_path, model, DONE, script))
+    _, _repl, io = asyncio.run(session(python_workspace, tmp_path, model, DONE, script))
     feedback = [m for m in model.seen[3].messages if isinstance(m, ToolMessage)][-1]
     assert str(feedback.content) == f"{REJECT_MESSAGE_WITH_REASON_PREFIX}also support division by zero errors"
     assert "(Type /edit" not in io.text()

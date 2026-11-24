@@ -9,12 +9,12 @@ import asyncio
 import io
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
-import app.cli.handlers.util as util
 import app.main as main_module
+from app.cli.handlers import util
 from app.components.design_system.dialog import CANCELLED
 from app.constants.product import VERSION
 from app.utils.settings.settings import SettingsLocations
@@ -57,7 +57,8 @@ class FakeManager:
 
 
 class FakePlugins:
-    errors = [{"type": "generic-error", "source": "lint@team", "plugin": "lint", "error": "boom"}]
+    errors: ClassVar[list[dict[str, str]]] = [
+        {"type": "generic-error", "source": "lint@team", "plugin": "lint", "error": "boom"}]
 
 
 @pytest.fixture

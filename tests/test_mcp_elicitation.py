@@ -29,6 +29,7 @@ import app.services.mcp.elicitation_handler as eh
 import app.services.mcp.mcp_connection_manager as mm
 from app.schemas.hooks import CommandHook, HookMatcher
 from app.services.mcp.types import ConnectedMCPServer, McpServerConfig
+from app.utils.hooks.hook_events import TOOL_HOOK_EXECUTION_TIMEOUT_MS
 from app.utils.hooks.hooks import (
     ElicitationHookResult,
     ElicitationResponse,
@@ -40,7 +41,6 @@ from app.utils.hooks.hooks import (
     execute_notification_hooks,
     parse_elicitation_hook_output,
 )
-from app.utils.hooks.hook_events import TOOL_HOOK_EXECUTION_TIMEOUT_MS
 from app.utils.hooks.hooks_config_snapshot import HooksConfigSnapshot
 from app.utils.messages import HookBlockingError
 from tests.test_mcp_client import factory

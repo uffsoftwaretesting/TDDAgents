@@ -46,8 +46,8 @@ from e2b import (
 from e2b.exceptions import RateLimitException
 from e2b_code_interpreter import Sandbox
 
-from app.utils.debug import TERMINAL
 from app.config.config import Config
+from app.utils.debug import TERMINAL
 from app.workspace.base import (
     CommandResult,
     FileEntry,

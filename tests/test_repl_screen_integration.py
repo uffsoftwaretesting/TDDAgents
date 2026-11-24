@@ -111,8 +111,8 @@ def test_parallel_calls_each_keep_their_own_result(python_workspace, tmp_path):
     assert _result_under(rows, "⏺ Write(tests/test_calc.py)") == ["  ⎿  Wrote 4 lines to tests/test_calc.py"]
     # The second call is refused (RED locks a non-test file): its error stays under its own row.
     assert _result_under(rows, "⏺ Write(notes.txt)") == [
-        "  ⎿  Error: TDD phase RED denies writing to production file 'notes.txt'. "
-        "Only test files may be written in RED phase."]
+        ("  ⎿  Error: TDD phase RED denies writing to production file 'notes.txt'. "
+         "Only test files may be written in RED phase.")]
 
 
 def test_a_refused_call_reads_without_tags(python_workspace, tmp_path):

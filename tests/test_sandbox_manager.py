@@ -283,10 +283,10 @@ def test_the_bridge_starts_two_socat_processes_and_stops_them(fake_socat: Path, 
         assert Path(context.http_socket_path).name.startswith("tddagents-http-")
         lines = fake_socat.read_text().splitlines()
         assert lines == [
-            f"UNIX-LISTEN:{context.http_socket_path},fork,reuseaddr "
-            "TCP:localhost:41001,keepalive,keepidle=10,keepintvl=5,keepcnt=3",
-            f"UNIX-LISTEN:{context.socks_socket_path},fork,reuseaddr "
-            "TCP:localhost:41002,keepalive,keepidle=10,keepintvl=5,keepcnt=3"]
+            (f"UNIX-LISTEN:{context.http_socket_path},fork,reuseaddr "
+             "TCP:localhost:41001,keepalive,keepidle=10,keepintvl=5,keepcnt=3"),
+            (f"UNIX-LISTEN:{context.socks_socket_path},fork,reuseaddr "
+             "TCP:localhost:41002,keepalive,keepidle=10,keepintvl=5,keepcnt=3")]
         assert context.http_bridge_process.poll() is None and context.socks_bridge_process.poll() is None
     finally:
         bridge.shutdown_linux_network_bridge(context)

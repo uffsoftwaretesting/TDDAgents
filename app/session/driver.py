@@ -234,9 +234,9 @@ __all__ = [
     "derive_thread_id",
     "develop_headless",
     "develop_interactive",
-    "rewind_files_headless",
     "development_run_options",
     "fresh_thread_id",
+    "rewind_files_headless",
     "session_exists",
     "start_plugin_checks",
 ]

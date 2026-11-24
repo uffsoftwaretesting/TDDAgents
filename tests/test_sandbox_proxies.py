@@ -124,12 +124,12 @@ def _send(port: int, data: bytes) -> bytes:
 
 
 def test_connect_to_an_allowed_host_is_tunnelled(echo: int) -> None:
-    with proxies(lambda _p, _h: True) as (context, seen):
-        with socket.create_connection(("127.0.0.1", context.http_proxy_port), timeout=5) as conn:
-            conn.sendall(f"CONNECT 127.0.0.1:{echo} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
-            assert conn.recv(1024) == b"HTTP/1.1 200 Connection Established\r\n\r\n"
-            conn.sendall(b"ping")
-            assert conn.recv(1024) == b"echo:ping"
+    with (proxies(lambda _p, _h: True) as (context, seen),
+          socket.create_connection(("127.0.0.1", context.http_proxy_port), timeout=5) as conn):
+        conn.sendall(f"CONNECT 127.0.0.1:{echo} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+        assert conn.recv(1024) == b"HTTP/1.1 200 Connection Established\r\n\r\n"
+        conn.sendall(b"ping")
+        assert conn.recv(1024) == b"echo:ping"
     assert seen == [(echo, "127.0.0.1")]
 
 
@@ -161,7 +161,7 @@ def test_an_absolute_uri_request_is_forwarded_with_its_host_and_closed(upstream:
         answer = _send(context.http_proxy_port,
                        f"GET http://127.0.0.1:{upstream}/a/b?q=1 HTTP/1.1\r\nHost: wrong\r\n"
                        f"Proxy-Connection: keep-alive\r\n\r\n".encode())
-    assert answer.startswith(b"HTTP/1.0 200") or answer.startswith(b"HTTP/1.1 200")
+    assert answer.startswith((b"HTTP/1.0 200", b"HTTP/1.1 200"))
     assert answer.endswith(f"path=/a/b?q=1 host=127.0.0.1:{upstream} conn=close".encode())
     assert seen == [(upstream, "127.0.0.1")]
 
@@ -223,12 +223,12 @@ def test_a_mitm_host_is_tunnelled_through_the_mitm_socket(tmp_path: Path) -> Non
     thread.start()
     ready.wait(5)
     try:
-        with proxies(lambda _p, _h: True, mitm=socket_path) as (context, _seen):
-            with socket.create_connection(("127.0.0.1", context.http_proxy_port), timeout=5) as conn:
-                conn.sendall(b"CONNECT mitm.test:443 HTTP/1.1\r\n\r\n")
-                assert _recv_until(conn, b"early") == b"HTTP/1.1 200 Connection Established\r\n\r\nearly"
-                conn.sendall(b"hi")
-                assert conn.recv(100) == b"mitm:hi"
+        with (proxies(lambda _p, _h: True, mitm=socket_path) as (context, _seen),
+              socket.create_connection(("127.0.0.1", context.http_proxy_port), timeout=5) as conn):
+            conn.sendall(b"CONNECT mitm.test:443 HTTP/1.1\r\n\r\n")
+            assert _recv_until(conn, b"early") == b"HTTP/1.1 200 Connection Established\r\n\r\nearly"
+            conn.sendall(b"hi")
+            assert conn.recv(100) == b"mitm:hi"
     finally:
         loop.call_soon_threadsafe(stop.set)
         thread.join(5)

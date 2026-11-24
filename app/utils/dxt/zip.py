@@ -156,7 +156,7 @@ def parse_zip_modes(data: bytes) -> dict[str, int]:
 async def read_and_unzip_file(file_path: str) -> dict[str, bytes]:
     """`readAndUnzipFile`: a missing file raises as is; any other failure is wrapped."""
     try:
-        with open(file_path, "rb") as handle:
+        with open(file_path, "rb") as handle:  # noqa: ASYNC230 - sync file call
             zip_data = handle.read()
         return await unzip_file(zip_data)
     except FileNotFoundError:

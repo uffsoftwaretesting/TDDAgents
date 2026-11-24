@@ -318,8 +318,8 @@ def test_check_context_warnings_runs_every_check():
 # ── doctorDiagnostic ─────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("value, issue, fix", [
-    ({"a": 1}, "an invalid value (expected true or an array, got object)", "Set it to true, or an array of: "
-     "skills, agents, hooks, mcp."),
+    ({"a": 1}, "an invalid value (expected true or an array, got object)", ("Set it to true, or an array of: "
+     "skills, agents, hooks, mcp.")),
     (None, "an invalid value (expected true or an array, got object)", "silently ignored (schema .catch"),
     ("skills", "an invalid value (expected true or an array, got string)", "an array of: skills"),
     (3, "an invalid value (expected true or an array, got number)", "an array of: skills"),
@@ -342,7 +342,7 @@ def test_no_policy_warning(tmp_path, content):
 
 
 def test_the_diagnostic(tmp_path, monkeypatch):
-    import app.utils.ripgrep as ripgrep
+    from app.utils import ripgrep
 
     loc = _loc(tmp_path)
     _write(loc.managed_dir / "managed-settings.json", {"strictPluginOnlyCustomization": "x"})
@@ -369,7 +369,7 @@ def test_the_diagnostic(tmp_path, monkeypatch):
 
 
 def test_a_failed_ripgrep_probe_is_recorded(monkeypatch):
-    import app.utils.ripgrep as ripgrep
+    from app.utils import ripgrep
 
     class Result:
         exit_code, stdout = 127, ""

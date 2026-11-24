@@ -56,10 +56,10 @@ from app.query.query import run_loop
 from app.query.state import LoopState, initial_loop_state
 from app.query.transitions import Terminated
 from app.services.compact.compact import is_compact_boundary_message
+from app.tools.synthetic_output_tool.synthetic_output_tool import SYNTHETIC_OUTPUT_TOOL_NAME
 from app.utils.attachments import attachment_of
 from app.utils.conversation_recovery import NO_RESPONSE_REQUESTED
 from app.utils.file_history import file_history_enabled, file_history_make_snapshot
-from app.tools.synthetic_output_tool.synthetic_output_tool import SYNTHETIC_OUTPUT_TOOL_NAME
 from app.utils.messages import Message, count_tool_calls, has_successful_tool_call
 from app.utils.process_user_input.process_user_input import (
     ProcessUserInputResult,

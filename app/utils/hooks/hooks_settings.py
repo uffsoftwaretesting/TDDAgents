@@ -183,10 +183,10 @@ def sort_matchers_by_priority(
 
 __all__ = [
     "BUILTIN_HOOK",
-    "IndividualHookConfig",
     "PLUGIN_HOOK",
     "SESSION_HOOK",
     "SOURCES",
+    "IndividualHookConfig",
     "get_all_hooks",
     "get_hooks_for_event",
     "hook_source_description_display_string",

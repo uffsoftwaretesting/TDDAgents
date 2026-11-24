@@ -31,10 +31,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from rich.box import ROUNDED
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
-from rich.markdown import Heading, Markdown
+from rich.markdown import Heading, Markdown, MarkdownElement
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
@@ -66,7 +67,7 @@ class _PlanHeading(Heading):
 class PlanMarkdown(Markdown):
     """The plan's Markdown with `_PlanHeading` headings."""
 
-    elements = {**Markdown.elements, "heading_open": _PlanHeading}
+    elements: ClassVar[dict[str, type[MarkdownElement]]] = {**Markdown.elements, "heading_open": _PlanHeading}
 
 
 @dataclass

@@ -185,7 +185,7 @@ def is_symlink_outside_boundary(original_path: str, resolved_path: str) -> bool:
     if normalized_original.startswith(normalized_resolved + "/"):
         return True
     canonical_original = normalized_original
-    if normalized_original.startswith("/tmp/") or normalized_original.startswith("/var/"):
+    if normalized_original.startswith(("/tmp/", "/var/")):
         canonical_original = "/private" + normalized_original
     if canonical_original != normalized_original and canonical_original.startswith(normalized_resolved + "/"):
         return True
@@ -251,7 +251,7 @@ def get_default_write_paths(*, home: str, tmpdir: str) -> list[str]:
 
 
 #: `generateProxyEnvVars`' `NO_PROXY`: localhost and the private networks.
-NO_PROXY_ADDRESSES: Final = ",".join([
+NO_PROXY_ADDRESSES: Final = ",".join([  # noqa: FLY002 - one part per line
     "localhost",
     "127.0.0.1",
     "::1",

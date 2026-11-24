@@ -19,11 +19,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from app.components.design_system.dialog import CANCELLED, Cancelled, DialogIO, choice_hint
+from app.components.design_system.dialog import CANCELLED, Cancelled, DialogIO, choice_hint, is_option_number
 from app.components.mcp.types import ServerInfo
 from app.services.mcp.utils import describe_mcp_config_file_path
 from app.utils.string_utils import plural
-from app.components.design_system.dialog import is_option_number
 
 #: `SCOPE_ORDER`; `dynamic` (built-in) is listed separately, last.
 SCOPE_ORDER = ("project", "local", "user", "enterprise")

@@ -358,8 +358,8 @@ def is_bash_read_only(args: dict[str, Any], cwd: str | None = None) -> bool:
 
 __all__ = [
     "READONLY_COMMANDS",
-    "SANDBOXED_OUTSIDE_ORIGINAL_CWD",
     "READONLY_COMMAND_REGEXES",
+    "SANDBOXED_OUTSIDE_ORIGINAL_CWD",
     "check_read_only_constraints",
     "command_has_any_git",
     "command_writes_to_git_internal_paths",

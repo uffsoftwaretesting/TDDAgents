@@ -877,7 +877,7 @@ def _parse_time(value: Any) -> datetime:
     """A recorded date; an unreadable one becomes the epoch rather than dropping the snapshot."""
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return datetime.fromisoformat(value)
         except ValueError:
             pass
     return datetime.fromtimestamp(0, tz=UTC)

@@ -36,6 +36,7 @@ watched: an E2B workspace has no file to stat.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Callable
@@ -135,10 +136,8 @@ class ProjectConfigWatcher:
         self.disposed = True
         if self._task is not None:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):  # the watch is over either way
                 await self._task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001 - the watch is over either way
-                pass
             self._task = None
 
     async def _poll_loop(self) -> None:

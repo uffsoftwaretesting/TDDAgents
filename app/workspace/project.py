@@ -37,7 +37,7 @@ def load_sandbox_profile(path: Path = SHIPPED_SANDBOX_PROFILE) -> dict[str, Any]
     """The sandbox profile's settings document (`{"sandbox": {...}}`)."""
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
-        raise ValueError(f"{path} is not a settings object")
+        raise ValueError(f"{path} is not a settings object")  # noqa: TRY004 - an invalid settings file
     return document
 
 

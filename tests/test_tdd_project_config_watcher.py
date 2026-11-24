@@ -90,8 +90,8 @@ def test_an_invalid_file_is_no_configuration_with_its_issues():
     state = s.get()
     assert state.project_config is None
     assert state.project_config_issues == (
-        "unknown keys: surprise (the keys are version, setup, test, listTests, junitReport, coverageReport, testFiles, "
-        "testSupportFiles, manifestFiles, exclude)",
+        ("unknown keys: surprise (the keys are version, setup, test, listTests, junitReport, coverageReport, "
+         "testFiles, testSupportFiles, manifestFiles, exclude)"),
         "`test` is required: the shell command that runs the whole test suite")
     # The patterns went away with the configuration: the baseline follows them.
     assert state.tdd_item_test_baseline is None
@@ -244,8 +244,8 @@ def test_a_watched_file_that_excludes_the_tests_is_no_configuration():
     assert apply_text(s, ws, replace(CONFIG, exclude=("tests/",)).to_json()) is True
     assert s.get().project_config is None
     assert s.get().project_config_issues == (
-        "`exclude` accepts generated directories only (patterns ending in `/` that cover no `testFiles` pattern): "
-        "tests/",)
+        ("`exclude` accepts generated directories only (patterns ending in `/` that cover no `testFiles` pattern): "
+         "tests/"),)
 
 
 def test_a_valid_edit_an_invalid_file_and_another_file_pass():

@@ -279,8 +279,8 @@ def test_a_deny_rule_wins_over_the_ask(tmp_path: Any) -> None:
 
 
 def test_a_permission_request_hook_can_answer_where_no_prompt_can_be_shown(tmp_path: Any) -> None:
-    from tests.hook_doubles import ScriptedDispatcher
     from app.types.hooks import AggregatedHookResult
+    from tests.hook_doubles import ScriptedDispatcher
 
     outer = context(tmp_path, interactive=False)
     allow = AggregatedHookResult(permission_request_result={"behavior": "allow"})
@@ -334,13 +334,14 @@ def test_the_registration_survives_dropping_the_plugin_hooks(tmp_path: Any) -> N
 
 def open_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, *, sandboxed: bool) -> HookDispatcher:
     """The dispatcher a session opens with, the sandbox faked on or left off (the suite's `sandbox_off_settings`)."""
+    from langchain_core.messages import AIMessage
+
     import app.cli.print as session
     import app.utils.hooks.hook_dispatcher as runtime
     from app.utils.sandbox.sandbox_adapter import SandboxAdapter
     from tests.conftest import FakeWorkspace
     from tests.session_run_helpers import run_item
     from tests.test_loop_hooks_mutation_a import Model, loop_deps
-    from langchain_core.messages import AIMessage
 
     built: list[HookDispatcher] = []
     real_build = runtime.build_hook_dispatcher
@@ -625,7 +626,8 @@ def test_a_session_in_bypass_mode_asks_before_writing_outside(
     from langchain_core.messages import AIMessage as Ai
 
     from app.tdd.plan import TddPlan
-    from tests.test_repl import Model, call as model_call, session, until
+    from tests.test_repl import Model, session, until
+    from tests.test_repl import call as model_call
 
     outside = Path(tempfile.mkdtemp(prefix="gate-outside-")) / "note.txt"
     model = Model([[model_call("Bash", "b1", command=f"echo hi > {outside}")], [Ai(content="done")]])

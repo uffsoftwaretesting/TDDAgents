@@ -68,7 +68,8 @@ def test_the_test_venv_is_real_and_isolated(test_venv):
     out = subprocess.run([str(python), "-c", script], capture_output=True, text=True, check=True).stdout.split()
     assert out == ["9.0.1", str(test_venv)]
     # TDDAgents' own dependencies are not visible to generated code
-    assert subprocess.run([str(python), "-c", "import langchain_core"], capture_output=True).returncode != 0
+    done = subprocess.run([str(python), "-c", "import langchain_core"], capture_output=True, check=False)
+    assert done.returncode != 0
 
 
 @pytest.mark.parametrize(("environ", "expected"), [
@@ -562,7 +563,6 @@ def test_local_resolve_names_the_escaping_path(tmp_path):
 def test_run_tests_carries_workspace_stderr(make_fake_workspace):
     from app.tdd.run_tests_tool.run_tests_tool import _default_test_runner
     from app.workspace.base import CommandResult
-
     from tests.plan_helpers import TEST_PROJECT_CONFIG
 
     ws = make_fake_workspace()

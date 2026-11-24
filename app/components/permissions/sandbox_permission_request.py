@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.components.permissions.permission_dialog import PermissionDialog
 from app.components.design_system.dialog import is_option_number
+from app.components.permissions.permission_dialog import PermissionDialog
 
 TITLE = "Network request outside of sandbox"
 QUESTION = "Do you want to allow this connection?"

@@ -171,13 +171,13 @@ class HookEventEmitter:
 
 __all__ = [
     "ALWAYS_EMITTED_HOOK_EVENTS",
-    "MAX_PENDING_EVENTS",
-    "HookEventEmitter",
     "HOOK_EVENTS",
+    "MAX_PENDING_EVENTS",
     "SESSION_END_HOOK_TIMEOUT_MS_DEFAULT",
     "TOOL_EVENTS",
     "TOOL_HOOK_EXECUTION_TIMEOUT_MS",
     "HookEvent",
+    "HookEventEmitter",
     "is_hook_event",
     "match_query_for",
 ]

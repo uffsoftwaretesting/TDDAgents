@@ -199,29 +199,27 @@ def check_tdd_phase_permission(
                 (f"TDD phase RED denies implementation-writing tool '{tool.name}': "
                  "write and run this sub-requirement's tests first."),
             )
-        if tool.name in GENERIC_WRITER_TOOL_NAMES:
-            if raw_path:
-                path = str(raw_path)
-                if kind == "production":
-                    return (
-                        False,
-                        (f"TDD phase RED denies writing to production file '{path}'. "
-                         "Only test files may be written in RED phase."),
-                    )
+        if tool.name in GENERIC_WRITER_TOOL_NAMES and raw_path:
+            path = str(raw_path)
+            if kind == "production":
+                return (
+                    False,
+                    (f"TDD phase RED denies writing to production file '{path}'. "
+                     "Only test files may be written in RED phase."),
+                )
     elif ledger.phase == TddPhase.GREEN:
         if is_test_writing_tool(tool):
             return (
                 False,
                 f"TDD phase {ledger.phase} denies test-writing tool '{tool.name}'.",
             )
-        if tool.name in GENERIC_WRITER_TOOL_NAMES:
-            if raw_path:
-                path = str(raw_path)
-                if kind == "test":
-                    return (
-                        False,
-                        (f"TDD phase {ledger.phase} denies modifying test file '{path}': GREEN implements "
-                         f"what the tests describe. Tests can be improved in REFACTOR. {BACK_TO_RED}"),
-                    )
+        if tool.name in GENERIC_WRITER_TOOL_NAMES and raw_path:
+            path = str(raw_path)
+            if kind == "test":
+                return (
+                    False,
+                    (f"TDD phase {ledger.phase} denies modifying test file '{path}': GREEN implements "
+                     f"what the tests describe. Tests can be improved in REFACTOR. {BACK_TO_RED}"),
+                )
 
     return True, ""

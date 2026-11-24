@@ -257,10 +257,9 @@ class StructuredOutputHolder:
 
 def create_structured_output_tool(holder: StructuredOutputHolder) -> Any:
     """`createStructuredOutputTool`: `SyntheticOutputTool` with the hook response schema."""
-    from app.tool import PermissionResult, ToolResult, build_tool
-
     import jsonschema
 
+    from app.tool import PermissionResult, ToolResult, build_tool
     from app.tools.synthetic_output_tool.synthetic_output_tool import (
         STRUCTURED_OUTPUT_PROVIDED,
         schema_errors,

@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.components.design_system.dialog import CANCELLED, DialogIO, choice_hint, render_options
+from app.components.design_system.dialog import CANCELLED, DialogIO, choice_hint, is_option_number, render_options
 from app.utils.mcp.date_time_parser import QueryHaiku
 from app.utils.mcp.elicitation_validation import (
     get_enum_label,
@@ -54,7 +54,6 @@ from app.utils.mcp.elicitation_validation import (
     validate_elicitation_input_async,
 )
 from app.utils.string_utils import plural
-from app.components.design_system.dialog import is_option_number
 
 REQUIRED = "This field is required"
 #: `figures`.

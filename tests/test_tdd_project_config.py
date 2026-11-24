@@ -85,8 +85,8 @@ def test_a_minimal_configuration_takes_the_defaults():
     ({**FULL, "version": True}, ("`version` must be 1",)),
     ({**FULL, "version": 2}, ("`version` must be 1",)),
     ({**FULL, "extra": 1, "Test": 2}, (
-        "unknown keys: Test, extra (the keys are version, setup, test, listTests, junitReport, coverageReport, "
-        "testFiles, testSupportFiles, manifestFiles, exclude)",)),
+        ("unknown keys: Test, extra (the keys are version, setup, test, listTests, junitReport, coverageReport, "
+         "testFiles, testSupportFiles, manifestFiles, exclude)"),)),
     ({**FULL, "test": " "}, ("`test` must be a non-empty shell command",)),
     ({**FULL, "setup": 3}, ("`setup` must be a non-empty shell command",)),
     ({**FULL, "listTests": "  "}, ("`listTests` must be a non-empty shell command",)),

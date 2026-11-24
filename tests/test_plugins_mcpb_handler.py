@@ -10,6 +10,7 @@ import shutil
 import stat
 import zipfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -101,7 +102,7 @@ def test_load_extracts_and_generates_the_config(plugin_dir, locations) -> None:
     assert result.mcp_config == {"command": "node", "args": [f"{expected_dir}/index.js"]}
     server = os.path.join(expected_dir, "bin", "server")
     assert stat.S_IMODE(os.stat(server).st_mode) == 0o755
-    assert open(os.path.join(expected_dir, "README.md"), encoding="utf-8").read() == "hello"
+    assert Path(expected_dir, "README.md").read_text(encoding="utf-8") == "hello"
     assert not os.path.isfile(os.path.join(expected_dir, "bin"))
     assert progress[0] == "Loading ./s.mcpb..." and progress[-1] == "Generating MCP server configuration..."
     metadata_files = [f for f in os.listdir(plugin_dir / ".mcpb-cache") if f.endswith(".metadata.json")]

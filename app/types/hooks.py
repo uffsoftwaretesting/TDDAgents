@@ -560,8 +560,8 @@ def get_user_prompt_submit_hook_blocking_message(blocking_error: HookBlockingErr
 __all__ = [
     "EXPECTED_SCHEMA_HINT",
     "AggregatedHookResult",
-    "HookProgress",
     "HookOutputError",
+    "HookProgress",
     "HookResult",
     "ParsedHookOutput",
     "PromptOption",

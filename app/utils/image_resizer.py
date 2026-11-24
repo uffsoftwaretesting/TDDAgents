@@ -291,11 +291,11 @@ __all__ = [
     "ImageBlockWithDimensions",
     "ImageDimensions",
     "ImageResizeError",
-    "maybe_resize_and_downsample_image_block",
     "ResizeResult",
     "compress_image_buffer",
     "compress_image_buffer_with_token_limit",
     "create_image_metadata_text",
     "detect_image_format_from_buffer",
+    "maybe_resize_and_downsample_image_block",
     "maybe_resize_and_downsample_image_buffer",
 ]

@@ -18,11 +18,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from app.components.design_system.dialog import DialogIO, render_options
+from app.components.design_system.dialog import DialogIO, is_option_number, render_options
 from app.components.mcp_server_approval_dialog import listed_servers, write_local_settings
 from app.components.mcp_server_dialog_copy import MCP_SERVER_DIALOG_COPY
 from app.utils.settings.settings import SettingsLocations, get_initial_settings
-from app.components.design_system.dialog import is_option_number
 
 SUBTITLE = "Select any you wish to enable."
 #: What Esc answers: `handleEscRejectAll`.

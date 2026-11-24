@@ -134,7 +134,7 @@ def _process_wide_session_state(monkeypatch: Any) -> Any:
 
 def _reset_interaction_clock() -> None:
     """`STATE.lastInteractionTime` and its dirty mark (`app/bootstrap/state.py`), as a new process starts."""
-    import app.bootstrap.state as state
+    from app.bootstrap import state
 
     state._LAST_INTERACTION_TIME[0] = 0.0
     state._INTERACTION_TIME_DIRTY[0] = False

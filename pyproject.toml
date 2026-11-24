@@ -79,10 +79,16 @@ tests_dir = ["tests/"]
 # the run reports a meaningless 100%.
 also_copy = ["app/", "requirements.txt", ".tddagents/", "docs/", "scripts/"]
 
+[tool.ruff]
+# flake8's `max-line-length` (setup.cfg), so isort wraps imports where flake8 would.
+line-length = 120
+
 [tool.ruff.lint]
 # flake8 is the project linter of record (setup.cfg); these are its codes, so a `# noqa`
-# for them is not an unused directive to ruff.
-external = ["E302", "E402", "E501", "W291", "W293"]
+# for them is not an unused directive to ruff. BLE001 marks every deliberate catch-all
+# (CLAUDE.md), also where ruff's rule stays quiet (the handler logs or re-raises); S311,
+# E731 and N802 mark deliberate choices for the reader.
+external = ["E302", "E402", "E501", "W291", "W293", "BLE001", "S311", "E731", "N802"]
 
 [tool.ruff.lint.isort]
 # `app/services/mcp/` shares its name with the MCP SDK, which isort would otherwise take for a

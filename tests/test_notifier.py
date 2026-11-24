@@ -12,6 +12,7 @@ upstream has no method.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -272,7 +273,6 @@ class IO:
 
 def repl(io: IO) -> Any:
     from app.screens.repl import Repl
-
     from app.state.app_state_store import AppStateStore
 
     r = Repl(SimpleNamespace(on_message=None, ctx=SimpleNamespace(hook_dispatcher=None)), io)  # type: ignore[arg-type]
@@ -426,10 +426,8 @@ def test_handle_line_stamps_the_interaction_clock() -> None:
                                     retry="", cancelled=None, aborts_turn=True, text="")
         before = get_last_interaction_time()
         await asyncio.sleep(0.01)
-        try:
+        with contextlib.suppress(Exception):  # only the clock matters here
             await r.handle_line("1")
-        except Exception:  # noqa: BLE001 - only the clock matters here
-            pass
         return get_last_interaction_time() - before
 
     assert asyncio.run(go()) > 0
@@ -481,12 +479,12 @@ def test_a_finished_plan_reaches_a_notification_hook_and_the_bell(python_workspa
         await until(lambda: BEL in repl.io.raw)
         io.lines.put_nowait("/exit")
 
-    terminal, repl, io = asyncio.run(session(python_workspace, tmp_path, Model(cycle_turns()),
-                                             TddPlan.from_texts(["add"]), script))
+    _terminal, repl, _io = asyncio.run(session(python_workspace, tmp_path, Model(cycle_turns()),
+                                               TddPlan.from_texts(["add"]), script))
     payload = json.loads(marker.read_text())
     assert (payload["hook_event_name"], payload["notification_type"], payload["message"]) == (
         "Notification", "idle_prompt", "TDDAgents is waiting for your input")
-    assert BEL in getattr(repl.io, "raw")
+    assert BEL in getattr(repl.io, "raw")  # noqa: B009 - the fake IO's own attribute
     assert repl._idle_notice is None or repl._idle_notice.done()
 
 
@@ -566,10 +564,9 @@ def test_a_question_from_the_model_notifies_that_it_needs_attention(monkeypatch:
 
 
 def test_a_notification_fires_once_per_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.screens.repl as screen
     from app.hooks.use_can_use_tool import PermissionPrompt
     from tests.test_repl import OPTIONS
-
-    import app.screens.repl as screen
 
     monkeypatch.setattr(screen, "DEFAULT_INTERACTION_THRESHOLD_MS", 20)
     dispatcher = Dispatcher()

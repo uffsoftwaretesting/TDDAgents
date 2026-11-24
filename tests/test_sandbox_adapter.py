@@ -221,11 +221,11 @@ def test_enablement_follows_the_settings_the_platform_and_the_dependencies(layou
     ("wsl", "1", (), None, None, "sandbox.enabled is set but WSL1 is not supported (requires WSL2)"),
     ("linux", None, (), None, ["macos"], "sandbox.enabled is set but linux is not in sandbox.enabledPlatforms"),
     ("linux", None, ("socat", "bwrap"), None, None,
-     "sandbox.enabled is set but dependencies are missing: bubblewrap (bwrap) not installed, socat not installed"
-     " · install missing tools (e.g. apt install bubblewrap socat) or run /sandbox for details"),
+     ("sandbox.enabled is set but dependencies are missing: bubblewrap (bwrap) not installed, socat not installed"
+     " · install missing tools (e.g. apt install bubblewrap socat) or run /sandbox for details")),
     ("linux", None, (), "bubblewrap (bwrap) cannot create a sandbox: No permissions", None,
-     "sandbox.enabled is set but dependencies are missing: bubblewrap (bwrap) cannot create a sandbox: No "
-     "permissions · install missing tools (e.g. apt install bubblewrap socat) or run /sandbox for details"),
+     ("sandbox.enabled is set but dependencies are missing: bubblewrap (bwrap) cannot create a sandbox: No "
+     "permissions · install missing tools (e.g. apt install bubblewrap socat) or run /sandbox for details")),
 ])
 def test_unavailable_reasons(layout: dict[str, Path], platform: str, wsl: str | None, missing: tuple[str, ...],
                              probe: str | None, listed: list[str] | None, reason: str) -> None:

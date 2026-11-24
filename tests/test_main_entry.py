@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import dataclasses
-
 import argparse
+import dataclasses
 import io
 import os
 from pathlib import Path
